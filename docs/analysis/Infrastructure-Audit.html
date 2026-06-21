@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bid Factory — Infrastructure Audit v1.0</title>
+<style>
+  :root {
+    --bg: #0c0a09; --surface: #1c1917; --border: #3f3f46; --border-soft: #27272a;
+    --text: #d6d3d1; --muted: #78716c; --head: #fafaf9;
+    --accent: #a78bfa; --green: #4ade80; --yellow: #fbbf24; --red: #f87171; --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.6 'Inter', system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 24px; color: var(--head); font-weight: 600; margin-bottom: 6px; }
+  h2 { font-size: 18px; color: var(--head); font-weight: 600; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 14px; color: var(--head); font-weight: 600; margin: 28px 0 10px; }
+  h4 { font-size: 13px; color: var(--accent); font-weight: 500; margin: 18px 0 8px; }
+  p { margin-bottom: 12px; color: var(--text); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13px; }
+  th { background: var(--surface); color: var(--head); font-weight: 600; text-align: left; padding: 8px 12px; border: 1px solid var(--border); }
+  td { padding: 8px 12px; border: 1px solid var(--border-soft); vertical-align: top; }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; background: rgba(167,139,250,0.1); color: var(--accent); padding: 1px 5px; border-radius: 3px; }
+  .note { background: rgba(96,165,250,0.08); border-left: 3px solid var(--blue); padding: 10px 14px; margin: 12px 0; border-radius: 0 6px 6px 0; font-size: 13px; }
+  .warn { background: rgba(251,191,36,0.08); border-left: 3px solid var(--yellow); padding: 10px 14px; margin: 12px 0; border-radius: 0 6px 6px 0; font-size: 13px; }
+  .ok { color: var(--green); font-weight: 600; }
+  .risk { color: var(--yellow); font-weight: 600; }
+  .blocker { color: var(--red); font-weight: 600; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .p-pilot { background: rgba(74,222,128,0.15); color: var(--green); }
+  .p-saas { background: rgba(167,139,250,0.15); color: var(--accent); }
+  .p-later { background: rgba(120,113,108,0.2); color: var(--muted); }
+  .lead { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  nav { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--border); padding: 8px 0; margin-bottom: 32px; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; z-index: 10; }
+  nav a { color: var(--muted); }
+  nav a:hover { color: var(--accent); }
+  .topology { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin: 16px 0; font-family: monospace; font-size: 12px; line-height: 1.8; color: var(--text); white-space: pre; overflow-x: auto; }
+  .cost-row-highlight td { background: rgba(167,139,250,0.06); }
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Bid Factory — Infrastructure Audit</h1>
+<p class="lead">v1.0 · June 2026 · Component-by-component review of every service needed to ship v1 to a pilot customer and scale to multi-tenant SaaS. Two phases throughout: <span class="pill p-pilot">Pilot</span> = first 1–3 orgs, solo dev; <span class="pill p-saas">SaaS</span> = 5–50+ orgs, production-grade.</p>
+
+<nav>
+  <a href="#summary">Summary</a>
+  <a href="#compute">Compute</a>
+  <a href="#database">Database</a>
+  <a href="#redis">Redis</a>
+  <a href="#storage">Object Storage</a>
+  <a href="#auth">Auth</a>
+  <a href="#email">Email</a>
+  <a href="#ai">AI API</a>
+  <a href="#workers">Workers</a>
+  <a href="#pdf">PDF</a>
+  <a href="#cdn">CDN / DNS / SSL</a>
+  <a href="#monitoring">Monitoring</a>
+  <a href="#cicd">CI/CD</a>
+  <a href="#secrets">Secrets</a>
+  <a href="#backups">Backups</a>
+  <a href="#payments">Payments</a>
+  <a href="#localdev">Local Dev</a>
+  <a href="#topology">Topology</a>
+  <a href="#gdpr">GDPR Register</a>
+  <a href="#costs">Costs</a>
+  <a href="#scale">Scale Triggers</a>
+  <a href="#gaps">Open Decisions</a>
+</nav>
+
+<!-- ─── SUMMARY ─── -->
+<h2 id="summary">Summary — what you need and when</h2>
+<table>
+  <tr><th>Component</th><th>Provider (decided)</th><th>Pilot</th><th>SaaS</th><th>GDPR</th></tr>
+  <tr><td><strong>Compute</strong></td><td>Hetzner Cloud (EU)</td><td>2× CX32</td><td>4–6× mixed instances + LB</td><td class="ok">✓</td></tr>
+  <tr><td><strong>PostgreSQL + pgvector</strong></td><td>Self-hosted on Hetzner</td><td>1× CX32</td><td>1× CX52 + read replica</td><td class="ok">✓</td></tr>
+  <tr><td><strong>Redis</strong></td><td>Self-hosted → Upstash EU</td><td>On app server</td><td>Upstash EU Frankfurt</td><td class="ok">✓</td></tr>
+  <tr><td><strong>Object Storage</strong></td><td>Hetzner Object Storage</td><td>1 bucket</td><td>2 buckets (files + backups)</td><td class="ok">✓</td></tr>
+  <tr><td><strong>Auth</strong></td><td>Clerk (EU instance)</td><td>Free</td><td>Pro ($25/mo)</td><td class="ok">✓ with EU instance</td></tr>
+  <tr><td><strong>Email inbound + outbound</strong></td><td>Mailgun EU</td><td>Flex (pay-per-use)</td><td>Foundation (€35/mo)</td><td class="ok">✓ EU region</td></tr>
+  <tr><td><strong>AI API</strong></td><td>Anthropic Claude</td><td>Pay per use</td><td>Pay per use + volume</td><td class="risk">⚠ DPA required</td></tr>
+  <tr><td><strong>PDF generation</strong></td><td>WeasyPrint (self-hosted)</td><td>In-process</td><td>In-process</td><td class="ok">✓ no external call</td></tr>
+  <tr><td><strong>CDN / DNS</strong></td><td>Cloudflare</td><td>Free</td><td>Pro ($25/mo)</td><td class="ok">✓ DPA available</td></tr>
+  <tr><td><strong>SSL</strong></td><td>Caddy (Let's Encrypt)</td><td>Free</td><td>Free</td><td class="ok">✓</td></tr>
+  <tr><td><strong>Error tracking</strong></td><td>Sentry</td><td>Free tier</td><td>Team ($26/mo)</td><td class="risk">⚠ EU region needed</td></tr>
+  <tr><td><strong>Logs + uptime</strong></td><td>Betterstack</td><td>—</td><td>Starter ($25/mo)</td><td class="ok">✓ EU servers</td></tr>
+  <tr><td><strong>CI/CD</strong></td><td>GitHub Actions + Kamal</td><td>Free</td><td>Team (~$5/mo)</td><td class="ok">✓ no customer data</td></tr>
+  <tr><td><strong>Secrets</strong></td><td><strong>Infisical (self-hosted on Hetzner)</strong></td><td>Self-hosted, free</td><td>Self-hosted, free</td><td class="ok">✓ fully EU, no subprocessor</td></tr>
+  <tr><td><strong>Payments</strong></td><td><strong>Paddle</strong> (Merchant of Record — handles all EU VAT)</td><td>Billing data model in v1; Paddle checkout wired in v1.x</td><td>~5% + $0.50/txn</td><td class="ok">✓ Paddle handles EU VAT compliance</td></tr>
+</table>
+
+<div class="note"><strong>Bottom line:</strong> Pilot infrastructure costs ~€80–120/month (mostly Hetzner servers + AI API usage). You can run a credible pilot on two Hetzner servers and free tiers everywhere else. The SaaS jump to 5–20 orgs adds ~€400–600/month but the revenue (5 orgs × €500/mo = €2,500 MRR) comfortably covers it.</div>
+
+<!-- ─── COMPUTE ─── -->
+<h2 id="compute">Compute — Hetzner Cloud</h2>
+<p><strong>Provider: Hetzner Cloud (decided).</strong> German company, EU data centres (Nuremberg, Falkenstein, Helsinki), GDPR-compliant, DPA available, cheapest serious VPS in Europe by a significant margin.</p>
+
+<h4>Instance types to know</h4>
+<table>
+  <tr><th>Type</th><th>vCPU</th><th>RAM</th><th>Storage</th><th>€/month</th><th>Use for</th></tr>
+  <tr><td><code>CX22</code></td><td>2 shared</td><td>4 GB</td><td>40 GB SSD</td><td>~€4</td><td>Staging, Redis standalone</td></tr>
+  <tr><td><code>CX32</code></td><td>4 shared</td><td>8 GB</td><td>80 GB SSD</td><td>~€13</td><td>App server (pilot), DB (pilot)</td></tr>
+  <tr><td><code>CX42</code></td><td>8 shared</td><td>16 GB</td><td>160 GB SSD</td><td>~€20</td><td>App server (SaaS), DB (SaaS)</td></tr>
+  <tr><td><code>CCX23</code></td><td>4 dedicated AMD</td><td>16 GB</td><td>160 GB NVMe</td><td>~€20</td><td>Geometry workers (CPU-intensive OCCT)</td></tr>
+  <tr><td><code>CCX33</code></td><td>8 dedicated AMD</td><td>32 GB</td><td>240 GB NVMe</td><td>~€40</td><td>Geometry workers at scale</td></tr>
+</table>
+
+<div class="note">Shared vCPU (CX-series) is fine for the app server and DB — they're bursty, not sustained. Geometry workers need dedicated AMD (CCX-series) because OCCT analysis is sustained CPU load. Running a 200-component BOM analysis on a shared vCPU will hit the credit limit.</div>
+
+<h4>Pilot topology (2 servers total)</h4>
+<table>
+  <tr><th>Server</th><th>Type</th><th>Runs</th><th>€/month</th></tr>
+  <tr><td>app-01</td><td>CX32</td><td>FastAPI (uvicorn), Celery workers (default + extraction + AI queues), Redis, Caddy</td><td>€13</td></tr>
+  <tr><td>db-01</td><td>CX32</td><td>PostgreSQL 16 + pgvector, nightly pg_dump to Object Storage</td><td>€13</td></tr>
+</table>
+<p><em>For a very early prototype, everything on one CX42 is workable — but split DB from day one to avoid data loss risk during app deploys.</em></p>
+
+<h4>SaaS topology (5–20 orgs)</h4>
+<table>
+  <tr><th>Server</th><th>Type</th><th>Count</th><th>Runs</th></tr>
+  <tr><td>app</td><td>CX42</td><td>2</td><td>FastAPI, Celery I/O workers (extraction, AI, email), Caddy</td></tr>
+  <tr><td>geometry-worker</td><td>CCX23</td><td>1–2</td><td>Celery geometry queue workers (OCCT, nesting, BOM)</td></tr>
+  <tr><td>db-primary</td><td>CX42</td><td>1</td><td>PostgreSQL primary, PgBouncer connection pooler</td></tr>
+  <tr><td>db-replica</td><td>CX32</td><td>1</td><td>PostgreSQL streaming replica (read queries, backups)</td></tr>
+  <tr><td>Hetzner Load Balancer</td><td>LB11</td><td>1</td><td>Layer 4/7 LB across app servers (€5/mo)</td></tr>
+</table>
+<p>Redis moves to Upstash EU at this stage (see Redis section). Total SaaS server cost: ~€90–130/month before managed services.</p>
+
+<!-- ─── DATABASE ─── -->
+<h2 id="database">Database — PostgreSQL 16 + pgvector</h2>
+<p><strong>Self-hosted on Hetzner. Do not use a managed PostgreSQL service for v1.</strong></p>
+
+<h4>Why not managed (Supabase, Neon, RDS)?</h4>
+<table>
+  <tr><th>Option</th><th>Problem</th></tr>
+  <tr><td>Hetzner Managed DB</td><td>Does not support the <code>pgvector</code> extension — a hard requirement for geometry similarity search and AI embeddings. Not viable.</td></tr>
+  <tr><td>Supabase EU</td><td>pgvector ✓, EU region ✓, but adds US-company GDPR complexity, extra subprocessor, and a REST/realtime layer you don't need. Adds cost and abstraction over pure Postgres.</td></tr>
+  <tr><td>Neon EU</td><td>Serverless Postgres — great for dev branching, but production reliability at manufacturing workloads (large STEP file ingests, geometry queries) is unproven for this use case.</td></tr>
+  <tr><td>AWS RDS EU</td><td>Expensive (3–5× Hetzner cost), US-company DPA complexity, overkill.</td></tr>
+</table>
+<p><strong>Recommendation:</strong> Self-hosted PostgreSQL 16 on Hetzner CX32/CX42. Install pgvector from source (<code>pgvector v0.7+</code> supports HNSW indexing — use this over IVFFlat for geometry similarity). Automated pg_dump to Hetzner Object Storage nightly + WAL archiving for point-in-time recovery.</p>
+
+<h4>Key PostgreSQL configuration for this workload</h4>
+<table>
+  <tr><th>Setting</th><th>Value (CX32 8GB)</th><th>Why</th></tr>
+  <tr><td><code>shared_buffers</code></td><td>2GB</td><td>25% of RAM — standard</td></tr>
+  <tr><td><code>work_mem</code></td><td>64MB</td><td>Geometry/vector queries need working memory</td></tr>
+  <tr><td><code>maintenance_work_mem</code></td><td>512MB</td><td>HNSW index builds are memory-intensive</td></tr>
+  <tr><td><code>max_connections</code></td><td>100</td><td>Use PgBouncer in front; DB should not see raw app connections at SaaS scale</td></tr>
+  <tr><td><code>wal_level</code></td><td><code>replica</code></td><td>Required for streaming replication (SaaS)</td></tr>
+  <tr><td>pgvector <code>hnsw.ef_construction</code></td><td>128</td><td>Higher accuracy for geometry similarity at build time</td></tr>
+</table>
+<div class="note"><strong>PgBouncer:</strong> Add PgBouncer connection pooling from day one, even on the pilot. FastAPI + Celery will open many short-lived connections. PgBouncer in transaction mode keeps the DB connection count manageable. Run it as a sidecar on the DB server.</div>
+
+<!-- ─── REDIS ─── -->
+<h2 id="redis">Redis — Cache, Celery broker, undo TTLs</h2>
+<p>Redis is used for: Celery task broker + result backend; org AI settings cache (5-min TTL); quote assembly undo keys (60s TTL); session caching; rate limiting.</p>
+
+<h4>Pilot: self-hosted on app-01</h4>
+<p>Redis in a Docker container on the app server. No persistence needed for the queue (if Redis restarts, in-flight Celery tasks are lost but re-queued on next trigger). Enable AOF persistence for the AI settings cache. Cost: €0 (included in app server).</p>
+
+<h4>SaaS: Upstash EU Frankfurt</h4>
+<p><strong>Upstash</strong> is serverless Redis, billed per request. EU Frankfurt region is GDPR-compliant with DPA available. Pay-as-you-go: $0.2 per 100k requests. For 5–20 orgs, expect $10–30/month. No server to manage, automatic failover.</p>
+<p><em>Alternative: self-hosted Redis Sentinel (3-node HA) on Hetzner CX22s. More work to operate, ~€12/month for the instances. Upstash is simpler for a solo dev.</em></p>
+<div class="note"><strong>Do not store file content or PII in Redis.</strong> The 60s undo keys store only a <code>line_item_id</code> reference — not the router data itself (that stays in Postgres). The AI settings cache stores toggles, not customer data.</div>
+
+<!-- ─── STORAGE ─── -->
+<h2 id="storage">Object Storage — Hetzner Object Storage</h2>
+<p>All file uploads (STEP, DXF, STL, PDFs, thumbnails, generated quote PDFs) go to object storage. <strong>Hetzner Object Storage</strong> is S3-compatible, EU-only, and the natural choice given Hetzner is the compute provider.</p>
+
+<h4>Pricing (as of 2026)</h4>
+<table>
+  <tr><th>Item</th><th>Price</th></tr>
+  <tr><td>Storage</td><td>€0.019 / GB / month</td></tr>
+  <tr><td>Egress (after first 1 TB)</td><td>€0.01 / GB</td></tr>
+  <tr><td>Requests</td><td>Free</td></tr>
+</table>
+
+<h4>Bucket structure</h4>
+<table>
+  <tr><th>Bucket</th><th>Contents</th><th>Access</th></tr>
+  <tr><td><code>bf-files-{env}</code></td><td>Part files (STEP, DXF, STL), PDFs, extracted thumbnails, generated quote PDFs. Keyed: <code>{org_id}/{quote_id}/{file_id}/original.step</code></td><td>Private — pre-signed URLs for all access (never public)</td></tr>
+  <tr><td><code>bf-backups-{env}</code></td><td>Nightly pg_dump archives, restic server backups</td><td>Private — only accessible by backup scripts</td></tr>
+</table>
+
+<h4>Python access</h4>
+<p>Use <code>boto3</code> with <code>endpoint_url='https://your-region.your-objectstorage.com'</code>. Hetzner Object Storage is S3-compatible, so boto3 works without modification. Generate pre-signed URLs (1-hour expiry for file downloads, 15-minute expiry for uploads).</p>
+<div class="warn"><strong>File retention for GoBD compliance:</strong> Quote PDFs are legal commercial documents requiring 10-year retention. Apply an Object Lock policy (WORM) on the <code>bf-files</code> bucket for generated quote PDFs once sent. Never allow deletion of sent-quote PDFs even via admin tooling — see build spec § GDPR erasure decision (DB anonymization only; files kept).</div>
+
+<!-- ─── AUTH ─── -->
+<h2 id="auth">Auth — Clerk</h2>
+<p>Clerk handles the full authentication lifecycle (login, sessions, org management, invite flows, SSO/SAML). Already decided in the build spec. Key infrastructure notes:</p>
+
+<h4>Critical: use the EU Clerk instance</h4>
+<p>Clerk has a separate EU instance (<code>clerk.com → eu.clerk.com</code>) that stores all identity data in the EU. <strong>You must use this from day one.</strong> It is not trivially migrated later. Create your Clerk app in the EU instance — the Frontend API domain will be <code>*.clerk.accounts.dev</code> routing through EU infrastructure.</p>
+
+<table>
+  <tr><th>Plan</th><th>Price</th><th>What you need it for</th></tr>
+  <tr><td>Free</td><td>€0</td><td>Up to 10k MAU, all core auth (email, passkeys, Google/Microsoft). Fine for pilot.</td></tr>
+  <tr><td>Pro</td><td>$25/mo</td><td>Custom email domain (quotes sent from <code>@yourdomain.com</code> not <code>@clerk.com</code>), custom SMS, advanced rate limiting. Needed before SaaS launch.</td></tr>
+  <tr><td>Enterprise</td><td>Custom</td><td>SAML SSO for enterprise customers, custom DPA. Needed when you land a customer requiring SSO.</td></tr>
+</table>
+
+<div class="note"><strong>Org model:</strong> Use Clerk's native Organizations — each shop is one Clerk org. Roles (Admin, Estimator, etc.) are stored in BF's own <code>user_org_roles</code> table and mirrored via Clerk webhooks. Do not rely on Clerk roles for authorization — BF's Postgres is the source of truth for permissions.</div>
+
+<!-- ─── EMAIL ─── -->
+<h2 id="email">Email — Mailgun EU</h2>
+<p>Mailgun handles both directions: <strong>inbound</strong> (RFQ emails forwarded to <code>{org-slug}@rfq.bidfactory.app</code> → webhook → auto-quote creation) and <strong>outbound</strong> (quote send, notifications, order confirmations).</p>
+
+<h4>Critical: use Mailgun's EU region</h4>
+<p>Mailgun has a US region and an EU region. The EU region API endpoint is <code>api.eu.mailgun.net</code>. All email data (content, recipients, attachments) stored in EU. <strong>Set this from day one — domains are region-locked and cannot be migrated.</strong></p>
+
+<table>
+  <tr><th>Plan</th><th>Price</th><th>When</th></tr>
+  <tr><td>Flex</td><td>Free (100 emails/day), then $0.001/email</td><td>Pilot. A shop sending 20 quotes/day with ~3 recipients each = 60 emails/day. Likely free or pennies.</td></tr>
+  <tr><td>Foundation</td><td>~€35/month for 50k emails</td><td>SaaS with 10+ orgs. 10 orgs × 200 emails/month = 2k emails — actually still cheap on Flex. Move to Foundation when you need dedicated IPs for deliverability.</td></tr>
+</table>
+
+<h4>Inbound routing setup</h4>
+<p>Configure a Mailgun route that matches <code>.*@rfq.bidfactory.app</code>, forwards the parsed email (subject, body, attachments) via webhook to <code>POST /ingest/email</code>. Mailgun parses MIME, extracts attachments, and posts them as multipart form data. The FastAPI endpoint validates the Mailgun signature, saves attachments to Object Storage, and enqueues the Wingman parse job. Add MX records for <code>rfq.bidfactory.app</code> pointing to Mailgun.</p>
+
+<div class="note"><strong>Attachment size limit:</strong> Mailgun's inbound webhook supports up to 25MB per attachment (email server limit). The build spec's 200MB file size limit applies to <em>direct uploads</em> (Smart RFQ form, Part Viewer upload), not email ingest. Document this distinction — customers with large assemblies should use the Smart RFQ form, not email forwarding.</div>
+
+<!-- ─── AI ─── -->
+<h2 id="ai">AI API — Anthropic Claude</h2>
+<p>All AI features use the Anthropic Claude API. No other AI provider is needed for v1 — Claude handles vision (Wingman extraction), JSON generation (triage briefs, NL search), and text (synthesis paragraphs).</p>
+
+<h4>Model selection by task</h4>
+<table>
+  <tr><th>Task</th><th>Model</th><th>Why</th></tr>
+  <tr><td>Wingman extraction (vision, Stage 1 + 2)</td><td>claude-sonnet-4-5 (or latest Sonnet)</td><td>Vision accuracy is the highest priority; Sonnet is the right cost/accuracy balance for production extraction</td></tr>
+  <tr><td>Triage Brief generation</td><td>claude-haiku-4-5</td><td>Simple JSON synthesis over already-parsed data; Haiku is fast and cheap</td></tr>
+  <tr><td>Requote Diff synthesis paragraph</td><td>claude-haiku-4-5</td><td>Input is structured JSON diff; one short paragraph output</td></tr>
+  <tr><td>Agentic Quote Assembly review comment</td><td>claude-haiku-4-5</td><td>Short paragraph; structured input</td></tr>
+  <tr><td>Customer Intelligence Brief</td><td>claude-haiku-4-5</td><td>2–3 bullets from structured DB aggregate</td></tr>
+  <tr><td>Pre-send Review narration</td><td>claude-haiku-4-5</td><td>Plain-language sentence per anomaly; often no call at all (clean pass)</td></tr>
+  <tr><td>Estimation Coaching chip</td><td>claude-haiku-4-5</td><td>One sentence; often no call (insufficient historical data)</td></tr>
+  <tr><td>NL Search filter translation</td><td>claude-haiku-4-5</td><td>Structured JSON output; Haiku is fast enough for interactive search</td></tr>
+  <tr><td>In-App Assistant (chat)</td><td>claude-sonnet-4-5</td><td>Conversational quality matters; Sonnet gives better nuanced answers on manufacturing questions</td></tr>
+</table>
+
+<h4>Cost estimation per org per month</h4>
+<table>
+  <tr><th>Scenario</th><th>Volume assumption</th><th>Estimated AI cost</th></tr>
+  <tr><td>Low-volume pilot shop</td><td>10 quotes/week, 2 parts avg, 3 pages/drawing</td><td>~€15–25/month</td></tr>
+  <tr><td>Mid-volume production shop</td><td>30 quotes/week, 5 parts avg, 5 pages/drawing</td><td>~€60–100/month</td></tr>
+  <tr><td>High-volume job shop</td><td>100 quotes/week, 8 parts avg, 3 pages/drawing</td><td>~€150–250/month</td></tr>
+</table>
+<p>At a €500/month SaaS subscription, mid-volume AI costs are 12–20% of revenue — acceptable margin. Price tiers should scale with quote volume to protect margin at the high-volume end.</p>
+
+<h4>GDPR — the critical step</h4>
+<p>Anthropic is a US company. Drawing content (technical PDFs, STEP file text) is sent to the Claude API during Wingman extraction. <strong>Before sending any customer files to the API, you must:</strong></p>
+<ol style="padding-left:20px;margin:8px 0 12px;font-size:13px;line-height:2">
+  <li>Sign Anthropic's <strong>Data Processing Addendum (DPA)</strong> — request from Anthropic enterprise sales or find via the API console</li>
+  <li>Confirm <strong>zero-data-retention</strong> agreement is in the DPA (Anthropic offers this for API customers — they do not train on API data)</li>
+  <li>Add Anthropic as a named <strong>subprocessor</strong> in your customer DPA / Privacy Policy with a description of what data is processed and the legal basis</li>
+  <li>Enforce the <strong>AI processing toggle</strong> — when disabled, no data leaves the EU environment</li>
+  <li>Enforce the <strong>CUI/ITAR auto-skip</strong> — flagged files never go to the API regardless of toggle state</li>
+</ol>
+<div class="warn"><strong>This is not optional before you sign a DACH customer.</strong> German manufacturing shops will ask for your subprocessor list in their supplier qualification process. Have the DPA in hand before the first pilot.</div>
+
+<h4>Prompt + eval management</h4>
+<p>Store all prompts under <code>extraction/prompts/</code> in the repo (version-controlled). Store eval fixtures under <code>extraction/evals/</code>. Run the eval suite on every PR that touches a prompt file — this is how you catch regressions before they reach production. Use <code>pytest</code> + a small harness that calls the Claude API against fixture drawings and checks accuracy against known-good outputs.</p>
+
+<!-- ─── WORKERS ─── -->
+<h2 id="workers">Background Workers — Celery queues</h2>
+<p>Celery + Redis broker handles all async work. <strong>Do not run all task types on the same worker pool</strong> — geometry/nesting is CPU-bound and will starve I/O-bound tasks (AI calls, email sends) if they share workers.</p>
+
+<h4>Queue architecture</h4>
+<table>
+  <tr><th>Queue</th><th>Task types</th><th>Worker concurrency</th><th>Server</th></tr>
+  <tr><td><code>default</code></td><td>General tasks, triage brief, rule suggestion scans, org settings cache refresh</td><td>4–8 (I/O bound)</td><td>app server</td></tr>
+  <tr><td><code>extraction</code></td><td>Wingman vision extraction (Stage 1 + Stage 2), email ingest parse</td><td>8–16 (I/O bound; Claude API latency ~2–5s per call)</td><td>app server</td></tr>
+  <tr><td><code>ai</code></td><td>All other AI calls (requote diff, quote assembly comment, customer brief, presend review, NL search, coaching)</td><td>8–16 (I/O bound)</td><td>app server</td></tr>
+  <tr><td><code>geometry</code></td><td>OCCT geometry analysis, DFM checks, nesting, BOM detection, pgvector embedding generation</td><td>2–4 (CPU bound — 1 per physical core)</td><td>geometry-worker server (CCX23)</td></tr>
+  <tr><td><code>email</code></td><td>Quote send, notifications, order confirmations, vendor RFQ emails</td><td>4 (I/O bound)</td><td>app server</td></tr>
+</table>
+
+<h4>Task retry + error handling</h4>
+<table>
+  <tr><th>Task type</th><th>Retry policy</th><th>On final failure</th></tr>
+  <tr><td>Wingman extraction</td><td>3 retries with exponential backoff (10s, 30s, 90s)</td><td>Mark extraction as failed; show "Manual entry required" on all fields; do not block quote creation</td></tr>
+  <tr><td>Geometry analysis</td><td>2 retries (30s, 90s)</td><td>Mark part as "Geometry unavailable"; 3D viewer shows file but interrogation results are empty</td></tr>
+  <tr><td>Email send</td><td>5 retries (immediate, 1m, 5m, 15m, 1h)</td><td>Alert estimator via in-app notification; log to Sentry</td></tr>
+  <tr><td>Triage brief</td><td>2 retries</td><td>Silently skip — notification card shows without AI brief</td></tr>
+  <tr><td>AI suggestion tasks</td><td>1 retry</td><td>Silently skip — the feature is advisory, not blocking</td></tr>
+</table>
+
+<h4>Celery Beat (scheduled tasks)</h4>
+<p>Celery Beat handles periodic tasks: nightly rule-suggestion pattern scan, daily backup verification ping, nightly pg_dump trigger, daily Margin Coach benchmark cache rebuild. Run Beat on the app server as a separate process (one instance only — not replicated).</p>
+
+<!-- ─── PDF ─── -->
+<h2 id="pdf">PDF Generation — WeasyPrint</h2>
+<p>Quote PDFs (generated at send time and stored in Object Storage) require HTML-to-PDF with full CSS support for branding, tables, and multi-page layout. <strong>WeasyPrint</strong> (Python library, no external service) is the right choice.</p>
+
+<table>
+  <tr><th>Option</th><th>Verdict</th></tr>
+  <tr><td><strong>WeasyPrint</strong></td><td><span class="ok">✓ Recommended.</span> Pure Python, good CSS support, handles paged media (page breaks, headers/footers, page numbers), EU-safe (no external calls), already used in many Django/FastAPI stacks.</td></tr>
+  <tr><td>ReportLab</td><td>Programmatic PDF (draw every element in code). Too low-level for a templated quote layout.</td></tr>
+  <tr><td>Puppeteer / Playwright</td><td>Headless Chrome. Excellent CSS fidelity but requires a running Chrome process — heavy for a solo dev stack and adds a Node.js dependency.</td></tr>
+  <tr><td>External service (DocRaptor, etc.)</td><td>Sends quote content to a US SaaS — GDPR concern, adds a subprocessor, unnecessary cost.</td></tr>
+</table>
+
+<p>WeasyPrint runs inside a Celery worker (the <code>default</code> queue). PDF generation is triggered when a quote is sent or explicitly requested. The resulting PDF is uploaded to <code>bf-files/{org_id}/quotes/{quote_id}/quote-v{rev}.pdf</code> and the URL is stored on the Quote model.</p>
+<div class="note"><strong>WeasyPrint system dependencies:</strong> requires libpango, libcairo, libgdk-pixbuf on the server. Add these to your Dockerfile and server setup script from day one — they're the most common source of "works locally, fails in production" issues with WeasyPrint.</div>
+
+<!-- ─── CDN ─── -->
+<h2 id="cdn">CDN, DNS, SSL — Cloudflare + Caddy</h2>
+
+<h4>Cloudflare (DNS + CDN + DDoS)</h4>
+<p>Put your domain on Cloudflare from day one. Even on the free plan you get: global DNS (fast propagation), DDoS protection, SSL termination (or pass-through), basic WAF, analytics. <strong>Do not proxy customer file uploads through Cloudflare</strong> — 200MB STEP files will hit Cloudflare's 100MB request size limit on the free/pro plan. Use <code>DNS Only</code> records (grey cloud) for the upload endpoint; use proxied records (orange cloud) for the app and API.</p>
+
+<table>
+  <tr><th>Plan</th><th>Price</th><th>When to upgrade</th></tr>
+  <tr><td>Free</td><td>€0</td><td>Pilot — more than adequate</td></tr>
+  <tr><td>Pro</td><td>$25/mo</td><td>SaaS — adds WAF rules, better analytics, priority support, 200MB upload limit (still grey-cloud uploads to bypass anyway)</td></tr>
+</table>
+
+<h4>Caddy (reverse proxy + automatic HTTPS)</h4>
+<p>Run Caddy on each app server as the reverse proxy in front of uvicorn. Caddy automatically provisions and renews Let's Encrypt certificates — zero SSL management overhead for a solo dev. Caddyfile example:</p>
+<pre style="background:var(--surface);padding:12px;border-radius:6px;font-size:12px;overflow-x:auto;margin:8px 0">app.bidfactory.app {
+    reverse_proxy localhost:8000
+}
+</pre>
+<p>That's it. Caddy handles HTTPS, HTTP→HTTPS redirect, certificate renewal, and HTTP/2.</p>
+
+<!-- ─── MONITORING ─── -->
+<h2 id="monitoring">Monitoring &amp; Observability</h2>
+<p>A solo dev needs three things: know when something breaks, know what broke, and know how the system is performing under load. Three tools cover this with minimal overhead.</p>
+
+<h4>Sentry — error tracking + performance</h4>
+<p>Sentry SDK for Python (FastAPI) + JavaScript (React). Captures unhandled exceptions with full stack traces, request context, and user info. The FastAPI integration is two lines of code. <strong>Use Sentry's EU data region</strong> (errors contain stack traces which may include user IDs / quote data fragments — keep in EU).</p>
+<table>
+  <tr><th>Plan</th><th>Price</th><th>When</th></tr>
+  <tr><td>Free (Developer)</td><td>€0</td><td>Pilot — 5k errors/month, 10k performance transactions</td></tr>
+  <tr><td>Team</td><td>$26/month</td><td>SaaS — 50k errors, custom alerts, release tracking</td></tr>
+</table>
+
+<h4>Betterstack — logs + uptime</h4>
+<p>Betterstack (formerly Logtail) ingests structured logs from the FastAPI app and Celery workers via a log drain or the Python logging handler. Also provides uptime monitoring with status page. EU servers available (Frankfurt). <strong>Start using this at the SaaS stage</strong> — pilot debugging can be done with <code>journalctl</code> / Docker logs directly.</p>
+<table>
+  <tr><th>Plan</th><th>Price</th><th>When</th></tr>
+  <tr><td>—</td><td>—</td><td>Pilot — use <code>journalctl -u bid-factory</code> and Sentry</td></tr>
+  <tr><td>Starter</td><td>$25/month</td><td>SaaS — structured logs, 7-day retention, uptime checks, status page for customers</td></tr>
+</table>
+
+<h4>Prometheus + Grafana Cloud — metrics</h4>
+<p>FastAPI exposes a <code>/metrics</code> endpoint via <code>prometheus-fastapi-instrumentator</code>. Scrape with Prometheus; visualise in Grafana Cloud (free tier: 10k active metrics, 50GB logs). Key dashboards to build: request latency p50/p95/p99, Celery queue depth per queue, PostgreSQL query times, geometry job duration histogram. Start this at the SaaS stage.</p>
+
+<div class="note"><strong>The most important alert to set up on day one:</strong> Celery geometry queue depth > 10 for more than 5 minutes. This means jobs are piling up — the geometry worker is overwhelmed or dead. Without this alert, a customer will wait 20 minutes for their STEP file to process and you won't know.</div>
+
+<!-- ─── CICD ─── -->
+<h2 id="cicd">CI/CD — GitHub Actions + Kamal</h2>
+
+<h4>GitHub Actions (test + build)</h4>
+<p>Two workflows: <strong>PR check</strong> (pytest, type check, extraction eval suite on fixture drawings) and <strong>deploy</strong> (triggered on merge to main). Keep test suites fast — the extraction eval suite with 10 fixture drawings should complete in under 3 minutes.</p>
+<p>Free tier: 2,000 minutes/month for private repos. At ~5 min/run, that's 400 runs/month — more than enough for solo development. Upgrade to Team ($4/month) only if you exceed the limit.</p>
+
+<h4>Kamal (deployment)</h4>
+<p>Kamal is a deployment tool (used by Basecamp/Rails) that deploys Docker containers to any VPS via SSH — no Kubernetes, no Heroku, no platform lock-in. It handles zero-downtime deploys (rolling restart with healthchecks), secrets injection, and rollback. A <code>config/deploy.yml</code> file defines servers + image + env. One command: <code>kamal deploy</code>.</p>
+
+<pre style="background:var(--surface);padding:12px;border-radius:6px;font-size:12px;overflow-x:auto;margin:8px 0">service: bid-factory
+image: ghcr.io/you/bid-factory
+servers:
+  web: [app-01.hetzner.ip, app-02.hetzner.ip]
+  worker: {hosts: [worker-01.hetzner.ip], cmd: celery -A app.tasks worker -Q geometry}
+proxy:
+  ssl: true
+  host: app.bidfactory.app
+</pre>
+
+<p>GitHub Actions calls <code>kamal deploy</code> after tests pass. The whole CD pipeline is under 10 minutes including Docker build, push to GitHub Container Registry, and rolling deploy to Hetzner.</p>
+
+<div class="note"><strong>Environment strategy:</strong> Three environments from day one — local (Docker Compose), staging (single Hetzner CX22, mirrors prod), production. Every merge to <code>main</code> deploys to staging automatically; production deploy requires a manual trigger (or a tagged release). This prevents the pilot customer seeing broken code.</div>
+
+<!-- ─── SECRETS ─── -->
+<h2 id="secrets">Secrets Management — Infisical (self-hosted) ✓ DECIDED</h2>
+<p>API keys (Anthropic, Mailgun, Clerk, Hetzner Object Storage) must not be hardcoded or committed to the repo. <strong>Infisical self-hosted on Hetzner</strong> is the chosen solution — fully EU, no third-party subprocessor, open source, free.</p>
+
+<table>
+  <tr><th>Plan</th><th>Price</th><th>What it gives you</th></tr>
+  <tr><td>Free (Developer)</td><td>€0</td><td>Unlimited secrets, 3 projects, CLI, GitHub Actions integration. Sufficient for pilot.</td></tr>
+  <tr><td>Team</td><td>$10/month</td><td>Audit logs, team access, service account tokens. Needed when more than one person has access.</td></tr>
+</table>
+
+<p>Infisical runs as a Docker container on a small Hetzner CX22 (€4/month) or as a service on the app server. It exposes a CLI and GitHub Actions integration identical to Doppler. Inject secrets at deploy time via <code>infisical run -- kamal deploy</code>. No customer data ever touches Infisical — only your own infrastructure credentials.</p>
+<p>Add Infisical to the Docker Compose local dev stack so secrets work identically in development and production. The Infisical instance itself should be set up as part of the pre-build infrastructure checklist, before any other service is configured.</p>
+
+<!-- ─── BACKUPS ─── -->
+<h2 id="backups">Backups</h2>
+<p>GoBD requires 10-year retention for commercial records. GDPR requires data availability + integrity. Backups are not optional.</p>
+
+<table>
+  <tr><th>What</th><th>How</th><th>Where</th><th>Retention</th></tr>
+  <tr><td>PostgreSQL data</td><td>Nightly <code>pg_dump</code> (compressed) + continuous WAL archiving via <code>wal-g</code> for PITR</td><td>Hetzner Object Storage <code>bf-backups</code> bucket</td><td>7 daily, 4 weekly, 12 monthly, 10 yearly</td></tr>
+  <tr><td>File uploads (part files, PDFs)</td><td>Hetzner Object Storage has built-in multi-AZ redundancy within the region; cross-region replication for SaaS using <code>rclone</code> to a second Hetzner location (Helsinki ↔ Nuremberg)</td><td>Second Hetzner Object Storage bucket in alternate region</td><td>Indefinite (GoBD compliance for sent-quote PDFs)</td></tr>
+  <tr><td>Server config</td><td>All config in Git + Kamal deploy config; server is reproducible from scratch</td><td>GitHub</td><td>Indefinite</td></tr>
+  <tr><td>Restore test</td><td>Monthly: restore pg_dump to a throwaway Hetzner CX22, verify row counts + pgvector extension, destroy instance</td><td>—</td><td>Monthly cadence in ops calendar</td></tr>
+</table>
+
+<div class="warn"><strong>Test your backups before the pilot goes live.</strong> The only thing worse than no backups is discovering your backups don't restore at the moment you need them. Run a restore test as part of the M6 milestone acceptance criteria.</div>
+
+<!-- ─── PAYMENTS ─── -->
+<h2 id="payments">Payments — Stripe (v1.x)</h2>
+<p><strong>Not needed for v1.</strong> The build spec decision is PO-only checkout for v1; card checkout is v1.x. When card checkout ships:</p>
+<ul style="padding-left:20px;margin:8px 0 12px;font-size:13px;line-height:2">
+  <li><strong>Provider: Stripe.</strong> Best-in-class API, EU data residency option, GDPR DPA available, strong German-market presence</li>
+  <li>Use Stripe Connect if you ever want marketplace-style payments (shops getting paid by their customers through BF); standard Stripe for direct billing</li>
+  <li>For v1.x, only the buyer checkout (buyer pays the shop via BF) is in scope — not the shop paying BF's subscription (that's separate billing infrastructure)</li>
+  <li>Stripe Elements (pre-built UI) avoids PCI scope on your servers — card data never touches your backend</li>
+</ul>
+
+<!-- ─── LOCAL DEV ─── -->
+<h2 id="localdev">Local Development — Docker Compose</h2>
+<p>The entire stack must run locally without internet access for productive development. A <code>docker-compose.yml</code> in the repo root handles this.</p>
+
+<table>
+  <tr><th>Service</th><th>Image</th><th>Purpose</th></tr>
+  <tr><td>db</td><td><code>pgvector/pgvector:pg16</code></td><td>PostgreSQL 16 with pgvector pre-installed</td></tr>
+  <tr><td>redis</td><td><code>redis:7-alpine</code></td><td>Celery broker + cache</td></tr>
+  <tr><td>app</td><td>Local Dockerfile</td><td>FastAPI (uvicorn --reload)</td></tr>
+  <tr><td>worker-default</td><td>Same image</td><td>Celery worker: <code>-Q default,extraction,ai,email</code></td></tr>
+  <tr><td>worker-geometry</td><td>Same image</td><td>Celery worker: <code>-Q geometry</code> (can slow-run OCCT locally)</td></tr>
+  <tr><td>beat</td><td>Same image</td><td>Celery Beat scheduler</td></tr>
+  <tr><td>minio</td><td><code>minio/minio</code></td><td>S3-compatible local object storage — same boto3 code works locally</td></tr>
+  <tr><td>mailhog</td><td><code>mailhog/mailhog</code></td><td>Fake SMTP server with web UI — catch all outbound emails locally at <code>localhost:8025</code></td></tr>
+  <tr><td>frontend</td><td>Local Dockerfile</td><td>Vite dev server with HMR (<code>npm run dev</code>)</td></tr>
+</table>
+
+<p>One command to start: <code>docker compose up</code>. Seed data command: <code>docker compose exec app python -m scripts.seed_demo</code>. All fixture drawings + demo data load automatically.</p>
+
+<!-- ─── TOPOLOGY ─── -->
+<h2 id="topology">Topology Diagrams</h2>
+
+<h3>Pilot (1–3 orgs)</h3>
+<div class="topology">
+Internet
+  │
+  ▼
+Cloudflare (DNS + DDoS)
+  │
+  ▼
+app-01 [Hetzner CX32, Nuremberg]
+  ├── Caddy (HTTPS → uvicorn)
+  ├── FastAPI (uvicorn, 4 workers)
+  ├── Celery workers (default + extraction + ai + email + geometry queues)
+  ├── Celery Beat
+  └── Redis (Docker container)
+  │                      │
+  │ (private network)    │ (S3-compatible API)
+  ▼                      ▼
+db-01 [Hetzner CX32]    Hetzner Object Storage
+  ├── PostgreSQL 16      └── bf-files-prod (STEP, PDF, thumbnails)
+  ├── pgvector           └── bf-backups-prod (pg_dump, server backups)
+  └── PgBouncer
+
+External APIs (outbound only):
+  ├── Anthropic Claude API (extraction, AI features)
+  ├── Clerk EU (auth, session validation)
+  └── Mailgun EU (inbound RFQ parse, outbound quote send)
+</div>
+
+<h3>SaaS (5–20 orgs)</h3>
+<div class="topology">
+Internet
+  │
+  ▼
+Cloudflare Pro (DNS + CDN + WAF)
+  │
+  ▼
+Hetzner Load Balancer LB11
+  │
+  ├──────────────────────┐
+  ▼                      ▼
+app-01 [CX42]          app-02 [CX42]
+  ├── Caddy              ├── Caddy
+  ├── FastAPI            ├── FastAPI
+  └── Celery (I/O)       └── Celery (I/O)
+                         (default + extraction + ai + email)
+
+geometry-worker-01 [CCX23]     geometry-worker-02 [CCX23]
+  └── Celery geometry queue      └── Celery geometry queue (overflow)
+
+db-primary [CX42]              db-replica [CX32]
+  ├── PostgreSQL primary         └── PostgreSQL streaming replica
+  └── PgBouncer                     (read queries + backups)
+
+Upstash EU Frankfurt           Hetzner Object Storage
+  └── Redis (managed)            ├── bf-files-prod
+                                 └── bf-backups-prod (+ Helsinki mirror)
+
+External APIs:
+  ├── Anthropic Claude API
+  ├── Clerk EU (Pro)
+  ├── Mailgun EU Foundation
+  ├── Sentry EU
+  └── Betterstack EU
+</div>
+
+<!-- ─── GDPR ─── -->
+<h2 id="gdpr">GDPR Subprocessor Register</h2>
+<p>Every service that touches personal data or customer data needs a DPA. This is the list to give your customers and include in your Privacy Policy subprocessor annex.</p>
+
+<table>
+  <tr><th>Subprocessor</th><th>Category</th><th>Data processed</th><th>Location</th><th>DPA</th><th>Status</th></tr>
+  <tr><td><strong>Hetzner Online GmbH</strong></td><td>Cloud infrastructure</td><td>All data (hosted in EU)</td><td>🇩🇪 Germany</td><td>Hetzner standard DPA (AVV)</td><td class="ok">✓ sign at account creation</td></tr>
+  <tr><td><strong>Clerk Inc.</strong></td><td>Authentication</td><td>Name, email, session tokens, org membership</td><td>🇪🇺 EU instance</td><td>Clerk DPA available</td><td class="ok">✓ use EU instance</td></tr>
+  <tr><td><strong>Mailgun (Sinch)</strong></td><td>Email delivery + ingest</td><td>Email content, recipient addresses, attachment metadata</td><td>🇪🇺 EU region</td><td>Mailgun DPA available</td><td class="ok">✓ use EU region API</td></tr>
+  <tr><td><strong>Anthropic PBC</strong></td><td>AI processing</td><td>Drawing content (PDF/images) sent during Wingman extraction; no PII by design</td><td>🇺🇸 USA</td><td>Anthropic DPA — request from enterprise team; must include zero-data-retention clause</td><td class="risk">⚠ must sign before pilot</td></tr>
+  <tr><td><strong>Cloudflare Inc.</strong></td><td>DNS, CDN, DDoS</td><td>IP addresses, request metadata (no customer business data transits Cloudflare)</td><td>🌍 Global</td><td>Cloudflare DPA available</td><td class="ok">✓ standard web infrastructure</td></tr>
+  <tr><td><strong>Sentry (Functional Software)</strong></td><td>Error monitoring</td><td>Stack traces, request URLs, user IDs (no business data if configured correctly)</td><td>🇩🇪 EU region</td><td>Sentry DPA available</td><td class="ok">✓ use EU region + scrub PII from events</td></tr>
+  <tr><td><strong>Betterstack</strong></td><td>Log aggregation + uptime</td><td>Application logs (configure to exclude PII from log lines)</td><td>🇪🇺 EU servers</td><td>Betterstack DPA available</td><td class="ok">✓ SaaS stage only</td></tr>
+  <tr><td><strong>GitHub (Microsoft)</strong></td><td>Source code + CI/CD</td><td>Application code only — no customer data in CI pipelines</td><td>🇺🇸 USA</td><td>GitHub DPA (Microsoft)</td><td class="ok">✓ no customer data; standard SaaS practice</td></tr>
+  <tr><td><strong>Stripe Inc.</strong></td><td>Payment processing (v1.x)</td><td>Payment card data (Stripe handles PCI; BF never sees raw card data)</td><td>🇪🇺 EU data residency available</td><td>Stripe DPA available</td><td class="p-later">Not needed until card checkout ships</td></tr>
+</table>
+
+<div class="note"><strong>Customer DPA template:</strong> Before the pilot, prepare a short Data Processing Agreement template that you can send to customers. It should list: your role (Data Processor), their role (Data Controller), the subprocessors above, the legal basis for AI processing (legitimate interest or explicit consent), retention periods (10-year for commercial records under GoBD, erasure-on-request for personal data per GDPR), and the right to audit. A lawyer should review this once but it doesn't need to be complex for a manufacturing B2B SaaS.</div>
+
+<!-- ─── COSTS ─── -->
+<h2 id="costs">Monthly Cost Estimates</h2>
+
+<table>
+  <tr><th>Line item</th><th class="ok">Pilot (1–2 orgs)</th><th>5 orgs</th><th>20 orgs</th></tr>
+  <tr><td>Hetzner compute</td><td class="ok">€26</td><td>€90</td><td>€180</td></tr>
+  <tr><td>Hetzner Object Storage (~50GB/org)</td><td class="ok">€5</td><td>€15</td><td>€50</td></tr>
+  <tr><td>Hetzner Load Balancer</td><td class="ok">€0</td><td>€5</td><td>€5</td></tr>
+  <tr><td>Clerk</td><td class="ok">€0</td><td>$25</td><td>$25</td></tr>
+  <tr><td>Redis (Upstash EU)</td><td class="ok">€0</td><td>~$10</td><td>~$25</td></tr>
+  <tr><td>Mailgun EU</td><td class="ok">€0–2</td><td>€35</td><td>€60</td></tr>
+  <tr><td>Sentry EU</td><td class="ok">€0</td><td>$26</td><td>$26</td></tr>
+  <tr><td>Betterstack</td><td class="ok">€0</td><td>$25</td><td>$25</td></tr>
+  <tr><td>Infisical (self-hosted)</td><td class="ok">€4 (CX22)</td><td>€4</td><td>€4</td></tr>
+  <tr><td>Cloudflare</td><td class="ok">€0</td><td>$25</td><td>$25</td></tr>
+  <tr><td>GitHub Actions</td><td class="ok">€0</td><td>~$5</td><td>~$10</td></tr>
+  <tr><td><strong>Anthropic Claude API (AI features)</strong></td><td class="ok">€20–50</td><td>€100–300</td><td>€400–1,000</td></tr>
+  <tr class="cost-row-highlight"><td><strong>Total (infrastructure)</strong></td><td class="ok"><strong>€55–85/mo</strong></td><td><strong>€360–550/mo</strong></td><td><strong>€820–1,440/mo</strong></td></tr>
+  <tr class="cost-row-highlight"><td><strong>Revenue (at €500/org/mo)</strong></td><td>€500–1,000</td><td><strong>€2,500</strong></td><td><strong>€10,000</strong></td></tr>
+  <tr class="cost-row-highlight"><td><strong>Infrastructure as % of revenue</strong></td><td>6–17%</td><td><strong>14–22%</strong></td><td><strong>8–14%</strong></td></tr>
+</table>
+
+<div class="note">AI API costs (Anthropic) are the biggest variable and scale with quote volume, not just org count. If you land a high-volume job shop sending 100+ quotes/week, their AI cost alone could be €200–300/month — price your tiers accordingly (quote-volume-based pricing, not flat per-seat). The €500/org/month figure above is illustrative; real pricing should be modelled against actual pilot usage data.</div>
+
+<!-- ─── SCALE ─── -->
+<h2 id="scale">Scale Trigger Points — when to upgrade what</h2>
+<table>
+  <tr><th>Trigger</th><th>What to change</th></tr>
+  <tr><td><strong>Pilot → 3 orgs</strong></td><td>Move geometry workers to a dedicated CCX23 (geometry on shared app server will be too slow under concurrent load). Add a staging environment (CX22). Set up Celery queue monitoring.</td></tr>
+  <tr><td><strong>3 → 5 orgs</strong></td><td>Add a second app server + Hetzner Load Balancer. Move Redis to Upstash EU. Enable Sentry Team + Betterstack. Set up Clerk Pro for custom email domain.</td></tr>
+  <tr><td><strong>5 → 10 orgs</strong></td><td>Add PostgreSQL read replica. Add PgBouncer (if not already running). Enable cross-region Object Storage mirror (Helsinki backup). Begin tracking AI cost per org to validate pricing model.</td></tr>
+  <tr><td><strong>10 → 20 orgs</strong></td><td>Upgrade app servers to CX42. Add second geometry worker. Review Celery queue depths — may need to increase extraction worker concurrency. Enable Grafana dashboards for system metrics.</td></tr>
+  <tr><td><strong>First enterprise customer (SSO required)</strong></td><td>Upgrade Clerk to Enterprise for SAML/OIDC. Prepare a formal SOC 2 Type I or ISO 27001 roadmap (enterprise procurement will ask).</td></tr>
+  <tr><td><strong>20+ orgs</strong></td><td>Consider Postgres HA (Patroni) for automatic failover. AI cost management becomes critical — add per-org usage tracking + budget alerts. Evaluate moving Celery to a dedicated broker (RabbitMQ) if Redis Upstash costs climb. Revisit whether geometry workers need auto-scaling (Hetzner Autoscaling Groups in beta).</td></tr>
+</table>
+
+<!-- ─── GAPS ─── -->
+<h2 id="gaps">Open Decisions — what still needs a choice</h2>
+<table>
+  <tr><th>Decision</th><th>Options</th><th>Recommended</th><th>When needed</th></tr>
+  <tr><td><strong>Domain name</strong></td><td>bidfactory.app, bidfactory.eu, bidfactory.de (for DACH market trust), getbidfactory.com</td><td>bidfactory.eu or bidfactory.de for DACH credibility; .app as secondary</td><td>Before pilot</td></tr>
+  <tr><td><strong>Transactional email from-address</strong></td><td>quotes@bidfactory.eu, noreply@bidfactory.eu, per-org subdomains (quotes@acme.bidfactory.eu)</td><td>Per-org subdomains give customers email from their own subdomain — higher trust, better deliverability. Requires Mailgun Pro.</td><td>Before quotes are sent</td></tr>
+  <tr><td><strong>Customer subscription billing</strong></td><td>Stripe Billing, Paddle, manual invoicing</td><td>Manual invoicing for pilot (B2B shops are comfortable with bank transfer / SEPA). Stripe Billing when you have 5+ orgs paying.</td><td>SaaS billing from 3+ orgs</td></tr>
+  <tr><td><strong>Status page</strong></td><td>Betterstack Status, Instatus, self-hosted Upptime</td><td>Betterstack Status (included in Starter plan). Customers will ask "is the system down or is it me?" — a public status page saves support time.</td><td>Before SaaS launch</td></tr>
+  <tr><td><strong>Secrets management</strong></td><td colspan="2"><strong>✓ DECIDED: Infisical self-hosted on Hetzner.</strong> Fully EU, no subprocessor, free. Deploy as part of pre-build infrastructure setup.</td><td>Before pilot deploy</td></tr>
+  <tr><td><strong>AI cost monitoring per org</strong></td><td>Track Anthropic API spend per org via request tagging vs post-hoc log analysis</td><td>Tag every Anthropic API call with <code>x-org-id</code> metadata from day one. Build a simple admin view showing AI cost per org per month. Without this, you're flying blind on margin per customer.</td><td>M3 (when AI features ship)</td></tr>
+</table>
+
+<footer>
+  Bid Factory Infrastructure Audit v1.0 · June 2026 · Companion to Bid-Factory-Build-Spec.html v2.15 · Prices are indicative; verify current pricing at provider websites before budgeting.
+</footer>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UI Alternatives Research — Bid Factory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── Token System (matches UI-Recommendations.html) ── */
+:root {
+  --bf-canvas:      #F2F2F0;
+  --bf-surface:     #FFFFFF;
+  --bf-surface-2:   #F8F8F6;
+  --bf-surface-3:   #F1F1EE;
+  --bf-nav:         #FAFAF8;
+  --bf-inverse:     #23211E;
+  --bf-text:        #2E2C29;
+  --bf-text-2:      #6B6862;
+  --bf-text-3:      #B3B0A9;
+  --bf-border:      #E5E3DE;
+  --bf-border-2:    #EDEBE6;
+  --bf-border-s:    #C9C6BF;
+  --bf-accent:      #E8590C;
+  --bf-accent-h:    #D14F08;
+  --bf-accent-bg:   #FDEEE4;
+  --bf-link:        #0A66B5;
+  --bf-link-bg:     #E8F2FB;
+  --bf-purple:      #7A4FD0;
+  --bf-purple-bg:   #F1EBFC;
+  --bf-green:       #1F7A4D;  --bf-green-bg: #E3F4EA;
+  --bf-warning:     #B57E00;  --bf-warning-bg: #FFF4D6;
+  --bf-critical:    #C2333B;  --bf-critical-bg: #FCE9EA;
+  --bf-r-card:      10px;
+  --bf-r-ctl:       8px;
+  --bf-shadow:      0 1px 0 rgba(35,33,30,.06), 0 0 0 1px rgba(35,33,30,.04);
+  --bf-shadow-pop:  0 4px 12px -2px rgba(35,33,30,.18), 0 0 0 1px rgba(35,33,30,.05);
+  --bf-font:        'Inter', -apple-system, sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--bf-font);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--bf-text);
+  background: var(--bf-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Layout ── */
+.shell { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 220px; flex-shrink: 0;
+  background: var(--bf-surface);
+  border-right: 1px solid var(--bf-border);
+  padding: 24px 0;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.sidebar-brand { padding: 0 16px 20px; border-bottom: 1px solid var(--bf-border); margin-bottom: 12px; }
+.sidebar-brand .wordmark { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--bf-text-3); }
+.sidebar-brand .doc-title { font-size: 13px; font-weight: 600; color: var(--bf-text); margin-top: 2px; }
+.sidebar nav a { display: flex; align-items: center; gap: 8px; padding: 6px 16px; font-size: 12.5px; color: var(--bf-text-2); text-decoration: none; transition: color .15s, background .15s; }
+.sidebar nav a:hover { color: var(--bf-text); background: var(--bf-canvas); }
+.sidebar nav a.active { color: var(--bf-accent); font-weight: 500; }
+.sidebar nav .nav-section { font-size: 10.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--bf-text-3); padding: 14px 16px 4px; }
+.content { flex: 1; min-width: 0; padding: 40px 48px 80px; max-width: 940px; }
+
+/* ── Doc Chrome ── */
+.doc-header { margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid var(--bf-border); }
+.doc-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--bf-accent); margin-bottom: 8px; }
+.doc-header h1 { font-size: 26px; font-weight: 700; letter-spacing: -.3px; color: var(--bf-text); margin-bottom: 10px; }
+.doc-header .subtitle { font-size: 14px; color: var(--bf-text-2); max-width: 600px; }
+.section { margin-bottom: 48px; }
+.section-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 20px; }
+.section-header h2 { font-size: 17px; font-weight: 700; color: var(--bf-text); }
+.section-header .section-num { font-size: 11px; font-weight: 600; color: var(--bf-text-3); }
+h3 { font-size: 13.5px; font-weight: 600; color: var(--bf-text); margin-bottom: 8px; margin-top: 20px; }
+p { color: var(--bf-text-2); margin-bottom: 12px; }
+p:last-child { margin-bottom: 0; }
+a { color: var(--bf-link); }
+
+/* ── Demo frame ── */
+.demo {
+  border: 1px dashed var(--bf-border-s);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 16px 0;
+  background: var(--bf-canvas);
+  position: relative;
+  overflow: hidden;
+}
+.demo::before {
+  content: 'LIVE SAMPLE';
+  position: absolute; top: -9px; left: 14px;
+  background: var(--bf-canvas);
+  color: var(--bf-text-3);
+  font-size: 10px; font-weight: 650; letter-spacing: .08em;
+  padding: 0 6px;
+}
+
+/* ── Reusable micro-components ── */
+.badge { display:inline-flex;align-items:center;gap:5px;border-radius:999px;font-size:11.5px;font-weight:550;padding:1px 8px;background:var(--bf-surface-3);color:var(--bf-text-2); }
+.badge .dot { width:7px;height:7px;border-radius:50%;display:inline-block; }
+.badge.success{background:var(--bf-green-bg);color:var(--bf-green)}.badge.success .dot{background:var(--bf-green)}
+.badge.warning{background:var(--bf-warning-bg);color:var(--bf-warning)}.badge.warning .dot{border:2px solid var(--bf-warning);width:4px;height:4px;background:transparent}
+.badge.critical{background:var(--bf-critical-bg);color:var(--bf-critical)}.badge.critical .dot{background:var(--bf-critical)}
+.badge.info{background:var(--bf-link-bg);color:var(--bf-link)}.badge.info .dot{border:2px solid var(--bf-link);width:4px;height:4px;background:transparent}
+.badge.ai{background:var(--bf-purple-bg);color:var(--bf-purple)}
+.btn { display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:550;font-size:12.5px;border-radius:var(--bf-r-ctl);padding:6px 12px;cursor:pointer;border:1px solid transparent;line-height:1; }
+.btn-primary { background:var(--bf-accent);color:#fff; }
+.btn-primary:hover { background:var(--bf-accent-h); }
+.btn-secondary { background:var(--bf-surface);color:var(--bf-text);border-color:var(--bf-border-s); }
+.btn-secondary:hover { background:var(--bf-surface-2); }
+.card { background:var(--bf-surface);border-radius:var(--bf-r-card);box-shadow:var(--bf-shadow);overflow:hidden; }
+.num { font-variant-numeric:tabular-nums;text-align:right; }
+
+/* ─── Alt cards (summary) ─── */
+.alt-card { background:var(--bf-surface);border-radius:var(--bf-r-card);box-shadow:var(--bf-shadow);margin-bottom:4px;overflow:hidden; }
+.alt-card-header { padding:18px 22px 14px;border-bottom:1px solid var(--bf-border);display:flex;align-items:flex-start;justify-content:space-between;gap:16px; }
+.alt-icon { width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0;color:#fff; }
+.alt-icon.linear  { background:#1a1a1a; }
+.alt-icon.stripe  { background:#635BFF; }
+.alt-icon.vercel  { background:#000; }
+.alt-icon.raycast { background:#FF6363; }
+.alt-icon.cpq     { background:#1A5F3F; }
+.alt-name { font-size:14px;font-weight:650;color:var(--bf-text); }
+.alt-tagline { font-size:12px;color:var(--bf-text-2);margin-top:1px; }
+.fit-bar { display:flex;gap:3px;margin-top:4px; }
+.fit-dot { width:10px;height:10px;border-radius:50%;background:var(--bf-border); }
+.fit-dot.on { background:var(--bf-accent); }
+.alt-card-body { display:grid;grid-template-columns:1fr 1fr;gap:0; }
+.alt-card-col { padding:14px 22px;border-right:1px solid var(--bf-border); }
+.alt-card-col:last-child { border-right:none; }
+.alt-card-col:nth-child(3),.alt-card-col:nth-child(4) { border-top:1px solid var(--bf-border); }
+.alt-card-col h4 { font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--bf-text-3);margin-bottom:5px; }
+.alt-card-col p { font-size:12.5px;color:var(--bf-text-2);line-height:1.5;margin:0; }
+.alt-card-footer { padding:12px 22px;border-top:1px solid var(--bf-border);background:var(--bf-surface-2);display:flex;align-items:flex-start;gap:8px; }
+.steal-label { font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--bf-accent);white-space:nowrap;padding-top:1px; }
+.alt-card-footer p { font-size:12.5px;color:var(--bf-text-2);margin:0; }
+
+/* ─── Trends grid ─── */
+.trend-grid { display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:4px; }
+.trend-card { background:var(--bf-surface);border-radius:var(--bf-r-card);box-shadow:var(--bf-shadow);padding:16px; }
+.trend-icon { font-size:20px;margin-bottom:8px; }
+.trend-card h4 { font-size:13px;font-weight:650;color:var(--bf-text);margin:0 0 6px; }
+.trend-card p { font-size:12px;color:var(--bf-text-2);line-height:1.5;margin:0; }
+.trend-stat { font-size:11px;font-weight:600;color:var(--bf-accent);margin-top:8px; }
+
+/* ─── Synthesis table ─── */
+.synth { background:var(--bf-surface);border-radius:var(--bf-r-card);box-shadow:var(--bf-shadow);overflow:hidden;margin-bottom:24px; }
+.synth table { width:100%;border-collapse:collapse; }
+.synth th { padding:9px 16px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--bf-text-3);background:var(--bf-surface-2);border-bottom:1px solid var(--bf-border);text-align:left; }
+.synth td { padding:10px 16px;font-size:12.5px;color:var(--bf-text-2);border-bottom:1px solid var(--bf-border);vertical-align:top;line-height:1.45; }
+.synth tr:last-child td { border-bottom:none; }
+.synth .td-src { font-weight:600;color:var(--bf-text); }
+.synth .td-rule { color:var(--bf-text); }
+
+/* ─── Directive ─── */
+.directive { background:var(--bf-inverse);color:#F0EEE9;border-radius:var(--bf-r-card);padding:24px 28px;margin-top:28px; }
+.directive h3 { color:#fff;font-size:14px;font-weight:650;margin:0 0 16px; }
+.directive-grid { display:grid;grid-template-columns:1fr 1fr;gap:14px; }
+.directive-item { display:flex;align-items:flex-start;gap:10px; }
+.directive-num { background:var(--bf-accent);color:#fff;font-size:10px;font-weight:700;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px; }
+.directive-item p { font-size:12.5px;color:rgba(245,244,241,.75);margin:0;line-height:1.5; }
+.directive-item strong { color:#F0EEE9;font-weight:550; }
+
+/* ─── Quote callout ─── */
+.quote { border-left:3px solid var(--bf-accent);padding:10px 16px;background:var(--bf-accent-bg);border-radius:0 6px 6px 0;margin:16px 0; }
+.quote p { font-size:13px;font-style:italic;color:var(--bf-text);margin:0; }
+.quote cite { font-size:11px;color:var(--bf-text-2);font-style:normal;display:block;margin-top:4px; }
+
+/* ─── Source chips ─── */
+.sources { margin-top:40px;padding-top:20px;border-top:1px solid var(--bf-border); }
+.sources h4 { font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--bf-text-3);margin-bottom:10px; }
+.source-chips { display:flex;flex-wrap:wrap;gap:6px; }
+.source-chip { font-size:11.5px;color:var(--bf-link);background:var(--bf-link-bg);padding:3px 8px;border-radius:20px;text-decoration:none; }
+.source-chip:hover { text-decoration:underline; }
+
+
+/* ═══════════════════════════════════════════════
+   DEMO 1 — LINEAR: Attention Hierarchy
+═══════════════════════════════════════════════ */
+.linear-demo {
+  display: flex;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--bf-border);
+  height: 280px;
+  background: var(--bf-surface);
+  transition: all .3s;
+}
+.linear-demo-nav {
+  width: 180px;
+  flex-shrink: 0;
+  background: var(--bf-nav);
+  border-right: 1px solid var(--bf-border);
+  padding: 10px 8px;
+  transition: all .4s;
+}
+.linear-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--bf-text);
+  cursor: pointer;
+  transition: all .3s;
+  border-left: 2px solid transparent;
+  position: relative;
+}
+.linear-nav-item .ni { width:14px;height:14px;border-radius:3px;background:var(--bf-border);flex-shrink:0; }
+.linear-nav-item.active .ni { background:var(--bf-accent); }
+.linear-nav-item.active { border-left-color: var(--bf-accent); background:var(--bf-surface);box-shadow:var(--bf-shadow); }
+.linear-badge { margin-left:auto;font-size:10px;font-weight:600;background:var(--bf-critical-bg);color:var(--bf-critical);border-radius:4px;padding:1px 5px; }
+.linear-demo-content {
+  flex: 1;
+  padding: 16px 18px;
+  overflow: hidden;
+}
+.linear-content-title { font-size:15px;font-weight:650;color:var(--bf-text);margin-bottom:12px; }
+.linear-row {
+  display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--bf-border-2);font-size:12.5px;
+}
+.linear-row:last-child { border-bottom:none; }
+.linear-row .lr-num { font-family:monospace;font-size:11px;color:var(--bf-text-3);width:42px;flex-shrink:0; }
+.linear-row .lr-title { flex:1;color:var(--bf-text); }
+.linear-row .lr-badge { flex-shrink:0; }
+
+/* "dim" state */
+.linear-demo.dim .linear-demo-nav { background:#F4F3F0; }
+.linear-demo.dim .linear-nav-item:not(.active) { opacity: 0.45; }
+.linear-demo.dim .linear-nav-item:not(.active):hover { opacity: 0.85; }
+.linear-demo.dim .linear-demo-content { background: var(--bf-surface); }
+
+.demo-toggle-row { display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap; }
+.demo-toggle-btn { font:inherit;font-size:12px;font-weight:600;padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--bf-border-s);background:var(--bf-surface);color:var(--bf-text-2);transition:all .2s; }
+.demo-toggle-btn.active { background:var(--bf-inverse);color:#fff;border-color:var(--bf-inverse); }
+.demo-label { font-size:11.5px;color:var(--bf-text-3); }
+
+
+/* ═══════════════════════════════════════════════
+   DEMO 2 — STRIPE: Side Panel Pattern
+═══════════════════════════════════════════════ */
+.stripe-demo-wrap {
+  position: relative;
+  border-radius: 8px;
+  border: 1px solid var(--bf-border);
+  background: var(--bf-surface);
+  overflow: hidden;
+  min-height: 300px;
+}
+.stripe-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.stripe-list-table th {
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--bf-text-3);
+  background: var(--bf-surface-2);
+  border-bottom: 1px solid var(--bf-border);
+  text-align: left;
+}
+.stripe-list-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--bf-border-2);
+  color: var(--bf-text);
+  vertical-align: middle;
+}
+.stripe-list-table tr:last-child td { border-bottom: none; }
+.stripe-list-table tbody tr {
+  cursor: pointer;
+  transition: background .15s;
+}
+.stripe-list-table tbody tr:hover td { background: var(--bf-surface-2); }
+.stripe-list-table tbody tr.selected td { background: var(--bf-accent-bg); }
+
+/* Side panel */
+.side-panel {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 340px;
+  background: var(--bf-surface);
+  border-left: 1px solid var(--bf-border);
+  box-shadow: -4px 0 16px -4px rgba(35,33,30,.12);
+  transform: translateX(100%);
+  transition: transform .28s cubic-bezier(.4,0,.2,1);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+.side-panel.open { transform: translateX(0); }
+.side-panel-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--bf-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.sp-close {
+  width: 24px;height: 24px;border-radius:6px;border:1px solid var(--bf-border-s);
+  background:var(--bf-surface);cursor:pointer;font-size:14px;
+  display:flex;align-items:center;justify-content:center;color:var(--bf-text-2);
+  flex-shrink:0;
+}
+.sp-close:hover { background:var(--bf-surface-2); }
+.sp-title { font-size:13px;font-weight:650;color:var(--bf-text);flex:1; }
+.side-panel-body { padding: 14px 16px; flex: 1; }
+.sp-field { margin-bottom: 12px; }
+.sp-field .label { font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--bf-text-3);margin-bottom:3px; }
+.sp-field .value { font-size:12.5px;color:var(--bf-text); }
+.sp-line-row { display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--bf-border-2);font-size:12.5px; }
+.sp-line-row:last-child{border-bottom:none;}
+.sp-line-row .sp-lnum{font-family:monospace;font-size:11px;color:var(--bf-text-3);width:14px;}
+.sp-line-row .sp-lname{flex:1;color:var(--bf-text);}
+.sp-line-row .sp-lval{color:var(--bf-text);font-variant-numeric:tabular-nums;}
+.stripe-hint { font-size:11.5px;color:var(--bf-text-3);padding:8px 14px 10px;border-top:1px solid var(--bf-border-2);text-align:center; }
+
+
+/* ═══════════════════════════════════════════════
+   DEMO 3 — VERCEL: Command Palette
+═══════════════════════════════════════════════ */
+.cmdpal-trigger-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  background: var(--bf-surface-2);
+  border-radius: 8px;
+}
+.cmdpal-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--bf-border-s);
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--bf-surface);
+  box-shadow: var(--bf-shadow);
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--bf-text-2);
+  width: 240px;
+  transition: box-shadow .15s;
+}
+.cmdpal-hint:hover { box-shadow: var(--bf-shadow-pop); }
+.cmdpal-hint .kbds { margin-left:auto;display:flex;gap:3px; }
+.kbd { font-family:monospace;font-size:10.5px;border:1px solid var(--bf-border-s);border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--bf-surface-2);color:var(--bf-text); }
+
+/* Overlay */
+.cmdpal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(35,33,30,.5);
+  z-index: 1000;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+}
+.cmdpal-overlay.show { display: flex; }
+.cmdpal {
+  background: var(--bf-surface);
+  border-radius: 12px;
+  box-shadow: var(--bf-shadow-pop), 0 0 0 1px rgba(35,33,30,.06);
+  width: 520px;
+  max-height: 480px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: cmdpal-in .18s ease;
+}
+@keyframes cmdpal-in {
+  from { opacity:0; transform:scale(.97) translateY(-6px); }
+  to   { opacity:1; transform:scale(1)   translateY(0); }
+}
+.cmdpal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--bf-border);
+}
+.cmdpal-input-row .cp-icon { color:var(--bf-text-3);font-size:15px;flex-shrink:0; }
+.cmdpal-input-row input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--bf-text);
+  background: transparent;
+}
+.cmdpal-input-row input::placeholder { color:var(--bf-text-3); }
+.cmdpal-input-row .cp-esc { font-size:10.5px;color:var(--bf-text-3);cursor:pointer; }
+.cmdpal-section-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--bf-text-3);
+  padding: 10px 14px 4px;
+}
+.cmdpal-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background .1s;
+  font-size: 12.5px;
+  color: var(--bf-text);
+}
+.cmdpal-item:hover, .cmdpal-item.active {
+  background: var(--bf-surface-2);
+}
+.cmdpal-item.active { background: var(--bf-accent-bg); }
+.cmdpal-item .ci-icon { width:28px;height:28px;border-radius:6px;background:var(--bf-surface-2);border:1px solid var(--bf-border);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0; }
+.cmdpal-item.active .ci-icon { background:var(--bf-accent-bg);border-color:rgba(232,89,12,.2); }
+.cmdpal-item .ci-text { flex:1; }
+.cmdpal-item .ci-sub { font-size:11px;color:var(--bf-text-3);margin-top:1px; }
+.cmdpal-item .ci-kbd { font-family:monospace;font-size:10px;color:var(--bf-text-3); }
+.cmdpal-items { overflow-y:auto;max-height:320px;padding-bottom:6px; }
+.cmdpal-footer { padding:8px 14px;border-top:1px solid var(--bf-border);display:flex;gap:12px;font-size:10.5px;color:var(--bf-text-3);background:var(--bf-surface-2);flex-shrink:0; }
+.cmdpal-footer span { display:flex;align-items:center;gap:4px; }
+
+
+/* ═══════════════════════════════════════════════
+   DEMO 4 — RAYCAST: Bold Identity A/B
+═══════════════════════════════════════════════ */
+.ab-demo { display:grid;grid-template-columns:1fr 1fr;gap:16px; }
+.ab-panel {
+  border-radius:10px;
+  border:1px solid var(--bf-border);
+  background:var(--bf-surface);
+  overflow:hidden;
+}
+.ab-panel-header {
+  padding:9px 14px;
+  background:var(--bf-surface-2);
+  border-bottom:1px solid var(--bf-border);
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+}
+.ab-panel-header.bad  { color:var(--bf-critical); }
+.ab-panel-header.good { color:var(--bf-green); }
+.ab-body { padding:16px; }
+
+/* ✗ Apologetic orange */
+.ab-bad .ab-header { font-size:12.5px;font-weight:600;color:var(--bf-text-2);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--bf-border); }
+.ab-bad-row { display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bf-border-2);font-size:12.5px; }
+.ab-bad-row:last-of-type{border-bottom:none;}
+.ab-bad-row .abl{color:var(--bf-text-2);}
+.ab-bad-row .abr{display:flex;align-items:center;gap:6px;}
+/* Apologetic: thin orange borders, light orange text, multiple orange things */
+.ab-bad-chip { background:#FEF0E7;color:#E8590C;border:1px solid #F5C9AB;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600; }
+.ab-bad-link { color:#E8590C;font-size:12px;text-decoration:underline; }
+.ab-bad-btn { background:transparent;border:1px solid #E8590C;color:#E8590C;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer; }
+.ab-bad-btn2 { background:#FEF0E7;border:1px solid #F5C9AB;color:#E8590C;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer; }
+.ab-bad-note { font-size:11px;color:var(--bf-critical);margin-top:10px;display:flex;align-items:flex-start;gap:5px; }
+
+/* ✓ Confident orange */
+.ab-good .ab-header { font-size:12.5px;font-weight:600;color:var(--bf-text-2);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--bf-border); }
+.ab-good-row { display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bf-border-2);font-size:12.5px; }
+.ab-good-row:last-of-type{border-bottom:none;}
+.ab-good-row .abl{color:var(--bf-text-2);}
+.ab-good-row .abr{display:flex;align-items:center;gap:6px;}
+.ab-good-chip { background:var(--bf-green-bg);color:var(--bf-green);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600; }
+.ab-good-chip.warn { background:var(--bf-warning-bg);color:var(--bf-warning); }
+.ab-good-cta { background:var(--bf-accent);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;width:100%;margin-top:12px;transition:background .15s; }
+.ab-good-cta:hover { background:var(--bf-accent-h); }
+.ab-good-note { font-size:11px;color:var(--bf-green);margin-top:10px;display:flex;align-items:flex-start;gap:5px; }
+
+
+/* ═══════════════════════════════════════════════
+   DEMO 5 — CPQ: Role-Aware View
+═══════════════════════════════════════════════ */
+.role-tabs {
+  display:flex;gap:0;border-bottom:1px solid var(--bf-border);
+  background:var(--bf-surface);
+  border-radius:8px 8px 0 0;
+  overflow:hidden;
+}
+.role-tab {
+  padding:9px 18px;
+  font-size:12.5px;font-weight:550;
+  color:var(--bf-text-2);
+  cursor:pointer;
+  border-bottom:2px solid transparent;
+  transition:all .2s;
+}
+.role-tab:hover{color:var(--bf-text);background:var(--bf-surface-2);}
+.role-tab.active{color:var(--bf-text);border-bottom-color:var(--bf-accent);background:var(--bf-surface);}
+.role-panel {
+  display:none;
+  background:var(--bf-surface);
+  border:1px solid var(--bf-border);
+  border-top:none;
+  border-radius:0 0 8px 8px;
+  overflow:hidden;
+}
+.role-panel.active { display:block; }
+.role-panel-inner { padding:14px 16px; }
+.rp-hero { margin-bottom:14px;padding:12px 14px;border-radius:8px; }
+.rp-hero.est  { background:var(--bf-accent-bg); }
+.rp-hero.mgr  { background:var(--bf-link-bg); }
+.rp-hero.cust { background:var(--bf-green-bg); }
+.rp-hero .rph-label { font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--bf-text-3);margin-bottom:2px; }
+.rp-hero .rph-val { font-size:22px;font-weight:700;letter-spacing:-.5px; }
+.rp-hero.est .rph-val  { color:var(--bf-accent); }
+.rp-hero.mgr .rph-val  { color:var(--bf-link); }
+.rp-hero.cust .rph-val { color:var(--bf-green); }
+.rp-hero .rph-sub { font-size:11.5px;color:var(--bf-text-2);margin-top:2px; }
+.rp-table { width:100%;border-collapse:collapse;font-size:12px; }
+.rp-table th { padding:6px 10px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--bf-text-3);border-bottom:1px solid var(--bf-border);text-align:left; }
+.rp-table td { padding:8px 10px;border-bottom:1px solid var(--bf-border-2);color:var(--bf-text); }
+.rp-table tr:last-child td{border-bottom:none;}
+.rp-table .num { text-align:right;font-variant-numeric:tabular-nums; }
+</style>
+</head>
+
+<body>
+<div class="shell">
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="wordmark">Bid Factory</div>
+    <div class="doc-title">UI Alternatives</div>
+  </div>
+  <nav>
+    <div class="nav-section">Overview</div>
+    <a href="#intro">Why look further?</a>
+    <a href="#shopify-vs">Shopify benchmark</a>
+    <div class="nav-section">The 5 Systems</div>
+    <a href="#linear">1 · Linear</a>
+    <a href="#stripe">2 · Stripe Dashboard</a>
+    <a href="#vercel">3 · Vercel / shadcn</a>
+    <a href="#raycast">4 · Raycast / Calm Productivity</a>
+    <a href="#cpq">5 · Enterprise CPQ</a>
+    <div class="nav-section">Synthesis</div>
+    <a href="#trends">2025–26 Trends</a>
+    <a href="#synthesis">What to steal</a>
+    <a href="#directive">Build directive</a>
+  </nav>
+</aside>
+
+<!-- ── Main ── -->
+<main class="content">
+
+<!-- Header -->
+<div class="doc-header" id="intro">
+  <div class="doc-eyebrow">UI Research · Companion to UI-Recommendations.html</div>
+  <h1>5 UI Alternatives to Shopify Polaris</h1>
+  <p class="subtitle">Deep research into what the best-designed SaaS tools in 2025–26 are doing — and what each one teaches Bid Factory. Every section includes a live working demo of the specific pattern.</p>
+</div>
+
+<div class="section">
+  <p>Shopify Polaris is excellent. But it was designed for e-commerce merchants managing stores — not estimators grinding dense costing grids for 4–8 hours a day. The patterns diverge most on: <strong>information density</strong>, <strong>keyboard-first power</strong>, <strong>data table ergonomics</strong>, and <strong>AI affordances</strong>. The five systems below each crack one of those problems better than Polaris.</p>
+  <div class="quote">
+    <p>"Power users want data, not breathing room. The gap between good and poor dashboards comes down to navigation predictability, information density, and load state handling."</p>
+    <cite>— Dashboard Design Patterns for Modern Web Apps 2026, artofstyleframe.com</cite>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════
+     §1 · LINEAR
+════════════════════════════════════════════ -->
+<div class="section" id="linear">
+  <div class="section-header">
+    <span class="section-num">§ 1</span>
+    <h2>Linear — "Don't compete for attention you haven't earned"</h2>
+  </div>
+
+  <div class="alt-card">
+    <div class="alt-card-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="alt-icon linear">L</div>
+        <div><div class="alt-name">Linear</div><div class="alt-tagline">Project management · linear.app</div></div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--bf-text-3);margin-bottom:4px">Bid Factory fit</div>
+        <div class="fit-bar" style="justify-content:flex-end">
+          <div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot"></div>
+        </div>
+      </div>
+    </div>
+    <div class="alt-card-body">
+      <div class="alt-card-col">
+        <h4>What makes it distinctive</h4>
+        <p>Linear's March 2026 refresh was guided by two principles: <em>"Don't compete for attention you haven't earned"</em> and <em>"Structure should be felt, not seen."</em> The navigation sidebar literally dims itself after you've navigated. Borders are softened. The main content area — where you work — is always the brightest element on screen.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>How it handles dense data</h4>
+        <p>Modular components on an 8px scale without a fixed grid. Icons scaled down and reduced in count. Information density is preserved; the <em>decoration</em> around it is stripped. Weight 510 (between Regular and Medium) creates the "precise but not bold" typographic voice.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Color &amp; typography</h4>
+        <p>Dark default. The 2026 refresh shifted from cool blue-gray to warmer, less saturated gray — "inch toward warmer without looking muddy." Selective accents (indigo, emerald, crimson) for meaning. Monochrome otherwise.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Better than Shopify for daily drivers</h4>
+        <p>Keyboard-first throughout. ⌘K is primary navigation. Every action has a shortcut. The mental model assumes you'll live in it 8 hours/day. Shopify Polaris was designed for occasional use — different ergonomic target.</p>
+      </div>
+    </div>
+    <div class="alt-card-footer">
+      <div class="steal-label">Steal →</div>
+      <p>The attention hierarchy: nav recedes, content leads. Sidebar dims after navigation. Warm gray palette. Weight-500 typography. The rule: every non-content pixel competes — make it earn its place.</p>
+    </div>
+  </div>
+
+  <h3>Live demo — Attention hierarchy: before &amp; after</h3>
+  <p>Toggle between "Standard" (sidebar as bright as content — it competes) and "Linear approach" (sidebar dims, content leads).</p>
+
+  <div class="demo">
+    <div class="demo-toggle-row">
+      <button class="demo-toggle-btn" id="linear-btn-std" onclick="setLinearMode('std')">Standard (sidebar competes)</button>
+      <button class="demo-toggle-btn active" id="linear-btn-dim" onclick="setLinearMode('dim')">Linear approach (sidebar recedes)</button>
+      <span class="demo-label">Hover over nav items to see the difference</span>
+    </div>
+    <div class="linear-demo dim" id="linearDemo">
+      <div class="linear-demo-nav">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--bf-text-3);padding:4px 10px 8px">Workspace</div>
+        <div class="linear-nav-item"><div class="ni"></div>Dashboard</div>
+        <div class="linear-nav-item active"><div class="ni"></div>Quotes <div class="linear-badge">3</div></div>
+        <div class="linear-nav-item"><div class="ni"></div>Parts</div>
+        <div class="linear-nav-item"><div class="ni"></div>Orders</div>
+        <div class="linear-nav-item"><div class="ni"></div>Vendor RFQs</div>
+        <div style="height:1px;background:var(--bf-border-2);margin:8px 4px"></div>
+        <div class="linear-nav-item"><div class="ni"></div>Configure</div>
+        <div class="linear-nav-item"><div class="ni"></div>Settings</div>
+      </div>
+      <div class="linear-demo-content">
+        <div class="linear-content-title">Quotes <span style="font-size:13px;font-weight:400;color:var(--bf-text-2)">— 22 open</span></div>
+        <div class="linear-row">
+          <span class="lr-num">#15217</span>
+          <span class="lr-title"><strong>Fwd: SM / CNC Simple RFQ</strong> · CC's CNC Machining</span>
+          <span class="lr-badge"><span class="badge warning"><span class="dot"></span>In progress</span></span>
+          <span style="font-size:12px;color:var(--bf-text-2);font-variant-numeric:tabular-nums">€18.240</span>
+        </div>
+        <div class="linear-row">
+          <span class="lr-num">#15214</span>
+          <span class="lr-title"><strong>Gehäuse Rev C</strong> · Müller Blechtechnik</span>
+          <span class="lr-badge"><span class="badge success"><span class="dot"></span>Complete</span></span>
+          <span style="font-size:12px;color:var(--bf-text-2);font-variant-numeric:tabular-nums">€4.812</span>
+        </div>
+        <div class="linear-row">
+          <span class="lr-num">#15209</span>
+          <span class="lr-title"><strong>Serverrack Baugruppe</strong> · DTMA</span>
+          <span class="lr-badge"><span class="badge ai">✦ 12 findings</span></span>
+          <span style="font-size:12px;color:var(--bf-text-2);font-variant-numeric:tabular-nums">€96.380</span>
+        </div>
+        <div class="linear-row">
+          <span class="lr-num">#15201</span>
+          <span class="lr-title"><strong>Halteblech Set 12x</strong> · Weber GmbH</span>
+          <span class="lr-badge"><span class="badge"><span class="dot" style="border:2px solid #B3B0A9;width:4px;height:4px;background:transparent"></span>Not started</span></span>
+          <span style="font-size:12px;color:var(--bf-text-2);font-variant-numeric:tabular-nums">€1.960</span>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:11.5px;color:var(--bf-text-3);margin-top:10px;margin-bottom:0">In the Linear approach, the nav is at 45% opacity. Your eye goes straight to the quote list. In "Standard," the sidebar has equal weight — it competes for every glance.</p>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════
+     §2 · STRIPE
+════════════════════════════════════════════ -->
+<div class="section" id="stripe">
+  <div class="section-header">
+    <span class="section-num">§ 2</span>
+    <h2>Stripe Dashboard — Progressive disclosure done right</h2>
+  </div>
+
+  <div class="alt-card">
+    <div class="alt-card-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="alt-icon stripe">S</div>
+        <div><div class="alt-name">Stripe Dashboard</div><div class="alt-tagline">Payments &amp; financial ops · stripe.com</div></div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--bf-text-3);margin-bottom:4px">Bid Factory fit</div>
+        <div class="fit-bar" style="justify-content:flex-end">
+          <div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div>
+        </div>
+      </div>
+    </div>
+    <div class="alt-card-body">
+      <div class="alt-card-col">
+        <h4>What makes it distinctive</h4>
+        <p>Stripe answers <em>one</em> question per screen. "Did revenue grow this week?" — everything else supports that lead question. Side panels instead of full-page navigation: click a payment → panel slides in from the right, list position preserved. Progressive disclosure as the structural principle.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>How it handles dense data</h4>
+        <p>Sidebar nav (240–280px) + card metric strip (4–6 KPIs) + CSS Grid content area. Tables answer a clear question per row — not sparse, but purposeful. The 2024 update streamlined navigation while keeping information richness.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Color &amp; typography</h4>
+        <p>White / light background — deliberately not dark. Two or three type weights maximum. Status uses muted, purposeful color. Relevant for DACH: most shop offices have bright fluorescent lighting — a light app is more readable on older monitors in that environment.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Better than Shopify for daily drivers</h4>
+        <p>The side-panel pattern is superior for record-detail workflows. Shopify uses full-page navigation — you lose list position, you lose context. Stripe's panel keeps both. For an estimator jumping between 10 open quotes, this difference is felt every minute.</p>
+      </div>
+    </div>
+    <div class="alt-card-footer">
+      <div class="steal-label">Steal →</div>
+      <p>Side-panel pattern for all record detail (already in the spec — affirmed). Lead-question layout rule per screen. Metric strip on the dashboard. Progressive disclosure over upfront complexity.</p>
+    </div>
+  </div>
+
+  <h3>Live demo — Side panel: click any quote row</h3>
+  <p>The list stays visible. Your position is preserved. The panel slides in with full detail. This is the pattern for part detail, operation detail, vendor quote review.</p>
+
+  <div class="demo" style="padding:0;overflow:visible">
+    <div class="stripe-demo-wrap" id="stripeDemo">
+      <table class="stripe-list-table">
+        <thead>
+          <tr><th>Quote</th><th>Customer</th><th>Status</th><th class="num" style="padding-right:14px">Value</th><th>Due</th></tr>
+        </thead>
+        <tbody>
+          <tr onclick="openPanel(0)" id="srow-0">
+            <td><strong>#15217</strong> <span style="font-size:11.5px;color:var(--bf-text-2)">SM / CNC Simple RFQ</span></td>
+            <td>CC's CNC Machining</td>
+            <td><span class="badge warning"><span class="dot"></span>In progress</span></td>
+            <td class="num" style="font-variant-numeric:tabular-nums;padding-right:14px">€18.240</td>
+            <td style="font-size:12px;color:var(--bf-text-2)">17.06.</td>
+          </tr>
+          <tr onclick="openPanel(1)" id="srow-1">
+            <td><strong>#15214</strong> <span style="font-size:11.5px;color:var(--bf-text-2)">Gehäuse Rev C</span></td>
+            <td>Müller Blechtechnik</td>
+            <td><span class="badge success"><span class="dot"></span>Complete</span></td>
+            <td class="num" style="font-variant-numeric:tabular-nums;padding-right:14px">€4.812</td>
+            <td style="font-size:12px;color:var(--bf-text-2)">19.06.</td>
+          </tr>
+          <tr onclick="openPanel(2)" id="srow-2">
+            <td><strong>#15209</strong> <span style="font-size:11.5px;color:var(--bf-text-2)">Serverrack Baugruppe</span></td>
+            <td>DTMA</td>
+            <td><span class="badge ai">✦ 12 findings</span></td>
+            <td class="num" style="font-variant-numeric:tabular-nums;padding-right:14px">€96.380</td>
+            <td style="font-size:12px;color:var(--bf-text-2)">24.06.</td>
+          </tr>
+          <tr onclick="openPanel(3)" id="srow-3">
+            <td><strong>#15201</strong> <span style="font-size:11.5px;color:var(--bf-text-2)">Halteblech Set 12x</span></td>
+            <td>Weber GmbH</td>
+            <td><span class="badge"><span class="dot" style="border:2px solid #B3B0A9;width:4px;height:4px;background:transparent"></span>Not started</span></td>
+            <td class="num" style="font-variant-numeric:tabular-nums;padding-right:14px">€1.960</td>
+            <td style="font-size:12px;color:var(--bf-text-2)">01.07.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="stripe-hint">← Click any row to open the side panel</div>
+
+      <!-- Side Panel -->
+      <div class="side-panel" id="sidePanel">
+        <div class="side-panel-header">
+          <div class="sp-close" onclick="closePanel()">✕</div>
+          <div class="sp-title" id="spTitle">Quote</div>
+          <div id="spBadge"></div>
+        </div>
+        <div class="side-panel-body" id="spBody"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════
+     §3 · VERCEL / shadcn
+════════════════════════════════════════════ -->
+<div class="section" id="vercel">
+  <div class="section-header">
+    <span class="section-num">§ 3</span>
+    <h2>Vercel / shadcn — The composable open-source foundation</h2>
+  </div>
+
+  <div class="alt-card">
+    <div class="alt-card-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="alt-icon vercel">▲</div>
+        <div><div class="alt-name">Vercel Dashboard + shadcn/ui ecosystem</div><div class="alt-tagline">Developer platform · ui.shadcn.com</div></div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--bf-text-3);margin-bottom:4px">Bid Factory fit</div>
+        <div class="fit-bar" style="justify-content:flex-end">
+          <div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div>
+        </div>
+      </div>
+    </div>
+    <div class="alt-card-body">
+      <div class="alt-card-col">
+        <h4>What makes it distinctive</h4>
+        <p>Not just a visual system — a <em>build system</em>. shadcn/ui is copy-paste components (not a package), giving full ownership. Radix UI primitives ensure AAA accessibility. Zero runtime overhead. The confirmed #1 React SaaS stack in 2026, with 70% headless component adoption growth in 2025.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>How it handles dense data</h4>
+        <p>Tremor (built on shadcn + Radix + Tailwind) provides 35+ data-rich dashboard components. TanStack Table handles virtual scroll for large datasets — costing grids, BOM tables. Vercel's new AI Elements library provides open-source patterns for AI interactions: message threads, reasoning panels, confidence display.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Color &amp; typography</h4>
+        <p>Vercel's own dashboard is stark dark — but the <em>system</em> is token-agnostic. Apply any token set to the same components. shadcn's headless architecture means visual identity is entirely ours. Our warm orange + warm grays layer on top with no conflict.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Better than Shopify for daily drivers</h4>
+        <p>Shopify Polaris is opinionated and locked to Shopify visual language. shadcn/Radix gives you components you own, modify, and extend. Every component is code. No license risk, no visual lock-in, no package dependency — just composable primitives with AAA accessibility baked in.</p>
+      </div>
+    </div>
+    <div class="alt-card-footer">
+      <div class="steal-label">Steal →</div>
+      <p>This is our confirmed component layer. shadcn/ui + Radix UI for primitives. Tremor for KPI cards. TanStack Table for grids. AI Elements as the reference pattern for Wingman affordances.</p>
+    </div>
+  </div>
+
+  <h3>Live demo — ⌘K Command Palette</h3>
+  <p>Keyboard-first navigation is now table stakes in B2B SaaS. Click the search bar below or press <span class="kbd">⌘</span><span class="kbd">K</span>. Use arrow keys to navigate, Enter to select, Escape to close.</p>
+
+  <div class="demo">
+    <div class="cmdpal-trigger-area">
+      <div class="cmdpal-hint" onclick="openCmdPal()" id="cmdpalTrigger">
+        <span>🔍</span>
+        <span style="color:var(--bf-text-3)">Search or jump to…</span>
+        <div class="kbds"><span class="kbd">⌘</span><span class="kbd">K</span></div>
+      </div>
+      <button class="btn btn-secondary" onclick="openCmdPal()">Open palette</button>
+    </div>
+  </div>
+
+  <!-- Command Palette Overlay (outside demo div so it can be fixed-position) -->
+  <div class="cmdpal-overlay" id="cmdpalOverlay" onclick="closeCmdPalOutside(event)">
+    <div class="cmdpal" id="cmdpal">
+      <div class="cmdpal-input-row">
+        <span class="cp-icon">🔍</span>
+        <input type="text" id="cmdpalInput" placeholder="Search quotes, parts, customers…" oninput="filterCmdPal(this.value)" onkeydown="cmdpalKeydown(event)" autocomplete="off">
+        <span class="cp-esc kbd" onclick="closeCmdPal()">esc</span>
+      </div>
+      <div class="cmdpal-items" id="cmdpalItems"></div>
+      <div class="cmdpal-footer">
+        <span><span class="kbd">↑↓</span> navigate</span>
+        <span><span class="kbd">↵</span> select</span>
+        <span><span class="kbd">esc</span> close</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════
+     §4 · RAYCAST / CALM PRODUCTIVITY
+════════════════════════════════════════════ -->
+<div class="section" id="raycast">
+  <div class="section-header">
+    <span class="section-num">§ 4</span>
+    <h2>Raycast / Arc — Bold identity within a calm system</h2>
+  </div>
+
+  <div class="alt-card">
+    <div class="alt-card-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="alt-icon raycast">R</div>
+        <div><div class="alt-name">Raycast + Arc Browser</div><div class="alt-tagline">Launcher + "calm productivity" design school</div></div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--bf-text-3);margin-bottom:4px">Bid Factory fit</div>
+        <div class="fit-bar" style="justify-content:flex-end">
+          <div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot"></div><div class="fit-dot"></div>
+        </div>
+      </div>
+    </div>
+    <div class="alt-card-body">
+      <div class="alt-card-col">
+        <h4>What makes it distinctive</h4>
+        <p>Raycast started as a Linear-derivative (dark, minimal) and found its own identity: bold red color, distinctive personality, abstract noisy overlays. It proved you can follow "calm design" UX principles while being visually unforgettable. Arc: calm animations, fade-out chrome, everything designed to reduce visual anxiety and mental fatigue.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>How it handles dense data</h4>
+        <p>Command palette as primary navigation — you don't browse, you type. This eliminates the visual cost of showing all nav options. For Bid Factory: "new quote for Müller GmbH" or "open #15217" typed into ⌘K is faster than any sidebar. Keyboard-first makes density navigable rather than overwhelming.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Color &amp; typography</h4>
+        <p>Bold signature color used <em>once</em>, confidently, on the single most important action. Everything else is neutral. The lesson: a brand color used everywhere at low opacity is invisible. The same color used sparingly at full strength is memorable and functional.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Better than Shopify for daily drivers</h4>
+        <p>Arc's "reduce visual anxiety" principle is measurable: after 4 hours in any app, visual noise creates cognitive fatigue. Apps that hide their chrome (fade-out toolbar, dim sidebar) feel <em>calmer</em> in extended use. This is ergonomic, not aesthetic.</p>
+      </div>
+    </div>
+    <div class="alt-card-footer">
+      <div class="steal-label">Steal →</div>
+      <p>Orange used once per screen, confidently, on the primary action. Never diluted across 6 different UI elements. ⌘K as first-class navigation (see §3 demo). Nav chrome dims in focused work mode.</p>
+    </div>
+  </div>
+
+  <h3>Live demo — Bold vs. apologetic brand color</h3>
+  <p>The same information, two approaches to orange. The "apologetic" pattern — orange everywhere at low strength — reads as noise. The "confident" pattern — orange once, at full strength — reads as signal.</p>
+
+  <div class="demo">
+    <div class="ab-demo">
+      <!-- ✗ Apologetic -->
+      <div class="ab-panel">
+        <div class="ab-panel-header bad">✗ Apologetic orange — diluted everywhere</div>
+        <div class="ab-body ab-bad">
+          <div class="ab-header">Quote #15217 — Draft</div>
+          <div class="ab-bad-row">
+            <span class="abl">Status</span>
+            <span class="abr"><span class="ab-bad-chip">In Progress</span></span>
+          </div>
+          <div class="ab-bad-row">
+            <span class="abl">Customer</span>
+            <span class="abr"><span class="ab-bad-link">CC's CNC Machining</span></span>
+          </div>
+          <div class="ab-bad-row">
+            <span class="abl">Value</span>
+            <span class="abr" style="color:#E8590C;font-weight:600">€18.240</span>
+          </div>
+          <div class="ab-bad-row">
+            <span class="abl">Actions</span>
+            <span class="abr">
+              <button class="ab-bad-btn">Edit</button>
+              <button class="ab-bad-btn2">Preview</button>
+            </span>
+          </div>
+          <div class="ab-bad-note">⚠ Orange appears 5× on this card. Eye doesn't know where to land. Which action matters?</div>
+        </div>
+      </div>
+
+      <!-- ✓ Confident -->
+      <div class="ab-panel">
+        <div class="ab-panel-header good">✓ Confident orange — reserved for one action</div>
+        <div class="ab-body ab-good">
+          <div class="ab-header">Quote #15217 — Draft</div>
+          <div class="ab-good-row">
+            <span class="abl">Status</span>
+            <span class="abr"><span class="badge warning"><span class="dot"></span>In progress</span></span>
+          </div>
+          <div class="ab-good-row">
+            <span class="abl">Customer</span>
+            <span class="abr" style="color:var(--bf-link)">CC's CNC Machining ↗</span>
+          </div>
+          <div class="ab-good-row">
+            <span class="abl">Value</span>
+            <span class="abr" style="color:var(--bf-text);font-weight:600;font-variant-numeric:tabular-nums">€18.240</span>
+          </div>
+          <div class="ab-good-row">
+            <span class="abl">Actions</span>
+            <span class="abr">
+              <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px">Actions ▾</button>
+            </span>
+          </div>
+          <button class="ab-good-cta">Finalize &amp; send quote →</button>
+          <div class="ab-good-note">✓ Orange appears exactly once. The eye knows immediately: this is the thing to do next.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════
+     §5 · ENTERPRISE CPQ
+════════════════════════════════════════════ -->
+<div class="section" id="cpq">
+  <div class="section-header">
+    <span class="section-num">§ 5</span>
+    <h2>Enterprise CPQ — Context-oriented data for heavy industry</h2>
+  </div>
+
+  <div class="alt-card">
+    <div class="alt-card-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="alt-icon cpq">⚙</div>
+        <div><div class="alt-name">Consumer-grade UX in Enterprise CPQ</div><div class="alt-tagline">Case study: Auxentios CPQ for heavy industry (Caterpillar/Komatsu/Volvo-class)</div></div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--bf-text-3);margin-bottom:4px">Bid Factory fit</div>
+        <div class="fit-bar" style="justify-content:flex-end">
+          <div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div><div class="fit-dot on"></div>
+        </div>
+      </div>
+    </div>
+    <div class="alt-card-body">
+      <div class="alt-card-col">
+        <h4>What makes it distinctive</h4>
+        <p>The only system in this list built specifically for manufacturing CPQ. Research found SAP and Salesforce force users across 4+ disconnected tools (CRM, comms, contracts, iteration). The goal: consumer-grade UX with enterprise data structure. Six user roles with distinct information needs. 200+ screens designed from a component-first system.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>How it handles dense data</h4>
+        <p><em>Context-oriented data representation</em> — show information in the context of the current decision, not as raw fields. Multiple exit points on long tasks (no dead ends mid-quote). Role-based information hierarchy: the estimator, manager, and purchasing lead see the same record with different column priority and hero numbers.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Color &amp; typography</h4>
+        <p>Enterprise-calibrated: high contrast, accessible, functional. Role-based visual differentiation — the estimator's view and the manager's view are structurally distinct even when showing the same data. Data visualization tuned for quotation accuracy, not KPI dashboards.</p>
+      </div>
+      <div class="alt-card-col">
+        <h4>Better than Shopify for daily drivers</h4>
+        <p>Shopify Polaris has one information hierarchy. This system has three — per role. The insight: each role's "lead question" is different. Estimator: "what's the cost?" Manager: "are we winning?" Purchasing: "where are the materials?" One product, three information architectures.</p>
+      </div>
+    </div>
+    <div class="alt-card-footer">
+      <div class="steal-label">Steal →</div>
+      <p>Context-oriented data per role. Multiple exit points on every important task. Consumer-grade feel ("like Stripe, not SAP"). Role-aware views from day one — estimator, manager, customer portal show the same record differently.</p>
+    </div>
+  </div>
+
+  <h3>Live demo — Role-aware view: same quote, three information hierarchies</h3>
+  <p>Switch roles to see how the same Quote #15217 is presented differently. The lead question changes — and so does what appears first.</p>
+
+  <div class="demo">
+    <div class="role-tabs" id="roleTabs">
+      <div class="role-tab active" onclick="switchRole('est', this)">👷 Estimator</div>
+      <div class="role-tab" onclick="switchRole('mgr', this)">📊 Manager</div>
+      <div class="role-tab" onclick="switchRole('cust', this)">🤝 Customer Portal</div>
+    </div>
+
+    <!-- Estimator View -->
+    <div class="role-panel active" id="role-est">
+      <div class="role-panel-inner">
+        <div class="rp-hero est">
+          <div class="rph-label">Total cost → you</div>
+          <div class="rph-val">€11.450</div>
+          <div class="rph-sub">3 ops · 47.3h total · DFM: <span style="color:var(--bf-critical);font-weight:600">2 warnings</span></div>
+        </div>
+        <table class="rp-table">
+          <thead><tr><th>Operation</th><th>Setup</th><th>Run</th><th class="num">Qty 1</th><th class="num">Qty 50</th></tr></thead>
+          <tbody>
+            <tr><td>CNC Milling (5-Axis)</td><td>2.0 hr</td><td>89 min</td><td class="num">€261,60</td><td class="num">€5.730</td></tr>
+            <tr><td>Inspection</td><td>30 min</td><td>15 min</td><td class="num">€48,75</td><td class="num">€845</td></tr>
+            <tr><td><span class="badge ai" style="font-size:10.5px">✦ suggested</span> Surface treatment</td><td>—</td><td>20 min</td><td class="num">€12,00</td><td class="num">€280</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Manager View -->
+    <div class="role-panel" id="role-mgr">
+      <div class="role-panel-inner">
+        <div class="rp-hero mgr">
+          <div class="rph-label">Gross margin</div>
+          <div class="rph-val">37.2%</div>
+          <div class="rph-sub">Quote €18.240 · Cost €11.450 · Win prob: <span style="color:var(--bf-link);font-weight:600">68%</span></div>
+        </div>
+        <table class="rp-table">
+          <thead><tr><th>Line item</th><th>Process</th><th class="num">Cost</th><th class="num">Quoted</th><th class="num">Margin</th></tr></thead>
+          <tbody>
+            <tr><td>3601215 Rev C</td><td>CNC Milling</td><td class="num">€3.820</td><td class="num">€6.100</td><td class="num" style="color:var(--bf-green)">37.4%</td></tr>
+            <tr><td>PP-18932 Rev A</td><td>Laser / Fab</td><td class="num">€7.630</td><td class="num">€12.140</td><td class="num" style="color:var(--bf-green)">37.1%</td></tr>
+            <tr style="font-weight:600"><td colspan="2">Total</td><td class="num">€11.450</td><td class="num">€18.240</td><td class="num" style="color:var(--bf-green)">37.2%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Customer View -->
+    <div class="role-panel" id="role-cust">
+      <div class="role-panel-inner">
+        <div class="rp-hero cust">
+          <div class="rph-label">Your price</div>
+          <div class="rph-val">€18.240</div>
+          <div class="rph-sub">Est. delivery: 25 business days · Valid until 30.06.2026</div>
+        </div>
+        <table class="rp-table">
+          <thead><tr><th>Part</th><th>Qty</th><th class="num">Unit price</th><th class="num">Total</th></tr></thead>
+          <tbody>
+            <tr><td>3601215 Rev C · Offset Connector</td><td>1</td><td class="num">€6.100,00</td><td class="num">€6.100</td></tr>
+            <tr><td>PP-18932 Rev A · Bracket</td><td>100</td><td class="num">€121,40</td><td class="num">€12.140</td></tr>
+            <tr style="font-weight:600"><td colspan="3">Total (excl. VAT)</td><td class="num">€18.240</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:14px;display:flex;gap:8px">
+          <button class="btn btn-primary">Accept quote &amp; send PO</button>
+          <button class="btn btn-secondary">Request revision</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p style="font-size:11.5px;color:var(--bf-text-3);margin-top:4px">Internal cost data (€11.450) is completely hidden from the customer view. The estimator sees operations and DFM warnings. The manager sees margin. Same record — three different information architectures.</p>
+</div>
+
+
+<!-- ════════════════════════════════════════════
+     §6 · TRENDS
+════════════════════════════════════════════ -->
+<div class="section" id="trends">
+  <div class="section-header">
+    <span class="section-num">§ 6</span>
+    <h2>2025–26 B2B SaaS UI Trends</h2>
+  </div>
+  <div class="trend-grid">
+    <div class="trend-card">
+      <div class="trend-icon">⬛</div>
+      <h4>Density over decoration</h4>
+      <p>The best dashboards show 5–9 core elements. Strip decoration, keep information. Power users want data. Breathing room is for landing pages.</p>
+      <div class="trend-stat">→ 13px / 1.55 line height already in our spec</div>
+    </div>
+    <div class="trend-card">
+      <div class="trend-icon">🌑</div>
+      <h4>Warm dark mode</h4>
+      <p>Linear 2026 shifted from cool blue-gray to warmer gray. "100% black is too black." 82% of power users have dark mode on.</p>
+      <div class="trend-stat">→ Inverse #23211E (warm) already defined</div>
+    </div>
+    <div class="trend-card">
+      <div class="trend-icon">⌘</div>
+      <h4>Command palette first-class</h4>
+      <p>Linear, Vercel, Raycast, GitHub all treat ⌘K as primary navigation. Power users type faster than they click.</p>
+      <div class="trend-stat">→ Build from M1, not as a feature flag</div>
+    </div>
+    <div class="trend-card">
+      <div class="trend-icon">🤖</div>
+      <h4>AI has its own lane</h4>
+      <p>In 2026, AI is not a floating button — it's a distinct visual identity. Vercel AI Elements, Linear agent API. Users need a consistent pattern they trust.</p>
+      <div class="trend-stat">→ Purple = AI only. Already locked.</div>
+    </div>
+    <div class="trend-card">
+      <div class="trend-icon">📋</div>
+      <h4>Progressive disclosure</h4>
+      <p>Surface the answer to the lead question first. Every additional layer is a deliberate user action. Don't front-load complexity.</p>
+      <div class="trend-stat">→ Work queue answers "what needs me?" first</div>
+    </div>
+    <div class="trend-card">
+      <div class="trend-icon">💛</div>
+      <h4>Emotional design = retention</h4>
+      <p>Higher emotional engagement = lower 30-day churn. "Delight is a business metric." Orange that pops is not decorative — it's a retention lever.</p>
+      <div class="trend-stat">→ Orange #E8590C + save bar animations</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════
+     §7 · SYNTHESIS
+════════════════════════════════════════════ -->
+<div class="section" id="synthesis">
+  <div class="section-header">
+    <span class="section-num">§ 7</span>
+    <h2>The Bid Factory Synthesis</h2>
+  </div>
+  <p>Each system contributes one layer. Stack them and you get something that feels like none of them — and better than any single one for a manufacturing CPQ.</p>
+
+  <div class="synth">
+    <table>
+      <thead>
+        <tr><th>Principle</th><th>Source</th><th>In Bid Factory…</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="td-rule">Attention hierarchy — nav recedes, content leads</td><td class="td-src">Linear</td><td>Sidebar at 65% opacity by default; brightens on hover; active item full opacity + orange left border</td></tr>
+        <tr><td class="td-rule">Lead-question first on every screen</td><td class="td-src">Stripe</td><td>Quote detail: total cost is the first number the eye lands on. Dashboard: "what needs me now" is the first card</td></tr>
+        <tr><td class="td-rule">Side panels, not full-page navigation</td><td class="td-src">Stripe</td><td>Part detail, operation detail, vendor quote review all open as 480px right panels. List position preserved.</td></tr>
+        <tr><td class="td-rule">Headless, owned components</td><td class="td-src">Vercel/shadcn</td><td>shadcn/Radix + our token sheet. No Polaris, no MUI, no third-party visual lock-in</td></tr>
+        <tr><td class="td-rule">⌘K command palette first-class</td><td class="td-src">Vercel/Raycast</td><td>Built in M1. Routes: new quote, open customer, go to settings, recent quotes</td></tr>
+        <tr><td class="td-rule">Brand color used once, confidently</td><td class="td-src">Raycast</td><td>Orange #E8590C on the single primary action per screen. Never diluted to "a hint of orange" across 6 elements</td></tr>
+        <tr><td class="td-rule">Context-oriented data per role</td><td class="td-src">Enterprise CPQ</td><td>Estimator sees cost + DFM first. Manager sees margin + win prob. Customer sees price + delivery. Same record.</td></tr>
+        <tr><td class="td-rule">Multiple exit points on long tasks</td><td class="td-src">Enterprise CPQ</td><td>Quote wizard abandonable at any step. Operations expand one at a time. No dead ends.</td></tr>
+        <tr><td class="td-rule">AI has a dedicated visual lane</td><td class="td-src">All 5 systems</td><td>Purple = AI. Every Wingman suggestion, auto-fill, extraction confidence marker. Never orange.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════
+     §8 · DIRECTIVE
+════════════════════════════════════════════ -->
+<div class="section" id="directive">
+  <div class="section-header">
+    <span class="section-num">§ 8</span>
+    <h2>Build Directive</h2>
+  </div>
+  <p>These decisions extend <code>UI-Recommendations.html</code>. Both documents together form the UI appendix to the build spec.</p>
+
+  <div class="directive">
+    <h3>Confirmed directives for Claude Code</h3>
+    <div class="directive-grid">
+      <div class="directive-item">
+        <div class="directive-num">1</div>
+        <p><strong>Sidebar attention hierarchy:</strong> Nav icons/labels at 65% opacity default. Hover → 100%. Active → full + orange left-border 2px. Chrome never competes with content.</p>
+      </div>
+      <div class="directive-item">
+        <div class="directive-num">2</div>
+        <p><strong>⌘K command palette in M1:</strong> Not a v2 feature. Routes: new quote, open customer, go to settings, recent quotes. Uses shadcn cmdk primitive.</p>
+      </div>
+      <div class="directive-item">
+        <div class="directive-num">3</div>
+        <p><strong>Side panels for all record detail:</strong> 480px Sheet (shadcn). Part detail, operation, vendor quote. Full-page navigation only for the Quote Builder itself.</p>
+      </div>
+      <div class="directive-item">
+        <div class="directive-num">4</div>
+        <p><strong>Lead-question layout rule:</strong> Every screen has one hero number — the answer to why the user is here. Quote: total cost. Dashboard: urgency count. Part: confidence score.</p>
+      </div>
+      <div class="directive-item">
+        <div class="directive-num">5</div>
+        <p><strong>Role-aware information hierarchy:</strong> Estimator sees cost + time first. Manager sees margin + win probability. Customer sees price + delivery. Same record, different column order.</p>
+      </div>
+      <div class="directive-item">
+        <div class="directive-num">6</div>
+        <p><strong>Component stack, no substitutions:</strong> shadcn/Radix primitives, TanStack Table for grids, Tremor for KPI/charts, AI Elements pattern for Wingman UI.</p>
+      </div>
+      <div class="directive-item">
+        <div class="directive-num">7</div>
+        <p><strong>Orange once per screen:</strong> The single primary action gets orange at full strength. Everything else uses neutral or semantic color. Never dilute across multiple elements.</p>
+      </div>
+      <div class="directive-item">
+        <div class="directive-num">8</div>
+        <p><strong>Orange = brand. Purple = AI. No exceptions:</strong> This distinction must hold across every screen, every component, every sprint.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Sources -->
+<div class="sources">
+  <h4>Sources</h4>
+  <div class="source-chips">
+    <a class="source-chip" href="https://linear.app/now/behind-the-latest-design-refresh" target="_blank">Linear design refresh, March 2026</a>
+    <a class="source-chip" href="https://blog.logrocket.com/ux-design/linear-design/" target="_blank">LogRocket: Linear design trend 2025</a>
+    <a class="source-chip" href="https://artofstyleframe.com/blog/dashboard-design-patterns-web-apps/" target="_blank">Dashboard design patterns 2026</a>
+    <a class="source-chip" href="https://www.saasui.design/blog/7-saas-ui-design-trends-2026" target="_blank">SaaSUI: 7 trends 2026</a>
+    <a class="source-chip" href="https://www.tcules.com/case-studies/cpq-software-mvp-ux" target="_blank">Auxentios CPQ UX case study</a>
+    <a class="source-chip" href="https://hashbyt.com/blog/best-react-ui-component-libraries" target="_blank">Best React UI libraries 2026</a>
+    <a class="source-chip" href="https://vercel.com/changelog/introducing-ai-elements" target="_blank">Vercel AI Elements</a>
+    <a class="source-chip" href="https://support.stripe.com/questions/dashboard-update-may-2024" target="_blank">Stripe dashboard update 2024</a>
+  </div>
+</div>
+
+</main>
+</div><!-- /shell -->
+
+
+<!-- ═══════════════════════════
+     JAVASCRIPT FOR ALL DEMOS
+═══════════════════════════ -->
+<script>
+/* ── Demo 1: Linear attention hierarchy ── */
+function setLinearMode(mode) {
+  const demo = document.getElementById('linearDemo');
+  const btnStd = document.getElementById('linear-btn-std');
+  const btnDim = document.getElementById('linear-btn-dim');
+  if (mode === 'dim') {
+    demo.classList.add('dim');
+    btnDim.classList.add('active');
+    btnStd.classList.remove('active');
+  } else {
+    demo.classList.remove('dim');
+    btnStd.classList.add('active');
+    btnDim.classList.remove('active');
+  }
+}
+
+/* ── Demo 2: Stripe side panel ── */
+const panelData = [
+  {
+    id: '#15217', title: 'SM / CNC Simple RFQ',
+    badge: '<span class="badge warning"><span class="dot"></span>In progress</span>',
+    customer: 'CC\'s CNC Machining · Chris Butler',
+    value: '€18.240', due: '17.06.2026', estimator: 'S. McAuley',
+    lines: [
+      { n: '1', name: '3601215 Rev C · Offset Connector', val: '€6.100' },
+      { n: '2', name: 'PP-18932 Rev A · Bracket', val: '€12.140' },
+    ],
+    note: '✦ Wingman created 2 line items · 3 unresolved findings'
+  },
+  {
+    id: '#15214', title: 'Gehäuse Rev C',
+    badge: '<span class="badge success"><span class="dot"></span>Complete</span>',
+    customer: 'Müller Blechtechnik · K. Müller',
+    value: '€4.812', due: '19.06.2026', estimator: 'J. Rindini',
+    lines: [
+      { n: '1', name: 'Gehäuse Blech 2mm · Laser cut', val: '€4.812' },
+    ],
+    note: 'Ready to send — no unresolved items'
+  },
+  {
+    id: '#15209', title: 'Serverrack Baugruppe',
+    badge: '<span class="badge ai">✦ 12 findings</span>',
+    customer: 'DTMA · T. Weber',
+    value: '€96.380', due: '24.06.2026', estimator: 'Unassigned',
+    lines: [
+      { n: '1', name: 'Rack Frame · Weld assembly', val: '€42.000' },
+      { n: '2', name: 'Side panels (×8) · Sheet metal', val: '€31.200' },
+      { n: '3', name: 'Cable management · Misc', val: '€23.180' },
+    ],
+    note: '⚠ 12 Wingman findings require review before pricing'
+  },
+  {
+    id: '#15201', title: 'Halteblech Set 12x',
+    badge: '<span class="badge"><span class="dot" style="border:2px solid #B3B0A9;width:4px;height:4px;background:transparent"></span>Not started</span>',
+    customer: 'Weber GmbH · M. Fischer',
+    value: '€1.960', due: '01.07.2026', estimator: 'Unassigned',
+    lines: [
+      { n: '1', name: 'Halteblech 100×50 (×12) · Laser', val: '€1.960' },
+    ],
+    note: 'Simple sheet metal — assign to estimator'
+  }
+];
+
+function openPanel(idx) {
+  const d = panelData[idx];
+  document.querySelectorAll('[id^="srow-"]').forEach(r => r.classList.remove('selected'));
+  document.getElementById('srow-' + idx).classList.add('selected');
+  document.getElementById('spTitle').textContent = d.id + ' — ' + d.title;
+  document.getElementById('spBadge').innerHTML = d.badge;
+  document.getElementById('spBody').innerHTML = `
+    <div class="sp-field"><div class="label">Customer</div><div class="value">${d.customer}</div></div>
+    <div class="sp-field"><div class="label">Value</div><div class="value" style="font-size:16px;font-weight:650;font-variant-numeric:tabular-nums">${d.value}</div></div>
+    <div class="sp-field"><div class="label">Due</div><div class="value">${d.due}</div></div>
+    <div class="sp-field"><div class="label">Estimator</div><div class="value">${d.estimator}</div></div>
+    <div class="sp-field" style="margin-top:14px"><div class="label" style="margin-bottom:6px">Line items</div>
+      ${d.lines.map(l => `<div class="sp-line-row"><span class="sp-lnum">${l.n}</span><span class="sp-lname">${l.name}</span><span class="sp-lval">${l.val}</span></div>`).join('')}
+    </div>
+    <div style="margin-top:12px;font-size:11.5px;color:var(--bf-text-2);padding:8px 10px;background:var(--bf-surface-2);border-radius:6px">${d.note}</div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn btn-primary" style="flex:1">Open quote →</button>
+      <button class="btn btn-secondary">Actions ▾</button>
+    </div>
+  `;
+  document.getElementById('sidePanel').classList.add('open');
+}
+
+function closePanel() {
+  document.getElementById('sidePanel').classList.remove('open');
+  document.querySelectorAll('[id^="srow-"]').forEach(r => r.classList.remove('selected'));
+}
+
+/* ── Demo 3: Command Palette ── */
+const cmdpalCommands = [
+  { section: 'New', icon: '＋', title: 'New quote', sub: 'Start a fresh RFQ', kbd: 'N' },
+  { section: 'New', icon: '📁', title: 'New customer', sub: 'Add a customer account', kbd: '' },
+  { section: 'New', icon: '📦', title: 'New vendor RFQ', sub: 'Send to outside process vendor', kbd: '' },
+  { section: 'Navigate', icon: '📋', title: 'Go to Quotes', sub: 'All open quotes', kbd: 'G Q' },
+  { section: 'Navigate', icon: '🔧', title: 'Go to Parts library', sub: 'Part catalog & geometry', kbd: 'G P' },
+  { section: 'Navigate', icon: '⚙', title: 'Go to Configure', sub: 'Machines, rates, materials', kbd: 'G C' },
+  { section: 'Navigate', icon: '📊', title: 'Go to Dashboard', sub: 'Work queue & urgency', kbd: 'G D' },
+  { section: 'Recent', icon: '📄', title: '#15217 · SM / CNC Simple RFQ', sub: 'CC\'s CNC Machining · In progress', kbd: '' },
+  { section: 'Recent', icon: '📄', title: '#15209 · Serverrack Baugruppe', sub: 'DTMA · 12 Wingman findings', kbd: '' },
+  { section: 'Recent', icon: '📄', title: '#15214 · Gehäuse Rev C', sub: 'Müller Blechtechnik · Complete', kbd: '' },
+];
+
+let cpActiveIdx = 0;
+let cpFiltered = [...cmdpalCommands];
+
+function openCmdPal() {
+  document.getElementById('cmdpalOverlay').classList.add('show');
+  setTimeout(() => document.getElementById('cmdpalInput').focus(), 50);
+  cpFiltered = [...cmdpalCommands];
+  cpActiveIdx = 0;
+  renderCmdPal();
+}
+
+function closeCmdPal() {
+  document.getElementById('cmdpalOverlay').classList.remove('show');
+  document.getElementById('cmdpalInput').value = '';
+}
+
+function closeCmdPalOutside(e) {
+  if (e.target === document.getElementById('cmdpalOverlay')) closeCmdPal();
+}
+
+function filterCmdPal(q) {
+  const lq = q.toLowerCase();
+  cpFiltered = cmdpalCommands.filter(c =>
+    !lq || c.title.toLowerCase().includes(lq) || c.sub.toLowerCase().includes(lq) || c.section.toLowerCase().includes(lq)
+  );
+  cpActiveIdx = 0;
+  renderCmdPal();
+}
+
+function renderCmdPal() {
+  const container = document.getElementById('cmdpalItems');
+  let html = '';
+  let lastSection = '';
+  cpFiltered.forEach((cmd, i) => {
+    if (cmd.section !== lastSection) {
+      html += `<div class="cmdpal-section-label">${cmd.section}</div>`;
+      lastSection = cmd.section;
+    }
+    html += `<div class="cmdpal-item${i === cpActiveIdx ? ' active' : ''}" onclick="selectCmdPalItem(${i})">
+      <div class="ci-icon">${cmd.icon}</div>
+      <div class="ci-text">
+        <div>${cmd.title}</div>
+        <div class="ci-sub">${cmd.sub}</div>
+      </div>
+      ${cmd.kbd ? `<div class="ci-kbd">${cmd.kbd}</div>` : ''}
+    </div>`;
+  });
+  container.innerHTML = html || '<div style="padding:16px;text-align:center;color:var(--bf-text-3);font-size:12.5px">No results</div>';
+}
+
+function selectCmdPalItem(i) {
+  const cmd = cpFiltered[i];
+  if (cmd) {
+    closeCmdPal();
+    // Just close for demo — in real app would navigate
+  }
+}
+
+function cmdpalKeydown(e) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    cpActiveIdx = Math.min(cpActiveIdx + 1, cpFiltered.length - 1);
+    renderCmdPal();
+    scrollActiveCmdPal();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    cpActiveIdx = Math.max(cpActiveIdx - 1, 0);
+    renderCmdPal();
+    scrollActiveCmdPal();
+  } else if (e.key === 'Enter') {
+    selectCmdPalItem(cpActiveIdx);
+  } else if (e.key === 'Escape') {
+    closeCmdPal();
+  }
+}
+
+function scrollActiveCmdPal() {
+  const items = document.querySelectorAll('.cmdpal-item');
+  if (items[cpActiveIdx]) items[cpActiveIdx].scrollIntoView({ block: 'nearest' });
+}
+
+// Global ⌘K listener
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    if (document.getElementById('cmdpalOverlay').classList.contains('show')) {
+      closeCmdPal();
+    } else {
+      openCmdPal();
+    }
+  }
+  if (e.key === 'Escape' && document.getElementById('cmdpalOverlay').classList.contains('show')) {
+    closeCmdPal();
+  }
+});
+
+/* ── Demo 5: Role-aware view ── */
+function switchRole(role, tab) {
+  document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.role-panel').forEach(p => p.classList.remove('active'));
+  tab.classList.add('active');
+  document.getElementById('role-' + role).classList.add('active');
+}
+
+/* ── Sidebar scroll spy ── */
+const sections = document.querySelectorAll('[id]');
+const navLinks = document.querySelectorAll('.sidebar nav a');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      navLinks.forEach(l => l.classList.remove('active'));
+      const a = document.querySelector(`.sidebar nav a[href="#${e.target.id}"]`);
+      if (a) a.classList.add('active');
+    }
+  });
+}, { threshold: 0.25, rootMargin: '-80px 0px -60% 0px' });
+sections.forEach(s => observer.observe(s));
+</script>
+
+</body>
+</html>

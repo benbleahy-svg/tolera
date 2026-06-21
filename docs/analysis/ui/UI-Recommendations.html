@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bid Factory — UI Direction &amp; Recommendations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet">
+<style>
+  /* ============ BID FACTORY DESIGN TOKENS (Polaris-informed, visually distinct) ============ */
+  :root{
+    /* Surfaces */
+    --bf-canvas:#F2F2F0;          /* app background — warm-gray, NOT Shopify's #F1F1F1 cool gray */
+    --bf-surface:#FFFFFF;          /* cards */
+    --bf-surface-2:#F8F8F6;        /* secondary surface / hover */
+    --bf-surface-3:#F1F1EE;        /* active / selected */
+    --bf-nav:#FAFAF8;              /* left nav rail (light, vs Shopify's gray) */
+    --bf-inverse:#23211E;          /* top bar, save bar, toasts — warm near-black */
+    /* Text */
+    --bf-text:#2E2C29;             /* primary — warm dark gray, not black */
+    --bf-text-2:#6B6862;           /* secondary */
+    --bf-text-3:#B3B0A9;           /* disabled */
+    --bf-link:#0A66B5;             /* links — steel blue, not Shopify #005BD3 */
+    /* Borders */
+    --bf-border:#E5E3DE;
+    --bf-border-2:#EDEBE6;         /* row dividers */
+    --bf-border-strong:#C9C6BF;
+    /* Brand & accent — THE identity divergence: industrial orange primary */
+    --bf-accent:#E8590C;           /* primary actions — safety orange (refined from spec's #ff7a18) */
+    --bf-accent-hover:#D14F08;
+    --bf-accent-surface:#FDEEE4;
+    --bf-focus:#E8590C;
+    /* Status tones (tone + shape, never color alone) */
+    --bf-success:#1F7A4D;  --bf-success-bg:#E3F4EA;  --bf-success-text:#155C39;
+    --bf-warning:#B57E00;  --bf-warning-bg:#FFF4D6;  --bf-warning-text:#6E4D00;
+    --bf-critical:#C2333B; --bf-critical-bg:#FCE9EA; --bf-critical-text:#94262C;
+    --bf-info:#0A66B5;     --bf-info-bg:#E8F2FB;     --bf-info-text:#084B85;
+    --bf-ai:#7A4FD0;       --bf-ai-bg:#F1EBFC;       /* Wingman/AI = purple, as in the demos */
+    /* Geometry */
+    --bf-r-card:10px; --bf-r-ctl:8px; --bf-r-pill:999px;
+    --bf-shadow-card:0 1px 0 rgba(35,33,30,.06), 0 0 0 1px rgba(35,33,30,.04);
+    --bf-shadow-pop:0 4px 12px -2px rgba(35,33,30,.18), 0 0 0 1px rgba(35,33,30,.05);
+    /* Type */
+    --bf-font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    --bf-mono:ui-monospace,'SF Mono',Consolas,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bf-canvas);color:var(--bf-text);font-family:var(--bf-font);font-size:13px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  main{max-width:980px;margin:0 auto;padding:40px 24px 120px}
+  h1{font-size:24px;font-weight:700;letter-spacing:-.3px;margin:0 0 4px}
+  h2{font-size:17px;font-weight:650;letter-spacing:-.15px;margin:44px 0 12px;padding-top:24px;border-top:1px solid var(--bf-border)}
+  h3{font-size:14px;font-weight:650;margin:24px 0 8px}
+  p{margin:8px 0;max-width:76ch}
+  .sub{color:var(--bf-text-2)}
+  a{color:var(--bf-link);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:var(--bf-mono);font-size:12px;background:var(--bf-surface-3);border:1px solid var(--bf-border);border-radius:4px;padding:1px 5px}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12.5px;background:var(--bf-surface);border:1px solid var(--bf-border);border-radius:var(--bf-r-card);overflow:hidden}
+  th{background:var(--bf-surface-2);font-weight:600;text-align:left;padding:8px 12px;border-bottom:1px solid var(--bf-border)}
+  td{padding:7px 12px;border-bottom:1px solid var(--bf-border-2);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  /* ---------- doc chrome ---------- */
+  .card{background:var(--bf-surface);border-radius:var(--bf-r-card);box-shadow:var(--bf-shadow-card);padding:16px;margin:14px 0}
+  .note{background:var(--bf-info-bg);border:1px solid #C7DFF5;border-radius:var(--bf-r-card);padding:12px 14px;margin:14px 0}
+  .warn{background:var(--bf-warning-bg);border:1px solid #EDD9A3;border-radius:var(--bf-r-card);padding:12px 14px;margin:14px 0}
+  .crit{background:var(--bf-critical-bg);border:1px solid #F2C4C7;border-radius:var(--bf-r-card);padding:12px 14px;margin:14px 0}
+  .demo{border:1px dashed var(--bf-border-strong);border-radius:12px;padding:20px;margin:14px 0;background:var(--bf-canvas);position:relative}
+  .demo::before{content:'LIVE SAMPLE';position:absolute;top:-9px;left:14px;background:var(--bf-canvas);color:var(--bf-text-2);font-size:10px;font-weight:650;letter-spacing:.08em;padding:0 6px}
+  .swatchrow{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .swatch{width:120px;border-radius:8px;overflow:hidden;border:1px solid var(--bf-border);background:#fff}
+  .swatch .c{height:44px}
+  .swatch .l{padding:5px 8px;font-size:10.5px;line-height:1.35}
+  .swatch .l b{display:block;font-weight:600}
+  .kbd{font-family:var(--bf-mono);font-size:11px;border:1px solid var(--bf-border-strong);border-bottom-width:2px;border-radius:5px;padding:0 5px;background:#fff}
+  /* ---------- sample components ---------- */
+  .btn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:550;font-size:12.5px;border-radius:var(--bf-r-ctl);padding:6px 12px;cursor:pointer;border:1px solid transparent}
+  .btn-primary{background:var(--bf-accent);color:#fff}
+  .btn-primary:hover{background:var(--bf-accent-hover)}
+  .btn-secondary{background:#fff;color:var(--bf-text);border-color:var(--bf-border-strong)}
+  .btn-secondary:hover{background:var(--bf-surface-2)}
+  .btn-plain{background:none;color:var(--bf-link);padding:6px 4px}
+  .badge{display:inline-flex;align-items:center;gap:5px;border-radius:var(--bf-r-pill);font-size:11.5px;font-weight:550;padding:1px 8px;background:var(--bf-surface-3);color:var(--bf-text-2)}
+  .badge .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .badge.success{background:var(--bf-success-bg);color:var(--bf-success-text)} .badge.success .dot{background:var(--bf-success)}
+  .badge.warning{background:var(--bf-warning-bg);color:var(--bf-warning-text)} .badge.warning .dot{border:2px solid var(--bf-warning);width:4px;height:4px;background:transparent}
+  .badge.critical{background:var(--bf-critical-bg);color:var(--bf-critical-text)} .badge.critical .dot{background:var(--bf-critical)}
+  .badge.info{background:var(--bf-info-bg);color:var(--bf-info-text)} .badge.info .dot{border:2px solid var(--bf-info);width:4px;height:4px;background:transparent}
+  .badge.ai{background:var(--bf-ai-bg);color:var(--bf-ai)}
+  .pagehead{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .pagehead .back{width:28px;height:28px;border:1px solid var(--bf-border-strong);border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;color:var(--bf-text-2);cursor:pointer}
+  .pagehead h4{font-size:18px;font-weight:650;letter-spacing:-.2px;margin:0}
+  .pagehead .spacer{flex:1}
+  .tabs{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--bf-border-2)}
+  .tab{font-size:12.5px;font-weight:550;color:var(--bf-text-2);padding:6px 10px;border-radius:8px 8px 0 0;cursor:pointer}
+  .tab.active{color:var(--bf-text);background:var(--bf-surface-3)}
+  .tab.add{color:var(--bf-link)}
+  .itable{width:100%;border-collapse:collapse;font-size:12.5px;margin:0;border:none;border-radius:0;background:#fff}
+  .itable th{font-weight:600;color:var(--bf-text-2);padding:7px 10px;background:#fff;border-bottom:1px solid var(--bf-border)}
+  .itable td{padding:6px 10px;border-bottom:1px solid var(--bf-border-2)}
+  .itable tr:hover td{background:var(--bf-surface-2);cursor:pointer}
+  .num{font-variant-numeric:tabular-nums;text-align:right}
+  .grid2{display:grid;grid-template-columns:1fr 320px;gap:14px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  .savebar{display:flex;align-items:center;gap:10px;background:var(--bf-inverse);color:#F0EEE9;border-radius:10px;padding:8px 8px 8px 14px;font-size:12.5px;font-weight:550;box-shadow:var(--bf-shadow-pop);max-width:480px}
+  .savebar .spacer{flex:1}
+  .savebar .btn-ghost{background:transparent;color:#F0EEE9;border:1px solid #4A4742}
+  .savebar .btn-save{background:var(--bf-accent);color:#fff}
+  .toast{display:inline-flex;align-items:center;gap:10px;background:var(--bf-inverse);color:#F0EEE9;border-radius:var(--bf-r-pill);padding:8px 16px;font-size:12.5px;font-weight:550;box-shadow:var(--bf-shadow-pop)}
+  .toast a{color:#FFB089}
+  .costgrid td,.costgrid th{padding:5px 10px}
+  .costgrid .unit{display:block;font-size:11px;color:var(--bf-text-2);font-weight:400}
+  .costgrid .cat{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+  .navrail{width:200px;background:var(--bf-nav);border:1px solid var(--bf-border);border-radius:12px;padding:8px;font-size:12.5px;font-weight:550}
+  .navrail .item{display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:8px;color:var(--bf-text-2);cursor:pointer}
+  .navrail .item.active{background:#fff;color:var(--bf-text);box-shadow:var(--bf-shadow-card)}
+  .navrail .item .ic{width:16px;height:16px;border-radius:4px;background:var(--bf-border);flex:none}
+  .navrail .item.active .ic{background:var(--bf-accent)}
+  .queue-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--bf-border-2)}
+  .queue-row:last-child{border-bottom:none}
+  .queue-row:hover{background:var(--bf-surface-2);cursor:pointer}
+  .urgency{font-family:var(--bf-mono);font-size:11px;font-weight:600;border-radius:6px;padding:2px 6px}
+  .u-hi{background:var(--bf-critical-bg);color:var(--bf-critical-text)}
+  .u-md{background:var(--bf-warning-bg);color:var(--bf-warning-text)}
+  .u-lo{background:var(--bf-surface-3);color:var(--bf-text-2)}
+  .reason{font-size:11.5px;color:var(--bf-text-2)}
+  .viewer-dark{background:#16181C;border-radius:10px;color:#C8CDD4;padding:14px;font-size:12px}
+</style>
+</head>
+<body>
+<main>
+  <p style="font-size:11px;font-weight:650;letter-spacing:.08em;color:var(--bf-accent)">BID FACTORY · UI DIRECTION</p>
+  <h1>Shopify-class UI for a manufacturing CPQ</h1>
+  <p class="sub">Research findings + concrete recommendations · 2026-06-13 · <strong>this document is rendered in the recommended design language</strong> — what you're reading is the proposed look.</p>
+
+  <div class="crit"><strong>⚠ Legal first — we cannot copy Polaris.</strong> Shopify's Polaris license (verified June 2026) restricts use to apps that integrate with Shopify; standalone apps must be <em>"dissimilar and visually distinct from Shopify products … as determined by Shopify in its sole discretion."</em> The React library is also archived (Jan 2026, maintenance-only). <strong>Recommendation: adopt the Polaris <em>system</em> (architecture, density, semantics) with our own identity tokens, built on Tailwind + shadcn/Radix. No Polaris packages, no pixel-cloning.</strong> Numeric values like a 13px body or a 4px spacing scale are facts and free to use; the black beveled buttons, exact palette, and nav treatment are Shopify's trade dress — ours diverge deliberately (orange primary, warm grays, flat controls).</div>
+
+  <h2>1 · Why the Shopify admin feels the way it does</h2>
+  <p>Shopify's 2023 redesign ("uplift", Polaris v12/v13) was built on four stated principles — these, not any specific color, are what we should steal:</p>
+  <table>
+    <tr><th style="width:190px">Principle</th><th>What it means concretely</th><th>Bid Factory application</th></tr>
+    <tr><td><strong>Calm density</strong></td><td>13px body text, 6px table-cell padding — spreadsheet-class density — kept calm by a gray canvas + white cards and 1px "edge" shadows instead of floating shadows.</td><td>Perfect for estimating: costing grids, BOM trees and quote tables want density; cards keep an information-heavy quote editor scannable.</td></tr>
+    <tr><td><strong>Color = meaning, never decoration</strong></td><td>The UI is gray/white until something needs attention. Even the primary button is near-black. Status tones (green/yellow/red/blue) therefore pop instantly.</td><td>Review items, DFM warnings, workflow statuses, inventory dots — our product lives on status. A neutral chrome makes them legible. Purple stays reserved for Wingman/AI (matches the demos).</td></tr>
+    <tr><td><strong>Predictability</strong></td><td>Every object gets the same triad: index page (saved views + table) → detail page (2-column cards) → same header pattern. Learn once, navigate anything.</td><td>Quotes, Parts, Orders, Vendors, Rules, Processes — all follow the identical triad. This is also cheaper to build: one page recipe, instantiated eight times.</td></tr>
+    <tr><td><strong>Explicit state</strong></td><td>Dirty-state save bar, skeleton screens shaped like the destination, black toast confirmations, banners for errors. The app always tells you what's happening.</td><td>Critical for trust with skeptical Mittelstand users — especially around pricing recalculation ("Preise werden neu berechnet…", skeleton rows, then the new totals).</td></tr>
+  </table>
+
+  <h2>2 · The Bid Factory theme — token sheet</h2>
+  <p>Polaris-informed values, identity-divergent choices. Full token table below; swatches first:</p>
+  <div class="swatchrow">
+    <div class="swatch"><div class="c" style="background:#F2F2F0"></div><div class="l"><b>canvas #F2F2F0</b>warm gray (Shopify: cool #F1F1F1)</div></div>
+    <div class="swatch"><div class="c" style="background:#FFFFFF;border-bottom:1px solid #E5E3DE"></div><div class="l"><b>surface #FFFFFF</b>cards</div></div>
+    <div class="swatch"><div class="c" style="background:#2E2C29"></div><div class="l"><b>text #2E2C29</b>warm near-black</div></div>
+    <div class="swatch"><div class="c" style="background:#E8590C"></div><div class="l"><b>accent #E8590C</b>primary actions — industrial orange</div></div>
+    <div class="swatch"><div class="c" style="background:#0A66B5"></div><div class="l"><b>link #0A66B5</b>steel blue</div></div>
+    <div class="swatch"><div class="c" style="background:#7A4FD0"></div><div class="l"><b>AI #7A4FD0</b>Wingman purple</div></div>
+    <div class="swatch"><div class="c" style="background:#1F7A4D"></div><div class="l"><b>success #1F7A4D</b></div></div>
+    <div class="swatch"><div class="c" style="background:#B57E00"></div><div class="l"><b>warning #B57E00</b></div></div>
+    <div class="swatch"><div class="c" style="background:#C2333B"></div><div class="l"><b>critical #C2333B</b></div></div>
+    <div class="swatch"><div class="c" style="background:#23211E"></div><div class="l"><b>inverse #23211E</b>top bar · save bar · toasts</div></div>
+  </div>
+  <table>
+    <tr><th style="width:170px">Token group</th><th>Decision</th><th>vs Shopify</th></tr>
+    <tr><td>Typography</td><td><strong>Inter variable</strong> (OFL, free). Body <strong>13px/20</strong>; secondary 12px; table headers 12px/600; card titles 14px/650; page titles 18–20px/650 with −0.2px tracking. Tabular numerals (<code>font-variant-numeric: tabular-nums</code>) on every money/qty column.</td><td>Same font family (it's open source); standard weights 400/550/650 via the variable axis</td></tr>
+    <tr><td>Spacing</td><td>4px base scale. Card padding 16px; card gap 14px; <strong>table cell padding 6px vertical</strong>; control height 28px (compact) / 32px (default)</td><td>Same scale — it's the density that matters</td></tr>
+    <tr><td>Radii</td><td>Cards 10px · controls 8px · badges pill</td><td>Shopify: 12/8 — slightly squarer here</td></tr>
+    <tr><td>Shadows</td><td>Cards: 1px bottom-edge + hairline ring (<code>0 1px 0 rgba(35,33,30,.06), 0 0 0 1px rgba(35,33,30,.04)</code>); popovers float. <strong>Flat buttons — no bevels</strong> (the bevel is Shopify trade dress).</td><td>Deliberate divergence</td></tr>
+    <tr><td>Primary action</td><td><strong>Orange #E8590C</strong>, white text — one per page max ("FINALIZE QUOTE", "CREATE LINE ITEMS")</td><td>Shopify uses near-black — divergence is both identity and legal distance</td></tr>
+    <tr><td>Status system</td><td>Tone <em>plus shape</em>: filled dot = done/positive, hollow dot = in progress/attention, no dot = neutral. Color-blind safe, and matches our workflow-step semantics.</td><td>Shopify's badge "progress" geometry, generalized</td></tr>
+    <tr><td>Dark surfaces</td><td>Reserved for: top bar, save bar, toasts — and the <strong>CAD/PDF viewer canvases, which stay dark</strong> (CAD convention, model contrast, and continuity with the demo screenshots)</td><td>Same inverse-surface logic</td></tr>
+  </table>
+
+  <div class="warn"><strong>Decision required (spec change):</strong> the build spec currently says <em>"dark theme matching this spec."</em> This recommendation replaces it with: <strong>light Shopify-class app chrome + dark viewer canvases</strong>. The reference screenshots (dark Paperless Parts UI) remain layout ground truth, not color ground truth. If approved, I'll patch the spec's Tech Stack + add this doc as the UI appendix.</div>
+
+  <h2>3 · The patterns, mapped to Bid Factory screens</h2>
+
+  <h3>3.1 · Index pages = saved views as tabs + dense table <span class="sub">(Quotes, Parts, Orders, Vendors…)</span></h3>
+  <p>Shopify's orders page <em>is</em> our spec'd saved-view engine: tabs are named saved filter+sort+column sets, user-creatable ("Save as" from edited filters). Filters render as dismissible pills. Row click navigates; checkbox selects; selection swaps the header for a bulk-actions bar (→ Bulk Edit Components, Update Thickness).</p>
+  <div class="demo">
+    <div class="pagehead">
+      <h4>Quotes</h4><span class="badge info"><span class="dot"></span>22 open</span>
+      <span class="spacer"></span>
+      <button class="btn btn-secondary">Import</button>
+      <button class="btn btn-primary">Create quote</button>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="tabs">
+        <div class="tab">All</div><div class="tab active">My quotes</div><div class="tab">Due this week</div><div class="tab">Unassigned</div><div class="tab">Material pricing needed</div><div class="tab add">+ New view</div>
+      </div>
+      <table class="itable">
+        <tr><th style="width:26px"><input type="checkbox"></th><th>Quote</th><th>Account</th><th>Status</th><th>Review</th><th class="num">Value</th><th>Due</th><th>Estimator</th></tr>
+        <tr><td><input type="checkbox"></td><td><strong>#15217</strong> · Fwd: SM / CNC Simple RFQ</td><td>CC's CNC Machining</td><td><span class="badge warning"><span class="dot"></span>In progress · 43%</span></td><td><span class="badge critical"><span class="dot"></span>3 unresolved</span></td><td class="num">€18.240</td><td>17.06.</td><td>S. McAuley</td></tr>
+        <tr><td><input type="checkbox"></td><td><strong>#15214</strong> · Gehäuse Rev C</td><td>Müller Blechtechnik</td><td><span class="badge success"><span class="dot"></span>Complete</span></td><td><span class="badge"><span class="dot" style="background:#B3B0A9"></span>—</span></td><td class="num">€4.812</td><td>19.06.</td><td>J. Rindini</td></tr>
+        <tr><td><input type="checkbox"></td><td><strong>#15209</strong> · Serverrack Baugruppe</td><td>DTMA</td><td><span class="badge"><span class="dot" style="border:2px solid #B3B0A9;width:4px;height:4px;background:transparent"></span>Not started</span></td><td><span class="badge ai">✦ 12 findings</span></td><td class="num">€96.380</td><td>24.06.</td><td>Unassigned</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h3>3.2 · Detail pages = two-column cards <span class="sub">(Quote detail, Order detail, Account)</span></h3>
+  <p>Shopify's order-detail layout maps 1:1 to our quote editor home: main column (~2/3) carries line items, costing summary, files, activity timeline; side column (~320px) carries customer/account, people, expedite, notes. Page header: back chip + title + status badge + actions, one orange primary.</p>
+  <div class="demo">
+    <div class="pagehead">
+      <div class="back">←</div><h4>Quote #15217</h4><span class="badge warning"><span class="dot"></span>Draft</span>
+      <span class="spacer"></span>
+      <button class="btn btn-secondary">Actions ▾</button>
+      <button class="btn btn-secondary">Preview</button>
+      <button class="btn btn-primary">Finalize quote</button>
+    </div>
+    <div class="grid2">
+      <div>
+        <div class="card" style="margin-top:0">
+          <strong style="font-size:14px">Line items (7)</strong>
+          <table class="itable" style="margin-top:8px">
+            <tr><th>Part</th><th>Process</th><th class="num">Qty breaks</th><th class="num">Unit from</th></tr>
+            <tr><td><strong>3601215</strong> Rev C · Offset Connector</td><td>CNC | Milling</td><td class="num">1 / 5 / 20</td><td class="num">€84,60</td></tr>
+            <tr><td><strong>PP-18932</strong> Rev A · Bracket</td><td>Fab | Laser</td><td class="num">100 / 500</td><td class="num">€3,12</td></tr>
+          </table>
+        </div>
+        <div class="card"><strong style="font-size:14px">Activity</strong>
+          <p class="sub" style="margin:8px 0 0">✦ Wingman created 7 line items from <code>RFQ_2026.eml</code> · 09:14<br>S. McAuley set process on line 1 · 09:32 · <a href="#">View</a></p>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="margin-top:0"><strong style="font-size:14px">Customer</strong>
+          <p style="margin:6px 0 0">CC's CNC Machining<br><span class="sub">Chris Butler · chris@ccscnc.de</span><br><span class="badge" style="margin-top:6px">PO · Net 30</span></p>
+        </div>
+        <div class="card"><strong style="font-size:14px">Expedite</strong>
+          <p class="sub" style="margin:6px 0 0">Standard 25 BD · +5d −25% · +10d −75%</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>3.3 · The costing grid — the one thing Polaris doesn't have</h3>
+  <p>Polaris has <strong>no editable data grid</strong>; Shopify edits via pages and modals. Our costing/operations tables need cell-level editing, per-qty columns, footer aggregation, drag-reorder. <strong>Recommendation: TanStack Table (headless, already in our stack) skinned with these tokens</strong>; AG Grid Community as fallback if virtualization/edit ergonomics demand it. Dense (5–6px cell padding), tabular numerals, unit price beneath totals, category color chips on costing rows (the demos' color-coding, kept).</p>
+  <div class="demo">
+    <div class="card" style="padding:0;overflow:hidden;margin:0">
+      <table class="itable costgrid">
+        <tr><th>Operation</th><th>Setup</th><th>Run</th><th class="num">Qty 1</th><th class="num">Qty 50</th><th class="num">Qty 500</th></tr>
+        <tr><td>≡ Programming (Milling)</td><td>1.20 hr</td><td>—</td><td class="num">€78,00</td><td class="num">€78,00<span class="unit">€1,56/ea</span></td><td class="num">€78,00<span class="unit">€0,15/ea</span></td></tr>
+        <tr><td>≡ CNC Milling (5-Axis)</td><td>2.00 hr</td><td>89.28 min</td><td class="num">€261,60</td><td class="num">€5.730,00<span class="unit">€114,60/ea</span></td><td class="num">€55.950,00<span class="unit">€111,90/ea</span></td></tr>
+        <tr><td>≡ Inspection · <span class="badge ai" style="font-size:10.5px">✦ from rule</span></td><td>30 min</td><td>15 min</td><td class="num">€48,75</td><td class="num">€845,00<span class="unit">€16,90/ea</span></td><td class="num">€8.157,50<span class="unit">€16,31/ea</span></td></tr>
+        <tr style="font-weight:650"><td colspan="3"><span class="cat" style="background:#0A66B5"></span>Operation summary</td><td class="num">€388,35</td><td class="num">€6.653,00</td><td class="num">€64.185,50</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h3>3.4 · Contextual save bar — Shopify's most-loved pattern, ours too</h3>
+  <p>Any dirty field on a detail/Configure page summons a dark bar (top-center): explicit save/discard, navigation blocked with confirm. Zero autosave ambiguity — exactly right for pricing data where a stray edit changes money. (BOM Builder keeps its spec'd draft-autosave; the save bar governs forms.)</p>
+  <div class="demo" style="display:flex;justify-content:center">
+    <div class="savebar"><span>⚠ Unsaved changes — Laser rate €95 → €98</span><span class="spacer"></span><button class="btn btn-ghost">Discard</button><button class="btn btn-save">Save</button></div>
+  </div>
+
+  <h3>3.5 · Status, toasts, banners, empty states</h3>
+  <div class="demo">
+    <p style="margin-top:0"><span class="badge"><span class="dot" style="border:2px solid #B3B0A9;width:4px;height:4px;background:transparent"></span>Not started</span>&nbsp; <span class="badge warning"><span class="dot"></span>In progress</span>&nbsp; <span class="badge success"><span class="dot"></span>Complete</span>&nbsp; <span class="badge critical"><span class="dot"></span>No quote</span>&nbsp; <span class="badge info"><span class="dot"></span>Sent</span>&nbsp; <span class="badge ai">✦ Wingman suggestion</span>&nbsp; <span class="badge success"><span class="dot"></span>Stock ≥200%</span>&nbsp; <span class="badge warning"><span class="dot"></span>Stock at risk</span></p>
+    <div class="toast">✓ Quote #15217 sent to chris@ccscnc.de <a href="#">View</a></div>
+    <p class="sub" style="margin-bottom:0">Toasts (dark pill, bottom-center, 4s) = confirmations only. Errors and AI findings = banners. Empty states = illustration + one line + one primary action ("Noch keine Anfragen — leite eine E-Mail an <code>m-blech@rfq…</code> weiter").</p>
+  </div>
+
+  <h3>3.6 · Navigation, search, and the work queue</h3>
+  <div class="demo" style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+    <div class="navrail">
+      <div class="item"><span class="ic"></span>Dashboard</div>
+      <div class="item active"><span class="ic"></span>Quotes</div>
+      <div class="item"><span class="ic"></span>Parts</div>
+      <div class="item"><span class="ic"></span>Orders</div>
+      <div class="item"><span class="ic"></span>Vendor RFQs <span class="badge warning" style="margin-left:auto;font-size:10px"><span class="dot"></span>2</span></div>
+      <div class="item"><span class="ic"></span>Contacts</div>
+      <div class="item" style="margin-top:14px;border-top:1px solid var(--bf-border-2);padding-top:10px"><span class="ic"></span>Configure</div>
+      <div class="item"><span class="ic"></span>Settings</div>
+    </div>
+    <div style="flex:1;min-width:300px">
+      <div class="card" style="margin-top:0;padding:0;overflow:hidden">
+        <div style="padding:10px 12px;border-bottom:1px solid var(--bf-border-2)"><strong style="font-size:14px">What needs you now</strong> <span class="sub">· sorted by urgency</span></div>
+        <div class="queue-row"><span class="urgency u-hi">98</span><div><strong>#15209 DTMA Serverrack</strong><div class="reason">Due in 2 days · €96k · 12 unresolved findings</div></div></div>
+        <div class="queue-row"><span class="urgency u-md">61</span><div><strong>Vendor quote received — Anodize, #15217</strong><div class="reason">Galvanik Schmidt · €2,10/part · apply to OSV op?</div></div></div>
+        <div class="queue-row"><span class="urgency u-lo">22</span><div><strong>@you in #15214</strong><div class="reason">"Can we hold ±0.05 on this bore?" · J. Rindini</div></div></div>
+      </div>
+      <p class="sub" style="margin:8px 2px 0">Light rail (vs Shopify's gray), active item = white pill + orange icon. <span class="kbd">⌘K</span> command palette: jump to quote/part, run actions ("create quote", "open nesting"), ask Wingman — the Linear pattern, table stakes in 2026.</p>
+    </div>
+  </div>
+
+  <h3>3.7 · Where we deviate from Shopify on purpose</h3>
+  <table>
+    <tr><th style="width:230px">Deviation</th><th>Why</th></tr>
+    <tr><td><strong>Side panels/drawers for record preview</strong> (Stripe pattern), not modal-everything</td><td>Estimators compare constantly. Clicking an operation, a review finding, or a vendor quote opens a right-side drawer over context — the spec's operation drawer already works this way. Modals reserved for true commitments (Bulk Edit warning, Create Rule).</td></tr>
+    <tr><td><strong>Dark viewer canvases</strong> (CAD/PDF/nesting)</td><td>CAD convention; model/drawing contrast; the demos' viewer look survives. The light chrome wraps a dark stage — like Figma.</td></tr>
+    <tr><td><strong>Editable grids in-table</strong></td><td>Shopify edits via pages; estimators live in override cells. Single-click to edit, <span class="kbd">Tab</span> across qty columns, calculated-vs-override styling (override values shown bold + underlined dot).</td></tr>
+    <tr><td><strong>Orange primary + warm neutrals + flat controls</strong></td><td>Identity + the license's "visually distinct" requirement. Orange also survives on the shop floor (gloves, bad monitors, sunlight).</td></tr>
+    <tr><td><strong>Purple = AI, everywhere and only AI</strong></td><td>Continues the demos' Wingman convention: purple badges, sparkles, suggestion cards. Users learn instantly: purple = machine-suggested, verify before money depends on it.</td></tr>
+  </table>
+
+  <h2>4 · Implementation plan</h2>
+  <table>
+    <tr><th style="width:60px">Step</th><th>What</th></tr>
+    <tr><td>1</td><td><strong>Token file first:</strong> the CSS variables in this document become <code>tokens.css</code> + Tailwind theme config — single source of truth. No raw hex in components, ever.</td></tr>
+    <tr><td>2</td><td><strong>Component kit on shadcn/ui (Radix primitives) + Tailwind:</strong> Button, Badge (tone+shape), Card, PageHeader, Tabs/SavedViews, FilterPills, Banner, Toast, SaveBar, Drawer, Modal, EmptyState, Skeleton set, NavRail, CommandPalette (cmdk). ~2 weeks of Claude Code work; everything downstream gets faster.</td></tr>
+    <tr><td>3</td><td><strong>Grid layer:</strong> TanStack Table skin (dense theme, tabular nums, editable cells, footer aggregates, row drag). One implementation reused by quotes list, costing, operations, BOM, nesting overview.</td></tr>
+    <tr><td>4</td><td><strong>Page recipes:</strong> Index-page template + Detail-page template instantiated per entity. Storybook (or Ladle) catalog so every screen is built from cataloged parts — this is how the spec's 30+ screens stay consistent.</td></tr>
+    <tr><td>5</td><td><strong>Spec patch (on your go):</strong> Tech Stack section → light theme + this token sheet; add UI appendix reference; note the dark-viewer exception; acceptance criteria unchanged (layout fidelity to screenshots, not color fidelity).</td></tr>
+  </table>
+
+  <h2>5 · Sources</h2>
+  <p class="sub" style="font-size:12px">Polaris tokens &amp; components: <a href="https://polaris-react.shopify.com/tokens/color">color</a> · <a href="https://polaris-react.shopify.com/tokens/font">font</a> · <a href="https://polaris-react.shopify.com/tokens/space">space</a> · <a href="https://polaris-react.shopify.com/tokens/shadow">shadow</a> · <a href="https://polaris-react.shopify.com/components/tables/index-table">IndexTable</a> · <a href="https://polaris-react.shopify.com/components/selection-and-input/index-filters">IndexFilters</a> &nbsp;|&nbsp; <a href="https://medium.com/shopify-ux/uplifting-shopify-polaris-7c54fc6564d9">"Uplifting Shopify Polaris" (design principles, José Torre)</a> &nbsp;|&nbsp; <a href="https://github.com/Shopify/polaris-react/blob/main/LICENSE.md">Polaris license (restriction clause)</a> &nbsp;|&nbsp; <a href="https://www.shopify.com/partners/blog/polaris-goes-stable-the-future-of-shopify-app-development-is-here">Polaris unified web components (Oct 2025)</a> &nbsp;|&nbsp; <a href="https://help.shopify.com/en/manual/shopify-admin/admin-search">admin ⌘K search</a> &nbsp;|&nbsp; Density rationale: <a href="https://blog.logrocket.com/ux-design/dashboard-ui-best-practices-examples/">LogRocket dashboard study</a>. Alternative references: Stripe Dashboard (drawers), Linear (⌘K, list density), Mercury (financial calm).</p>
+</main>
+</body>
+</html>

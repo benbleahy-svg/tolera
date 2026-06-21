@@ -1,0 +1,158 @@
+Demo,CanonicalName,SourceFolder,SourceFile,Confidence,Status
+D,02_pdf_viewer_assembly_drawing.png,BOM Builder,download (19).png,high,placed
+D,03_quote_detail_actions_dropdown.png,BOM Builder,download (1).png,high,placed
+D,04_split_pdf_toast_processing.png,BOM Builder,download (2).png,high,placed
+D,05_split_pdf_toast_success.png,BOM Builder,download (3).png,high,placed
+D,06_quote_files_after_split_wingman_tooltip.png,BOM Builder,download (4).png,high,placed
+D,07_bom_builder_modal_initial_loaded.png,BOM Builder,download (9).png,high,placed
+D,08_bom_builder_add_files_after.png,BOM Builder,download (10).png,high,placed
+D,09_bom_builder_subassemblies_expanded_level2.png,BOM Builder,download (12).png,high,placed
+D,10_bom_builder_subassemblies_level3.png,,,,unfilled
+D,11_bom_builder_complete_43_parts.png,BOM Builder,download (14).png,medium,placed
+D,12_published_bom_line_item_view.png,BOM Builder,download (16).png,high,placed
+E,03_pricing_today_slide.png,Custom Markups & Margins,download.png,high,placed
+E,04_custom_markups_overview_slide.png,Custom Markups & Margins,download (1).png,high,placed
+E,05_p3l_how_it_works_slide.png,Custom Markups & Margins,download (2).png,high,placed
+E,06_demo_quote_overview.png,Custom Markups & Margins,download (3).png,high,placed
+E,07_example1_difficult_material_costing_pricing.png,Pricing and Margin,Screenshot 6.32.56 AM.png,high,placed
+E,08_example2_laser_workcenter_costing_pricing.png,Pricing and Margin,Screenshot 6.34.02 AM.png,high,placed
+E,09_example3_labor_overhead_costing_pricing.png,Pricing and Margin,Screenshot 6.35.26 AM.png,high,placed
+E,11_example4_piece_price_tool_costing_pricing.png,Pricing and Margin,Screenshot 6.36.00 AM.png,high,placed
+E,12_example5_outside_finishes_costing_pricing.png,Pricing and Margin,Screenshot 6.37.00 AM.png,high,placed
+E,13_example6_complexity_operations_table.png,Custom Markups & Margins,download (11).png,high,placed
+E,14_example6_complexity_level3_pricing.png,Custom Markups & Margins,download (12).png,medium,placed
+E,15_example6_complexity_level2_pricing.png,Pricing and Margin,Screenshot 6.39.28 AM.png,high,placed
+E,16_quote_actions_dropdown_excel.png,Custom Markups & Margins,download (21).png,high,placed
+E,16_configure_pricing_processes.png,Custom Markups & Margins,download (17).png,high,placed
+E,17_excel_export_1.png,,,,unfilled
+E,18_excel_export_2.png,,,,unfilled
+F,ep2_01_parts-library_0012.png,Power Lunch Ep 2,download (51).png,high,placed
+F,ep2_02_part-viewer_0121.png,Power Lunch Ep 2,download (1).png,high,placed
+F,ep2_03_geometric-analysis_0341.png,Power Lunch Ep 2,download (5).png,high,placed
+F,ep2_04_team-techmate_0544.png,Power Lunch Ep 2,download (9).png,high,placed
+F,ep2_05_pdf-annotate_1029.png,Power Lunch Ep 2,download (12).png,high,placed
+F,ep2_06_pemconnect_1557.png,Power Lunch Ep 2,download (17).png,high,placed
+F,ep2_07_files-tab_1956.png,Power Lunch Ep 2,download (18).png,high,placed
+G,01_quote-detail_process-dropdown_~0016.png,How to Cost Parts More Easily & Consistently,download.png,high,placed
+G,02_quote-detail_routing-generated_~0022.png,How to Cost Parts More Easily & Consistently,download (1).png,high,placed
+G,03_process-config_general_~0046.png,How to Cost Parts More Easily & Consistently,download (3).png,high,placed
+G,04_process-config_edit-operations-modal_~0060.png,How to Cost Parts More Easily & Consistently,download (4).png,high,placed
+G,05_process-config_operations-list_~0074.png,How to Cost Parts More Easily & Consistently,download (5).png,high,placed
+G,06_process-config_edit-pricing-items_~0081.png,How to Cost Parts More Easily & Consistently,download (6).png,high,placed
+G,07_process-config_pricing-formula-editor_~0100.png,How to Cost Parts More Easily & Consistently,download (8).png,high,placed
+H,01_quote_files_dxf.png,Power Lunch Ep 37,download.png,high,placed
+H,02_bulk_update_thickness_modal.png,Power Lunch Ep 37,download (12).png,med-high,placed
+H,03_operation_editor_variables.png,Power Lunch Ep 37,download (15).png,medium,placed
+H,04_router_operations_costing.png,Power Lunch Ep 37,download (17).png,medium,placed
+H,05_cnc_milling_operation_modal.png,Power Lunch Ep 37,download (4).png,high,placed
+H,06_edit_dimensions_dialog.png,Power Lunch Ep 37,download (5).png,high,placed
+H,07_part_setup_click_to_set.png,Power Lunch Ep 37,download (24).png,medium,placed
+H,08_settings_email_templates.png,Power Lunch Ep 37,download (25).png,high,placed
+H,09_settings_quote_display.png,Power Lunch Ep 37,download (26).png,high,placed
+H,10_settings_units_date_security.png,Power Lunch Ep 37,download (27).png,high,placed
+H,11_digital_quote_expired.png,,,,unfilled
+H,12_facilitate_order_drawer.png,Power Lunch Ep 37,download (10).png,medium,placed
+H,13_settings_facilitate_order_optin.png,,,,unfilled
+I,01_rfq_email.png,,,,unfilled
+I,02_quotes_list_saved_views.png,PP for Sheet Metal Fab,download.png,high,placed
+I,03_bulk_create_line_items.png,PP for Sheet Metal Fab,download (2).png,high,placed
+I,04_bom_builder_beta.png,PP for Sheet Metal Fab,download (3).png,medium,placed
+I,05_print_requirements.png,PP for Sheet Metal Fab,download (4).png,medium,placed
+I,06_cad_sheetmetal_warnings.png,PP for Sheet Metal Fab,download (6).png,high,placed
+I,07_routing_costing.png,PP for Sheet Metal Fab,download (9).png,high,placed
+I,08_nesting_overview.png,PP for Sheet Metal Fab,download (10).png,high,placed
+I,09_pricing_markups.png,PP for Sheet Metal Fab,download (12).png,high,placed
+I,10_quote_header_workflow.png,PP for Sheet Metal Fab,download (16).png,high,placed
+I,11_email_template_send.png,PP for Sheet Metal Fab,download (18).png,high,placed
+I,12_customer_digital_quote.png,PP for Sheet Metal Fab,download (19).png,high,placed
+J,01_line_item_detail.png,Nest Parts within your Quoting Software,download (11).png,medium,placed
+J,02_update_process_material.png,Nest Parts within your Quoting Software,download (1).png,high,placed
+J,03_sheet_metal_interrogation.png,Nest Parts within your Quoting Software,download (4).png,medium,placed
+J,04_nesting_module_single.png,Nest Parts within your Quoting Software,download (7).png,high,placed
+J,05_nest_generated_metrics.png,Nest Parts within your Quoting Software,download (9).png,medium,placed
+J,06_multicomponent_overview.png,Nest Parts within your Quoting Software,download (15).png,medium,placed
+J,07_prepare_sheet_nests.png,Nest Parts within your Quoting Software,download (18).png,high,placed
+J,08_nest_result_object.png,Nest Parts within your Quoting Software,download (21).png,high,placed
+K,02_gmail_rfq_email.png,,,,unfilled
+K,03_bulk_create_line_items.png,,,,unfilled
+K,04_quotes_list_savedviews.png,,,,unfilled
+K,05_print_viewer_part_setup.png,,,,unfilled
+K,06_requirements_review.png,PP for CNC,download (2).png,high,placed
+K,07_cad_viewer_warnings.png,PP for CNC,download.png,high,placed
+K,08_chat_panel.png,PP for CNC,download (1).png,high,placed
+K,09_update_process_material.png,PP for CNC,download (3).png,high,placed
+K,10_costing_pricing_tables.png,PP for CNC,download (5).png,medium,placed
+K,11_quote_account_expedite.png,PP for CNC,download (7).png,medium,placed
+K,12_send_email_template.png,PP for CNC,download (8).png,high,placed
+K,13_customer_digital_quote.png,,,,unfilled
+L,02_bom_component_context_menu.png,Visability into Purchased Components,download.png,high,placed
+L,03_convert_to_purchased_smart_match.png,Visability into Purchased Components,download (1).png,high,placed
+L,04_bom_purchased_pricing_inventory.png,Visability into Purchased Components,download (3).png,high,placed
+L,05_inventory_at_risk_high_volume.png,Visability into Purchased Components,download (12).png,high,placed
+L,07_realtime_pricing_settings_beta.png,Visability into Purchased Components,download (10).png,high,placed
+M,04_ungrouped_drag_drop_reorder.png,Power Lunch 19,download (1).png,high,placed
+M,06_breadcrumb_sibling_dropdown.png,Power Lunch 19,download (3).png,high,placed
+M,07_unique_url_child.png,Power Lunch 19,download (4).png,high,placed
+M,09_thumbnail_hover_tooltip.png,Power Lunch 19,download (6).png,high,placed
+M,14_flat_bom_warnings_suppliers.png,Power Lunch 19,download (11).png,high,placed
+M,15_bulk_update_components_modal.png,Power Lunch 19,download (12).png,high,placed
+M,17_copy_pricing_panel.png,Power Lunch 19,download (14).png,high,placed
+N,01_title_no-cad-license.png,Geometry Viewer,Screenshot 9.58.54 PM.png,high,placed
+N,02_milling_features_warnings.png,Geometry Viewer,Screenshot 9.58.58 PM.png,high,placed
+N,03_milling_warnings_highlighted.png,Geometry Viewer,Screenshot 9.59.00 PM.png,high,placed
+N,04_lathe_features_live-tooling.png,Geometry Viewer,Screenshot 9.59.05 PM.png,high,placed
+N,05_lathe_bounding_box.png,Geometry Viewer,Screenshot 9.59.07 PM.png,high,placed
+N,06_sheetmetal_bends_kfactor.png,Geometry Viewer,Screenshot 9.59.09 PM.png,high,placed
+N,07_sheetmetal_unfolded_flatten.png,Geometry Viewer,Screenshot 9.59.12 PM.png,high,placed
+N,08_wire-edm_features_warnings.png,Geometry Viewer,Screenshot 9.59.15 PM.png,high,placed
+N,09_wire-edm_incompatible_faces.png,Geometry Viewer,Screenshot 9.59.17 PM.png,high,placed
+N,10_additive_stl_orientation.png,Geometry Viewer,Screenshot 9.59.21 PM.png,high,placed
+N,11_additive_reoriented.png,Geometry Viewer,Screenshot 9.59.24 PM.png,medium,placed
+N,12_waterjet-laser_dxf_flat.png,Geometry Viewer,Screenshot 9.59.27 PM.png,high,placed
+N,13_waterjet-laser_tight-corner.png,Geometry Viewer,Screenshot 9.59.29 PM.png,high,placed
+A,03_paperless_parts_main_dashboard.png,YouTube a7GAEwIYjiU,t=8:26,high,placed
+A,04_quote_detail_page_files_notes.png,YouTube a7GAEwIYjiU,t=11:05,high,placed
+A,05_quote_account_context_expedite_pricing.png,YouTube a7GAEwIYjiU,t=9:36,high,placed
+A,06_line_item_part_estimating_view.png,YouTube a7GAEwIYjiU,t=28:11,medium,placed (253000PPA)
+A,07_bom_builder_hierarchical_parts.png,YouTube a7GAEwIYjiU,t=16:51,high,placed
+A,8_sheet_metal_part_interrogation_operations.png,YouTube a7GAEwIYjiU,t=19:41,high,placed
+A,09_pdf_drawing_viewer_ai_review_items.png,YouTube a7GAEwIYjiU,t=22:01,high,placed
+A,10_multi_quantity_pricing_with_ai_review_flags.png,YouTube a7GAEwIYjiU,t=23:41,high,placed
+A,11_sheet_metal_nesting_module_configuration.png,YouTube a7GAEwIYjiU,t=31:54,high,placed
+A,12_nesting_overview_sheet_metal_components.png,YouTube a7GAEwIYjiU,t=31:40,high,placed
+A,13_bulk_edit_components_assembly_bom_view.png,YouTube a7GAEwIYjiU,t=29:01,medium,placed (no bulk-edit modal shown)
+A,14_costing_pricing_summary_multi_quantity.png,YouTube a7GAEwIYjiU,t=31:24,high,placed
+A,15_quote_general_fields_workflow_status.png,YouTube a7GAEwIYjiU,t=32:22,high,placed
+A,16_build_order.png,,,,unfilled (after 33-min window)
+A,17_shipping_payment.png,,,,unfilled (after 33-min window)
+C,01_quote_detail_part_setup.png,Desktop (recent),Screenshot 2026-06-12 at 10.17.02 PM.png,high,placed
+C,02_print_viewer_partsetup_panel.png,Desktop (recent),Screenshot 2026-06-12 at 10.17.22 PM.png,high,placed
+C,03_callout_popover.png,Desktop (recent),Screenshot 2026-06-12 at 10.17.26 PM.png,high,placed
+C,04_whiteout_mode.png,Desktop (recent),Screenshot 2026-06-12 at 10.17.23 PM.png,medium,placed
+C,05_add_missing_extraction_modal.png,,,,unfilled
+C,06_create_rule_dialog_empty.png,Desktop (recent),Screenshot 2026-06-12 at 10.17.39 PM.png,medium,placed
+C,07_create_rule_with_filter_and_resolution.png,Desktop (recent),Screenshot 2026-06-12 at 10.18.10 PM.png,high,placed
+C,08_resolution_options_dropdown.png,Desktop (recent),Screenshot 2026-06-12 at 10.18.00 PM.png,high,placed
+C,09_signal_selector_tree.png,Desktop (recent),Screenshot 2026-06-12 at 10.17.29 PM.png,high,placed
+C,10_requirements_review_lineitem_panel.png,Desktop (recent),Screenshot 2026-06-12 at 10.18.48 PM.png,high,placed
+C,11_quote_level_summary_view.png,,,,unfilled
+C,12_lineitem_process_section.png,,,,unfilled
+C,13_operations_router_pricing_table.png,,,,unfilled
+B,01_dashboard_workflows_notifications.png,,,,unfilled (home dashboard not shown in demo)
+B,02_quotes_list_sidebar_views.png,YouTube 2s9Iyb-b-ek,t=6:05,high,placed
+B,03_quote_detail_workflow_tracker.png,YouTube 2s9Iyb-b-ek,t=7:00,high,placed
+B,04_bulk_create_line_items_modal.png,YouTube 2s9Iyb-b-ek,t=10:00,high,placed
+B,05_quote_line_items_file_structure.png,YouTube 2s9Iyb-b-ek,t=10:50,high,placed
+B,06_review_items_auto_detected.png,YouTube 2s9Iyb-b-ek,t=26:39,high,placed
+B,07_assembly_bom_child_bom.png,YouTube 2s9Iyb-b-ek,t=15:50,high,placed
+B,08_line_item_part_detail_geometry_status.png,YouTube 2s9Iyb-b-ek,t=16:10,high,placed
+B,09_part_library_match_categories.png,YouTube 2s9Iyb-b-ek,t=16:50,high,placed
+B,10_cad_viewer_part_setup_panel.png,YouTube 2s9Iyb-b-ek,t=19:10,high,placed
+B,11_cad_viewer_face_annotation_team_chat.png,YouTube 2s9Iyb-b-ek,t=20:50,high,placed
+B,12_geometric_features_milling_analysis.png,YouTube 2s9Iyb-b-ek,t=21:30,high,placed
+B,13_feature_highlighting_on_3d_model.png,YouTube 2s9Iyb-b-ek,t=23:40,high,placed
+B,14_create_rule_dialog_with_pdf.png,YouTube 2s9Iyb-b-ek,t=25:40,high,placed
+B,15_operations_costing_per_quantity.png,YouTube 2s9Iyb-b-ek,t=27:07,high,placed
+B,16_costing_pricing_breakdown_margins.png,YouTube 2s9Iyb-b-ek,t=28:10,high,placed
+B,17_addons_fai_lead_times.png,YouTube 2s9Iyb-b-ek,t=30:40,high,placed
+B,18_addons_dropdown_options.png,YouTube 2s9Iyb-b-ek,t=30:19,high,placed

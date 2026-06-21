@@ -1,0 +1,41 @@
+# --- OS junk ---
+.DS_Store
+**/.DS_Store
+
+# --- Large binary reference: kept on disk, NOT in git (git-lfs unavailable) ---
+# 125 MB of PP screenshots. To version them later:
+#   git lfs install && git lfs track "docs/reference/screenshots/**"
+#   then remove the line below and commit.
+docs/reference/screenshots/
+
+# --- Superseded / history (kept on disk, out of the repo) ---
+archive/
+Video Analysis/
+
+# --- Secrets / environment ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# --- Logs / misc ---
+*.log
+.cache/
+coverage/

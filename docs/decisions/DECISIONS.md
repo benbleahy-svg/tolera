@@ -1,0 +1,182 @@
+# DECISIONS.md
+# Tolera — Ambiguity Log
+
+**Purpose:** When Claude Code (or any developer) encounters a genuine ambiguity not resolved by `Bid-Factory-Build-Spec.html`, add an entry here. Do not guess — block and add an entry. Benjamin reviews and resolves entries before the next build session.
+
+**Format:**
+```
+## [YYYY-MM-DD] Short description
+**Status:** OPEN | RESOLVED
+**Question:** What exactly is unclear?
+**Options considered:** ...
+**Decision:** (fill in when resolved)
+**Affects:** Which milestone / module
+```
+
+---
+
+## Pre-seeded open items (resolve before or during build)
+
+---
+
+## [2026-06-14] Product name and domain
+**Status:** RESOLVED  
+**Question:** "Bid Factory" is a working title only. The product needs a real name before domain registration, Mailgun EU domain verification, Clerk OAuth redirect URIs, email from-addresses, and PDF/UI branding can be finalised.  
+**Decision:** **Tolera** — domain **tolera.eu**, app at **app.tolera.eu**, RFQ ingest at **rfq.tolera.eu**. `BRAND` config object must be parameterised from day one — no hardcoded product name strings in code.  
+**Resolved:** 2026-06-19 (grill-me session)  
+**Affects:** M0 (branding config), Mailgun setup, Clerk setup, all customer-facing strings.
+
+---
+
+## [2026-06-14] Google OAuth security review timeline
+**Status:** RESOLVED  
+**Question:** Gmail OAuth `gmail.readonly` scope triggers a Google security review (2–3 weeks). Users see a security warning screen until approved.  
+**Decision:** Ship Gmail connect behind the warning screen for the pilot. Submit the review on day one of infrastructure setup. Do not block M3 on review approval.  
+**Affects:** M3 (email threading). Google app registration must be submitted before build starts.
+
+---
+
+## [2026-06-14] Spatial / HOOPS licensing timeline
+**Status:** RESOLVED  
+**Question:** Spatial licensing for native SLDPRT import and advanced feature recognition is in procurement.  
+**Decision:** Build entirely on OCCT (pythonocc) for v1. Spatial swaps in post-pilot when licensing is confirmed. `GeometryService` abstraction must require zero changes above the service layer on swap.  
+**Affects:** M4 (geometry). Document Spatial-upgradeable capabilities in `GEOMETRY.md`.
+
+---
+
+## [2026-06-14] Würth API access
+**Status:** RESOLVED  
+**Question:** `WürthMaterialPricingAdapter` requires API credentials not yet obtained.  
+**Decision:** Build adapter against a fixture response (documented JSON schema). Real credentials slot in without code changes. Do not block M6 on Würth procurement.  
+**Affects:** M6 (differentiators).
+
+---
+
+## [2026-06-14] Pilot customer org slug for RFQ ingest
+**Status:** RESOLVED  
+**Question:** The email ingest route is `{org-slug}@rfq.tolera.eu`. What is the pilot customer's org slug?  
+**Decision:** Pilot org slug = **fechner**. Ingest address: **fechner@rfq.tolera.eu**. Seed their org with slug `fechner` in M0 fixtures.  
+**Resolved:** 2026-06-19 (grill-me session)  
+**Affects:** M3 (email ingest), M0 (org seed).
+
+---
+
+## [2026-06-14] Margin math for mixed markup + margin pricing items
+**Status:** RESOLVED  
+**Question:** Margin contribution formula — verify `cost × pct/(1−pct)`.  
+**Decision:** Confirmed. Formula is `cost × pct/(1−pct)` — verified against Paperless Parts pricing documentation (`Margin % = (Selling Price − Cost) / Selling Price × 100` rearranged to `Selling Price = Cost / (1−pct)`, profit = `cost × pct/(1−pct)`). Build M1 with this formula. Add a margin-type fixture case to the M1 golden-test suite once Benjamin supplies a test case with known cost + output price.  
+**Resolved:** 2026-06-19 (grill-me session)  
+**Affects:** M1 (pricing engine). High priority — incorrect margin math breaks every quote.
+
+---
+
+## [2026-06-14] German translation strings
+**Status:** RESOLVED  
+**Question:** Who does native German review, and when?  
+**Decision:** Use Claude-generated German strings throughout the build. Fechner (pilot customer, native German speakers) will review all UI strings and provide feedback before pilot go-live. Formal review happens between pilot start and first paying customer.  
+**Resolved:** 2026-06-19 (grill-me session)  
+**Affects:** M5 (de-DE catalog). Non-blocking for pilot.
+
+---
+
+## [2026-06-14] SOLIDWORKS connector target surface
+**Status:** OPEN  
+**Question:** The CAD connector spec lists SOLIDWORKS as a fast-follow after Fusion. Target surface (PDM vs 3DEXPERIENCE vs desktop add-in) is still open.  
+**Options considered:** Desktop add-in (most common for SME shops); PDM (larger shops); 3DEXPERIENCE (enterprise).  
+**Decision:** PENDING — confirm with real customers during/after pilot. Do not build until confirmed. Post-pilot only.  
+**Affects:** Post-v1.
+
+---
+
+## [2026-06-14] Belgian locale (nl-BE vs fr-BE)
+**Status:** OPEN  
+**Question:** When Belgian locale ships, primary language must be decided (Dutch / French / bilingual).  
+**Decision:** PENDING — later phase, not a v1 concern. Add to post-pilot backlog.  
+**Affects:** Post-v1.
+
+---
+
+## [2026-06-14] CRM conflict resolution granularity
+**Status:** RESOLVED  
+**Question:** When HubSpot and Tolera have conflicting data for the same Account or Contact, what wins?  
+**Decision:** Tolera-always-wins for v1 (simplest; avoids merge logic). Add field-level conflict resolution as a post-pilot HubSpot adapter upgrade.  
+**Affects:** M6 (HubSpot adapter).
+
+---
+
+## [2026-06-14] Quote PDF visual design
+**Status:** OPEN  
+**Question:** WeasyPrint quote PDF template needs an approved layout before M5 implementation.  
+**Decision:** Dedicated design session scheduled before M5 (at M4 completion). Do not start WeasyPrint template implementation without an approved design. Benjamin to initiate this session. Quote PDFs are fully white-label (org logo, brand colours, no Tolera branding visible to customer).  
+**Resolved (partial):** 2026-06-19 — confirmed fully white-label; design session still required at M4.  
+**Affects:** M5 (quote PDF output). Pre-M5 blocker.
+
+---
+
+## [2026-06-19] AI assistant name
+**Status:** RESOLVED  
+**Question:** What is Tolera's name for the AI extraction/assistant layer (was "Wingman" in early spec)?  
+**Decision:** **Lens**. Purple signal colour. AI Governor pattern (55% opacity until accepted). All spec references updated.  
+**Affects:** All milestones. UI copy throughout.
+
+---
+
+## [2026-06-19] Pricing formula language name
+**Status:** RESOLVED  
+**Question:** What is Tolera's name for the formula DSL (was "P3L" / "Paperless Parts Pricing Language")?  
+**Decision:** **Kalk**. Python-based, AST-sandboxed. Three contexts: pricing formulas, operation generation, operation cost formulas. All spec references updated.  
+**Affects:** M1 (pricing engine), M2 (operation library), all Kalk editor UI.
+
+---
+
+## [2026-06-19] Partner integration names
+**Status:** RESOLVED  
+**Question:** What are Tolera's names for the partner integration slots (was TechMate / PEMConnect)?  
+**Decision:** Advisory chat partner → **Tolera Advisor**. Fastener sourcing partner → **Tolera Source**. Both mocked in v1. All spec references updated.  
+**Affects:** M6 (integrations), Part Viewer UI.
+
+---
+
+## [2026-06-19] Login type / auth flow
+**Status:** RESOLVED  
+**Question:** Is email login magic-link (passwordless) or password-first?  
+**Decision:** **Password-primary, magic-link fallback.** Clerk also provides Google SSO and Microsoft SSO (via Clerk's OAuth providers). Passkey (WebAuthn/FIDO2) also available via Clerk. Spec updated on auth table.  
+**Affects:** M0 (auth setup), Clerk configuration.
+
+---
+
+## [2026-06-19] Fixture packages
+**Status:** RESOLVED (pending delivery)  
+**Question:** When will 5–10 anonymised Fechner RFQ fixture packages be available for golden-test suite?  
+**Decision:** Benjamin has access to the packages. Target delivery: Monday 2026-06-23. Build M1 golden-test suite structure now; slot fixtures in on delivery.  
+**Affects:** M1 (golden tests), M3 (email ingest tests).
+
+---
+
+## [2026-06-19] Multi-organization users (E4-a)
+**Status:** RESOLVED
+**Question:** Should one user be able to belong to multiple orgs and switch between them (distinct from multi-tenancy)?
+**Decision:** **In v1.** Build a `UserOrgMembership` (User⋈Org M:N, role per membership), active-org as session state (Clerk claim), an org switcher in the top-bar account menu, and cross-org notifications (labeled, switch-on-select). Membership model required from M0 so it isn't retrofitted into auth. Not exercised at the (single-org) Fechner pilot but must exist in the schema. See `E4-Behavioral-Gaps.md` §E4-a.
+**Affects:** M0 (auth/session, data model), App Shell, Notifications.
+
+## [2026-06-19] Pricing-config-change policy (E4-d)
+**Status:** RESOLVED
+**Question:** When pricing config (operations, Kalk, materials) changes, what happens to existing draft quotes / revisions?
+**Decision:** **Freeze + manual refresh** (Paperless Parts model). Existing drafts/revisions keep pricing; only new quotes reflect config changes. Provide `Regenerate Operations` (no overrides), `Refresh Pricing` (single), `Bulk Refresh Pricing` (multi-select), with manual post-refresh cleanup. See `E4-Behavioral-Gaps.md` §E4-d.
+**Affects:** M1 (pricing engine), Quote Detail (Process actions), quote lifecycle.
+
+## [2026-06-19] Analytics scope (E4-k)
+**Status:** RESOLVED
+**Question:** Ship analytics as a stub, a fixed dashboard, or the full query-builder?
+**Decision:** **Full query-builder** — a BI semantic layer of measures + dimensions across ~20 entities, time/filters, user dashboards + query editor, seeded with the 12-tile default dashboard. Replicate only the working fields (omit KB-flagged broken/deprecated ones); Segments are out (non-functional). Consider a semantic-layer lib over the Postgres warehouse. See `E4-Behavioral-Gaps.md` §E4-k. Replaces the prior "Analytics tab = stub" note.
+**Affects:** New analytics milestone (sizeable build), data warehouse.
+
+## [2026-06-19] E4 post-pilot deferrals (E4-e/f/g)
+**Status:** RESOLVED
+**Question:** Are MBD/PMI viewing, the on-prem managed connector, and MSSQL direct-DB import in v1?
+**Decision:** **Post-pilot.** MBD/PMI needs Spatial-grade extraction (v1 OCCT can't); managed connector + MSSQL import are covered for v1 by adapters + SFTP. Keep viewer toggle / adapter interfaces as stubs; build later. See `E4-Behavioral-Gaps.md` post-pilot section.
+**Affects:** Post-v1 (geometry/PMI, integrations).
+
+---
+
+*Add new entries above this line as ambiguities arise during the build.*

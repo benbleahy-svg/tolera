@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bid Factory — 2026 UI Research & Gap Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --canvas:  #F2F1EE;
+  --surface: #FFFFFF;
+  --s2:      #F8F7F4;
+  --s3:      #F0EFec;
+  --inv:     #1B1F27;
+  --inv-s:   #252A35;
+  --text:    #2C2A27;
+  --t2:      #696560;
+  --t3:      #AAA7A0;
+  --border:  #E4E2DC;
+  --border2: #ECEBE6;
+  --borders: #C8C5BE;
+  --p:       #1B52C4;
+  --p-h:     #1440A0;
+  --p-bg:    #EBF1FB;
+  --p-t:     #0D2E7A;
+  --g:       #1F7A4D; --g-bg: #E3F4EA; --g-t: #155C39;
+  --w:       #B57E00; --w-bg: #FFF4D6; --w-t: #6E4D00;
+  --cr:      #C2333B; --cr-bg: #FCE9EA; --cr-t: #8A2028;
+  --ai:      #7A4FD0; --ai-bg: #F1EBFC; --ai-t: #5234A0;
+  --font:    'Inter', -apple-system, sans-serif;
+  --mono:    'SF Mono', ui-monospace, monospace;
+  --r:       10px;
+  --rc:      8px;
+  --shadow:  0 1px 0 rgba(35,33,30,.07), 0 0 0 1px rgba(35,33,30,.05);
+  --shadow-lg: 0 8px 24px -8px rgba(35,33,30,.18), 0 0 0 1px rgba(35,33,30,.07);
+}
+
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+  background: var(--canvas);
+}
+
+/* ── Layout ── */
+.doc-shell { display: flex; min-height: 100vh; }
+.doc-nav {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 32px 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.doc-nav .logo {
+  padding: 0 20px 24px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--t2);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.doc-nav a {
+  display: block;
+  padding: 7px 20px;
+  font-size: 13px;
+  color: var(--t2);
+  text-decoration: none;
+  border-radius: 0;
+  transition: color .15s, background .15s;
+}
+.doc-nav a:hover { color: var(--text); background: var(--s2); }
+.doc-nav a.active { color: var(--p); font-weight: 550; }
+.doc-nav .nav-group {
+  margin-top: 20px;
+  padding: 0 20px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.doc-content {
+  flex: 1;
+  max-width: 820px;
+  padding: 48px 56px 80px;
+}
+@media (max-width: 900px) { .doc-nav { display: none; } .doc-content { padding: 32px 24px 60px; } }
+
+/* ── Typography ── */
+h1 { font-size: 28px; font-weight: 680; letter-spacing: -.02em; line-height: 1.2; margin-bottom: 8px; }
+h2 { font-size: 20px; font-weight: 640; letter-spacing: -.015em; margin: 48px 0 12px; padding-top: 48px; border-top: 1px solid var(--border); }
+h3 { font-size: 15px; font-weight: 620; letter-spacing: -.01em; margin: 28px 0 8px; }
+h4 { font-size: 13px; font-weight: 600; color: var(--t2); text-transform: uppercase; letter-spacing: .06em; margin: 20px 0 6px; }
+p { margin-bottom: 14px; color: var(--text); }
+p:last-child { margin-bottom: 0; }
+strong { font-weight: 620; }
+code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+ul, ol { padding-left: 20px; margin-bottom: 14px; }
+li { margin-bottom: 5px; }
+
+/* ── Chips and tags ── */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 560;
+  padding: 3px 8px;
+  border-radius: 20px;
+  letter-spacing: .02em;
+}
+.tag-green  { background: var(--g-bg);  color: var(--g-t);  }
+.tag-red    { background: var(--cr-bg); color: var(--cr-t); }
+.tag-yellow { background: var(--w-bg);  color: var(--w-t);  }
+.tag-blue   { background: var(--p-bg);  color: var(--p-t);  }
+.tag-ai     { background: var(--ai-bg); color: var(--ai-t); }
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 20px 24px;
+  margin: 16px 0;
+  box-shadow: var(--shadow);
+}
+.card.dark {
+  background: var(--inv);
+  border-color: rgba(255,255,255,.08);
+  color: #E4E2DD;
+}
+.card.dark p, .card.dark li { color: #B8B6B0; }
+.card.dark strong { color: #E4E2DD; }
+.card.dark h3 { color: #F0EEE9; }
+.card.highlight {
+  background: var(--p-bg);
+  border-color: rgba(27,82,196,.25);
+}
+
+/* ── Score/stat row ── */
+.stat-row {
+  display: flex;
+  gap: 16px;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+.stat {
+  flex: 1;
+  min-width: 120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--rc);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+.stat-num { font-size: 28px; font-weight: 680; letter-spacing: -.03em; color: var(--text); }
+.stat-num.green { color: var(--g); }
+.stat-num.yellow { color: var(--w); }
+.stat-num.red { color: var(--cr); }
+.stat-label { font-size: 12px; color: var(--t2); margin-top: 2px; }
+
+/* ── Gap table ── */
+.gap-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.gap-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--t2);
+  border-bottom: 2px solid var(--border);
+  background: var(--s2);
+}
+.gap-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border2);
+  vertical-align: top;
+}
+.gap-table tr:hover td { background: var(--s2); }
+.gap-table td.area { font-weight: 550; color: var(--text); }
+.gap-table td.status { white-space: nowrap; }
+
+/* ── Demo boxes ── */
+.demo-wrap {
+  margin: 24px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+.demo-bar {
+  background: var(--s2);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--t2);
+  font-weight: 500;
+}
+.demo-bar .dots { display: flex; gap: 6px; }
+.demo-bar .dot { width: 10px; height: 10px; border-radius: 50%; }
+.demo-bar .dot:nth-child(1) { background: #FF5F56; }
+.demo-bar .dot:nth-child(2) { background: #FEBC2E; }
+.demo-bar .dot:nth-child(3) { background: #27C840; }
+.demo-body { background: var(--surface); }
+
+/* ── §1 SIDEBAR DEMO ── */
+.sidebar-demo {
+  display: flex;
+  height: 320px;
+  position: relative;
+}
+.sd-sidebar {
+  width: 220px;
+  background: #FAFAF8;
+  border-right: 1px solid var(--border);
+  padding: 12px 0;
+  flex-shrink: 0;
+  transition: width 260ms cubic-bezier(.4,0,.2,1);
+  overflow: hidden;
+  position: relative;
+}
+.sd-sidebar.collapsed { width: 56px; }
+.sd-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.sd-logo-mark {
+  width: 26px; height: 26px;
+  background: var(--p);
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+.sd-logo-text { font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; color: var(--text); }
+.sd-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 1px 6px;
+  color: var(--t2);
+  opacity: .6;
+  transition: opacity .15s, background .15s, color .15s;
+  white-space: nowrap;
+  position: relative;
+}
+.sd-item:hover { opacity: 1; background: rgba(0,0,0,.04); }
+.sd-item.active { opacity: 1; color: var(--p); background: var(--p-bg); font-weight: 550; }
+.sd-item.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  background: var(--p);
+  border-radius: 0 2px 2px 0;
+}
+.sd-icon { width: 16px; height: 16px; flex-shrink: 0; opacity: .8; }
+.sd-label { font-size: 13px; overflow: hidden; }
+.sd-content { flex: 1; padding: 20px; background: var(--canvas); overflow: hidden; }
+.sd-content-title { font-size: 15px; font-weight: 640; margin-bottom: 6px; }
+.sd-content-sub { font-size: 12.5px; color: var(--t2); }
+
+.sd-toggle {
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  box-shadow: 0 1px 4px rgba(0,0,0,.12);
+  transition: box-shadow .15s;
+  color: var(--t2);
+  font-size: 10px;
+  font-weight: 700;
+}
+.sd-toggle:hover { box-shadow: 0 2px 8px rgba(0,0,0,.18); color: var(--text); }
+
+.sd-tooltip {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--inv);
+  color: #F0EEE9;
+  font-size: 11px;
+  font-weight: 550;
+  padding: 4px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .12s;
+  z-index: 100;
+}
+.sd-sidebar.collapsed .sd-item:hover .sd-tooltip { opacity: 1; }
+
+.demo-controls {
+  padding: 12px 16px;
+  background: var(--s2);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+}
+.demo-btn {
+  padding: 5px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font);
+  transition: background .12s;
+}
+.demo-btn:hover { background: var(--s3); }
+.demo-btn.primary {
+  background: var(--p);
+  color: #fff;
+  border-color: var(--p-h);
+}
+.demo-btn.primary:hover { background: var(--p-h); }
+kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--s3);
+  border: 1px solid var(--borders);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--t2);
+}
+.demo-note { color: var(--t2); font-size: 12px; }
+
+/* ── §3 Data Table Demo ── */
+.dt-wrap { overflow-x: auto; }
+.dt {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.dt th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--t2);
+  border-bottom: 1px solid var(--border);
+  background: var(--s2);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.dt th:hover { background: var(--s3); color: var(--text); }
+.dt td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border2);
+  color: var(--text);
+  vertical-align: middle;
+}
+.dt tr:hover td { background: var(--p-bg); }
+.dt tr.expanded-row td { background: var(--s2); border-top: none; padding: 4px 12px 10px 36px; color: var(--t2); font-size: 12px; }
+.dt-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 560;
+  padding: 2px 7px;
+  border-radius: 12px;
+}
+.dt-status.ok  { background: var(--g-bg); color: var(--g-t); }
+.dt-status.warn { background: var(--w-bg); color: var(--w-t); }
+.dt-status.err  { background: var(--cr-bg); color: var(--cr-t); }
+.dt-edit-cell {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: text;
+  display: inline-block;
+  min-width: 60px;
+  transition: border-color .12s, background .12s;
+}
+.dt-edit-cell:focus {
+  outline: none;
+  border-color: var(--p);
+  background: var(--p-bg);
+}
+.dt-expand-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  color: var(--t3);
+  font-size: 10px;
+  transition: color .12s;
+  margin-right: 6px;
+}
+.dt-expand-btn:hover { color: var(--text); }
+
+/* ── §4 AI Wingman demo ── */
+.wingman-demo {
+  padding: 20px;
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+  min-height: 260px;
+}
+.wm-main { }
+.wm-field-group { margin-bottom: 12px; }
+.wm-label { font-size: 11px; font-weight: 560; color: var(--t2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+.wm-field {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: var(--font);
+  width: 100%;
+}
+.wm-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--ai-bg);
+  border: 1px solid rgba(122,79,208,.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .2s, transform .2s;
+}
+.wm-suggestion.visible { opacity: 1; transform: translateY(0); }
+.wm-suggestion.governor { opacity: .5; }  /* Governor pattern — awaiting approval */
+.wm-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ai); margin-top: 4px; flex-shrink: 0; }
+.wm-suggestion-text { color: var(--ai-t); flex: 1; }
+.wm-suggestion-text strong { color: var(--ai); }
+.wm-why {
+  font-size: 11px;
+  color: var(--ai);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  margin-top: 3px;
+  display: block;
+  opacity: .8;
+}
+.wm-why:hover { opacity: 1; }
+.wm-actions { display: flex; gap: 6px; margin-top: 8px; }
+.wm-accept {
+  padding: 4px 10px;
+  background: var(--ai);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-weight: 550;
+}
+.wm-dismiss {
+  padding: 4px 10px;
+  background: none;
+  color: var(--ai-t);
+  border: 1px solid rgba(122,79,208,.3);
+  border-radius: 5px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.wm-panel {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.wm-panel-title { font-size: 11.5px; font-weight: 600; margin-bottom: 10px; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.wm-panel-ai-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ai); }
+.wm-activity { }
+.wm-act-item { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; font-size: 12px; }
+.wm-act-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.wm-act-dot.ai { background: var(--ai); }
+.wm-act-dot.user { background: var(--t3); }
+.wm-act-text { color: var(--t2); }
+.wm-act-time { font-size: 10.5px; color: var(--t3); margin-top: 2px; }
+
+/* ── §5 Gap Analysis Section ── */
+.verdict {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 20px 0;
+}
+.verdict-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--rc);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.verdict-item h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--t2); margin-bottom: 8px; }
+.verdict-count { font-size: 32px; font-weight: 680; letter-spacing: -.03em; }
+.verdict-count.green { color: var(--g); }
+.verdict-count.yellow { color: var(--w); }
+.verdict-count.red { color: var(--cr); }
+.verdict-list { font-size: 12px; color: var(--t2); margin-top: 6px; line-height: 1.6; }
+
+/* ── Inline citation ── */
+.cite { font-size: 11px; color: var(--t3); }
+.cite a { color: var(--p); text-decoration: none; }
+.cite a:hover { text-decoration: underline; }
+
+/* ── Page header ── */
+.doc-header {
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.doc-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.doc-meta .tag { }
+
+/* ── Quote pullout ── */
+blockquote {
+  border-left: 3px solid var(--p);
+  padding: 10px 16px;
+  margin: 16px 0;
+  background: var(--p-bg);
+  border-radius: 0 var(--rc) var(--rc) 0;
+  font-size: 13.5px;
+  color: var(--p-t);
+  font-style: italic;
+}
+blockquote cite { font-size: 11px; color: var(--t2); font-style: normal; display: block; margin-top: 4px; }
+
+/* ── Sources ── */
+.sources {
+  margin-top: 16px;
+  padding: 16px 20px;
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--rc);
+  font-size: 12px;
+}
+.sources h4 { margin-bottom: 8px; }
+.sources a { color: var(--p); text-decoration: none; }
+.sources a:hover { text-decoration: underline; }
+.sources ul { list-style: none; padding: 0; }
+.sources li { padding: 3px 0; border-bottom: 1px solid var(--border2); }
+.sources li:last-child { border-bottom: none; }
+
+/* ── Callout box ── */
+.callout {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--rc);
+  margin: 16px 0;
+  border: 1px solid;
+}
+.callout.green  { background: var(--g-bg); border-color: rgba(31,122,77,.2); }
+.callout.yellow { background: var(--w-bg); border-color: rgba(181,126,0,.2); }
+.callout.red    { background: var(--cr-bg); border-color: rgba(194,51,59,.2); }
+.callout-icon { font-size: 16px; flex-shrink: 0; padding-top: 2px; }
+.callout-body { font-size: 13px; }
+.callout.green .callout-body  { color: var(--g-t); }
+.callout.yellow .callout-body { color: var(--w-t); }
+.callout.red .callout-body    { color: var(--cr-t); }
+
+</style>
+</head>
+<body>
+
+<div class="doc-shell">
+  <!-- ── Sidebar nav ── -->
+  <nav class="doc-nav">
+    <div class="logo">Bid Factory</div>
+    <a href="#exec" class="active">Executive Summary</a>
+    <div class="nav-group">Research</div>
+    <a href="#sidebar-nav">§1 Sidebar Navigation</a>
+    <a href="#saas-baseline">§2 B2B SaaS 2026 Baseline</a>
+    <a href="#cpq-ux">§3 Manufacturing / CPQ UX</a>
+    <a href="#ai-ux">§4 AI / Wingman UX</a>
+    <div class="nav-group">Analysis</div>
+    <a href="#gap">§5 Gap Analysis</a>
+    <a href="#updates">§6 Recommended Updates</a>
+    <a href="#sources">Sources</a>
+  </nav>
+
+  <!-- ── Main content ── -->
+  <main class="doc-content">
+
+    <div class="doc-header" id="exec">
+      <div class="doc-meta">
+        <span class="tag tag-blue">Research</span>
+        <span class="tag tag-blue">2026 Sources</span>
+        <span class="tag tag-ai">4 Search Angles</span>
+        <span class="tag tag-green">Gap Analysis Included</span>
+      </div>
+      <h1>2026 UI Research &amp; Gap Analysis</h1>
+      <p style="font-size:15px; color:var(--t2); margin-top:6px;">What best-in-class B2B SaaS looks like right now — and where the current Bid Factory mock stands against it.</p>
+    </div>
+
+    <div class="callout green">
+      <div class="callout-icon">✅</div>
+      <div class="callout-body"><strong>Short answer to "do we already have that?"</strong> — Largely yes. The current mock is well ahead of 2023-era enterprise software. It aligns with 9 of 14 key 2026 standards. The 5 gaps are real but fixable: collapsible sidebar (your request), inline table editing, AI governor pattern, row expansion in line items, and keyboard shortcut hints. Details below.</div>
+    </div>
+
+    <div class="verdict">
+      <div class="verdict-item">
+        <h4>Already correct</h4>
+        <div class="verdict-count green">9</div>
+        <div class="verdict-list">Inter font · Command palette · Dark mode · Role views · Side panel · Linear nav · Purple AI · KPI cards · Activity feed</div>
+      </div>
+      <div class="verdict-item">
+        <h4>Needs work</h4>
+        <div class="verdict-count yellow">5</div>
+        <div class="verdict-list">Collapsible sidebar · Inline table editing · AI governor · Row expansion · Shortcut hints</div>
+      </div>
+      <div class="verdict-item">
+        <h4>Out of scope v1</h4>
+        <div class="verdict-count" style="color:var(--t3)">3</div>
+        <div class="verdict-list">Optimistic UI · Density toggle · Mobile-first (desktop-first is correct for CPQ)</div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════ §1 SIDEBAR ══════════════════════ -->
+    <h2 id="sidebar-nav">§1 Sidebar Navigation Patterns</h2>
+    <p>Collapsible sidebars are now <strong>the standard in B2B SaaS</strong>, not a premium feature. The research is unambiguous: expanded by default, user-toggled to icon rail, preference persisted across sessions.</p>
+
+    <h3>The specification (2026 consensus)</h3>
+    <ul>
+      <li><strong>Expanded width:</strong> 220–260px. Our mock at 216px is correct.</li>
+      <li><strong>Collapsed width:</strong> 56–72px (icon rail only).</li>
+      <li><strong>Toggle mechanism:</strong> Click a chevron button on the sidebar border — never hover-to-expand. Linear uses <kbd>[</kbd> as a keyboard shortcut alongside the click target.</li>
+      <li><strong>Animation:</strong> 200–300ms <code>cubic-bezier(.4,0,.2,1)</code>. Faster = broken. Slower = sluggish.</li>
+      <li><strong>Collapsed state:</strong> Icons only, but <strong>mandatory hover tooltips</strong> revealing the full label. No tooltip = discoverability failure.</li>
+      <li><strong>Logo:</strong> Collapses to the mark/icon only — no text in collapsed state.</li>
+      <li><strong>Active state:</strong> The left-border accent persists in collapsed state on the icon.</li>
+      <li><strong>Persistence:</strong> Save collapsed/expanded state to <code>localStorage</code> so it survives page reload and app restart.</li>
+      <li><strong>Primary item count:</strong> 5–7 max before the IA needs restructuring. Beyond 7, the icon rail becomes a guessing game even for power users.</li>
+    </ul>
+
+    <blockquote>
+      "The most common mistake in sidebar design is replacing text labels with icons entirely, assuming users will learn the iconography over time. In practice, this creates a learning tax."
+      <cite>— ALF Design Group, Sidebar Design for Web Apps: UX Best Practices (2026)</cite>
+    </blockquote>
+
+    <h3>Live demo — collapsible sidebar</h3>
+    <p>The pattern we're implementing. Click the <code>◀</code> button or press <kbd>[</kbd> while focused on the demo to toggle. Tooltips appear in collapsed state on hover.</p>
+
+    <div class="demo-wrap">
+      <div class="demo-bar">
+        <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        <span>Collapsible sidebar demo</span>
+        <span></span>
+      </div>
+      <div class="demo-body">
+        <div class="sidebar-demo">
+          <div class="sd-sidebar" id="sdSidebar">
+            <div class="sd-logo">
+              <div class="sd-logo-mark">B</div>
+              <span class="sd-logo-text">Bid Factory</span>
+            </div>
+            <div class="sd-item active">
+              <svg class="sd-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+              <span class="sd-label">Dashboard</span>
+              <div class="sd-tooltip">Dashboard</div>
+            </div>
+            <div class="sd-item">
+              <svg class="sd-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M2 8h8M2 12h10"/></svg>
+              <span class="sd-label">Quotes</span>
+              <div class="sd-tooltip">Quotes</div>
+            </div>
+            <div class="sd-item">
+              <svg class="sd-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg>
+              <span class="sd-label">Orders</span>
+              <div class="sd-tooltip">Orders</div>
+            </div>
+            <div class="sd-item">
+              <svg class="sd-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h12v10H2zM5 12v2M11 12v2M2 6h12"/></svg>
+              <span class="sd-label">Customers</span>
+              <div class="sd-tooltip">Customers</div>
+            </div>
+            <div class="sd-item">
+              <svg class="sd-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="4"/><path d="M10.5 10.5l3 3"/></svg>
+              <span class="sd-label">Search</span>
+              <div class="sd-tooltip">Search</div>
+            </div>
+            <div class="sd-toggle" id="sdToggle" onclick="toggleSidebar()">◀</div>
+          </div>
+          <div class="sd-content">
+            <div class="sd-content-title" id="sdContentTitle">Dashboard</div>
+            <div class="sd-content-sub" id="sdContentSub">Sidebar is expanded. Click ◀ or press [ to collapse to icon rail.</div>
+          </div>
+        </div>
+        <div class="demo-controls">
+          <button class="demo-btn primary" onclick="toggleSidebar()">Toggle sidebar</button>
+          <span class="demo-note">or press <kbd>[</kbd> · Tooltips appear on icon hover when collapsed</span>
+        </div>
+      </div>
+    </div>
+
+    <h3>What to add to the mock</h3>
+    <p>The collapsible sidebar is the single concrete change requested. Implementation requires: a CSS width transition on <code>.sidebar</code>, a toggle button at the sidebar boundary, icon-only CSS class that hides label text and shows tooltip, and <code>localStorage</code> persistence. See §6 for the exact changes needed.</p>
+
+    <!-- ══════════════════════ §2 SAAS BASELINE ══════════════════════ -->
+    <h2 id="saas-baseline">§2 B2B SaaS UI Baseline — 2026</h2>
+    <p>These are now <strong>table stakes</strong>. Missing any of them signals "legacy" to a 2026 buyer who uses Linear, Notion, or Vercel daily.</p>
+
+    <h3>Information density: "purposeful density"</h3>
+    <p>The direction is not "more whitespace" or "less whitespace" — it's <strong>context-sensitive density</strong>. List and table views should be compact and information-rich. Detail and edit views should have generous breathing room. The 2020 pattern of maximum padding everywhere reads as low-capability in 2026.</p>
+    <blockquote>
+      "Power users demand density. They want high-information interfaces that look like trading terminals, not marketing brochures."
+      <cite>— LaderaLABS, The State of SaaS UX Design 2026</cite>
+    </blockquote>
+    <p>The reconciliation with "calm design": Linear looks minimal at first glance but surfaces dense information contextually on demand. The default state is clean; the information density is there when you need it. This is Strategic Minimalism — not sparse, but disciplined.</p>
+
+    <h3>Dark mode: no longer optional</h3>
+    <div class="stat-row">
+      <div class="stat"><div class="stat-num green">82%</div><div class="stat-label">mobile users prefer dark mode</div></div>
+      <div class="stat"><div class="stat-num yellow">39%</div><div class="stat-label">B2B brands have optimized for it</div></div>
+      <div class="stat"><div class="stat-num red">70%</div><div class="stat-label">dark mode fails on contrast issues</div></div>
+    </div>
+    <p>"Dark mode is no longer a feature. It's infrastructure." Pure black (#000) is wrong — the correct implementation is <code>#121212</code>–<code>#14161C</code> (warm-tinted near-black). Our mock uses <code>#14161C</code> — correct. The per-theme dark primary values are also correct (lighter and more vibrant on dark surfaces).</p>
+    <p><span class="tag tag-green">✓ Mock passes</span></p>
+
+    <h3>Command palette: table stakes</h3>
+    <p>Every B2B SaaS product with more than 10 features is <strong>expected to have a command palette</strong> as of 2026. SaaSUI.Design: "how to design a command palette has become a standard design interview question" — a reliable signal that a pattern has crossed from innovation to expectation. GitHub attempted to put their command palette behind a feature flag in 2025 and faced immediate public backlash, reversing the decision.</p>
+    <p><span class="tag tag-green">✓ Mock has ⌘K command palette</span></p>
+
+    <h3>Typography and aesthetic</h3>
+    <ul>
+      <li><strong>Inter</strong> is correct — de facto standard for trust-signaling B2B tools (alongside Geist Mono for data). <span class="tag tag-green">✓ Mock uses Inter</span></li>
+      <li><strong>1px borders</strong> over thick dividers — cleaner grid without visual bulk. <span class="tag tag-green">✓ Mock uses 1px borders</span></li>
+      <li><strong>"Bubbly" rounded UI</strong> (large border-radius, pastel illustrations, soft shadows) now reads as low-capability. Our border-radius of 10px / 8px is correct — present but not dominant.</li>
+      <li>The "FinTech Aesthetic" (Vercel/Supabase/Mercury) — high-contrast type, near-monochrome surfaces, clean — is now the standard for tools targeting technical or enterprise buyers. Bid Factory's Cobalt and Precision Graphite themes are well-positioned here.</li>
+    </ul>
+
+    <h3>Micro-interactions</h3>
+    <ul>
+      <li>200–500ms duration — long enough to register, short enough not to interrupt flow</li>
+      <li>Natural easing curves (acceleration + deceleration) — linear motion reads as robotic</li>
+      <li>Completion celebrations for task milestones (Asana's unicorn is the canonical B2B example)</li>
+      <li>Error states: a small "shake" animation communicates "no" without words</li>
+      <li>Always respect <code>prefers-reduced-motion</code></li>
+    </ul>
+
+    <h3>What "feels like Linear" means in 2026</h3>
+    <p>This is now the highest compliment in B2B design. It means: 0ms response to keyboard shortcuts (optimistic UI), every action reachable without mouse via <kbd>⌘K</kbd>, information hierarchy reduced to 5 mental concepts max, full-screen modals instead of page navigation (preserves context), and natural language date parsing. The user <em>never has to remember where something is</em>.</p>
+    <p>Linear achieved this with specific engineering choices: switching from HSL to <strong>LCH color space</strong> for theme generation (perceptually uniform — we should evaluate this), and reducing their dark/light theme from 98 variable definitions to <strong>3 variables</strong> (base color, accent, contrast).</p>
+
+    <!-- ══════════════════════ §3 CPQ UX ══════════════════════ -->
+    <h2 id="cpq-ux">§3 Manufacturing / CPQ UX Patterns</h2>
+    <p>This is where the research is most directly actionable. These patterns are specific to estimating and quoting tools — not generic SaaS.</p>
+
+    <h3>The "Excel-shaped" interface wins</h3>
+    <p>The dominant mental model for manufacturing estimators is a spreadsheet: <strong>header metadata → line-item table → summary/totals</strong>. Any CPQ tool that departs from this shape faces adoption friction. Modern tools like Paperless Parts embrace this shape and make it faster — they don't reinvent it.</p>
+    <p>The Salesforce CPQ interface is the widely-cited negative example: rigid tab-within-tab-within-modal structure that forces users back through the same path repeatedly, leading to the "silent rejection" pattern where estimators revert to Excel.</p>
+
+    <h3>Context collapse: the killer feature</h3>
+    <p>Paperless Parts (the market benchmark for custom-part quoting UX) built their entire design around a single principle: <strong>the estimator should never leave the screen to do their job</strong>. Part geometry, RFQ details, cost build-up, and customer info are all on one screen. Every modal, tab-switch, or screen navigation is a cognitive interruption and a time cost.</p>
+    <p>Our mock has a good side-panel pattern for record detail — but the quote detail screen should more explicitly implement the side-by-side layout: <strong>drawing/part context on the left, cost build-up on the right</strong>.</p>
+
+    <h3>Data table UX for estimators</h3>
+    <p>This is the single largest gap in the current mock. Dense line-item tables are the core of estimating work. The current mock shows a basic table — here's what it needs:</p>
+
+    <div class="demo-wrap">
+      <div class="demo-bar">
+        <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        <span>Line items table — best practice demo</span>
+        <span></span>
+      </div>
+      <div class="demo-body">
+        <div class="dt-wrap" style="padding: 0;">
+          <table class="dt">
+            <thead>
+              <tr>
+                <th style="width:28px"></th>
+                <th>Part / Operation</th>
+                <th>Qty</th>
+                <th>Material</th>
+                <th style="text-align:right">Unit cost</th>
+                <th style="text-align:right">Margin</th>
+                <th style="text-align:right">Total</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="dtBody">
+              <tr onclick="toggleRow('r1','rexp1')">
+                <td><button class="dt-expand-btn" id="r1btn">▶</button></td>
+                <td><strong>Flansch_v3_CNC.step</strong></td>
+                <td><span class="dt-edit-cell" contenteditable="true" onclick="event.stopPropagation()">12</span></td>
+                <td>1.4301 / 316L</td>
+                <td style="text-align:right;font-variant-numeric:tabular-nums">€ 84,00</td>
+                <td style="text-align:right"><span class="dt-edit-cell" contenteditable="true" onclick="event.stopPropagation()">34%</span></td>
+                <td style="text-align:right;font-weight:560;font-variant-numeric:tabular-nums">€ 1.008</td>
+                <td><span class="dt-status ok">✓ Ready</span></td>
+              </tr>
+              <tr id="rexp1" style="display:none">
+                <td colspan="8" class="expanded-row">
+                  ↳ Op 1: 5-Achs CNC Fräsen · 2,4 h · €48/h → €115 &nbsp;|&nbsp; Op 2: Drehen · 0,8 h · €42/h → €34 &nbsp;|&nbsp; Setup: €12 &nbsp;|&nbsp; DFM: ⚠ Tasche Tiefe/Breite 5,2:1 — prüfen
+                </td>
+              </tr>
+              <tr onclick="toggleRow('r2','rexp2')">
+                <td><button class="dt-expand-btn" id="r2btn">▶</button></td>
+                <td><strong>Gehäuse_links.step</strong></td>
+                <td><span class="dt-edit-cell" contenteditable="true" onclick="event.stopPropagation()">4</span></td>
+                <td>AlMg3</td>
+                <td style="text-align:right;font-variant-numeric:tabular-nums">€ 220,00</td>
+                <td style="text-align:right"><span class="dt-edit-cell" contenteditable="true" onclick="event.stopPropagation()">41%</span></td>
+                <td style="text-align:right;font-weight:560;font-variant-numeric:tabular-nums">€ 880</td>
+                <td><span class="dt-status warn">⚠ Review</span></td>
+              </tr>
+              <tr id="rexp2" style="display:none">
+                <td colspan="8" class="expanded-row">
+                  ↳ Op 1: Gießen · 3-Teil-Form · €68/Teil &nbsp;|&nbsp; Op 2: CNC Nachbearbeitung · 1,2 h &nbsp;|&nbsp; DFM: ⚠ Wandstärke 1,2 mm zu dünn — Gussqualität prüfen
+                </td>
+              </tr>
+              <tr onclick="toggleRow('r3','rexp3')">
+                <td><button class="dt-expand-btn" id="r3btn">▶</button></td>
+                <td><strong>Welle_Ø32.step</strong></td>
+                <td><span class="dt-edit-cell" contenteditable="true" onclick="event.stopPropagation()">8</span></td>
+                <td>42CrMo4</td>
+                <td style="text-align:right;font-variant-numeric:tabular-nums">€ 156,00</td>
+                <td style="text-align:right"><span class="dt-edit-cell" contenteditable="true" onclick="event.stopPropagation()">38%</span></td>
+                <td style="text-align:right;font-weight:560;font-variant-numeric:tabular-nums">€ 1.248</td>
+                <td><span class="dt-status ok">✓ Ready</span></td>
+              </tr>
+              <tr id="rexp3" style="display:none">
+                <td colspan="8" class="expanded-row">
+                  ↳ Op 1: Drehen Ø32 → Ø28 · Ra 0.8 · 0,6 h &nbsp;|&nbsp; Op 2: Schleifen · 0,4 h &nbsp;|&nbsp; Wärmebehandlung: Vergüten 800–850°C
+                </td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr style="background:var(--s2);">
+                <td colspan="5" style="padding:10px 12px;font-size:12px;color:var(--t2)">3 Positionen · Klicken zum Expandieren · Zellen editierbar</td>
+                <td style="text-align:right;padding:10px 12px;font-weight:600;font-size:12px">Gesamt</td>
+                <td style="text-align:right;padding:10px 12px;font-weight:680;font-size:14px;font-variant-numeric:tabular-nums">€ 3.136</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="demo-controls">
+          <span class="demo-note">▶ = expand row to see operations + DFM · Cells are inline-editable (click Qty or Margin)</span>
+        </div>
+      </div>
+    </div>
+
+    <p>Key patterns shown: <strong>expandable rows</strong> (operations detail + DFM warnings hidden by default, revealed on demand), <strong>inline cell editing</strong> (Qty and Margin are editable without navigating away), <strong>row-level status chips</strong>, and <strong>tabular-nums</strong> for aligned currency columns.</p>
+
+    <h3>AI in CPQ: eliminate setup, not judgment</h3>
+    <p>The Paperless Parts model has strong market traction: AI handles the "secretary work" (extract dimensions from drawings, populate initial BOM, flag manufacturability issues) — the estimator applies expertise to the result. Estimators do not want AI pricing their jobs. They want AI removing the setup friction before they engage with the job.</p>
+
+    <h3>Mobile in manufacturing</h3>
+    <p>The research is clear: <strong>desktop-first for quoting is correct</strong>. Estimating and quoting is desk work requiring large screen real estate. No evidence of meaningful mobile CPQ usage. Shop floor tablet usage is significant but that's a different product surface. Bid Factory should remain desktop-first with no mobile quoting obligation in v1.</p>
+
+    <!-- ══════════════════════ §4 AI UX ══════════════════════ -->
+    <h2 id="ai-ux">§4 AI / Wingman UX Patterns</h2>
+    <p>The current mock uses purple for AI and has an activity feed with AI dots — both correct. But there are specific interaction patterns the research identifies that the mock doesn't yet show.</p>
+
+    <h3>Where AI lives in the UI (placement hierarchy)</h3>
+    <p>From best to worst placement for daily-use tools:</p>
+    <ol>
+      <li><strong>Inline / contextual</strong> — appears where the user's cursor already is. Zero switching cost. (GitHub Copilot ghost text, Notion AI slash command)</li>
+      <li><strong>Side panel</strong> — parallel to the main workspace, for tasks where AI work is alongside primary work</li>
+      <li><strong>Command palette trigger</strong> — fires AI from wherever the user is, via <kbd>⌘K</kbd></li>
+      <li><strong>Floating button / persistent icon</strong> — weakest signal, competes for attention without context</li>
+    </ol>
+
+    <h3>The Governor Mechanism — the most important missing pattern</h3>
+    <p>Any AI-generated content that appears in the quote (suggested price, suggested delivery date, DFM flag) should appear at <strong>reduced opacity until the user explicitly approves it</strong>. This is the Governor pattern — a human-in-the-loop checkpoint that doesn't interrupt flow but prevents silent AI errors from going unnoticed. Cursor's diff-preview-before-apply is the canonical implementation.</p>
+
+    <h3>The "Why?" link — Progressive disclosure for explainability</h3>
+    <p>Every AI recommendation shows a brief summary. A "Why?" link reveals the reasoning on demand. Linear uses this for AI-suggested priorities. It's never front-loaded, never forced. For Bid Factory: when Wingman suggests a price, a "Why?" link should reveal the reasoning (cycle time estimate, material cost, comparable jobs). This is the pattern that builds trust rather than eroding it.</p>
+
+    <h3>Live demo — Wingman Governor + Why? pattern</h3>
+
+    <div class="demo-wrap">
+      <div class="demo-bar">
+        <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        <span>Wingman AI suggestion patterns</span>
+        <span></span>
+      </div>
+      <div class="demo-body">
+        <div class="wingman-demo">
+          <div class="wm-main">
+            <div class="wm-field-group">
+              <div class="wm-label">Quote line — Flansch_v3_CNC.step</div>
+              <input class="wm-field" type="text" value="CNC Fräsen 5-Achs · Material 1.4301 · Qty 12" readonly>
+            </div>
+            <div class="wm-field-group">
+              <div class="wm-label">Your unit price</div>
+              <input class="wm-field" id="wmPrice" type="text" placeholder="Enter unit price..." onfocus="showSuggestion()">
+            </div>
+            <div class="wm-suggestion governor" id="wmSuggestion">
+              <div class="wm-dot"></div>
+              <div class="wm-suggestion-text">
+                Wingman suggests <strong>€ 84,00 / Stück</strong> — based on 6 comparable CNC jobs (avg €81, range €76–90) and current 1.4301 material cost (€4.20/kg).
+                <a class="wm-why" onclick="toggleWhy()" id="wmWhyBtn">Why? ▾</a>
+                <div id="wmWhyDetail" style="display:none; margin-top:8px; font-size:12px; color:var(--ai-t); border-top:1px solid rgba(122,79,208,.15); padding-top:8px;">
+                  Machine: DMG 5-Achs · Zyklus 2.4h @ €48/h = €115 · Material €8/Teil · Setup €12/12 = €1 · Overhead 18% · Empfohlene Marge 34% → <strong>€84,00</strong>
+                </div>
+                <div class="wm-actions">
+                  <button class="wm-accept" onclick="acceptSuggestion()">Accept €84,00</button>
+                  <button class="wm-dismiss" onclick="dismissSuggestion()">Dismiss</button>
+                </div>
+              </div>
+            </div>
+            <div id="wmApproved" style="display:none; margin-top:8px;">
+              <span class="tag tag-green">✓ €84,00 accepted — Wingman suggestion applied</span>
+            </div>
+            <p style="font-size:12px; color:var(--t3); margin-top:12px;">Note: suggestion appears dimmed (governor opacity 0.5) until accepted. This prevents silent AI errors from going live.</p>
+          </div>
+          <div class="wm-panel">
+            <div class="wm-panel-title">
+              <div class="wm-panel-ai-dot"></div>
+              Wingman activity
+            </div>
+            <div class="wm-activity">
+              <div class="wm-act-item">
+                <div class="wm-act-dot ai"></div>
+                <div>
+                  <div class="wm-act-text">DFM-Analyse abgeschlossen — Tasche Tiefe/Breite 5,2:1 gemeldet</div>
+                  <div class="wm-act-time">vor 2 Min. · <span style="color:var(--ai)">Wingman</span></div>
+                </div>
+              </div>
+              <div class="wm-act-item">
+                <div class="wm-act-dot ai"></div>
+                <div>
+                  <div class="wm-act-text">Maße extrahiert aus Flansch_v3_CNC.step</div>
+                  <div class="wm-act-time">vor 3 Min. · <span style="color:var(--ai)">Wingman</span></div>
+                </div>
+              </div>
+              <div class="wm-act-item">
+                <div class="wm-act-dot user"></div>
+                <div>
+                  <div class="wm-act-text">RFQ angelegt — Müller GmbH</div>
+                  <div class="wm-act-time">vor 5 Min. · Benjamin</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="demo-controls">
+          <button class="demo-btn" onclick="resetWingman()">Reset demo</button>
+          <span class="demo-note">Click the price field to trigger suggestion · "Why?" reveals reasoning · Governor dims until accepted</span>
+        </div>
+      </div>
+    </div>
+
+    <h3>Proactive AI: when to fire</h3>
+    <p>From a 5-day field study of 15 developers with proactive AI (JetBrains/CMU, 2026): proactive suggestions fired <strong>mid-task were dismissed 62% of the time</strong>. The same suggestions at <strong>workflow boundaries</strong> (after saving, after completing a form, after a pause) achieved 52% engagement. For Bid Factory, this means Wingman fires proactively: after a STEP file is uploaded (DFM scan), after all line items are completed (margin check), after a quote is about to be sent (sanity check). Not while the estimator is mid-typing.</p>
+
+    <!-- ══════════════════════ §5 GAP ANALYSIS ══════════════════════ -->
+    <h2 id="gap">§5 Gap Analysis vs. Current Mock</h2>
+
+    <table class="gap-table">
+      <thead>
+        <tr>
+          <th>Pattern / Feature</th>
+          <th>2026 Standard</th>
+          <th>Mock Status</th>
+          <th>Priority</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="area">Collapsible sidebar</td>
+          <td>Standard in all B2B SaaS — 56-72px collapsed rail, click-to-toggle, localStorage</td>
+          <td class="status"><span class="tag tag-red">❌ Missing</span></td>
+          <td><span class="tag tag-red">P0 — your request</span></td>
+        </tr>
+        <tr>
+          <td class="area">Sidebar hover tooltips (collapsed)</td>
+          <td>Mandatory when icon-only state exists — hover tooltip shows full label</td>
+          <td class="status"><span class="tag tag-red">❌ Missing</span></td>
+          <td><span class="tag tag-red">P0 — paired with sidebar</span></td>
+        </tr>
+        <tr>
+          <td class="area">Sidebar collapse animation</td>
+          <td>200–300ms cubic-bezier(.4,0,.2,1) — specific curve matters</td>
+          <td class="status"><span class="tag tag-yellow">⚠ No transition set</span></td>
+          <td><span class="tag tag-red">P0 — paired with sidebar</span></td>
+        </tr>
+        <tr>
+          <td class="area">Keyboard shortcut to collapse sidebar</td>
+          <td>Linear uses [ — muscle-memory trainable</td>
+          <td class="status"><span class="tag tag-red">❌ Missing</span></td>
+          <td><span class="tag tag-yellow">P1</span></td>
+        </tr>
+        <tr>
+          <td class="area">Inline cell editing in line items table</td>
+          <td>Estimators edit Qty / cost / margin in-table — no modal required. Biggest speed win in CPQ.</td>
+          <td class="status"><span class="tag tag-yellow">⚠ Table shown but not editable</span></td>
+          <td><span class="tag tag-yellow">P1</span></td>
+        </tr>
+        <tr>
+          <td class="area">Expandable rows (operations detail)</td>
+          <td>Operations, DFM notes hidden by default — expand on demand. Standard in data-dense tables.</td>
+          <td class="status"><span class="tag tag-yellow">⚠ Flat table only</span></td>
+          <td><span class="tag tag-yellow">P1</span></td>
+        </tr>
+        <tr>
+          <td class="area">AI Governor pattern</td>
+          <td>AI-generated content appears at reduced opacity until user approves. Prevents silent errors.</td>
+          <td class="status"><span class="tag tag-red">❌ Missing</span></td>
+          <td><span class="tag tag-yellow">P1</span></td>
+        </tr>
+        <tr>
+          <td class="area">AI "Why?" link (explainability)</td>
+          <td>Every AI suggestion shows a brief label; "Why?" reveals reasoning. Linear / Cursor pattern.</td>
+          <td class="status"><span class="tag tag-red">❌ Missing</span></td>
+          <td><span class="tag tag-yellow">P1</span></td>
+        </tr>
+        <tr>
+          <td class="area">Keyboard shortcut hints in nav</td>
+          <td>Show shortcut hints on nav items (hover or always-visible). Teaches power-user mode.</td>
+          <td class="status"><span class="tag tag-yellow">⚠ Palette has shortcuts, nav doesn't</span></td>
+          <td><span class="tag tag-blue">P2</span></td>
+        </tr>
+        <tr>
+          <td class="area">Command palette (⌘K)</td>
+          <td>Table stakes — all actions reachable, fuzzy search, recents</td>
+          <td class="status"><span class="tag tag-green">✓ Implemented</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Dark mode</td>
+          <td>Expected — warm dark (#14161C), not pure black; per-theme dark primaries</td>
+          <td class="status"><span class="tag tag-green">✓ Fully implemented</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Role-based views</td>
+          <td>Same record, different defaults per role — Estimator / Manager / Customer</td>
+          <td class="status"><span class="tag tag-green">✓ Implemented in mock</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Stripe side panel (detail without nav)</td>
+          <td>Detail opens as right panel, list position preserved — no full page navigation</td>
+          <td class="status"><span class="tag tag-green">✓ Implemented</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Linear attention hierarchy</td>
+          <td>Nav items at low opacity default, full opacity + brand accent on active</td>
+          <td class="status"><span class="tag tag-green">✓ Implemented</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">AI color separation (Purple = AI only)</td>
+          <td>Strict color-meaning — purple never used outside AI affordances</td>
+          <td class="status"><span class="tag tag-green">✓ --ai: #7A4FD0</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Activity feed with AI attribution</td>
+          <td>Audit trail of AI actions, chronological, revertable</td>
+          <td class="status"><span class="tag tag-green">✓ Quote detail has activity feed</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Contextual save bar</td>
+          <td>Appears only when unsaved changes exist — no persistent footer noise</td>
+          <td class="status"><span class="tag tag-green">✓ Implemented</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Inter font</td>
+          <td>De facto standard for trust-signaling B2B SaaS</td>
+          <td class="status"><span class="tag tag-green">✓ Correct</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">KPI cards — 3-slot structure</td>
+          <td>Number + delta + label. Vercel's pattern. No more, no less.</td>
+          <td class="status"><span class="tag tag-green">✓ Dashboard has 4 KPI cards</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Optimistic UI (instant feedback)</td>
+          <td>Actions appear complete before server confirms. Linear hallmark.</td>
+          <td class="status"><span class="tag tag-blue">Out of scope (requires real API)</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Density toggle on tables</td>
+          <td>Compact / Default / Spacious. Power users want control.</td>
+          <td class="status"><span class="tag tag-blue">v2 scope</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="area">Mobile quoting</td>
+          <td>NOT required — desktop-first is correct for CPQ. Shop floor is a different surface.</td>
+          <td class="status"><span class="tag tag-blue">Correctly out of scope</span></td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- ══════════════════════ §6 UPDATES ══════════════════════ -->
+    <h2 id="updates">§6 Recommended Updates to BidFactory-LiveMock.html</h2>
+
+    <div class="callout yellow">
+      <div class="callout-icon">⚡</div>
+      <div class="callout-body"><strong>P0 (implement next):</strong> Collapsible sidebar with hover tooltips and smooth animation. This is your explicit request and the single highest-impact change.</div>
+    </div>
+
+    <h3>P0 — Collapsible sidebar changes</h3>
+    <p>In <code>BidFactory-LiveMock.html</code>, the following changes are needed:</p>
+    <ol>
+      <li>CSS: add <code>transition: width 260ms cubic-bezier(.4,0,.2,1)</code> to <code>.sidebar</code>, add <code>.sidebar.collapsed { width: 56px; }</code></li>
+      <li>CSS: in collapsed state, hide <code>.nav-label</code> text and <code>.logo-text</code>, show only icons and logo mark</li>
+      <li>CSS: tooltip positioning for collapsed icon hover (<code>position: absolute; left: calc(100% + 8px)</code>)</li>
+      <li>HTML: add a toggle button at the sidebar's right edge (the ◀/▶ chevron)</li>
+      <li>JS: <code>toggleSidebar()</code> function that toggles the <code>.collapsed</code> class and writes state to <code>localStorage</code></li>
+      <li>JS: on page load, read <code>localStorage.getItem('bf-sidebar-collapsed')</code> and apply if set</li>
+      <li>JS: document-level <kbd>[</kbd> keyboard listener that calls <code>toggleSidebar()</code></li>
+    </ol>
+
+    <h3>P1 — Line items table upgrade</h3>
+    <ol>
+      <li>Add <code>contenteditable="true"</code> to Qty and Margin cells (with <code>data-field</code> attribute for change tracking)</li>
+      <li>Add expand/collapse chevron column as first column</li>
+      <li>Add hidden <code>.operations-row</code> TR after each line item that expands on click</li>
+      <li>Style the expanded row distinctly (indent, smaller text, muted color)</li>
+    </ol>
+
+    <h3>P1 — AI Governor + "Why?" in Wingman affordances</h3>
+    <ol>
+      <li>Any AI-suggested value in the quote detail (price, lead time, DFM flag) renders at 50% opacity initially</li>
+      <li>An "Accept" micro-button and "Why?" link appear alongside the suggestion</li>
+      <li>Accepting restores full opacity and adds an activity log entry</li>
+      <li>Dismissing removes the suggestion and logs the dismissal</li>
+    </ol>
+
+    <h3>P2 — Shortcut hints in nav items</h3>
+    <p>Add <code>&lt;span class="nav-shortcut"&gt;D&lt;/span&gt;</code> hints to sidebar nav items (Dashboard = D, Quotes = Q, etc.) visible on hover. These are distinct from command palette shortcuts — they're <strong>direct navigation keys</strong>, a power-user feature that should be discoverable but not distracting.</p>
+
+    <!-- ══════════════════════ SOURCES ══════════════════════ -->
+    <h2 id="sources">Sources</h2>
+    <div class="sources">
+      <h4>Sidebar Navigation</h4>
+      <ul>
+        <li><a href="https://www.alfdesigngroup.com/post/improve-your-sidebar-design-for-web-apps">Sidebar Design for Web Apps: UX Best Practices (2026) — ALF Design Group</a></li>
+        <li><a href="https://uxplanet.org/best-ux-practices-for-designing-a-sidebar-9174ee0ecaa2">Best UX Practices for Designing a Sidebar — UX Planet / Dmitry Sergushkin</a></li>
+        <li><a href="https://www.saasui.design/blog/7-saas-ui-design-trends-2026">7 SaaS UI Design Trends in 2026 — SaaSUI.Design</a></li>
+        <li><a href="https://linear.app/changelog/unpublished-collapsible-sidebar">Linear Collapsible Sidebar — Linear Changelog</a></li>
+      </ul>
+      <h4>B2B SaaS UI Trends</h4>
+      <ul>
+        <li><a href="https://laderalabs.io/blog/saas-ux-trends-2026">The State of SaaS UX Design 2026 — LaderaLABS</a></li>
+        <li><a href="https://www.b2bnn.com/2026/02/the-rise-of-dark-mode/">The Rise of Dark Mode — B2B News Network</a></li>
+        <li><a href="https://primotech.com/ui-ux-evolution-2026-why-micro-interactions-and-motion-matter-more-than-ever/">UI/UX Evolution 2026: Micro-Interactions and Motion — Primotech</a></li>
+      </ul>
+      <h4>Best-in-Class Tools</h4>
+      <ul>
+        <li><a href="https://linear.app/now/how-we-redesigned-the-linear-ui">How We Redesigned the Linear UI (Part II) — Linear</a></li>
+        <li><a href="https://nimpatil.substack.com/p/the-ux-psychology-behind-linears">The UX Psychology Behind Linear's Speed — Nimisha Patil</a></li>
+        <li><a href="https://vercel.com/blog/dashboard-redesign">Vercel Dashboard Redesign — Vercel</a></li>
+        <li><a href="https://hex.tech/blog/fall-2025-launch/">Hex Fall 2025 Launch — Hex</a></li>
+        <li><a href="https://getdesign.md/superhuman/design-md">Superhuman Design System Analysis — getdesign.md</a></li>
+      </ul>
+      <h4>AI UX Patterns</h4>
+      <ul>
+        <li><a href="https://www.technology.org/2026/04/28/the-new-ux-of-ai-native-saas-and-erp-six-design-patterns-were-shipping-in-2026/">AI-Native SaaS and ERP UX in 2026 — Technology.org</a></li>
+        <li><a href="https://mantlr.com/blog/designing-for-ai-agents-ux-patterns-2026">Designing for AI Agents: 10 UX Patterns (2026) — Mantlr</a></li>
+        <li><a href="https://arxiv.org/abs/2601.10253">Developer Interaction Patterns with Proactive AI: A Field Study — arXiv</a></li>
+        <li><a href="https://www.letsgroto.com/blog/mastering-ai-copilot-design">Mastering AI Copilot Design — letsgroto.com</a></li>
+        <li><a href="https://www.taskade.com/blog/ai-native-vs-ai-bolted">AI-Native vs AI-Bolted-On — Taskade</a></li>
+      </ul>
+      <h4>Manufacturing / CPQ UX</h4>
+      <ul>
+        <li><a href="https://mobileforce.ai/blog/the-hidden-reason-cpq-implementations-fail-ux-mismatch-and-how-mobileforce-solves-it/">The Real Reason CPQ Fails: UX Mismatch — Mobileforce</a></li>
+        <li><a href="https://www.uxmatters.com/mt/archives/2023/03/using-ux-design-to-enhance-the-performance-of-cpq-systems.php">Using UX Design to Enhance CPQ Systems — UXmatters</a></li>
+        <li><a href="https://www.pencilandpaper.io/articles/ux-pattern-analysis-enterprise-data-tables">Enterprise Data Table UX Patterns — Pencil &amp; Paper</a></li>
+        <li><a href="https://proshoperp.com/blog/6-manufacturing-erp-red-flags-time-to-switch/">6 Manufacturing ERP Red Flags — ProShop ERP</a></li>
+        <li><a href="https://www.paperlessparts.com/blog/manufacturing-quoting-software-revolutionized/">Manufacturing Quoting Software Revolutionized — Paperless Parts</a></li>
+      </ul>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── §1 Sidebar demo ──
+let sidebarCollapsed = false;
+
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  const sb = document.getElementById('sdSidebar');
+  const btn = document.getElementById('sdToggle');
+  const sub = document.getElementById('sdContentSub');
+  if (sidebarCollapsed) {
+    sb.classList.add('collapsed');
+    btn.textContent = '▶';
+    sub.textContent = 'Sidebar collapsed to icon rail (56px). Hover icons for tooltips. Press [ or click ▶ to expand.';
+  } else {
+    sb.classList.remove('collapsed');
+    btn.textContent = '◀';
+    sub.textContent = 'Sidebar expanded. Click ◀ or press [ to collapse to icon rail.';
+  }
+}
+
+// Keyboard shortcut [ on demo section
+document.addEventListener('keydown', function(e) {
+  if (e.key === '[' && !e.ctrlKey && !e.metaKey) {
+    const active = document.activeElement;
+    if (!active || active.tagName === 'BODY' || active.tagName === 'MAIN') {
+      toggleSidebar();
+    }
+  }
+});
+
+// ── §3 Data table demo ──
+function toggleRow(btnId, rowId) {
+  const row = document.getElementById(rowId);
+  const btn = document.getElementById(btnId + 'btn');
+  if (row.style.display === 'none') {
+    row.style.display = '';
+    btn.textContent = '▼';
+    btn.style.color = 'var(--p)';
+  } else {
+    row.style.display = 'none';
+    btn.textContent = '▶';
+    btn.style.color = '';
+  }
+}
+
+// ── §4 Wingman demo ──
+function showSuggestion() {
+  const s = document.getElementById('wmSuggestion');
+  s.classList.add('visible');
+}
+
+function toggleWhy() {
+  const detail = document.getElementById('wmWhyDetail');
+  const btn = document.getElementById('wmWhyBtn');
+  if (detail.style.display === 'none') {
+    detail.style.display = 'block';
+    btn.textContent = 'Why? ▴';
+  } else {
+    detail.style.display = 'none';
+    btn.textContent = 'Why? ▾';
+  }
+}
+
+function acceptSuggestion() {
+  document.getElementById('wmSuggestion').style.display = 'none';
+  document.getElementById('wmApproved').style.display = 'block';
+  document.getElementById('wmPrice').value = '€ 84,00';
+}
+
+function dismissSuggestion() {
+  document.getElementById('wmSuggestion').classList.remove('visible');
+  document.getElementById('wmSuggestion').style.display = 'none';
+}
+
+function resetWingman() {
+  const s = document.getElementById('wmSuggestion');
+  s.style.display = '';
+  s.classList.remove('visible');
+  document.getElementById('wmApproved').style.display = 'none';
+  document.getElementById('wmPrice').value = '';
+  document.getElementById('wmWhyDetail').style.display = 'none';
+  document.getElementById('wmWhyBtn').textContent = 'Why? ▾';
+}
+</script>
+</body>
+</html>

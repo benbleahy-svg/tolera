@@ -1,0 +1,2227 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="claude" data-mode="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bid Factory — Live Mock</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..700&display=swap" rel="stylesheet">
+<style>
+
+/* ══════════════════════════════════════════
+   DESIGN TOKEN SYSTEM
+   Theme × Mode = full visual identity
+══════════════════════════════════════════ */
+:root {
+  /* ── Light mode base — warmer cream (Claude-adjacent) ── */
+  --canvas:    #F5F2ED;
+  --surface:   #FFFFFF;
+  --s2:        #F7F5F0;
+  --s3:        #EFEDE8;
+  --nav:       #1C1916;   /* dark warm sidebar — overridden in dark mode */
+  --inv:       #1C1F26;
+  --inv-text:  #F0EEE9;
+  --text:      #2E2C29;
+  --t2:        #6B6862;
+  --t3:        #B3B0A9;
+  --border:    #E5E3DE;
+  --border2:   #EDEBE6;
+  --borders:   #C9C6BF;
+  --shadow:    0 1px 0 rgba(35,33,30,.07), 0 0 0 1px rgba(35,33,30,.05);
+  --shadow-lg: 0 4px 16px -4px rgba(35,33,30,.18), 0 0 0 1px rgba(35,33,30,.06);
+
+  /* ── Semantic colors ── */
+  --g:  #1F7A4D; --g-bg:  #E3F4EA; --g-t:  #155C39;
+  --w:  #B57E00; --w-bg:  #FFF4D6; --w-t:  #6E4D00;
+  --cr: #C2333B; --cr-bg: #FCE9EA; --cr-t: #8A2028;
+  --ai: #7A4FD0; --ai-bg: #F1EBFC; --ai-t: #5234A0;
+  --lk: #0A66B5; --lk-bg: #E8F2FB;
+
+  /* ── Default theme: Cobalt ── */
+  --p:    #1B52C4;
+  --p-h:  #1440A0;
+  --p-bg: #EBF1FB;
+  --p-t:  #0D2E7A;
+
+  /* ── Layout ── */
+  --sw: 216px;
+  --th: 48px;
+  --r:  10px;
+  --rc: 8px;
+
+  --font: 'Inter', -apple-system, sans-serif;
+  --mono: 'SF Mono', ui-monospace, monospace;
+}
+
+/* ── Theme overrides ── */
+[data-theme="cobalt"]{ --p:#1B52C4; --p-h:#1440A0; --p-bg:#EBF1FB; --p-t:#0D2E7A; }
+[data-theme="teal"]  { --p:#0B8A98; --p-h:#096F7A; --p-bg:#E4F4F7; --p-t:#064F5A; }
+[data-theme="indigo"]{ --p:#5248D4; --p-h:#4038BE; --p-bg:#EEEDFB; --p-t:#2C2490; }
+[data-theme="slate"] { --p:#2E6093; --p-h:#234C78; --p-bg:#E8F1F8; --p-t:#1A3D62; }
+[data-theme="amber"] { --p:#B8690A; --p-h:#965208; --p-bg:#FEF3E5; --p-t:#7A4205; }
+[data-theme="orange"]   { --p:#E8590C; --p-h:#D14F08; --p-bg:#FDEEE4; --p-t:#9E3D08; }
+
+/* ── Precision Graphite — near-monochrome, instrument-panel feel ── */
+/* Canvas shifts cooler (#EDEEF1 vs warm #F2F2F0).                  */
+/* Primary is deep navy-graphite; accent is crisp electric blue.    */
+/* Closest real-world ref: Siemens Sinumerik / Heidenhain iTNC.     */
+[data-theme="precision"] {
+  --p:      #1D3461;
+  --p-h:    #142650;
+  --p-bg:   #E8EBF5;
+  --p-t:    #0E1E40;
+  --canvas: #EDEEF1;
+  --nav:    #F4F5F7;
+  --border: #DFE1E8;
+  --border2:#E8EAF0;
+  --s2:     #F4F5F8;
+  --s3:     #EAECF2;
+}
+
+/* ── Claude / Anthropic — warm rust primary, sand canvas ── */
+/* Mirrors the exact palette of claude.ai: terracotta accent,  */
+/* warm cream background, dark charcoal sidebar.               */
+[data-theme="claude"] {
+  --p:      #CC6431;   /* Anthropic rust/terracotta */
+  --p-h:    #B35428;
+  --p-bg:   #FAEEE5;
+  --p-t:    #8B3918;
+  --canvas: #F7F2EA;   /* warm sand — claude.ai background */
+  --surface: #FFFDF9;
+  --s2:     #F2EDE4;
+  --s3:     #EAE4DA;
+  --border: #E2DAD0;
+  --border2:#EAE4DA;
+  --borders:#C9C0B4;
+}
+
+/* ── Dark mode — warm dark, matching Claude desktop ── */
+[data-mode="dark"] {
+  --canvas:  #13110E;   /* warm near-black — not cool slate */
+  --surface: #1A1714;
+  --s2:      #1F1C18;
+  --s3:      #252119;
+  --nav:     #161310;
+  --inv:     #E8E6E1;
+  --inv-text:#1A1714;
+  --text:    #E4E2DD;
+  --t2:      #8C8A85;
+  --t3:      #555350;
+  --border:  #2B2820;
+  --border2: #231F1C;
+  --borders: #3A3530;
+  --shadow:  0 1px 0 rgba(0,0,0,.28), 0 0 0 1px rgba(0,0,0,.20);
+  --shadow-lg:0 4px 20px -4px rgba(0,0,0,.45), 0 0 0 1px rgba(0,0,0,.28);
+  --g:  #2CB86C; --g-bg:  #0D2419; --g-t:  #4FD48C;
+  --w:  #D9A020; --w-bg:  #281F04; --w-t:  #F0C060;
+  --cr: #E04B54; --cr-bg: #28100F; --cr-t: #F07078;
+  --ai: #9B7AE0; --ai-bg: #1C1438; --ai-t: #C0A8F8;
+  --lk: #4A9AE8; --lk-bg: #0E2040;
+}
+[data-mode="dark"][data-theme="cobalt"]{ --p:#4E7FDB; --p-h:#3D6BC7; --p-bg:#162040; --p-t:#A0C0F8; }
+[data-mode="dark"][data-theme="teal"]  { --p:#28B5C8; --p-h:#1A9EAF; --p-bg:#0C2530; --p-t:#78D8E8; }
+[data-mode="dark"][data-theme="indigo"]{ --p:#7B74E8; --p-h:#6860D8; --p-bg:#1C1A38; --p-t:#B4B0F8; }
+[data-mode="dark"][data-theme="slate"] { --p:#5A93C8; --p-h:#4880B8; --p-bg:#122030; --p-t:#90C0E8; }
+[data-mode="dark"][data-theme="amber"] { --p:#E0922A; --p-h:#CC7E18; --p-bg:#251A06; --p-t:#F0C070; }
+[data-mode="dark"][data-theme="orange"]    { --p:#FF7A35; --p-h:#E86820; --p-bg:#2A1508; --p-t:#FFB088; }
+[data-mode="dark"][data-theme="precision"] {
+  --p:      #5B8DD9;
+  --p-h:    #4A78C8;
+  --p-bg:   #0F1825;
+  --p-t:    #99C0F0;
+  --canvas: #11131A;
+  --nav:    #14161E;
+  --border: #222533;
+  --border2:#1C1F2C;
+  --s2:     #171A24;
+  --s3:     #1C2030;
+}
+[data-mode="dark"][data-theme="claude"] {
+  --p:      #E07845;   /* brighter terracotta on dark surfaces */
+  --p-h:    #CE6538;
+  --p-bg:   #28140A;
+  --p-t:    #F0A882;
+  --canvas: #14120E;   /* very warm dark — almost like a warm #111 */
+  --surface:#1C1914;
+  --s2:     #221F1A;
+  --s3:     #2A261F;
+  --border: #312C25;
+  --border2:#27231D;
+}
+
+/* ══════════════════════════════════════════
+   GLOBAL RESET & BASE
+══════════════════════════════════════════ */
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html,body { height:100%; overflow:hidden; }
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+  transition: background .25s, color .25s;
+}
+
+/* ══════════════════════════════════════════
+   APP SHELL
+══════════════════════════════════════════ */
+.app {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ─── SIDEBAR ─── */
+.sidebar {
+  width: var(--sw);
+  flex-shrink: 0;
+  background: var(--nav);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  transition: background .25s, border-color .25s, width 260ms cubic-bezier(.4,0,.2,1);
+  position: relative;
+}
+
+/* ── Collapsed sidebar: 56px icon rail ── */
+.sidebar.collapsed { width: 56px; }
+
+/* Hide text content when collapsed */
+.sidebar.collapsed .brand-name,
+.sidebar.collapsed .ss-label,
+.sidebar.collapsed .ss-kbd,
+.sidebar.collapsed .nav-section-label,
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .nav-badge,
+.sidebar.collapsed .footer-name,
+.sidebar.collapsed .footer-role,
+.sidebar.collapsed .footer-settings { display: none; }
+
+/* Re-center collapsed elements */
+.sidebar.collapsed .sidebar-brand { justify-content: center; padding: 14px 0; }
+.sidebar.collapsed .sidebar-top-row { justify-content: center; padding: 10px 4px 4px; gap: 0; }
+.sidebar.collapsed .sidebar-search { display: none; }
+.sidebar.collapsed .nav-item { padding: 9px 0; justify-content: center; border-left-width: 2px; }
+.sidebar.collapsed .sidebar-nav { padding: 4px 4px 2px; }
+.sidebar.collapsed .sidebar-footer { justify-content: center; padding: 10px 0; }
+
+/* Icon swap: show/hide the two SVGs inside the collapse button */
+.sidebar-collapse-btn .icon-collapse { display: block; }
+.sidebar-collapse-btn .icon-expand  { display: none; }
+.sidebar.collapsed .sidebar-collapse-btn .icon-collapse { display: none; }
+.sidebar.collapsed .sidebar-collapse-btn .icon-expand  { display: block; }
+
+/* Tooltip on collapsed hover */
+.nav-tooltip {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--inv);
+  color: var(--inv-text);
+  font-size: 11.5px;
+  font-weight: 560;
+  padding: 4px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 200;
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  transition: opacity .1s;
+}
+.sidebar.collapsed .nav-item { position: relative; }
+.sidebar.collapsed .nav-item:hover .nav-tooltip { opacity: 1; }
+
+/* ── Sidebar top row: search + collapse side-by-side ── */
+.sidebar-top-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 6px 4px;
+}
+/* search flex-fills the row */
+.sidebar-top-row .sidebar-search { flex: 1; margin: 0; }
+
+/* Collapse button — bare icon, matches Claude desktop */
+.sidebar-collapse-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,.38);
+  transition: background .15s, color .15s, transform .26s cubic-bezier(.4,0,.2,1);
+}
+.sidebar-collapse-btn:hover {
+  background: rgba(255,255,255,.07);
+  color: rgba(255,255,255,.80);
+}
+
+/* ─── Dark sidebar overrides — Claude-style inverted sidebar ─── */
+/* All items inside .sidebar get light-on-dark treatment.         */
+.sidebar { background: #1C1916; border-right: none; }
+[data-mode="dark"] .sidebar { background: #0E0C0A; border-right: none; }
+
+.sidebar .nav-section-label { color: rgba(255,255,255,.28); }
+/* Nav items: no opacity trick — direct color at ~70% */
+.sidebar .nav-item { color: rgba(255,255,255,.65); border-left: none; opacity: 1; box-shadow: none; }
+.sidebar .nav-item:hover { background: rgba(255,255,255,.06); color: rgba(255,255,255,.92); }
+.sidebar .nav-item.active {
+  background: rgba(255,255,255,.09);
+  color: rgba(255,255,255,.96);
+  border-left: none;
+  box-shadow: none;
+}
+.sidebar .nav-sep { background: rgba(255,255,255,.08); }
+.sidebar .footer-name { color: rgba(255,255,255,.75); }
+.sidebar .footer-role { color: rgba(255,255,255,.38); }
+.sidebar .footer-settings { color: rgba(255,255,255,.35); }
+
+/* Tooltip on dark sidebar — same dark as sidebar surface */
+.nav-tooltip { background: #2E2B26; border: 1px solid rgba(255,255,255,.12); color: rgba(255,255,255,.88); }
+
+/* Collapse btn tooltip */
+.sidebar-collapse-btn-wrap { position: relative; }
+.sidebar-collapse-btn-wrap:hover .sidebar-collapse-tip { opacity: 1; }
+.sidebar-collapse-tip {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 50%; transform: translateY(-50%);
+  background: #2E2B26; border: 1px solid rgba(255,255,255,.12); color: rgba(255,255,255,.88);
+  font-size: 11px; font-weight: 560; padding: 4px 8px; border-radius: 5px;
+  white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; z-index: 200;
+}
+
+/* ─── Sidebar brand — hidden; brand lives in topbar ─── */
+.sidebar-brand { display: none; }
+
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--p);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  transition: background .25s;
+}
+
+.brand-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: rgba(255,255,255,.85);
+  letter-spacing: -.1px;
+}
+
+.brand-name span {
+  opacity: .45;
+  font-weight: 400;
+}
+
+.sidebar-search {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  height: 32px;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: background .15s;
+  flex-shrink: 0;
+}
+
+.sidebar-search:hover { background: rgba(255,255,255,.07); }
+.sidebar-search .ss-label { font-size: 12px; color: rgba(255,255,255,.45); flex: 1; }
+.sidebar-search .ss-kbd { display: flex; gap: 2px; }
+.kbd { font-family: var(--mono); font-size: 10px; padding: 1px 4px; border-radius: 4px; background: rgba(255,255,255,.10); color: rgba(255,255,255,.4); border: 1px solid rgba(255,255,255,.15); }
+
+.sidebar-nav {
+  flex: 0 0 auto;
+  padding: 4px 8px 2px;
+}
+
+.nav-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--t3);
+  padding: 10px 8px 3px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  opacity: 1;
+  transition: background .15s, color .15s;
+  user-select: none;
+}
+
+.nav-item:hover { background: var(--s2); }
+
+.nav-item.active {
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.nav-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.nav-item.active .nav-icon { color: var(--p); }
+
+.nav-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 650;
+  background: var(--cr-bg);
+  color: var(--cr-t);
+  border-radius: 4px;
+  padding: 1px 5px;
+  opacity: 1 !important;
+}
+
+.nav-sep { height: 1px; background: var(--border); margin: 8px 4px; }
+
+/* ── New Quote primary action ── */
+.sidebar-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 8px 2px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: rgba(255,255,255,.75);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  user-select: none;
+  flex-shrink: 0;
+}
+.sidebar-new-btn:hover { background: rgba(255,255,255,.08); color: rgba(255,255,255,.95); }
+.sidebar-new-btn .new-plus {
+  width: 20px; height: 20px;
+  border-radius: 6px;
+  background: rgba(255,255,255,.12);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: rgba(255,255,255,.7);
+}
+.sidebar.collapsed .sidebar-new-btn { margin: 6px 4px 2px; padding: 6px 0; justify-content: center; }
+.sidebar.collapsed .sidebar-new-btn span:not(.new-plus) { display: none; }
+
+/* ── Recents section ── */
+.sidebar-recents {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0 4px;
+  min-height: 0;
+}
+.sidebar-recents::-webkit-scrollbar { width: 3px; }
+.sidebar-recents::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 99px; }
+
+.recents-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 18px 4px;
+  gap: 4px;
+}
+.recents-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,.32);
+  letter-spacing: .04em;
+  flex: 1;
+}
+.recents-view-all {
+  font-size: 11px;
+  color: rgba(255,255,255,.28);
+  cursor: pointer;
+  transition: color .15s;
+  white-space: nowrap;
+}
+.recents-view-all:hover { color: rgba(255,255,255,.65); }
+
+.recent-q {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px 5px 18px;
+  font-size: 12px;
+  color: rgba(255,255,255,.58);
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 0 4px;
+  transition: background .12s, color .12s;
+  min-width: 0;
+}
+.recent-q:hover { background: rgba(255,255,255,.06); color: rgba(255,255,255,.88); }
+.recent-q-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.recent-q-num {
+  font-size: 10.5px;
+  color: rgba(255,255,255,.25);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar.collapsed .sidebar-recents { display: none; }
+
+/* ── Footer chip (Claude-style) ── */
+.sidebar-footer {
+  padding: 8px 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  cursor: pointer;
+  border-radius: 8px;
+  margin: 0 4px 2px;
+  transition: background .15s;
+}
+.sidebar-footer:hover { background: rgba(255,255,255,.07); }
+
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--p);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.footer-name { font-size: 12px; font-weight: 550; color: rgba(255,255,255,.78); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.footer-org {
+  font-size: 10px;
+  color: rgba(255,255,255,.35);
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.footer-more {
+  width: 22px; height: 22px;
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  color: rgba(255,255,255,.32);
+  transition: background .12s, color .12s;
+}
+.footer-more:hover { background: rgba(255,255,255,.10); color: rgba(255,255,255,.8); }
+.sidebar.collapsed .sidebar-footer { justify-content: center; padding: 8px 0 10px; margin: 0; }
+.sidebar.collapsed .footer-name,
+.sidebar.collapsed .footer-org,
+.sidebar.collapsed .footer-more { display: none; }
+
+/* ─── MAIN AREA ─── */
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ─── TOPBAR ─── */
+.topbar {
+  height: var(--th);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 12px;
+  flex-shrink: 0;
+  transition: background .25s, border-color .25s;
+}
+
+.topbar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.topbar-breadcrumb .crumb { color: var(--t2); font-weight: 400; }
+.topbar-breadcrumb .sep { color: var(--t3); }
+
+.topbar-spacer { flex: 1; }
+
+/* Color palette picker */
+.palette-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: var(--s2);
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+
+.palette-label {
+  font-size: 10.5px;
+  color: var(--t3);
+  font-weight: 500;
+  margin-right: 2px;
+}
+
+.p-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform .15s, border-color .15s;
+  position: relative;
+}
+
+.p-swatch:hover { transform: scale(1.25); }
+.p-swatch.active { border-color: var(--text); }
+
+.p-swatch[data-t="cobalt"]{ background:#1B52C4; }
+.p-swatch[data-t="teal"]  { background:#0B8A98; }
+.p-swatch[data-t="indigo"]{ background:#5248D4; }
+.p-swatch[data-t="slate"] { background:#2E6093; }
+.p-swatch[data-t="amber"] { background:#B8690A; }
+.p-swatch[data-t="orange"]    { background:#E8590C; }
+.p-swatch[data-t="precision"] { background:#1D3461; }
+.p-swatch[data-t="claude"]    { background:#CC6431; }
+
+.topbar-div { width: 1px; height: 20px; background: var(--border); }
+
+/* Mode toggle */
+.mode-toggle {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--s2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  transition: background .15s;
+}
+.mode-toggle:hover { background: var(--s3); }
+
+/* ─── CONTENT AREA ─── */
+.content-area {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+  background: var(--canvas);
+  transition: background .25s;
+}
+
+/* ── Screens ── */
+.screen { display: none; padding: 24px 28px 80px; }
+.screen.active { display: block; }
+
+/* ══════════════════════════════════════════
+   SCREEN 1: DASHBOARD
+══════════════════════════════════════════ */
+
+.dash-greeting {
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--text);
+  margin-bottom: 4px;
+  letter-spacing: -.2px;
+}
+
+.dash-date {
+  font-size: 12.5px;
+  color: var(--t2);
+  margin-bottom: 22px;
+}
+
+/* KPI strip */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.kpi-card {
+  background: var(--surface);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  transition: background .25s;
+}
+
+.kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--t3);
+  margin-bottom: 6px;
+}
+
+.kpi-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-sub {
+  font-size: 11.5px;
+  color: var(--t2);
+  margin-top: 3px;
+}
+
+.kpi-delta {
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.kpi-delta.up { color: var(--g); }
+.kpi-delta.dn { color: var(--cr); }
+.kpi-delta.warn { color: var(--w); }
+
+/* Two-col layout */
+.dash-cols {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+}
+
+.panel {
+  background: var(--surface);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: background .25s;
+}
+
+.panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  flex: 1;
+}
+
+.panel-sub {
+  font-size: 11.5px;
+  color: var(--t2);
+}
+
+/* Work queue */
+.queue-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border2);
+  cursor: pointer;
+  transition: background .15s;
+}
+.queue-item:last-child { border-bottom: none; }
+.queue-item:hover { background: var(--s2); }
+
+.urgency-score {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.u-hi { background: var(--cr-bg); color: var(--cr-t); }
+.u-md { background: var(--w-bg); color: var(--w-t); }
+.u-lo { background: var(--s3); color: var(--t2); }
+
+.queue-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.queue-meta { font-size: 11.5px; color: var(--t2); margin-top: 2px; line-height: 1.4; }
+
+.queue-right {
+  margin-left: auto;
+  text-align: right;
+  flex-shrink: 0;
+}
+.queue-val { font-size: 12.5px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
+.queue-due { font-size: 11px; color: var(--t2); margin-top: 2px; }
+.queue-due.overdue { color: var(--cr-t); font-weight: 600; }
+
+/* Recents */
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border2);
+  cursor: pointer;
+  transition: background .15s;
+}
+.recent-item:last-child { border-bottom: none; }
+.recent-item:hover { background: var(--s2); }
+
+.recent-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--p-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.recent-title { font-size: 12.5px; font-weight: 550; color: var(--text); }
+.recent-meta { font-size: 11px; color: var(--t2); }
+.recent-time { margin-left: auto; font-size: 11px; color: var(--t3); flex-shrink: 0; }
+
+/* ══════════════════════════════════════════
+   SCREEN 2: QUOTE DETAIL
+══════════════════════════════════════════ */
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.back-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--borders);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--t2);
+  font-size: 15px;
+  transition: background .15s;
+  flex-shrink: 0;
+}
+.back-btn:hover { background: var(--s2); }
+
+.page-title {
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--text);
+  letter-spacing: -.2px;
+}
+
+.page-sub {
+  font-size: 12.5px;
+  color: var(--t2);
+  margin-top: 1px;
+}
+
+.page-spacer { flex: 1; }
+
+/* Lead question hero — THE STRIPE PRINCIPLE */
+.quote-hero {
+  background: var(--surface);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  transition: background .25s;
+}
+
+.hero-stat { text-align: center; }
+.hero-stat .hs-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--t3); margin-bottom: 3px; }
+.hero-stat .hs-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.3px; }
+.hero-stat .hs-val.primary { color: var(--p); }
+.hero-stat .hs-val.positive { color: var(--g); }
+.hero-stat .hs-sub { font-size: 11px; color: var(--t2); margin-top: 2px; }
+.hero-div { width: 1px; height: 40px; background: var(--border); }
+
+/* 2-column detail layout */
+.detail-cols {
+  display: grid;
+  grid-template-columns: 1fr 296px;
+  gap: 14px;
+}
+
+/* Line items table */
+.line-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.line-table th {
+  padding: 8px 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--t3);
+  background: var(--s2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.line-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border2);
+  color: var(--text);
+  vertical-align: middle;
+}
+.line-table tr:last-child td { border-bottom: none; }
+.line-table tbody tr { cursor: pointer; transition: background .12s; }
+.line-table tbody tr:hover td { background: var(--s2); }
+.line-table tbody tr.li-expanded td { background: var(--s2); }
+/* Expanded operations sub-row */
+.li-ops-row td {
+  padding: 4px 12px 10px 36px;
+  background: var(--s2);
+  color: var(--t2);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border2);
+  cursor: default;
+}
+.li-ops-row:hover td { background: var(--s2) !important; }
+/* Expand chevron */
+.li-expand-btn {
+  background: none; border: none; cursor: pointer;
+  padding: 2px 4px; color: var(--t3); font-size: 10px;
+  transition: color .12s, transform .15s;
+  display: inline-flex; align-items: center;
+}
+.li-expand-btn:hover { color: var(--text); }
+.li-expand-btn.open { transform: rotate(90deg); color: var(--p); }
+/* Inline editable cells */
+.li-editable {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 5px;
+  cursor: text;
+  display: inline-block;
+  min-width: 48px;
+  transition: border-color .12s, background .12s;
+  font-variant-numeric: tabular-nums;
+}
+.li-editable:focus {
+  outline: none;
+  border-color: var(--p);
+  background: var(--p-bg);
+}
+/* AI Governor — dimmed pending approval */
+.governor-wrap {
+  background: var(--ai-bg);
+  border: 1px solid rgba(122,79,208,.18);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 4px;
+  opacity: 0.55;
+  transition: opacity .2s;
+}
+.governor-wrap.approved { opacity: 1; background: var(--g-bg); border-color: rgba(31,122,77,.2); }
+.governor-wrap.dismissed { display: none; }
+.governor-header { display: flex; align-items: flex-start; gap: 8px; }
+.governor-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ai); flex-shrink: 0; margin-top: 4px; }
+.governor-text { font-size: 12.5px; color: var(--ai-t); flex: 1; }
+.governor-text strong { color: var(--ai); }
+.governor-why { font-size: 11px; color: var(--ai); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; display: inline; }
+.governor-why:hover { opacity: .8; }
+.governor-reason { font-size: 11.5px; color: var(--ai-t); margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(122,79,208,.15); display: none; }
+.governor-actions { display: flex; gap: 6px; margin-top: 8px; }
+.gov-accept { padding: 3px 9px; background: var(--ai); color:#fff; border:none; border-radius:5px; font-size:11.5px; cursor:pointer; font-family:var(--font); font-weight:550; }
+.gov-dismiss { padding: 3px 9px; background: none; color: var(--ai-t); border: 1px solid rgba(122,79,208,.3); border-radius:5px; font-size:11.5px; cursor:pointer; font-family:var(--font); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Side cards */
+.side-card {
+  background: var(--surface);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-bottom: 12px;
+  transition: background .25s;
+}
+.side-card:last-child { margin-bottom: 0; }
+
+.sc-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.sc-body { padding: 12px 14px; }
+.sc-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 7px; font-size: 12px; }
+.sc-row:last-child { margin-bottom: 0; }
+.sc-label { color: var(--t2); flex-shrink: 0; }
+.sc-val { color: var(--text); text-align: right; font-weight: 500; }
+
+/* Activity */
+.activity-item {
+  display: flex;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border2);
+  font-size: 12px;
+}
+.activity-item:last-child { border-bottom: none; }
+.act-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--borders); margin-top: 5px; flex-shrink: 0; }
+.act-dot.ai { background: var(--ai); }
+.act-dot.primary { background: var(--p); }
+.act-text { color: var(--text); line-height: 1.4; }
+.act-time { font-size: 11px; color: var(--t3); margin-top: 2px; }
+
+/* ══════════════════════════════════════════
+   BADGES
+══════════════════════════════════════════ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.badge-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.b-neutral { background: var(--s3); color: var(--t2); }
+.b-success { background: var(--g-bg); color: var(--g-t); }
+.b-success .badge-dot { background: var(--g); }
+.b-warn { background: var(--w-bg); color: var(--w-t); }
+.b-warn .badge-dot { border: 2px solid var(--w); width: 4px; height: 4px; background: transparent; }
+.b-crit { background: var(--cr-bg); color: var(--cr-t); }
+.b-crit .badge-dot { background: var(--cr); }
+.b-ai { background: var(--ai-bg); color: var(--ai-t); }
+.b-primary { background: var(--p-bg); color: var(--p-t); }
+
+/* ══════════════════════════════════════════
+   BUTTONS
+══════════════════════════════════════════ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  border-radius: var(--rc);
+  padding: 6px 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: background .15s;
+}
+.btn-primary { background: var(--p); color: #fff; }
+.btn-primary:hover { background: var(--p-h); }
+.btn-ghost { background: var(--s2); color: var(--text); border-color: var(--border); }
+.btn-ghost:hover { background: var(--s3); }
+.btn-inv { background: var(--inv); color: var(--inv-text); border-color: transparent; }
+
+/* ══════════════════════════════════════════
+   CONTEXTUAL SAVE BAR
+══════════════════════════════════════════ */
+.savebar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--inv);
+  color: var(--inv-text);
+  border-radius: 10px;
+  padding: 8px 8px 8px 16px;
+  font-size: 12.5px;
+  font-weight: 550;
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s, transform .2s;
+  transform: translateX(-50%) translateY(6px);
+  white-space: nowrap;
+}
+.savebar.show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.savebar-msg { color: var(--inv-text); opacity: .8; }
+.savebar-spacer { flex: 1; min-width: 12px; }
+.savebar-discard {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.2);
+  color: var(--inv-text);
+  opacity: .7;
+}
+.savebar-discard:hover { opacity: 1; background: rgba(255,255,255,.1); }
+
+/* ══════════════════════════════════════════
+   SIDE PANEL (record detail)
+══════════════════════════════════════════ */
+.sidepanel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.2);
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s;
+}
+.sidepanel-overlay.show { opacity: 1; pointer-events: auto; }
+
+.sidepanel {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 420px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform .28s cubic-bezier(.4,0,.2,1);
+}
+.sidepanel.open { transform: translateX(0); }
+
+.sp-header {
+  height: 52px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  flex-shrink: 0;
+  background: var(--s2);
+}
+
+.sp-close {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  border: 1px solid var(--borders);
+  background: var(--surface);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--t2);
+  transition: background .15s;
+  flex-shrink: 0;
+}
+.sp-close:hover { background: var(--s3); }
+
+.sp-title { font-size: 13px; font-weight: 650; color: var(--text); flex: 1; }
+
+.sp-body { flex: 1; overflow-y: auto; padding: 16px; }
+
+.sp-section { margin-bottom: 16px; }
+.sp-section-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--t3); margin-bottom: 8px; }
+
+.sp-field-row { display: flex; justify-content: space-between; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--border2); font-size: 12.5px; }
+.sp-field-row:last-child { border-bottom: none; }
+.sp-field-label { color: var(--t2); }
+.sp-field-val { color: var(--text); font-weight: 500; text-align: right; }
+
+.ai-suggestion {
+  background: var(--ai-bg);
+  border: 1px solid rgba(122,79,208,.15);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+.ai-suggestion-label { font-size: 10.5px; font-weight: 700; color: var(--ai); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 5px; }
+.ai-suggestion-text { font-size: 12.5px; color: var(--text); line-height: 1.45; }
+.ai-suggestion .btns { display: flex; gap: 6px; margin-top: 8px; }
+.btn-ai { background: var(--ai); color: #fff; font-size: 11.5px; padding: 4px 10px; }
+.btn-ai:hover { background: #6640c0; }
+.btn-ai-ghost { background: transparent; border: 1px solid var(--ai); color: var(--ai); font-size: 11.5px; padding: 4px 10px; }
+
+.sp-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ══════════════════════════════════════════
+   COMMAND PALETTE
+══════════════════════════════════════════ */
+.cmd-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.35);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 13vh;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s;
+}
+.cmd-overlay.show { opacity: 1; pointer-events: auto; }
+
+.cmdpal {
+  width: 520px;
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  transform: scale(.97) translateY(-6px);
+  transition: transform .18s ease;
+}
+.cmd-overlay.show .cmdpal { transform: scale(1) translateY(0); }
+
+.cmd-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cmd-input-row span { color: var(--t3); font-size: 16px; flex-shrink: 0; }
+.cmd-input-row input {
+  flex: 1; border: none; outline: none;
+  font: inherit; font-size: 14px; color: var(--text); background: transparent;
+}
+.cmd-input-row input::placeholder { color: var(--t3); }
+
+.cmd-sec-label {
+  font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em;
+  color: var(--t3); padding: 9px 14px 3px;
+}
+
+.cmd-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; cursor: pointer;
+  transition: background .1s;
+  font-size: 12.5px; color: var(--text);
+}
+.cmd-item:hover, .cmd-item.hi { background: var(--p-bg); }
+.cmd-item .ci { width: 28px; height: 28px; border-radius: 7px; background: var(--s2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+.cmd-item.hi .ci { background: var(--p-bg); }
+.cmd-item .ct { flex: 1; }
+.cmd-item .cs { font-size: 11px; color: var(--t2); margin-top: 1px; }
+.cmd-item .ck { font-family: var(--mono); font-size: 10px; color: var(--t3); }
+.cmd-items { max-height: 320px; overflow-y: auto; padding-bottom: 6px; }
+.cmd-footer {
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  display: flex; gap: 14px;
+  font-size: 10.5px; color: var(--t3);
+  background: var(--s2);
+}
+.cmd-footer span { display: flex; align-items: center; gap: 4px; }
+
+/* ══════════════════════════════════════════
+   COLOUR PICKER TOOLTIP
+══════════════════════════════════════════ */
+.swatch-wrap { position: relative; }
+.swatch-tooltip {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--inv);
+  color: var(--inv-text);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s;
+}
+.swatch-wrap:hover .swatch-tooltip { opacity: 1; }
+
+/* ══════════════════════════════════════════
+   COLOUR PALETTE INTRO PANEL
+══════════════════════════════════════════ */
+.color-panel {
+  background: var(--surface);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  transition: background .25s;
+}
+.color-panel h3 {
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--t3);
+  margin-bottom: 12px;
+}
+.color-options { display: flex; gap: 10px; flex-wrap: wrap; }
+.color-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all .15s;
+  background: var(--s2);
+}
+.color-opt:hover { border-color: var(--borders); background: var(--s3); }
+.color-opt.active { border-color: var(--p); background: var(--p-bg); }
+.color-opt .co-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.color-opt .co-name { font-size: 12.5px; font-weight: 550; color: var(--text); }
+.color-opt .co-sub { font-size: 11px; color: var(--t2); }
+
+</style>
+</head>
+
+<body>
+<div class="app">
+
+  <!-- ════════ SIDEBAR ════════ -->
+  <aside class="sidebar" id="appSidebar">
+
+    <!-- Top row: collapse icon + search (button first so it stays fixed when sidebar expands) -->
+    <div class="sidebar-top-row">
+      <div class="sidebar-collapse-btn-wrap">
+        <button class="sidebar-collapse-btn" id="sidebarToggle" onclick="toggleSidebar()" title="Collapse sidebar [">
+          <!-- Shown when expanded: panel-left (collapse) -->
+          <svg class="icon-collapse" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <rect x="1.5" y="1.5" width="13" height="13" rx="2.5"/>
+            <line x1="5.5" y1="1.5" x2="5.5" y2="14.5"/>
+          </svg>
+          <!-- Shown when collapsed: hamburger (expand) -->
+          <svg class="icon-expand" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <line x1="2" y1="4.5" x2="14" y2="4.5"/>
+            <line x1="2" y1="8"   x2="14" y2="8"/>
+            <line x1="2" y1="11.5" x2="14" y2="11.5"/>
+          </svg>
+        </button>
+        <span class="sidebar-collapse-tip">Collapse sidebar <kbd style="font-family:var(--mono);font-size:10px;background:rgba(255,255,255,.1);padding:1px 4px;border-radius:3px">[</kbd></span>
+      </div>
+      <div class="sidebar-search" onclick="openCmd()">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="flex-shrink:0;color:rgba(255,255,255,.38)">
+          <circle cx="7" cy="7" r="4.5"/>
+          <line x1="10.5" y1="10.5" x2="14" y2="14"/>
+        </svg>
+        <span class="ss-label">Search…</span>
+        <div class="ss-kbd"><span class="kbd">⌘</span><span class="kbd">K</span></div>
+      </div>
+    </div>
+
+    <!-- + New Quote primary action -->
+    <div class="sidebar-new-btn" onclick="openCmd()">
+      <span class="new-plus">+</span>
+      <span>New Quote</span>
+      <span class="nav-tooltip">New Quote</span>
+    </div>
+
+    <!-- Primary nav -->
+    <nav class="sidebar-nav">
+      <div class="nav-item" onclick="showScreen('dash',this)" id="nav-dash">
+        <span class="nav-icon">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.5"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1.5"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1.5"/><rect x="9" y="9" width="5.5" height="5.5" rx="1.5"/></svg>
+        </span>
+        <span class="nav-label">Dashboard</span>
+        <span class="nav-tooltip">Dashboard</span>
+      </div>
+      <div class="nav-item active" onclick="showScreen('quote',this)" id="nav-quotes">
+        <span class="nav-icon">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 2h10a1 1 0 011 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z"/><line x1="5" y1="6" x2="11" y2="6"/><line x1="5" y1="9" x2="11" y2="9"/><line x1="5" y1="12" x2="8.5" y2="12"/></svg>
+        </span>
+        <span class="nav-label">Quotes</span>
+        <span class="nav-badge">3</span>
+        <span class="nav-tooltip">Quotes</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.5L14.5 5v6L8 14.5 1.5 11V5L8 1.5z"/><path d="M8 1.5v13M1.5 5l6.5 3.5L14.5 5"/></svg>
+        </span>
+        <span class="nav-label">Orders</span>
+        <span class="nav-tooltip">Orders</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M5 3V1.5M11 3V1.5"/><line x1="1.5" y1="7" x2="14.5" y2="7"/></svg>
+        </span>
+        <span class="nav-label">Parts</span>
+        <span class="nav-tooltip">Parts</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="6" r="3"/><path d="M2.5 14c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/></svg>
+        </span>
+        <span class="nav-label">Contacts</span>
+        <span class="nav-tooltip">Contacts</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 12V5h12v7a1 1 0 01-1 1H3a1 1 0 01-1-1z"/><path d="M2 5l2-3h8l2 3"/><line x1="6" y1="8" x2="10" y2="8"/></svg>
+        </span>
+        <span class="nav-label">Vendor RFQs</span>
+        <span class="nav-tooltip">Vendor RFQs</span>
+      </div>
+      <div class="nav-sep"></div>
+      <div class="nav-item">
+        <span class="nav-icon">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><line x1="3" y1="4" x2="13" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="13" y2="12"/><circle cx="6.5" cy="4" r="1.5" fill="#1C1916" stroke="currentColor"/><circle cx="10" cy="8" r="1.5" fill="#1C1916" stroke="currentColor"/><circle cx="6.5" cy="12" r="1.5" fill="#1C1916" stroke="currentColor"/></svg>
+        </span>
+        <span class="nav-label">Configure</span>
+        <span class="nav-tooltip">Configure</span>
+      </div>
+    </nav>
+
+    <!-- Recents section — scrollable, fills remaining space -->
+    <div class="sidebar-recents" id="sidebarRecents">
+      <div class="recents-header">
+        <span class="recents-label">Recents</span>
+        <span class="recents-view-all" onclick="showScreen('quote',document.getElementById('nav-quotes'))">View all ↗</span>
+      </div>
+      <div class="recent-q" onclick="showScreen('quote',document.getElementById('nav-quotes'))">
+        <span class="recent-q-text">Arch Medial Solutions — Slap Hammer Assembly</span>
+        <span class="recent-q-num">#15217</span>
+      </div>
+      <div class="recent-q">
+        <span class="recent-q-text">Precision Cut — Server Rack Assembly</span>
+        <span class="recent-q-num">#14801</span>
+      </div>
+      <div class="recent-q">
+        <span class="recent-q-text">Blood Orange Machine — CabinetAssem</span>
+        <span class="recent-q-num">#5722</span>
+      </div>
+      <div class="recent-q">
+        <span class="recent-q-text">GOAT Machining Co — Milling Parts RFQ</span>
+        <span class="recent-q-num">#8511</span>
+      </div>
+      <div class="recent-q">
+        <span class="recent-q-text">Pistol Pete's Parts — Fastener Assembly</span>
+        <span class="recent-q-num">#70</span>
+      </div>
+      <div class="recent-q">
+        <span class="recent-q-text">Paperless Precision — Sheet Metal RFQ</span>
+        <span class="recent-q-num">#11220</span>
+      </div>
+      <div class="recent-q">
+        <span class="recent-q-text">Sultans of Solutions — Laser Cut Batch</span>
+        <span class="recent-q-num">#7865</span>
+      </div>
+      <div class="recent-q">
+        <span class="recent-q-text">Dini's Demos — CNC Turned Parts</span>
+        <span class="recent-q-num">#8987</span>
+      </div>
+    </div>
+
+    <!-- Footer: user chip (Claude-style) -->
+    <div class="sidebar-footer">
+      <div class="avatar" id="footerAvatar">BL</div>
+      <span class="footer-name">Benjamin L.</span>
+      <span class="footer-org">Precision GmbH</span>
+      <div class="footer-more">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="3" y1="8" x2="13" y2="8"/><polyline points="9 4 13 8 9 12"/></svg>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ════════ MAIN ════════ -->
+  <div class="main">
+
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="topbar-breadcrumb" id="topbarBread">
+        <span>Quotes</span>
+      </div>
+      <div class="topbar-spacer"></div>
+
+      <!-- Palette picker -->
+      <div class="palette-picker">
+        <span class="palette-label">Theme</span>
+        <div class="swatch-wrap"><div class="p-swatch" data-t="cobalt" onclick="setTheme('cobalt',this)" title="Precision Blue"></div><div class="swatch-tooltip">Cobalt</div></div>
+        <div class="swatch-wrap"><div class="p-swatch" data-t="teal"   onclick="setTheme('teal',this)"  ></div><div class="swatch-tooltip">Steel Teal</div></div>
+        <div class="swatch-wrap"><div class="p-swatch" data-t="indigo" onclick="setTheme('indigo',this)"></div><div class="swatch-tooltip">Studio Indigo</div></div>
+        <div class="swatch-wrap"><div class="p-swatch" data-t="slate"  onclick="setTheme('slate',this)" ></div><div class="swatch-tooltip">Nordic Slate</div></div>
+        <div class="swatch-wrap"><div class="p-swatch" data-t="amber"  onclick="setTheme('amber',this)" ></div><div class="swatch-tooltip">Forge Amber</div></div>
+        <div class="swatch-wrap"><div class="p-swatch" data-t="orange"     onclick="setTheme('orange',this)"    ></div><div class="swatch-tooltip">Factory Orange</div></div>
+        <div class="swatch-wrap"><div class="p-swatch" data-t="precision" onclick="setTheme('precision',this)"></div><div class="swatch-tooltip">Precision Graphite</div></div>
+        <div class="swatch-wrap"><div class="p-swatch active" data-t="claude" onclick="setTheme('claude',this)"></div><div class="swatch-tooltip">Claude / Anthropic</div></div>
+      </div>
+
+      <div class="topbar-div"></div>
+
+      <button class="mode-toggle" onclick="toggleMode()" id="modeBtn" title="Toggle dark mode">
+        <svg id="modeSun" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><line x1="8" y1="1" x2="8" y2="3"/><line x1="8" y1="13" x2="8" y2="15"/><line x1="1" y1="8" x2="3" y2="8"/><line x1="13" y1="8" x2="15" y2="8"/><line x1="3.05" y1="3.05" x2="4.46" y2="4.46"/><line x1="11.54" y1="11.54" x2="12.95" y2="12.95"/><line x1="12.95" y1="3.05" x2="11.54" y2="4.46"/><line x1="4.46" y1="11.54" x2="3.05" y2="12.95"/></svg>
+        <svg id="modeMoon" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="display:none"><path d="M13.5 10A6 6 0 016 2.5a6 6 0 100 11 6 6 0 007.5-3.5z"/></svg>
+      </button>
+    </header>
+
+    <!-- Content -->
+    <div class="content-area">
+
+      <!-- ══ SCREEN: DASHBOARD ══ -->
+      <div class="screen" id="screen-dash">
+        <div class="dash-greeting">Guten Morgen, Benjamin 👋</div>
+        <div class="dash-date" id="dashDate">Freitag, 13. Juni 2026</div>
+
+        <!-- Colour context panel — only on dashboard -->
+        <div class="color-panel">
+          <h3>🎨 Branding direction — click to preview</h3>
+          <div class="color-options">
+            <div class="color-opt" data-t="cobalt" onclick="setThemeFromCard('cobalt',this)">
+              <div class="co-dot" style="background:#1B52C4"></div>
+              <div><div class="co-name">Cobalt</div><div class="co-sub">Precision Blue — German engineering</div></div>
+            </div>
+            <div class="color-opt" data-t="teal" onclick="setThemeFromCard('teal',this)">
+              <div class="co-dot" style="background:#0B8A98"></div>
+              <div><div class="co-name">Steel Teal</div><div class="co-sub">Technical, distinctive in CPQ</div></div>
+            </div>
+            <div class="color-opt" data-t="indigo" onclick="setThemeFromCard('indigo',this)">
+              <div class="co-dot" style="background:#5248D4"></div>
+              <div><div class="co-name">Studio Indigo</div><div class="co-sub">Modern premium SaaS — Linear-adjacent</div></div>
+            </div>
+            <div class="color-opt" data-t="slate" onclick="setThemeFromCard('slate',this)">
+              <div class="co-dot" style="background:#2E6093"></div>
+              <div><div class="co-name">Nordic Slate</div><div class="co-sub">Calm premium — Bosch/Siemens feel</div></div>
+            </div>
+            <div class="color-opt" data-t="amber" onclick="setThemeFromCard('amber',this)">
+              <div class="co-dot" style="background:#B8690A"></div>
+              <div><div class="co-name">Forge Amber</div><div class="co-sub">Warm but refined — not safety orange</div></div>
+            </div>
+            <div class="color-opt" data-t="orange" onclick="setThemeFromCard('orange',this)">
+              <div class="co-dot" style="background:#E8590C"></div>
+              <div><div class="co-name">Factory Orange</div><div class="co-sub">Original direction — industrial, bold</div></div>
+            </div>
+            <div class="color-opt" data-t="precision" onclick="setThemeFromCard('precision',this)">
+              <div class="co-dot" style="background:#1D3461"></div>
+              <div><div class="co-name">Precision Graphite</div><div class="co-sub">Instrument-panel navy — Zeiss / Siemens Sinumerik feel</div></div>
+            </div>
+            <div class="color-opt active" data-t="claude" onclick="setThemeFromCard('claude',this)">
+              <div class="co-dot" style="background:#CC6431"></div>
+              <div><div class="co-name">Claude / Anthropic</div><div class="co-sub">Warm rust on sand — the Anthropic product palette</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-strip">
+          <div class="kpi-card">
+            <div class="kpi-label">Open quotes</div>
+            <div class="kpi-val">22</div>
+            <div class="kpi-delta up">↑ 3 vs last week</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Avg. margin</div>
+            <div class="kpi-val">36.4%</div>
+            <div class="kpi-delta dn">↓ 1.2pp this month</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Due today</div>
+            <div class="kpi-val" style="color:var(--cr)">3</div>
+            <div class="kpi-delta warn">⚠ 2 not started</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Pipeline value</div>
+            <div class="kpi-val">€1.4M</div>
+            <div class="kpi-delta up">↑ 12% this month</div>
+          </div>
+        </div>
+
+        <div class="dash-cols">
+          <!-- Work queue -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">What needs you now</div>
+              <div class="panel-sub">sorted by urgency score</div>
+            </div>
+            <div class="queue-item" onclick="showScreen('quote', document.getElementById('nav-quotes'))">
+              <div class="urgency-score u-hi">98</div>
+              <div style="flex:1">
+                <div class="queue-title">#15209 — Serverrack Baugruppe</div>
+                <div class="queue-meta">DTMA · <span class="badge b-ai" style="font-size:10.5px">✦ 12 Wingman findings</span> · Unassigned</div>
+              </div>
+              <div class="queue-right">
+                <div class="queue-val">€96.380</div>
+                <div class="queue-due overdue">Due 24.06. ↑</div>
+              </div>
+            </div>
+            <div class="queue-item">
+              <div class="urgency-score u-md">61</div>
+              <div style="flex:1">
+                <div class="queue-title">Vendor quote received — Anodize #15217</div>
+                <div class="queue-meta">Galvanik Schmidt · €2,10/part · accept or reject?</div>
+              </div>
+              <div class="queue-right">
+                <div class="queue-val" style="font-size:11.5px;color:var(--t2)">Action needed</div>
+                <div class="queue-due">09:41 today</div>
+              </div>
+            </div>
+            <div class="queue-item">
+              <div class="urgency-score u-md">44</div>
+              <div style="flex:1">
+                <div class="queue-title">#15217 — SM / CNC Simple RFQ</div>
+                <div class="queue-meta">CC's CNC Machining · In progress · 3 unresolved</div>
+              </div>
+              <div class="queue-right">
+                <div class="queue-val">€18.240</div>
+                <div class="queue-due">Due 17.06.</div>
+              </div>
+            </div>
+            <div class="queue-item">
+              <div class="urgency-score u-lo">22</div>
+              <div style="flex:1">
+                <div class="queue-title">@you in #15214 — "Can we hold ±0.05?"</div>
+                <div class="queue-meta">J. Rindini · Müller Blechtechnik</div>
+              </div>
+              <div class="queue-right">
+                <div class="queue-val" style="font-size:11.5px;color:var(--t2)">Mention</div>
+                <div class="queue-due">Yesterday</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recents + mini stats -->
+          <div>
+            <div class="panel" style="margin-bottom:12px">
+              <div class="panel-header">
+                <div class="panel-title">Recently opened</div>
+              </div>
+              <div class="recent-item" onclick="showScreen('quote', document.getElementById('nav-quotes'))">
+                <div class="recent-icon">📄</div>
+                <div style="flex:1">
+                  <div class="recent-title">#15217 · SM / CNC Simple</div>
+                  <div class="recent-meta">CC's CNC Machining</div>
+                </div>
+                <div class="recent-time">2m ago</div>
+              </div>
+              <div class="recent-item">
+                <div class="recent-icon">📄</div>
+                <div style="flex:1">
+                  <div class="recent-title">#15214 · Gehäuse Rev C</div>
+                  <div class="recent-meta">Müller Blechtechnik</div>
+                </div>
+                <div class="recent-time">1h ago</div>
+              </div>
+              <div class="recent-item">
+                <div class="recent-icon">🔩</div>
+                <div style="flex:1">
+                  <div class="recent-title">3601215 Rev C</div>
+                  <div class="recent-meta">Offset Connector · Part</div>
+                </div>
+                <div class="recent-time">3h ago</div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header"><div class="panel-title">Sent this week</div></div>
+              <div style="padding:14px 16px">
+                <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:8px">
+                  <span style="color:var(--t2)">Quotes sent</span>
+                  <strong>7</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:8px">
+                  <span style="color:var(--t2)">Total value</span>
+                  <strong style="font-variant-numeric:tabular-nums">€124.800</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:12.5px">
+                  <span style="color:var(--t2)">Win rate (30d)</span>
+                  <strong style="color:var(--g)">64%</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /screen-dash -->
+
+
+      <!-- ══ SCREEN: QUOTE DETAIL ══ -->
+      <div class="screen active" id="screen-quote">
+
+        <div class="page-header">
+          <div class="back-btn" onclick="showScreen('dash', document.getElementById('nav-dash'))">←</div>
+          <div>
+            <div class="page-title">#15217 — SM / CNC Simple RFQ</div>
+            <div class="page-sub">CC's CNC Machining · Created 11.06.2026 by S. McAuley</div>
+          </div>
+          <span style="margin-left:8px"><span class="badge b-warn"><span class="badge-dot"></span>Draft · 43%</span></span>
+          <div class="page-spacer"></div>
+          <button class="btn btn-ghost" onclick="showSaveBar()">Edit rates</button>
+          <button class="btn btn-ghost">Preview</button>
+          <button class="btn btn-primary">Finalise quote</button>
+        </div>
+
+        <!-- Lead question hero — THE STRIPE PRINCIPLE -->
+        <div class="quote-hero">
+          <div class="hero-stat">
+            <div class="hs-label">Total quoted</div>
+            <div class="hs-val primary">€18.240</div>
+            <div class="hs-sub">2 line items</div>
+          </div>
+          <div class="hero-div"></div>
+          <div class="hero-stat">
+            <div class="hs-label">Gross margin</div>
+            <div class="hs-val positive">37.2%</div>
+            <div class="hs-sub">Target 35%+</div>
+          </div>
+          <div class="hero-div"></div>
+          <div class="hero-stat">
+            <div class="hs-label">Cost → us</div>
+            <div class="hs-val" style="font-size:17px">€11.450</div>
+            <div class="hs-sub">Before markup</div>
+          </div>
+          <div class="hero-div"></div>
+          <div class="hero-stat">
+            <div class="hs-label">Lead time</div>
+            <div class="hs-val" style="font-size:17px">25 BD</div>
+            <div class="hs-sub">Standard</div>
+          </div>
+          <div class="hero-div"></div>
+          <div class="hero-stat">
+            <div class="hs-label">Due date</div>
+            <div class="hs-val" style="font-size:17px;color:var(--w-t)">17.06.</div>
+            <div class="hs-sub">4 days</div>
+          </div>
+        </div>
+
+        <div class="detail-cols">
+          <!-- Main col -->
+          <div>
+            <div class="panel" style="margin-bottom:14px">
+              <div class="panel-header">
+                <div class="panel-title">Line items</div>
+                <span class="badge b-ai">✦ Wingman · 3 unresolved</span>
+                <button class="btn btn-ghost" style="margin-left:8px;font-size:12px;padding:4px 10px">+ Add part</button>
+              </div>
+              <table class="line-table">
+                <thead>
+                  <tr>
+                    <th style="width:28px"></th>
+                    <th>Part</th>
+                    <th>Process</th>
+                    <th>Status</th>
+                    <th class="num">Qty</th>
+                    <th class="num">Unit price</th>
+                    <th class="num">Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Row 1 -->
+                  <tr id="li-row-1" class="">
+                    <td onclick="toggleLiRow('li-row-1','li-ops-1')" style="padding:9px 6px 9px 12px">
+                      <button class="li-expand-btn" id="li-btn-1">
+                        <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2l4 2.5L2 7"/></svg>
+                      </button>
+                    </td>
+                    <td onclick="openSidePanel('3601215 Rev C · Offset Connector')">
+                      <strong>3601215</strong> Rev C · Offset Connector
+                      <span class="badge b-ai" style="margin-left:6px;font-size:10.5px">✦ 2 findings</span>
+                    </td>
+                    <td style="color:var(--t2)" onclick="openSidePanel('3601215 Rev C · Offset Connector')">CNC · Milling</td>
+                    <td onclick="openSidePanel('3601215 Rev C · Offset Connector')"><span class="badge b-warn"><span class="badge-dot"></span>In progress</span></td>
+                    <td class="num"><span class="li-editable" contenteditable="true" onclick="event.stopPropagation()">20</span></td>
+                    <td class="num"><strong><span class="li-editable" contenteditable="true" onclick="event.stopPropagation()">€84,60</span></strong></td>
+                    <td class="num"><span class="li-editable" contenteditable="true" onclick="event.stopPropagation()">34%</span></td>
+                  </tr>
+                  <tr class="li-ops-row" id="li-ops-1" style="display:none">
+                    <td colspan="7">
+                      ↳ <strong>Op 1:</strong> 5-Achs CNC Fräsen · 2.4h @ €48/h = €115 &nbsp;|&nbsp; <strong>Op 2:</strong> Drehen · 0.8h @ €42/h = €34 &nbsp;|&nbsp; Setup: €12 &nbsp;|&nbsp;
+                      <span style="color:var(--w-t)">⚠ DFM: Tasche Tiefe/Breite 5.2:1 — prüfen</span> &nbsp;|&nbsp;
+                      <span style="color:var(--cr-t)">Toleranz ±0.015mm — Wingman: confirm with shop</span>
+                    </td>
+                  </tr>
+                  <!-- Row 2 -->
+                  <tr id="li-row-2" class="">
+                    <td onclick="toggleLiRow('li-row-2','li-ops-2')" style="padding:9px 6px 9px 12px">
+                      <button class="li-expand-btn" id="li-btn-2">
+                        <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2l4 2.5L2 7"/></svg>
+                      </button>
+                    </td>
+                    <td onclick="openSidePanel('PP-18932 Rev A · Bracket')"><strong>PP-18932</strong> Rev A · Bracket</td>
+                    <td style="color:var(--t2)" onclick="openSidePanel('PP-18932 Rev A · Bracket')">Fab · Laser</td>
+                    <td onclick="openSidePanel('PP-18932 Rev A · Bracket')"><span class="badge b-success"><span class="badge-dot"></span>Complete</span></td>
+                    <td class="num"><span class="li-editable" contenteditable="true" onclick="event.stopPropagation()">500</span></td>
+                    <td class="num"><strong><span class="li-editable" contenteditable="true" onclick="event.stopPropagation()">€3,12</span></strong></td>
+                    <td class="num"><span class="li-editable" contenteditable="true" onclick="event.stopPropagation()">41%</span></td>
+                  </tr>
+                  <tr class="li-ops-row" id="li-ops-2" style="display:none">
+                    <td colspan="7">
+                      ↳ <strong>Op 1:</strong> Laser Schneiden 2mm Blech · 0.4h @ €55/h = €22 &nbsp;|&nbsp; <strong>Op 2:</strong> Biegen · 0.2h = €11 &nbsp;|&nbsp; Material: DX51D Z275 &nbsp;|&nbsp;
+                      <span style="color:var(--g-t)">✓ DFM: keine Befunde</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header"><div class="panel-title">Activity</div></div>
+
+              <!-- Governor item 1: Wingman line-item extraction — pending review -->
+              <div class="activity-item">
+                <div class="act-dot ai"></div>
+                <div style="flex:1">
+                  <div class="governor-wrap" id="gov1">
+                    <div class="governor-header">
+                      <div class="governor-dot"></div>
+                      <div class="governor-text">
+                        <strong>✦ Wingman</strong> created 2 line items from <code style="font-size:11px;background:rgba(122,79,208,.12);padding:1px 4px;border-radius:3px">RFQ_Müller_2026.eml</code> — 94% extraction confidence
+                        <span class="governor-why" onclick="toggleGovReason('gov1-reason')"> · Why? ▾</span>
+                        <div class="governor-reason" id="gov1-reason">Extrahiert: 3601215 Rev C (qty 20), PP-18932 Rev A (qty 500). Prozess via Dateiname + Material-Keywords. 94% = ein Feld unsicher: qty auf 3601215 unklar (20 vs 200).</div>
+                        <div class="governor-actions">
+                          <button class="gov-accept" onclick="approveGov('gov1','Wingman line items accepted')">Accept line items</button>
+                          <button class="gov-dismiss" onclick="dismissGov('gov1')">Review manually</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="act-time" style="margin-top:4px">09:14 · 11.06.2026</div>
+                </div>
+              </div>
+
+              <div class="activity-item">
+                <div class="act-dot primary"></div>
+                <div>
+                  <div class="act-text">S. McAuley set process on line 1 → CNC Milling (5-Axis)</div>
+                  <div class="act-time">09:32 · 11.06.2026</div>
+                </div>
+              </div>
+
+              <!-- Governor item 2: Wingman DFM flag — pending review -->
+              <div class="activity-item">
+                <div class="act-dot ai"></div>
+                <div style="flex:1">
+                  <div class="governor-wrap" id="gov2">
+                    <div class="governor-header">
+                      <div class="governor-dot"></div>
+                      <div class="governor-text">
+                        <strong>✦ Wingman</strong> flagged: tight bore tolerance <strong>±0.015mm</strong> on line 1 — suggest confirming with machine shop before quoting
+                        <span class="governor-why" onclick="toggleGovReason('gov2-reason')"> · Why? ▾</span>
+                        <div class="governor-reason" id="gov2-reason">±0.015mm liegt unter der Standardtoleranz der meisten 5-Achs-Maschinen (±0.02mm). Basiert auf ähnlichen Jobs: 3 von 4 benötigten Rücksprache. Empfehlung: Toleranz vor Angebotsabgabe mit Shop klären.</div>
+                        <div class="governor-actions">
+                          <button class="gov-accept" onclick="approveGov('gov2','DFM flag acknowledged')">Acknowledge</button>
+                          <button class="gov-dismiss" onclick="dismissGov('gov2')">Not applicable</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="act-time" style="margin-top:4px">09:32 · auto</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Side col -->
+          <div>
+            <div class="side-card">
+              <div class="sc-header">Customer</div>
+              <div class="sc-body">
+                <div class="sc-row"><span class="sc-label">Company</span><span class="sc-val">CC's CNC Machining</span></div>
+                <div class="sc-row"><span class="sc-label">Contact</span><span class="sc-val">Chris Butler</span></div>
+                <div class="sc-row"><span class="sc-label">Email</span><span class="sc-val" style="color:var(--lk)">chris@ccscnc.de</span></div>
+                <div class="sc-row"><span class="sc-label">Payment</span><span class="sc-val"><span class="badge b-neutral">PO · Net 30</span></span></div>
+                <div class="sc-row"><span class="sc-label">Language</span><span class="sc-val">DE</span></div>
+              </div>
+            </div>
+            <div class="side-card">
+              <div class="sc-header">Expedite</div>
+              <div class="sc-body">
+                <div class="sc-row"><span class="sc-label">Standard</span><span class="sc-val">25 BD · —</span></div>
+                <div class="sc-row"><span class="sc-label">+5 days</span><span class="sc-val" style="color:var(--g)">−25% cost</span></div>
+                <div class="sc-row"><span class="sc-label">+10 days</span><span class="sc-val" style="color:var(--g)">−75% cost</span></div>
+              </div>
+            </div>
+            <div class="side-card">
+              <div class="sc-header">VAT</div>
+              <div class="sc-body">
+                <div class="sc-row"><span class="sc-label">DE standard</span><span class="sc-val">19%</span></div>
+                <div class="sc-row"><span class="sc-label">VAT-ID</span><span class="sc-val"><span class="badge b-success" style="font-size:10.5px">✓ Verified</span></span></div>
+                <div class="sc-row"><span class="sc-label">Invoice total</span><span class="sc-val" style="font-variant-numeric:tabular-nums">€21.705,60</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /screen-quote -->
+
+    </div><!-- /content-area -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ════════ SAVE BAR ════════ -->
+<div class="savebar" id="savebar">
+  <span class="savebar-msg">⚠ Unsaved changes — Laser rate €95 → €98</span>
+  <div class="savebar-spacer"></div>
+  <button class="btn btn-ghost savebar-discard" onclick="hideSaveBar()">Discard</button>
+  <button class="btn btn-primary" onclick="hideSaveBar()">Save changes</button>
+</div>
+
+<!-- ════════ SIDE PANEL ════════ -->
+<div class="sidepanel-overlay" id="spOverlay" onclick="closeSidePanel()"></div>
+<div class="sidepanel" id="sidepanel">
+  <div class="sp-header">
+    <div class="sp-close" onclick="closeSidePanel()">✕</div>
+    <div class="sp-title" id="spTitle">Part detail</div>
+    <span class="badge b-warn"><span class="badge-dot"></span>In progress</span>
+  </div>
+  <div class="sp-body">
+    <div class="sp-section">
+      <div class="sp-section-label">Part info</div>
+      <div class="sp-field-row"><span class="sp-field-label">Part number</span><span class="sp-field-val">3601215</span></div>
+      <div class="sp-field-row"><span class="sp-field-label">Revision</span><span class="sp-field-val">Rev C</span></div>
+      <div class="sp-field-row"><span class="sp-field-label">Material</span><span class="sp-field-val">6061-T6 Aluminium</span></div>
+      <div class="sp-field-row"><span class="sp-field-label">Process</span><span class="sp-field-val">CNC Milling 5-Axis</span></div>
+    </div>
+    <div class="sp-section">
+      <div class="sp-section-label">Geometry</div>
+      <div class="sp-field-row"><span class="sp-field-label">Bounding box</span><span class="sp-field-val">142 × 88 × 34mm</span></div>
+      <div class="sp-field-row"><span class="sp-field-label">Stock size</span><span class="sp-field-val">150 × 95 × 40mm</span></div>
+      <div class="sp-field-row"><span class="sp-field-label">Confidence</span><span class="sp-field-val"><span class="badge b-success" style="font-size:10.5px">94%</span></span></div>
+    </div>
+    <div class="sp-section">
+      <div class="sp-section-label">DFM Findings</div>
+      <div class="ai-suggestion">
+        <div class="ai-suggestion-label">✦ Wingman — Tight bore</div>
+        <div class="ai-suggestion-text">Bore Ø12H7 requires ±0.015mm tolerance. Verify machine capability before quoting. Consider adding 15% scrap allowance.</div>
+        <div class="btns">
+          <button class="btn btn-ai">Accept</button>
+          <button class="btn btn-ai-ghost">Dismiss</button>
+        </div>
+      </div>
+      <div class="ai-suggestion" style="margin-top:8px">
+        <div class="ai-suggestion-label">✦ Wingman — Surface finish</div>
+        <div class="ai-suggestion-text">Ra 0.8μm specified on mating face. Requires additional finishing op — not currently in operations list.</div>
+        <div class="btns">
+          <button class="btn btn-ai">Add operation</button>
+          <button class="btn btn-ai-ghost">Dismiss</button>
+        </div>
+      </div>
+    </div>
+    <div class="sp-section">
+      <div class="sp-section-label">Pricing (Qty 1)</div>
+      <div class="sp-field-row"><span class="sp-field-label">Material cost</span><span class="sp-field-val">€22,40</span></div>
+      <div class="sp-field-row"><span class="sp-field-label">Operations</span><span class="sp-field-val">€54,20</span></div>
+      <div class="sp-field-row"><span class="sp-field-label">Margin (35%)</span><span class="sp-field-val">€29,59</span></div>
+      <div class="sp-field-row" style="font-weight:650"><span class="sp-field-label">Unit price</span><span class="sp-field-val" style="color:var(--p)">€84,60</span></div>
+    </div>
+  </div>
+  <div class="sp-footer">
+    <button class="btn btn-primary" style="flex:1">Open full part →</button>
+    <button class="btn btn-ghost">Operations</button>
+  </div>
+</div>
+
+<!-- ════════ COMMAND PALETTE ════════ -->
+<div class="cmd-overlay" id="cmdOverlay" onclick="closeCmdOutside(event)">
+  <div class="cmdpal">
+    <div class="cmd-input-row">
+      <span>🔍</span>
+      <input id="cmdInput" type="text" placeholder="Search quotes, parts, customers…" oninput="filterCmd(this.value)" onkeydown="cmdKey(event)" autocomplete="off">
+      <span class="kbd" onclick="closeCmd()" style="cursor:pointer">esc</span>
+    </div>
+    <div class="cmd-items" id="cmdItems"></div>
+    <div class="cmd-footer">
+      <span><span class="kbd">↑↓</span> navigate</span>
+      <span><span class="kbd">↵</span> select</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// ── Screen navigation ──
+function showScreen(id, navEl) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (navEl) navEl.classList.add('active');
+
+  const breadcrumb = document.getElementById('topbarBread');
+  const titles = { dash: 'Dashboard', quote: '<span class="crumb">Quotes</span> <span class="sep">/</span> #15217' };
+  breadcrumb.innerHTML = titles[id] || id;
+}
+
+// ── Theme switching ──
+function setTheme(t, el) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.querySelectorAll('.p-swatch').forEach(s => s.classList.remove('active'));
+  if (el) el.classList.add('active');
+  document.querySelectorAll('.color-opt').forEach(o => o.classList.remove('active'));
+  const card = document.querySelector(`.color-opt[data-t="${t}"]`);
+  if (card) card.classList.add('active');
+}
+
+function setThemeFromCard(t, el) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.querySelectorAll('.color-opt').forEach(o => o.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.p-swatch').forEach(s => {
+    s.classList.toggle('active', s.dataset.t === t);
+  });
+}
+
+// ── Line item row expand/collapse ──
+function toggleLiRow(rowId, opsId) {
+  const ops = document.getElementById(opsId);
+  const btn = document.getElementById(rowId.replace('li-row','li-btn'));
+  const row = document.getElementById(rowId);
+  const isOpen = ops.style.display !== 'none';
+  ops.style.display = isOpen ? 'none' : '';
+  btn.classList.toggle('open', !isOpen);
+  row.classList.toggle('li-expanded', !isOpen);
+}
+
+// ── Governor pattern (AI approval) ──
+function toggleGovReason(reasonId) {
+  const el = document.getElementById(reasonId);
+  const isOpen = el.style.display === 'block';
+  el.style.display = isOpen ? 'none' : 'block';
+  // Find the Why? span inside the same governor-text and flip its arrow
+  const govText = el.closest('.governor-text');
+  if (govText) {
+    const whyBtn = govText.querySelector('.governor-why');
+    if (whyBtn) whyBtn.textContent = isOpen ? ' · Why? ▾' : ' · Why? ▴';
+  }
+}
+function approveGov(govId, logText) {
+  const el = document.getElementById(govId);
+  el.classList.add('approved');
+  el.querySelector('.governor-actions').innerHTML = '<span style="font-size:11.5px;color:var(--g-t)">✓ ' + logText + '</span>';
+  el.querySelector('.governor-dot').style.background = 'var(--g)';
+}
+function dismissGov(govId) {
+  document.getElementById(govId).classList.add('dismissed');
+}
+
+// ── Collapsible sidebar ──
+// pinnedCollapsed: true = user clicked to collapse; false = pinned open
+let pinnedCollapsed = false;
+let hoverPeeking    = false;
+
+function toggleSidebar() {
+  const sb = document.getElementById('appSidebar');
+  pinnedCollapsed = !pinnedCollapsed;
+  hoverPeeking    = false;
+  sb.classList.toggle('collapsed', pinnedCollapsed);
+  try { localStorage.setItem('bf-sidebar-collapsed', pinnedCollapsed ? '1' : '0'); } catch(e){}
+}
+
+// Restore sidebar state on load
+(function() {
+  try {
+    if (localStorage.getItem('bf-sidebar-collapsed') === '1') {
+      pinnedCollapsed = true;
+      const sb = document.getElementById('appSidebar');
+      if (sb) sb.classList.add('collapsed');
+    }
+  } catch(e){}
+})();
+
+// Hover-peek: expand on hover of the expand button; collapse when mouse leaves sidebar
+(function() {
+  const sb  = document.getElementById('appSidebar');
+  const btn = document.getElementById('sidebarToggle');
+  if (!sb || !btn) return;
+
+  btn.addEventListener('mouseenter', function() {
+    if (pinnedCollapsed && !hoverPeeking) {
+      hoverPeeking = true;
+      sb.classList.remove('collapsed');
+    }
+  });
+
+  sb.addEventListener('mouseleave', function() {
+    if (hoverPeeking) {
+      hoverPeeking = false;
+      sb.classList.add('collapsed');
+    }
+  });
+})();
+
+// ── Dark mode ──
+function toggleMode() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute('data-mode') === 'dark';
+  html.setAttribute('data-mode', isDark ? 'light' : 'dark');
+  // swap sun/moon SVG icons
+  const sun = document.getElementById('modeSun');
+  const moon = document.getElementById('modeMoon');
+  if (sun && moon) { sun.style.display = isDark ? '' : 'none'; moon.style.display = isDark ? 'none' : ''; }
+}
+
+// ── Save bar ──
+function showSaveBar() {
+  document.getElementById('savebar').classList.add('show');
+}
+function hideSaveBar() {
+  document.getElementById('savebar').classList.remove('show');
+}
+
+// ── Side panel ──
+function openSidePanel(name) {
+  document.getElementById('spTitle').textContent = name;
+  document.getElementById('spOverlay').classList.add('show');
+  document.getElementById('sidepanel').classList.add('open');
+}
+function closeSidePanel() {
+  document.getElementById('spOverlay').classList.remove('show');
+  document.getElementById('sidepanel').classList.remove('open');
+}
+
+// ── Command palette ──
+const cmds = [
+  { sec:'New',      icon:'＋',  title:'New quote',           sub:'Start from RFQ or blank', kbd:'N' },
+  { sec:'New',      icon:'🏭',  title:'New vendor RFQ',      sub:'Send to outside-process vendor', kbd:'' },
+  { sec:'New',      icon:'👤',  title:'New customer',        sub:'Add a customer account', kbd:'' },
+  { sec:'Navigate', icon:'📊',  title:'Go to Dashboard',     sub:'Work queue & urgency score', kbd:'G D' },
+  { sec:'Navigate', icon:'📄',  title:'Go to Quotes',        sub:'All open quotes', kbd:'G Q' },
+  { sec:'Navigate', icon:'🔩',  title:'Go to Parts library', sub:'Geometry & configurations', kbd:'G P' },
+  { sec:'Navigate', icon:'⚙',   title:'Go to Configure',     sub:'Machines, rates, materials', kbd:'G C' },
+  { sec:'Recent',   icon:'📄',  title:'#15217 · SM / CNC Simple', sub:"CC's CNC Machining · In progress", kbd:'' },
+  { sec:'Recent',   icon:'📄',  title:'#15214 · Gehäuse Rev C',   sub:'Müller Blechtechnik · Complete', kbd:'' },
+  { sec:'Recent',   icon:'📄',  title:'#15209 · Serverrack',      sub:'DTMA · 12 Wingman findings', kbd:'' },
+];
+
+let cmdIdx = 0, cmdFiltered = [...cmds];
+
+function openCmd() {
+  document.getElementById('cmdOverlay').classList.add('show');
+  setTimeout(() => document.getElementById('cmdInput').focus(), 30);
+  cmdFiltered = [...cmds];
+  cmdIdx = 0;
+  renderCmd();
+}
+function closeCmd() {
+  document.getElementById('cmdOverlay').classList.remove('show');
+  document.getElementById('cmdInput').value = '';
+}
+function closeCmdOutside(e) {
+  if (e.target === document.getElementById('cmdOverlay')) closeCmd();
+}
+function filterCmd(q) {
+  const lq = q.toLowerCase();
+  cmdFiltered = cmds.filter(c => !lq || c.title.toLowerCase().includes(lq) || c.sub.toLowerCase().includes(lq));
+  cmdIdx = 0;
+  renderCmd();
+}
+function renderCmd() {
+  let html = '', last = '';
+  cmdFiltered.forEach((c, i) => {
+    if (c.sec !== last) { html += `<div class="cmd-sec-label">${c.sec}</div>`; last = c.sec; }
+    html += `<div class="cmd-item${i===cmdIdx?' hi':''}" onclick="selectCmd(${i})">
+      <div class="ci">${c.icon}</div>
+      <div class="ct"><div>${c.title}</div><div class="cs">${c.sub}</div></div>
+      ${c.kbd?`<div class="ck">${c.kbd}</div>`:''}
+    </div>`;
+  });
+  document.getElementById('cmdItems').innerHTML = html || '<div style="padding:16px;text-align:center;color:var(--t3);font-size:12.5px">No results</div>';
+}
+function selectCmd(i) {
+  const c = cmdFiltered[i];
+  closeCmd();
+  if (c.title.includes('Quote')) showScreen('quote', document.getElementById('nav-quotes'));
+  if (c.title.includes('Dashboard')) showScreen('dash', document.getElementById('nav-dash'));
+}
+function cmdKey(e) {
+  if (e.key === 'ArrowDown') { e.preventDefault(); cmdIdx = Math.min(cmdIdx+1, cmdFiltered.length-1); renderCmd(); scrollCmdActive(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); cmdIdx = Math.max(cmdIdx-1, 0); renderCmd(); scrollCmdActive(); }
+  else if (e.key === 'Enter') selectCmd(cmdIdx);
+  else if (e.key === 'Escape') closeCmd();
+}
+function scrollCmdActive() {
+  const items = document.querySelectorAll('.cmd-item');
+  if (items[cmdIdx]) items[cmdIdx].scrollIntoView({ block:'nearest' });
+}
+
+// Global shortcuts
+document.addEventListener('keydown', e => {
+  if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('cmdOverlay').classList.contains('show') ? closeCmd() : openCmd(); }
+  if (e.key==='Escape') { closeCmd(); closeSidePanel(); hideSaveBar(); }
+  // [ = toggle sidebar (Linear pattern) — only when not typing in an input
+  if (e.key==='[' && !e.metaKey && !e.ctrlKey && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
+    e.preventDefault(); toggleSidebar();
+  }
+});
+
+// Set correct date
+const d = new Date();
+const days = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+const months = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+const el = document.getElementById('dashDate');
+if (el) el.textContent = `${days[d.getDay()]}, ${d.getDate()}. ${months[d.getMonth()]} ${d.getFullYear()}`;
+
+// Initial screen — start on dash so colors panel is visible
+showScreen('dash', document.getElementById('nav-dash'));
+document.getElementById('nav-dash').classList.add('active');
+document.getElementById('nav-quotes').classList.remove('active');
+</script>
+</body>
+</html>

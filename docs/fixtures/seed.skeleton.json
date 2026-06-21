@@ -1,0 +1,89 @@
+{
+  "_comment": "Tolera org-provisioning seed skeleton. Idempotent upsert by natural key. See SEED-AND-FIXTURES.md + DB-SCHEMA.sql. Representative entries only — full 54-op library lives in the spec's Operation Library section.",
+  "organization": {
+    "slug": "fechner",
+    "name": "Fechner (Pilot)",
+    "country": "DE",
+    "currency": "EUR",
+    "locale": "de-DE",
+    "default_tolerance_class": "ISO 2768-m",
+    "export_regime": "eu_dual_use",
+    "rfq_ingest": "fechner@rfq.tolera.eu",
+    "brand": { "name": "Fechner", "logo_key": null, "primary_color": null }
+  },
+  "users": [
+    { "email": "admin@fechner.example", "role": "admin", "first_name": "", "last_name": "" },
+    { "email": "estimator@fechner.example", "role": "estimator" }
+  ],
+  "material_classes": ["Metall", "Polymer", "Composite", "Sand", "Wax", "Additive"],
+  "materials": [
+    { "werkstoffnummer": "1.4301", "en_name": "X5CrNi18-10", "aisi_alias": "304", "family": "Edelstahl", "class": "Metall", "density": 7.90 },
+    { "werkstoffnummer": "1.4404", "en_name": "X2CrNiMo17-12-2", "aisi_alias": "316L", "family": "Edelstahl", "class": "Metall", "density": 8.00 },
+    { "werkstoffnummer": "1.0038", "en_name": "S235JR", "aisi_alias": "A36", "family": "Baustahl", "class": "Metall", "density": 7.85 },
+    { "werkstoffnummer": "EN AW-6061", "en_name": "EN AW-6061", "aisi_alias": "6061", "family": "Aluminium", "class": "Metall", "density": 2.70 },
+    { "werkstoffnummer": "3.7035", "en_name": "Ti Grade 2", "aisi_alias": "Grade 2", "family": "Titan", "class": "Metall", "density": 4.51 }
+  ],
+  "operation_library": {
+    "_note": "31 Machine+Operator + 23 Labour-Only = 54. Rates are shop-specific placeholders (log finals in DECISIONS.md).",
+    "machine_operator": [
+      { "name": "CNC Mill", "category": "operation", "calc_mode": "machine_operator", "machine_rate": 0, "labor_rate": 0, "surcharge_pct": 0 },
+      { "name": "CNC Lathe", "category": "operation", "calc_mode": "machine_operator" },
+      { "name": "Laser", "category": "operation", "calc_mode": "machine_operator" },
+      { "name": "Punch", "category": "operation", "calc_mode": "machine_operator" },
+      { "name": "Forming", "category": "operation", "calc_mode": "machine_operator" },
+      { "name": "Bürsten", "category": "operation", "calc_mode": "machine_operator", "_desc": "brushing/deburring machine" },
+      { "name": "Roboterschweißen", "category": "operation", "calc_mode": "machine_operator", "_desc": "robotic welding cell" }
+    ],
+    "labour_only": [
+      { "name": "Deburr", "category": "operation", "calc_mode": "labour_only", "is_finish": false },
+      { "name": "Hardware Insert", "category": "operation", "calc_mode": "labour_only" },
+      { "name": "QC", "category": "operation", "calc_mode": "labour_only" },
+      { "name": "Pack & Ship", "category": "operation", "calc_mode": "labour_only" },
+      { "name": "Engineering", "category": "operation", "calc_mode": "labour_only" }
+    ],
+    "material_ops": [
+      { "name": "Material | Bar (Round)", "category": "material", "calc_mode": "material" },
+      { "name": "Material | Sheet (Nesting)", "category": "material", "calc_mode": "material" }
+    ]
+  },
+  "processes": [
+    { "name": "CNC Milling", "family": "MILLING", "external_name": "CNC Machining", "available_in_smart_rfq": true,
+      "router": [ { "op": "Material | Bar (Round)", "position": 1 }, { "op": "CNC Mill", "position": 2, "per_setup": true }, { "op": "Deburr", "position": 3 }, { "op": "QC", "position": 4 } ] },
+    { "name": "Sheet Metal", "family": "SHEET_METAL", "available_in_smart_rfq": true,
+      "router": [ { "op": "Material | Sheet (Nesting)", "position": 1 }, { "op": "Laser", "position": 2 }, { "op": "Forming", "position": 3 }, { "op": "Deburr", "position": 4 } ] },
+    { "name": "Assembly | Parent-Level", "family": "ASSEMBLY",
+      "router": [ { "op": "Assembly | Manufactured", "position": 1, "is_assembly": true, "root_component_only": true }, { "op": "Generic | Shipping Prep", "position": 2, "root_component_only": true } ] },
+    { "name": "Purchased Component", "family": "GENERIC", "is_default_purchased_component_process": true,
+      "router": [ { "op": "PC Piece Price", "position": 1 } ] }
+  ],
+  "interrogation_profiles": [
+    { "name": "Default Sheet Metal (Laser)", "family": "SHEET_METAL",
+      "inputs": { "is_laser": true, "is_punch": false, "min_bend_radius": 0.75, "max_bend_radius": 150, "close_cutouts_threshold": 1.0, "cutout_edge_proximity": 2.0, "min_flange_length": 4.0 } },
+    { "name": "Default Milling", "family": "MILLING",
+      "inputs": { "depth_profiling_threshold": 50.8, "deep_hole_ratio_threshold": 8.0, "max_part_length": 1625, "should_detect_uncut_faces": true } }
+  ],
+  "pricing_items": [
+    { "name": "Standard Markup", "calc_type": "markup", "category": "general", "formula": "PERCENTAGE = 20" },
+    { "name": "Zuschlagskalkulation", "calc_type": "markup", "category": "general", "_note": "overhead-surcharge seed per spec" }
+  ],
+  "discounts": [ { "name": "Volume Discount", "formula": "PERCENTAGE = 5 if REQUESTED_QUANTITY > 100 else 0" } ],
+  "add_ons": [ { "name": "NRE / Tooling", "is_required": true, "formula": "PRICE = 0" } ],
+  "expedite_defaults": [ { "days_faster": 5, "markup_pct": 15 }, { "days_faster": 10, "markup_pct": 7 } ],
+  "workflow_steps": [
+    { "name": "Not Started", "position": 0 }, { "name": "In Progress", "position": 1 },
+    { "name": "On Hold", "position": 2 }, { "name": "Completed", "position": 3 }
+  ],
+  "rules": [
+    { "name": "Export-control review", "signals": ["extraction.export_controlled == true"], "resolution_options": ["Manager review", "Confirm dual-use classification"] },
+    { "name": "No material specified", "signals": ["component.material == null"], "resolution_options": ["Block send", "Assign material"] },
+    { "name": "Tight tolerance flag", "signals": ["extraction.tolerance.kind == 'limit'", "extraction.value <= threshold"], "resolution_options": ["Senior estimator review"] }
+  ],
+  "custom_tables": [
+    { "name": "laser_cut_rates", "columns": [ { "name": "material_family", "type": "string" }, { "name": "thickness", "type": "number" }, { "name": "cut_rate", "type": "number" }, { "name": "pierce_time", "type": "number" } ], "rows": [] },
+    { "name": "material_inventory", "columns": [ { "name": "material", "type": "string" }, { "name": "diameter", "type": "number" }, { "name": "length", "type": "number" }, { "name": "bar_cost", "type": "number" } ], "rows": [] }
+  ],
+  "email_templates": [
+    { "key": "quote_sent", "locale": "de-DE", "subject": "Ihr Angebot {{quote_number}}", "body": "" },
+    { "key": "rfq_received", "locale": "de-DE", "subject": "Anfrage erhalten", "body": "" }
+  ]
+}

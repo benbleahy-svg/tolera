@@ -1,0 +1,85 @@
+erDiagram
+  ORGANIZATION ||--o{ USER_ORG_MEMBERSHIP : has
+  USER ||--o{ USER_ORG_MEMBERSHIP : has
+  ORGANIZATION ||--o{ ACCOUNT : owns
+  ACCOUNT ||--o{ CONTACT : employs
+  ACCOUNT ||--o{ FACILITY : has
+  ACCOUNT }o--o| USER : salesperson
+  REQUEST_FOR_QUOTE ||--o| QUOTE : becomes
+  REQUEST_FOR_QUOTE_VIEW }o--|| REQUEST_FOR_QUOTE : "funnels to"
+  QUOTE }o--|| ACCOUNT : "for"
+  QUOTE }o--|| CONTACT : "for"
+  QUOTE }o--o| USER : estimator
+  QUOTE ||--o{ QUOTE_ITEM : contains
+  QUOTE ||--o| ORDER : "won becomes"
+  QUOTE_ITEM ||--|| COMPONENT : "root component is"
+  QUOTE_ITEM }o--o| WORKFLOW_STEP_DEF : status
+  QUOTE_ITEM ||--o{ REVIEW_ITEM : raises
+  RULE ||--o{ REVIEW_ITEM : generates
+  ORDER ||--o{ ORDER_ITEM : contains
+  PART ||--o{ NODE : "occurs as"
+  PART ||--|| COMPONENT : "priced as"
+  PART ||--o{ PART_FILE : has
+  PART ||--o| PART_GEOMETRY : has
+  PART_GEOMETRY ||--o{ EXTRACTION_FINDING : yields
+  NODE ||--o{ NODE : "parent of"
+  COMPONENT ||--o{ COMPONENT_QUANTITY : "per qty break"
+  COMPONENT }o--|| PROCESS : uses
+  COMPONENT }o--o| MATERIAL : of
+  COMPONENT }o--o| PURCHASED_COMPONENT : "if purchased"
+  COMPONENT ||--o{ OPERATION : has
+  COMPONENT ||--o{ ADD_ON : "root has"
+  COMPONENT ||--o{ PRICING_ITEM : "root has"
+  COMPONENT ||--o{ DISCOUNT : "root has"
+  COMPONENT ||--o{ NEST : "may nest in"
+  PROCESS ||--o{ OPERATION_DEF : defines
+  OPERATION }o--|| OPERATION_DEF : instanceof
+  OPERATION ||--o{ QUOTE_CELL : "cost per qty"
+  OPERATION_DEF }o--o{ CUSTOM_TABLE : "may read"
+  MATERIAL_CLASS ||--o{ MATERIAL_FAMILY : has
+  MATERIAL_FAMILY ||--o{ MATERIAL : has
+  ADD_ON ||--o{ ADD_ON_CELL : "per qty"
+  PRICING_ITEM ||--o{ PRICING_ITEM_CELL : "per qty"
+  DISCOUNT ||--o{ DISCOUNT_CELL : "per qty"
+
+  PART {
+    uuid id PK
+    string part_number
+    string revision
+    bool is_assembly
+    bool is_root_part
+    enum obtain_method "PURCHASED|MANUFACTURED"
+  }
+  NODE {
+    uuid id PK
+    uuid part_id FK
+    uuid parent_node_id FK
+    int qty_relative_to_parent
+  }
+  COMPONENT {
+    uuid id PK
+    uuid part_id FK
+    uuid process_id FK
+    bool is_root_component
+  }
+  COMPONENT_QUANTITY {
+    int quantity
+    int make_quantity
+    int deliver_quantity
+    money unit_cost
+    money unit_price
+    money total_price
+    int lead_time_days
+  }
+  QUOTE {
+    uuid id PK
+    string number
+    int revision
+    enum status "draft|sent|won|lost|expired"
+  }
+  QUOTE_ITEM {
+    uuid id PK
+    int position
+    enum workflow_status "in_progress|on_hold|completed"
+    bool was_won
+  }
