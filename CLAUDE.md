@@ -18,10 +18,10 @@ All planning docs live under `docs/`, organized so **folder = precedence tier** 
 │   ├── subsystems/                ← TIER 3  all engine/contract sub-specs
 │   ├── fixtures/                  ← TIER 3  SEED-AND-FIXTURES.md + seed.skeleton.json
 │   ├── analysis/  (+ ui/)         ← TIER 4  gap audits, research, UI mock
-│   └── reference/                 ← TIER 5  kb/ (PP KB) + screenshots/ + Screenshot-Mapping.*
+│   └── reference/                 ← TIER 5  screenshots/ + Screenshot-Mapping.* (kb/ = signpost; PP KB parked in archive/)
 ├── ui-prototype/                  ← throwaway UI prototype (separate session)
 ├── build-plan/                    ← milestone → build-block plan (added next)
-└── archive/                       ← superseded backups (ignore)
+└── archive/                       ← superseded backups + parked PP KB (kb-reference/) — ignored
 ```
 
 **Reference convention:** docs cite each other by **bare filename** (e.g. `DB-SCHEMA.sql`). Resolve by filename — every name maps to exactly one file under `docs/<tier>/`. Use `docs/spec/SPEC-INDEX.md` to jump into the master HTML spec by section anchor instead of loading the whole 492 KB file.
@@ -82,7 +82,7 @@ When two documents conflict, **higher tier wins**. Resolve conflicts *up* the la
 | `KB-Coverage-Gap-Analysis.md` | 186-article coverage matrix vs spec (provenance/rationale) | 4 |
 | `Build-Spec-Gap-Audit.md` | The original gap audit (§4 AI, §5 seed, …) | 4 |
 | `Screenshot-Mapping.md`, `Onboarding-*`, `UI-*`, `Infrastructure-Audit.html`, `*LiveMock.html` | UI research, onboarding, infra options, mock | 4 |
-| `reference/kb/` (PP KB, 186 articles) | Upstream PP behavior (descriptive) | 5 |
+| `archive/kb-reference/` (PP KB, 186 articles; **parked** during build) | Upstream PP behavior (descriptive) | 5 |
 
 \* DACH delta is tier-3 but **overrides** any region-specific behavior elsewhere.
 
@@ -90,7 +90,7 @@ When two documents conflict, **higher tier wins**. Resolve conflicts *up* the la
 
 ## 4. The KB source
 
-The Paperless Parts knowledge base (186 articles, Markdown) is the upstream reference the sub-specs were built from. **It is now on disk** at `docs/reference/kb/paperless-parts-kb-reference/`: `INDEX.md` (grouped index — start here), `articles/01-…`–`14-…/` (one Markdown file per article, front-matter + live source link, cited by **slug**), and a gitignored `index.html` (browsable single-file copy). Treat it as tier-5 (descriptive); when it conflicts with a sub-spec or the DACH delta, the sub-spec wins. Cite specific articles by slug (e.g. `building-review-rules`) when tracing a requirement; coverage vs the spec is mapped in `KB-Coverage-Gap-Analysis.md`.
+The Paperless Parts knowledge base (186 articles, Markdown) is the upstream reference the sub-specs were built from. It has already been distilled into the tier-1–3 specs, so during the build it is **parked in `archive/kb-reference/`** (out of the tracked tree to keep things focused) — `INDEX.md` (grouped index), `articles/01-…`–`14-…/` (one file per article, cited by **slug**), and `index.html`. It stays **on disk and greppable** (grep ignores `.gitignore`); to bring it back into the active tree run `mv archive/kb-reference docs/reference/kb/paperless-parts-kb-reference`. Treat it as tier-5 (descriptive); when it conflicts with a sub-spec or the DACH delta, the sub-spec wins. Cite articles by slug (e.g. `building-review-rules`); coverage vs the spec is mapped in `KB-Coverage-Gap-Analysis.md`.
 
 ---
 
