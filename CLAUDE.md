@@ -90,7 +90,7 @@ When two documents conflict, **higher tier wins**. Resolve conflicts *up* the la
 
 ## 4. The KB source
 
-The Paperless Parts knowledge base (186 articles, Markdown) is the upstream reference the sub-specs were built from. **It is not yet on disk in this repo** — `docs/reference/kb/` exists as an empty placeholder (see its `README.md`). **Action (Benjamin):** unzip the KB into `docs/reference/kb/` so it's locally greppable — it should contain `INDEX.md` + topic folders `01-…`–`14-…` + `index.html`. Treat it as tier-5 (descriptive); when it conflicts with a sub-spec or the DACH delta, the sub-spec wins. Cite specific articles by slug (e.g. `building-review-rules`) when tracing a requirement.
+The Paperless Parts knowledge base (186 articles, Markdown) is the upstream reference the sub-specs were built from. **It is now on disk** at `docs/reference/kb/paperless-parts-kb-reference/`: `INDEX.md` (grouped index — start here), `articles/01-…`–`14-…/` (one Markdown file per article, front-matter + live source link, cited by **slug**), and a gitignored `index.html` (browsable single-file copy). Treat it as tier-5 (descriptive); when it conflicts with a sub-spec or the DACH delta, the sub-spec wins. Cite specific articles by slug (e.g. `building-review-rules`) when tracing a requirement; coverage vs the spec is mapped in `KB-Coverage-Gap-Analysis.md`.
 
 ---
 

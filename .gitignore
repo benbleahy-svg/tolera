@@ -8,6 +8,10 @@
 #   then remove the line below and commit.
 docs/reference/screenshots/
 
+# --- Paperless Parts KB (tier 5): track the markdown; keep generated/heavy out of git ---
+docs/reference/kb/**/*.html
+docs/reference/kb/**/*.zip
+
 # --- Superseded / history (kept on disk, out of the repo) ---
 archive/
 Video Analysis/
