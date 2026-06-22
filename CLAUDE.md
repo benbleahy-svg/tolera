@@ -2,6 +2,8 @@
 
 **Read this first.** This is the orientation file for any agent (Claude Code or otherwise) working in the Bid Factory project. It tells you *what we're building*, *which document is authoritative for what*, the *precedence order* when documents disagree, the *repo conventions*, and the *block-and-log rule* for handling ambiguity. It is intentionally short; the detail lives in the documents it points to.
 
+> **2026-06-21 — Single-source fold-in.** The thirteen engine/contract sub-specs (Kalk, pricing, geometry/interrogation, DFM, PartGeometry, rules, Lens, domain model, DB schema, integration API, viewer/file-types, user-stories/workflows, DACH delta) were **enriched with the Paperless Parts KB and folded inline into `Bid-Factory-Build-Spec.html`**, which is now the **single self-contained build source** for Claude Code — KB-cited (89 articles, green `KB:` chips), ~620 KB, with new sub-anchors (`#kalk-*`, `#geometryservice`, `#dfm-catalogue`, `#rules-*`, `#lens-*`, `#db-schema`, `#api-*`, `#dach-delta`, …). The folded sub-specs are frozen under `docs/spec/folded-subspecs/` as provenance — **do not edit them; edit the spec.** `DECISIONS.md` still overrides everything; `SEED-AND-FIXTURES.md` (fixtures harness) + `E4-Behavioral-Gaps.md` remain standalone.
+
 ---
 
 ## 0. Repository layout
@@ -14,17 +16,17 @@ All planning docs live under `docs/`, organized so **folder = precedence tier** 
 ├── README.md                      ← human quickstart
 ├── docs/
 │   ├── decisions/                 ← TIER 1  DECISIONS.md
-│   ├── spec/                      ← TIER 2  Bid-Factory-Build-Spec.html + SPEC-INDEX.md
-│   ├── subsystems/                ← TIER 3  all engine/contract sub-specs
+│   ├── spec/                      ← TIER 2  Bid-Factory-Build-Spec.html + SPEC-INDEX.md + folded-subspecs/ (frozen provenance)
+│   ├── subsystems/                ← E4-Behavioral-Gaps.md + DOMAIN-MODEL.mermaid (engine sub-specs FOLDED into the spec → docs/spec/folded-subspecs/)
 │   ├── fixtures/                  ← TIER 3  SEED-AND-FIXTURES.md + seed.skeleton.json
 │   ├── analysis/  (+ ui/)         ← TIER 4  gap audits, research, UI mock
 │   └── reference/                 ← TIER 5  screenshots/ + Screenshot-Mapping.* (kb/ = signpost; PP KB parked in archive/)
 ├── ui-prototype/                  ← throwaway UI prototype (separate session)
 ├── build-plan/                    ← milestone → build-block plan (added next)
-└── archive/                       ← superseded backups + parked PP KB (kb-reference/) — ignored
+└── archive/                       ← backups + parked PP KB (kb-reference/) — ignored (folded sub-specs now tracked at docs/spec/folded-subspecs/)
 ```
 
-**Reference convention:** docs cite each other by **bare filename** (e.g. `DB-SCHEMA.sql`). Resolve by filename — every name maps to exactly one file under `docs/<tier>/`. Use `docs/spec/SPEC-INDEX.md` to jump into the master HTML spec by section anchor instead of loading the whole 492 KB file.
+**Reference convention:** docs cite each other by **bare filename** (e.g. `DB-SCHEMA.sql`). Resolve by filename — every name maps to exactly one file under `docs/<tier>/`. Use `docs/spec/SPEC-INDEX.md` to jump into the master HTML spec by section anchor instead of loading the whole (~620 KB) file. The spec is now **self-contained** — engine internals are folded in at the anchors listed in §3.
 
 ---
 
@@ -48,8 +50,8 @@ Working-name glossary: **Tolera** = product · **Kalk** = pricing DSL (P3L) · *
 When two documents conflict, **higher tier wins**. Resolve conflicts *up* the ladder; never silently pick the lower source.
 
 1. **`DECISIONS.md` — the living decision log.** Any explicit decision here **overrides everything**, including the master spec. This is where conflicts get resolved and where new decisions are recorded. *Always check it before acting on a contested point.*
-2. **`Bid-Factory-Build-Spec.html` — the master product spec.** Authoritative for product scope, feature set, and UI/UX intent (≈418 sections; anchors like `{kalk}`, `{interrogations-config}`, `{dach-costing}`, `{geometry-engine}`, `{integration-manager}`, `{auth}`, `{authz}`, `{billing-decided}`, `{ai-settings}`). The backups in `archive/` (`*.v2.14.backup.html`, `*.html.bak2`) are **history — ignore**.
-3. **Subsystem sub-specs** — authoritative for their subsystem's *internals* (schema, math, contracts). They refine, never contradict, tiers 1–2. The set: `DOMAIN-MODEL.md`/`.mermaid`, `DB-SCHEMA.sql`, `INTERROGATION-ENGINE-SPEC.md`, `PRICING-ENGINE-SPEC.md` + `KALK-REFERENCE.md`, `AI-LENS-ENGINE-SPEC.md`, `RULES-ENGINE-SPEC.md`, `INTEGRATION-API-CONTRACT.md`, `VIEWER-AND-FILE-TYPES.md`, `DACH-DELTA-LAYER.md`, `DFM-WARNINGS.md`, `PartGeometry-Attribute-Catalog.md`, `SEED-AND-FIXTURES.md` + `seed.skeleton.json`, `USER-STORIES-AND-WORKFLOWS.md`, `E4-Behavioral-Gaps.md`.
+2. **`Bid-Factory-Build-Spec.html` — the master product spec.** Authoritative for product scope, feature set, and UI/UX intent (≈418 sections; anchors like `{kalk}`, `{interrogations-config}`, `{dach-costing}`, `{geometry-engine}`, `{integration-manager}`, `{auth}`, `{authz}`, `{billing-decided}`, `{ai-settings}`). The backups in `archive/` (`*.v2.14.backup.html`, `*.html.bak2`) are **history — ignore**. **As of 2026-06-21 this file is the single self-contained build source: the engine sub-specs below are folded into it (see §3 anchors); on any conflict the spec wins and the archived sub-spec is mere provenance.**
+3. **Subsystem sub-specs — FOLDED into the spec (2026-06-21); now archived provenance in `docs/spec/folded-subspecs/`.** Their internals (schema, math, contracts) now live inline in `Bid-Factory-Build-Spec.html` at the §3 anchors and are the build target there. The originals are kept for traceability only. The set: `DOMAIN-MODEL.md`/`.mermaid`, `DB-SCHEMA.sql`, `INTERROGATION-ENGINE-SPEC.md`, `PRICING-ENGINE-SPEC.md` + `KALK-REFERENCE.md`, `AI-LENS-ENGINE-SPEC.md`, `RULES-ENGINE-SPEC.md`, `INTEGRATION-API-CONTRACT.md`, `VIEWER-AND-FILE-TYPES.md`, `DACH-DELTA-LAYER.md`, `DFM-WARNINGS.md`, `PartGeometry-Attribute-Catalog.md`, `SEED-AND-FIXTURES.md` + `seed.skeleton.json`, `USER-STORIES-AND-WORKFLOWS.md`, `E4-Behavioral-Gaps.md`.
    - **`DACH-DELTA-LAYER.md` is a cross-cutting override:** wherever any document (or the PP KB) describes US/imperial/ITAR/QuickBooks behavior, the DACH delta **wins** (metric, EUR/CHF + MwSt/USt, DIN/EN, GDPR + EU dual-use, DATEV).
    - **Within a subsystem, the more specific spec wins for its own internals** (e.g. Lens-vs-Geometry boundary is fixed in the Lens spec §0/§9).
 4. **Analysis & rationale (non-normative):** `Build-Spec-Gap-Audit.md`, `KB-Coverage-Gap-Analysis.md`, `Screenshot-Mapping.md`, `Onboarding-Research-and-Design.md`, the `UI-*Research/Recommendations*.html`, `Infrastructure-Audit.html`, `BidFactory-LiveMock.html`. Use for *why* and for design options — not as a source of binding requirements.
@@ -59,7 +61,7 @@ When two documents conflict, **higher tier wins**. Resolve conflicts *up* the la
 
 ## 3. Document index (what each file is authoritative for)
 
-> Paths are under `docs/` per §0 (e.g. `DECISIONS.md` → `docs/decisions/DECISIONS.md`; sub-specs → `docs/subsystems/`).
+> Paths are under `docs/` per §0. **The tier-3 sub-specs are now folded into `Bid-Factory-Build-Spec.html`** at the anchors shown — read them there; the source files are frozen in `docs/spec/folded-subspecs/`. Fold-in anchors: DOMAIN-MODEL+DB-SCHEMA→`#model`/`#model-4layer`/`#db-schema`; INTERROGATION+DFM→`#geometryservice`/`#dfm-catalogue`; PartGeometry→`#partgeometry`; PRICING+KALK→`#kalk`…`#kalk-golden`; AI-LENS→`#lens-engine`…`#lens-accept`; RULES→`#rules-engine`…`#rules-accept`; INTEGRATION-API→`#api-contract`…; VIEWER→`#viewer3d-tools`/`#pdf-capabilities`; USER-STORIES→`#states-roles`/`#states-stories`; DACH-DELTA→`#dach-delta`.
 
 | Document | Authoritative for | Tier |
 |---|---|---|

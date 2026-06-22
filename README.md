@@ -9,14 +9,14 @@ A **DACH-region instant-quoting / RFQ platform** for custom manufacturers (CNC, 
 | Path | Tier | Contents |
 |---|---|---|
 | `docs/decisions/` | 1 | `DECISIONS.md` — living decision log; **overrides everything** |
-| `docs/spec/` | 2 | `Bid-Factory-Build-Spec.html` (master spec) + `SPEC-INDEX.md` (section map) |
-| `docs/subsystems/` | 3 | All engine/contract sub-specs (domain model, DB schema, geometry, pricing/Kalk, AI/Lens, rules, integrations, viewer, DACH delta, DFM, user stories…) |
+| `docs/spec/` | 2 | `Bid-Factory-Build-Spec.html` (master spec — now the self-contained build source) + `SPEC-INDEX.md` (section map) + `folded-subspecs/` (13 engine sub-specs folded in; frozen provenance) |
+| `docs/subsystems/` | 3 | `E4-Behavioral-Gaps.md` + `DOMAIN-MODEL.mermaid` (the 13 engine/contract sub-specs were folded into the spec → `docs/spec/folded-subspecs/`) |
 | `docs/fixtures/` | 3 | `SEED-AND-FIXTURES.md` + `seed.skeleton.json` (golden-test harness) |
 | `docs/analysis/` | 4 | Gap audits, onboarding & infra research; `analysis/ui/` holds UI research + the `BidFactory-LiveMock.html` |
-| `docs/reference/` | 5 | `kb/` (Paperless Parts KB — **to be added**), `screenshots/`, `Screenshot-Mapping.*` |
+| `docs/reference/` | 5 | `screenshots/`, `Screenshot-Mapping.*`; `kb/` is a signpost (PP KB parked in `archive/kb-reference/`) |
 | `ui-prototype/` | — | Throwaway UI prototype, built in a separate `/prototype` session (see its `README.md`) |
 | `build-plan/` | — | Milestone → build-block plan (added in the next phase) |
-| `archive/` | — | Superseded spec backups — ignore |
+| `archive/` | — | Superseded spec backups + parked PP KB (`kb-reference/`) — gitignored |
 
 Application code (e.g. `backend/`, `frontend/`) is added at the repo root during the build.
 
@@ -35,7 +35,7 @@ Application code (e.g. `backend/`, `frontend/`) is added at the repo root during
 
 ## Open action items
 
-- **KB not on disk** — unzip the Paperless Parts KB into `docs/reference/kb/` (tier-5 reference; see `CLAUDE.md` §4).
+- **PP KB parked** in `archive/kb-reference/` (tier-5; on disk + greppable; restore command in `CLAUDE.md` §4).
 - **Golden fixtures due 2026-06-23** — 5–10 anonymised Fechner RFQ packages → `docs/fixtures/`.
 - **Screenshots are gitignored** (125 MB) but remain on disk. To version them, install Git LFS and run `git lfs track "docs/reference/screenshots/**"`.
 
