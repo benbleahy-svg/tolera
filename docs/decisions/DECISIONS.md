@@ -80,19 +80,21 @@
 ---
 
 ## [2026-06-14] SOLIDWORKS connector target surface
-**Status:** OPEN  
+**Status:** RESOLVED  
 **Question:** The CAD connector spec lists SOLIDWORKS as a fast-follow after Fusion. Target surface (PDM vs 3DEXPERIENCE vs desktop add-in) is still open.  
 **Options considered:** Desktop add-in (most common for SME shops); PDM (larger shops); 3DEXPERIENCE (enterprise).  
-**Decision:** PENDING — confirm with real customers during/after pilot. Do not build until confirmed. Post-pilot only.  
+**Decision:** **Deferred post-pilot, with the desktop add-in as the default target.** When built, target the SOLIDWORKS **desktop add-in** (most common for SME DACH shops like Fechner); revisit PDM/3DEXPERIENCE only if a real customer requires it. Do not build until confirmed by customer signal during/after the pilot.  
+**Resolved:** 2026-06-21  
 **Affects:** Post-v1.
 
 ---
 
 ## [2026-06-14] Belgian locale (nl-BE vs fr-BE)
-**Status:** OPEN  
+**Status:** RESOLVED  
 **Question:** When Belgian locale ships, primary language must be decided (Dutch / French / bilingual).  
-**Decision:** PENDING — later phase, not a v1 concern. Add to post-pilot backlog.  
-**Affects:** Post-v1.
+**Decision:** **Dropped from the roadmap.** Tolera targets DACH (DE/AT/CH) only for the foreseeable future; Belgium (nl-BE/fr-BE) is out of scope and removed from the post-pilot backlog. Revisit only if clear, sustained demand appears — at which point default to bilingual nl-BE + fr-BE with a language picker.  
+**Resolved:** 2026-06-21  
+**Affects:** Out of scope (was Post-v1).
 
 ---
 
@@ -105,11 +107,11 @@
 ---
 
 ## [2026-06-14] Quote PDF visual design
-**Status:** OPEN  
+**Status:** RESOLVED  
 **Question:** WeasyPrint quote PDF template needs an approved layout before M5 implementation.  
-**Decision:** Dedicated design session scheduled before M5 (at M4 completion). Do not start WeasyPrint template implementation without an approved design. Benjamin to initiate this session. Quote PDFs are fully white-label (org logo, brand colours, no Tolera branding visible to customer).  
-**Resolved (partial):** 2026-06-19 — confirmed fully white-label; design session still required at M4.  
-**Affects:** M5 (quote PDF output). Pre-M5 blocker.
+**Decision:** **Design folded into the M5 build block** — no separate pre-M5 design session and no starter template up front. The M5 builder designs *and* implements the WeasyPrint quote-PDF template as part of M5, working from the digital-quote spec section. Fixed constraint (unchanged): the PDF is **fully white-label** (org logo, brand colours, no Tolera branding visible to the customer). Supersedes the earlier "design session at M4" note.  
+**Resolved:** 2026-06-21 — white-label confirmed 2026-06-19; layout ownership moved into M5.  
+**Affects:** M5 (quote PDF output) — now self-contained in the M5 block, no longer a separate pre-M5 blocker.
 
 ---
 
