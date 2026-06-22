@@ -6,7 +6,7 @@
 
 **This file is the worked example.** M2–M6 follow its block template and citation density exactly.
 
-**Sequence:** `M1.1 ⟂ M1.2 ⟂ M1.3` (orthogonal CRUD, any order after M0) → `M1.4 → M1.5 → M1.6 → M1.7 → M1.8 (spike) → M1.9 → M1.10 → M1.11 → M1.12 → M1.13`. The spine is sequential because each layer renders into the one below; the chain ends at the golden-thread close.
+**Sequence:** `M1.1 ⟂ M1.2 ⟂ M1.3` (orthogonal CRUD, any order after M0) → `M1.4 → M1.5 → M1.6 → M1.7 → M1.8 (spike) → M1.9 → M1.10 → M1.11 → M1.12 → M1.13`. The spine is sequential because each layer renders into the one below; the chain ends at the golden-thread close. `M1.14 ⟂` (config-completeness guard) is orthogonal — it can land any time after M1.7 + M1.12, off the spine.
 
 ---
 
@@ -168,6 +168,19 @@
 - **Acceptance criteria:** the harness reproduces **all six Demo E figures exactly** (incl. $2,160.84); the golden-thread integration test passes in CI; re-running is deterministic.
 - **Test plan (fixtures):** the harness *is* the test; pricing assertions exact, future geometry assertions within tolerance (per Part 2).
 - **Golden-thread role:** **closes the thread (thin)** and pins it green in CI — the contract M3/M4/M5 each make progressively more real.
+
+### M1.14 — Config-completeness guard (operation-rates banner + missing-rates warning)   `[S]`  ⟂
+- **Vertical slice:** an operation with no rate raises a **missing-rates warning** on any quote that uses it, and Configure → Operations shows an **operation-rates banner** ("N operations need rates") — so the pilot can't quote on a €0/placeholder rate unnoticed.
+- **Scope (in):** the **operation-rates banner** in the Configure → Operations/Pricing surface (count of ops/materials with no rate + link to fix); the **missing-rates warning** on the part-estimating/costing view when a used op/material resolves to no rate (flags the line item; surfaces in "Outstanding Work"); deterministic, non-AI.
+- **Scope (out):** the full **Quick-Setup wizard + advanced-setup** self-serve onboarding (→ deferred post-pilot, see M6); auto-filling rates (shop-specific — a `DECISIONS.md` OPEN item).
+- **Depends on:** M1.7 (operations), M1.12 (seed catalog supplies the rates being checked)
+- **Implements (spec):** [#operation-rates-banner](../docs/spec/Bid-Factory-Build-Spec.html#operation-rates-banner), [#missing-rates-warning](../docs/spec/Bid-Factory-Build-Spec.html#missing-rates-warning)
+- **Internals (provenance):** ../docs/fixtures/SEED-AND-FIXTURES.md (the 54-op rates — the OPEN shop-specific values this guards)
+- **KB:** [KB: setting-up-operations](https://help.paperlessparts.com/s/article/setting-up-operations)
+- **Decisions:** ../docs/decisions/DECISIONS.md → the **54-op rates `OPEN:` item** (shop-specific; this guard is the safety net while they're unconfirmed)
+- **Acceptance criteria:** seeding an op with no rate → the Configure banner shows the count **and** the quote-side warning fires on a line item using it; a fully-rated catalog shows neither; deterministic; org-scoped.
+- **Test plan (fixtures):** seed one op with a null rate → assert banner count = 1 and a quote using it flags the line; set the rate → both clear. Bind to `/fixtures`.
+- **Golden-thread role:** none — orthogonal safety guard; the golden thread uses fully-rated fixtures, so it is unaffected.
 
 ---
 

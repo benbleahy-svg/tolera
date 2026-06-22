@@ -148,6 +148,14 @@
 
 ---
 
+## Deferred (post-pilot) — Self-serve onboarding / Quick-Setup wizard
+
+> The Fechner pilot org is **seeded** (M0.5 + M1.12), so the interactive first-run flow is **not on the pilot path**. Build it when onboarding self-serve customers who provision their own org.
+>
+> Covers the **Quick-Setup wizard** ([#quick-setup](../docs/spec/Bid-Factory-Build-Spec.html#quick-setup)) — guided first-run that pre-fills Configure from the seed catalog — and **Advanced Setup** ([#advanced-setup](../docs/spec/Bid-Factory-Build-Spec.html#advanced-setup)). The **operation-rates banner + missing-rates warning** half of this flow is **not** deferred — it ships in **M1.14** (pilot quoting needs it). ~2–3 M1-template blocks when scheduled.
+
+---
+
 ## Deferred milestone — Analytics (query-builder)   **`M7` · post-pilot**
 
 > **Not on the pilot critical path** and **not slotted into the spec's `#milestones` M0–M6 table.** Recorded here as a separate post-pilot milestone so the plan is complete; **its sequencing is Benjamin's call** (it can start any time after the M5 data model + warehouse exist, independent of the pilot). It is a **sizeable build** in its own right — present here as block one-liners, to be expanded to full M1-template blocks when scheduled.

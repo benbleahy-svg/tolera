@@ -119,7 +119,7 @@ M0 Foundations ──┬─> M1 Quote core + Pricing ──┬─> M2 Files & Vi
 |---|---|---|---|---|
 | [M0.0-prerequisites.md](M0.0-prerequisites.md) | **Provisioning gate** — accounts · secrets · DNS (human-gated; do before coding) | — | Runbook | — |
 | [M0-foundations.md](M0-foundations.md) | Scaffold + tenancy + auth + seed | 5 | Full | Low |
-| [M1-quote-core-pricing.md](M1-quote-core-pricing.md) | Quote core + full pricing engine | 13 | Full | Low–Med |
+| [M1-quote-core-pricing.md](M1-quote-core-pricing.md) | Quote core + full pricing engine | 14 | Full | Low–Med |
 | [M2-files-viewers.md](M2-files-viewers.md) | PDF/3D viewers, Part Library | 12 | Full | Med |
 | [M3-intelligence.md](M3-intelligence.md) | Lens, Rules, email ingest/threading | 10 | Full | Med |
 | [M4-geometry-manufacturing.md](M4-geometry-manufacturing.md) | GeometryService, sheet metal, nesting, BOM | 14 | Spike-gated | **High** |
@@ -127,7 +127,7 @@ M0 Foundations ──┬─> M1 Quote core + Pricing ──┬─> M2 Files & Vi
 | [M6-differentiators-hardening.md](M6-differentiators-hardening.md) | Dashboard, Vendor RFQ, adapters, pilot | 10 | Full | Med |
 | ↳ M7 (appendix in M6 file) | **Analytics query-builder** — deferred, post-pilot | ~6 | Outline | — |
 
-≈ **76 blocks** (+ a deferred M7 analytics milestone). At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
+≈ **77 blocks** (+ deferred post-pilot work: a self-serve onboarding wizard and the M7 analytics milestone). At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
 
 The 14 demos that define *done* are mapped to their implementing blocks, screenshots, and replay fixtures in **[DEMOS-TRACEABILITY.md](DEMOS-TRACEABILITY.md)** — the acceptance oracle.
 
