@@ -117,6 +117,7 @@ M0 Foundations ──┬─> M1 Quote core + Pricing ──┬─> M2 Files & Vi
 
 | File | Milestone | Blocks | Detail | Drift |
 |---|---|---|---|---|
+| [M0.0-prerequisites.md](M0.0-prerequisites.md) | **Provisioning gate** — accounts · secrets · DNS (human-gated; do before coding) | — | Runbook | — |
 | [M0-foundations.md](M0-foundations.md) | Scaffold + tenancy + auth + seed | 4 | Full | Low |
 | [M1-quote-core-pricing.md](M1-quote-core-pricing.md) | Quote core + full pricing engine | 13 | Full | Low–Med |
 | [M2-files-viewers.md](M2-files-viewers.md) | PDF/3D viewers, Part Library | 12 | Full | Med |

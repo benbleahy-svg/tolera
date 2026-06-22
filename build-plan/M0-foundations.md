@@ -8,6 +8,8 @@
 
 **Read first:** [#stack](../docs/spec/Bid-Factory-Build-Spec.html#stack), [#devworkflow](../docs/spec/Bid-Factory-Build-Spec.html#devworkflow), `CLAUDE.md` §5 (conventions) — and obey them from the first commit.
 
+**Prerequisite:** [M0.0 — Provisioning & Accounts](M0.0-prerequisites.md) must be complete (accounts, secrets, DNS) before M0.1 — it consumes the Clerk keys + `DATABASE_URL`/`REDIS_URL` on first run. The long-lead items there (Anthropic DPA, Google OAuth verification) should be *started* even earlier since they gate M3.
+
 **Sequence:** M0.1 → M0.2 → (M0.3 ⟂ M0.4). M0.3 and M0.4 can run in parallel branches once the spine (M0.2) is green.
 
 ---
