@@ -117,7 +117,7 @@
 
 ### M5.9 — de-DE catalog (German UI strings + email templates throughout)   `[M]`  ⟂
 - **Vertical slice:** every M5 surface (portal, checkout, PDF, send composer, orders, settings) renders in German via the i18n catalog, and the seeded email templates are German — the "in German" half of the M5 exit criteria.
-- **Scope (in):** the **de-DE message catalog** filled out across the M5 surfaces (extending the M0.3 i18n plumbing): portal labels, checkout form, confirmation copy, PDF field labels + the §14-UStG/reverse-charge note wording, send-composer + merge-field-rendered template defaults, orders list/detail, Finalized-Quote settings; **German seed email templates** (Quote-send, Order-shipment/confirmation); locale-correct formatting wired through the Region/Locale service (DE/AT comma-decimal `1.234,56 €`; CH point-decimal/apostrophe `CHF 1'234.56`; `TT.MM.JJJJ` dates); footer **Impressum / company register (HRB) + USt-IdNr** on customer-facing email/PDF.
+- **Scope (in):** the **de-DE message catalog** filled out across the M5 surfaces (extending the M0.4 i18n plumbing): portal labels, checkout form, confirmation copy, PDF field labels + the §14-UStG/reverse-charge note wording, send-composer + merge-field-rendered template defaults, orders list/detail, Finalized-Quote settings; **German seed email templates** (Quote-send, Order-shipment/confirmation); locale-correct formatting wired through the Region/Locale service (DE/AT comma-decimal `1.234,56 €`; CH point-decimal/apostrophe `CHF 1'234.56`; `TT.MM.JJJJ` dates); footer **Impressum / company register (HRB) + USt-IdNr** on customer-facing email/PDF.
 - **Scope (out):** **de-CH / de-AT variants and FR/IT are post-pilot** ([DACH-DELTA-LAYER](../docs/spec/folded-subspecs/DACH-DELTA-LAYER.md) §8 — de-DE now, variants later); **Belgium dropped — DE/AT/CH only** (`DECISIONS.md`); non-M5 surfaces' strings (owned by their own milestones).
 - **Depends on:** M5.1, M5.2, M5.4, M5.5, M5.6, M5.8 (the surfaces being translated)
 - **Implements (spec):** [#dach-delta](../docs/spec/Bid-Factory-Build-Spec.html#dach-delta) (§1 language/formatting), [#dach-tax](../docs/spec/Bid-Factory-Build-Spec.html#dach-tax) (German invoice/reverse-charge wording)
@@ -154,6 +154,19 @@
 - **Acceptance criteria:** pre-send returns the deterministic checklist; Claude is called **only** when a check is warning/anomaly and is **skipped on a clean pass**; the coaching chip fires only when **deviation >40% AND N ≥ 5** and **never when the toggle is off** (no query runs); Margin Coach returns **null** below 50 quotes and the UI renders nothing; all three are non-blocking/advisory.
 - **Test plan (fixtures):** **the coaching-chip case is an M5 exit criterion** — override a fixture part's cycle time with N ≥ 5 historical matches deviating >40% and assert the chip fires (and does not when N < 5 or toggle off); assert pre-send skips the Claude call on a clean quote and narrates on a dirty one; assert `get_margin_benchmark` returns null below threshold. Bind to `/fixtures`.
 - **Golden-thread role:** completes the exit clause **"pre-send checklist"** + **"coaching chip fires on override of fixture part with N ≥ 5 historical matches"** — the last assertions of the M5 exit; preserves the thread (advisory only, no pricing change).
+
+### M5.12 — User Management screen (invite · assign role · deactivate)   `[M]`  ⟂
+- **Vertical slice:** an org admin invites a user, assigns a **role per org-membership**, and deactivates one — every action enforced by the M0.3 policy module.
+- **Scope (in):** the `#user-management` settings screen; **invite** flow (Clerk invitation → pending membership); **assign / change role** on the `UserOrgMembership` (M0.2 model); **deactivate / reactivate**; member list (name, role, status, last active); **admin-only** access (gated by the M0.3 `require()` guard). The top-bar **org-switcher** already exists (M0.4); this manages who is in the org and as what.
+- **Scope (out):** SSO/SCIM auto-provisioning (post-pilot); cross-org administration (single-org pilot); billing seats (Paddle, post-v1).
+- **Depends on:** M0.3, M5.8 (Settings tree)
+- **Implements (spec):** [#user-management](../docs/spec/Bid-Factory-Build-Spec.html#user-management), [#authz](../docs/spec/Bid-Factory-Build-Spec.html#authz)
+- **Internals (provenance):** ../docs/spec/folded-subspecs/USER-STORIES-AND-WORKFLOWS.md (#states-roles)
+- **KB:** [KB: company-settings](https://help.paperlessparts.com/s/article/company-settings)
+- **Decisions:** ../docs/decisions/DECISIONS.md → *Multi-organization users (E4-a)* (role-per-membership; a user may belong to several orgs)
+- **Acceptance criteria:** an admin invites → the user joins the org with the assigned role; a role change updates that user's permissions **via the M0.3 module** (no parallel logic); a deactivated user is denied; a **non-admin cannot open the screen** (M0.3 enforces); all org-scoped.
+- **Test plan (fixtures):** invite → accept → role-gated action test; a role change flips an allow/deny; deactivate denies; non-admin access rejected. Bind to `/fixtures` seeded roles.
+- **Golden-thread role:** none — admin surface around the thread.
 
 ---
 

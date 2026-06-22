@@ -118,16 +118,16 @@ M0 Foundations ──┬─> M1 Quote core + Pricing ──┬─> M2 Files & Vi
 | File | Milestone | Blocks | Detail | Drift |
 |---|---|---|---|---|
 | [M0.0-prerequisites.md](M0.0-prerequisites.md) | **Provisioning gate** — accounts · secrets · DNS (human-gated; do before coding) | — | Runbook | — |
-| [M0-foundations.md](M0-foundations.md) | Scaffold + tenancy + auth + seed | 4 | Full | Low |
+| [M0-foundations.md](M0-foundations.md) | Scaffold + tenancy + auth + seed | 5 | Full | Low |
 | [M1-quote-core-pricing.md](M1-quote-core-pricing.md) | Quote core + full pricing engine | 13 | Full | Low–Med |
 | [M2-files-viewers.md](M2-files-viewers.md) | PDF/3D viewers, Part Library | 12 | Full | Med |
 | [M3-intelligence.md](M3-intelligence.md) | Lens, Rules, email ingest/threading | 10 | Full | Med |
 | [M4-geometry-manufacturing.md](M4-geometry-manufacturing.md) | GeometryService, sheet metal, nesting, BOM | 14 | Spike-gated | **High** |
-| [M5-outputs-orders.md](M5-outputs-orders.md) | Digital quote, checkout, PDF, orders | 11 | Full | Med |
+| [M5-outputs-orders.md](M5-outputs-orders.md) | Digital quote, checkout, PDF, orders | 12 | Full | Med |
 | [M6-differentiators-hardening.md](M6-differentiators-hardening.md) | Dashboard, Vendor RFQ, adapters, pilot | 10 | Full | Med |
 | ↳ M7 (appendix in M6 file) | **Analytics query-builder** — deferred, post-pilot | ~6 | Outline | — |
 
-≈ **74 blocks** (+ a deferred M7 analytics milestone). At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
+≈ **76 blocks** (+ a deferred M7 analytics milestone). At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
 
 The 14 demos that define *done* are mapped to their implementing blocks, screenshots, and replay fixtures in **[DEMOS-TRACEABILITY.md](DEMOS-TRACEABILITY.md)** — the acceptance oracle.
 
@@ -160,7 +160,7 @@ Resolved this session; recorded here so the slicing rationale isn't lost (substa
 - **Coverage** = everything fully detailed, **taper by uncertainty not recency**; M4 internals spike-gated.
 - **M0 tracer bullet** = the **tenancy + auth spine**, proven by a cross-org denial test (the riskiest, least-reversible property first).
 - **Golden-thread discipline** adopted (§4).
-- **M0 cut** = 4 blocks (skeleton / tenancy spine / shell+i18n+BRAND / seed framework), skeleton split from tenancy.
+- **M0 cut** = 5 blocks (skeleton / tenancy spine / **authz policy** / shell+i18n+BRAND / seed framework); skeleton split from tenancy; the authz policy module + a User Management screen (M5) added in the 2026-06-22 grill.
 - **M1 Kalk** = a spike + two blocks (sandbox core; then variable system + contexts + editor).
 - **OCCT spike** heads **M4** (not pulled early).
 - Three spec-implied decisions **folded into their owning blocks** rather than reopened: PDF rendering = PDF.js (M2 owns annotate/redact on top); LLM provider = Anthropic/Claude, configurable (M3); Lens correction-storage = per-tenant default, global on opt-in (M3).

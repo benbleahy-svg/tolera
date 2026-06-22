@@ -14,7 +14,7 @@
 - **Vertical slice:** create/list/edit/archive an Account and its Contacts, org-scoped, with Tolera as the system of record.
 - **Scope (in):** native `Account` + `Contact` models + CRUD API/UI; soft-delete; salesperson links; org-scoping via the M0.2 RLS pattern. (CRM two-way sync layers on top later — M6.)
 - **Scope (out):** HubSpot sync (→ M6); export controls/ITAR flags on parts (→ M1.5).
-- **Depends on:** M0.2 (tenancy/auth), M0.3 (shell)
+- **Depends on:** M0.2 (tenancy/auth), M0.4 (shell)
 - **Implements (spec):** [#contacts](../docs/spec/Bid-Factory-Build-Spec.html#contacts)
 - **Internals (provenance):** ../docs/spec/folded-subspecs/DOMAIN-MODEL.md, ../docs/spec/folded-subspecs/DB-SCHEMA.sql
 - **KB:** [KB: accounts-and-contacts](https://help.paperlessparts.com/s/article/accounts-and-contacts)
@@ -145,7 +145,7 @@
 - **Golden-thread role:** completes the thread's priced quote (net + tax).
 
 ### M1.12 — Seed catalog (materials · operations · processes · pricing defaults)   `[M]`
-- **Vertical slice:** provisioning an org now fills the Configure data the engine needs — materials tree, 54-op library, Core-4 processes, pricing defaults — extending the M0.4 framework.
+- **Vertical slice:** provisioning an org now fills the Configure data the engine needs — materials tree, 54-op library, Core-4 processes, pricing defaults — extending the M0.5 framework.
 - **Scope (in):** `SEED-AND-FIXTURES` Part 1 §2 (materials tree, Werkstoffnummer-keyed), §3 (54-op German library), §4 (Core-4 process templates + routers, *minus* interrogation), §6 (pricing defaults + Zuschlagskalkulation), §7 partial (workflow steps, custom tables, email templates).
 - **Scope (out):** §5 interrogation profiles (→ M4, needs DFM); §7 starter rule library (→ M3, needs rules engine).
 - **Depends on:** M1.7 (material/op entities), M1.9 (Kalk for rate/pricing formulas), M1.10 (pricing items)
