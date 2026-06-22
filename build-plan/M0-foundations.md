@@ -16,12 +16,12 @@
 
 ### M0.1 — Walking skeleton   `[M]`
 - **Vertical slice:** a request travels React → FastAPI → Postgres and back, in Docker, with CI green — the layers are connected and deployable before anything is built on them.
-- **Scope (in):** monorepo (FastAPI backend + React/TypeScript/Vite frontend); Docker Compose (app, Postgres, Redis); Alembic baseline migration; one health endpoint that round-trips a DB read; one e2e smoke test; GitHub Actions CI running `pytest` + `mypy` + `ruff`; the seed `CLAUDE.md` run-commands wired (`docker compose up`, `pytest`).
+- **Scope (in):** monorepo (FastAPI backend + React/TypeScript/Vite frontend); Docker Compose (app, Postgres, Redis); Alembic baseline migration; one health endpoint that round-trips a DB read; one e2e smoke test; GitHub Actions CI running `pytest` + `mypy` + `ruff`; the seed `CLAUDE.md` run-commands wired (`docker compose up`, `pytest`); the **cross-cutting convention scaffolds every later block inherits** (`CLAUDE.md` §5) — structured JSON logging (request-id + org context), one API **error envelope** + Pydantic-v2 edge validation, a **Celery base task** (idempotent + retry-with-backoff + timeout + dead-letter), and a **health/readiness + baseline-metrics** endpoint.
 - **Scope (out):** auth, any domain table, any UI beyond a mounted shell placeholder (→ M0.2/M0.4).
 - **Depends on:** — (first block)
 - **Implements (spec):** [#stack](../docs/spec/Bid-Factory-Build-Spec.html#stack), [#devworkflow](../docs/spec/Bid-Factory-Build-Spec.html#devworkflow)
 - **Internals (provenance):** ../docs/spec/folded-subspecs/DB-SCHEMA.sql (DB conventions: UUID PKs, snake_case, ISO-8601 UTC, JSONB)
-- **Acceptance criteria:** `docker compose up` brings the stack up clean; `GET /healthz` returns a value read from Postgres; CI is green on the PR (pytest + mypy + ruff all pass).
+- **Acceptance criteria:** `docker compose up` brings the stack up clean; `GET /healthz` returns a value read from Postgres; CI is green on the PR (pytest + mypy + ruff all pass); a deliberately-triggered error returns the standard **error envelope** (no stack trace); the example Celery task is **idempotent on retry**; logs are structured JSON carrying request-id + org context.
 - **Test plan (fixtures):** e2e smoke test hits `/healthz` through the running stack and asserts the DB-sourced payload; CI runs it on every PR thereafter.
 - **Golden-thread role:** none yet — establishes the harness the thread's CI test will live in.
 

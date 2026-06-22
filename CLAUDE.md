@@ -107,6 +107,13 @@ The Paperless Parts knowledge base (186 articles, Markdown) is the upstream refe
 - **Language/i18n:** German-first UI + email templates; ISO GPS for GD&T.
 - **Naming:** sub-spec files `UPPER-KEBAB.md`; keep cross-references by filename so the index stays navigable.
 
+**Engineering (cross-cutting — scaffolded in `build-plan/M0.1`, inherited by every block):**
+- **Logging:** structured **JSON** logs carrying a request-id + `org_id` + user; **never** log secrets or customer PII / print contents; one logging config shared by API + workers.
+- **Errors & validation:** one API **error envelope** (`{code, message, details}`); validate input at the edge with **Pydantic v2**; never leak a stack trace to a client or external recipient.
+- **Async jobs:** all long work (extraction, geometry, nesting, email sync) runs on **Celery** — tasks **idempotent** (safe to re-run), **retried with backoff**, **timeout-bounded**, **dead-lettered** on final failure; never block a request on it.
+- **Observability:** a health/readiness endpoint + baseline metrics (request latency, job success/failure, queue depth); instrument the usage funnels the spec calls out (e.g. Vendor-RFQ open/submit/apply) from day one.
+- **Migrations:** every schema change is a **reversible Alembic migration** (autogenerate + human review); **no manual DDL**; migrations run in CI and on deploy.
+
 ---
 
 ## 6. The block-and-log rule (how to handle ambiguity)
