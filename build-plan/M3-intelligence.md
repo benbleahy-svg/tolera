@@ -8,6 +8,8 @@
 
 **This milestone follows the M1 worked example** for block template and citation density exactly.
 
+**AI test plan (two tracks).** Lens output is *probabilistic*, so M3 is tested on two tracks (see `README.md` → "Testing the two kinds of block"): the **deterministic core** — `ExtractionFinding` schema/persistence, the never-hallucinate *guard logic*, the rules AST evaluator, review-item lifecycle, email parsing — gets **exact unit tests that gate every PR** and **mocks the model**; the **probabilistic extraction quality** is scored by the **eval harness (M3.11)** — precision/recall/F1 per field category vs the spec targets (classification ≈95%, recall ≈65%, precision ≈85%), at temperature 0 + pinned model + versioned prompts, **threshold/regression-gated, never exact-match**.
+
 **Sequence:** `M3.1 → M3.2` (Lens pipeline then its panel) ⟂ with `M3.6 → M3.7 → M3.8` (rules schema → evaluator → review-item lifecycle); `M3.3 → M3.4` (ingest → bulk-create) depend on M3.1 and **carry the golden-thread swap**; `M3.5` (threading) is orthogonal after M3.3; `M3.9` (Triage Brief) chains after M3.3; `M3.10` (Rule Auto-Suggestion) depends on the rules engine (M3.8). The two AI features sit last because they consume the pipelines beneath them.
 
 ---
@@ -22,7 +24,7 @@
 - **KB:** [KB: found-in-files-extractions](https://help.paperlessparts.com/s/article/found-in-files-extractions), [KB: wingman-assistance](https://help.paperlessparts.com/s/article/wingman-assistance)
 - **Decisions:** ../docs/decisions/DECISIONS.md → *LLM provider = Anthropic Claude (zero-data-retention), configurable* — provider/region behind a setting, not hard-coded; this block owns the seam
 - **Acceptance criteria:** a fixture print produces golden findings (part# X, rev Y, material DIN Z, units mm, N holes with tolerances, M control frames) at the right category/type/value/tolerance/role; the **never-hallucinate test** passes (no value absent from the print is emitted); the **EU-routing test** passes (a dual-use-flagged file never leaves the DPA region); findings are org-scoped; status defaults `suggested`.
-- **Test plan (fixtures):** golden-extraction test bound to a `/fixtures/drawings` print; never-hallucinate negative test; EU-routing test on a flagged fixture.
+- **Test plan (fixtures):** *deterministic* tests gate this PR — the never-hallucinate negative test + the EU-routing test on a flagged fixture (both exact), with the model **mocked**; *extraction quality* (recall/precision per field) is scored separately by the **eval harness (M3.11)**, not exact-matched here (per the two-track strategy).
 - **Golden-thread role:** prerequisite for the real-intake swap — Lens must produce findings before the ingest path (M3.3/M3.4) can prefill the thread's quote.
 
 ### M3.2 — Found-in-Files panel + click-to-fill + corrections (training label)   `[M]`
@@ -137,6 +139,19 @@
 - **Acceptance criteria:** adding the same op to a 3rd qualifying part surfaces a non-blocking chip; clicking it opens the Create Rule dialog **pre-seeded** with the detected pattern; **no rule is created by AI** — the dialog requires an explicit human CREATE RULE; the suggestion is suppressed when `rule_suggest_enabled` is off; the pattern query (not Claude) decides eligibility.
 - **Test plan (fixtures):** pattern-detection test (3 manual adds same family/material/90d → suggestion fires; 2 → none); assert the dialog opens pre-seeded and that no rule exists until CREATE RULE is clicked.
 - **Golden-thread role:** orthogonal; only suggests — any router change still flows through the human + M3.8, so the priced thread is untouched.
+
+### M3.11 — Lens extraction eval harness (the probabilistic test track)   `[M]`  ⟂
+- **Vertical slice:** a labelled fixture set runs through Lens and is scored on precision / recall / F1 per field category with a CI threshold gate — the probabilistic counterpart to M1.13's deterministic golden harness.
+- **Scope (in):** the **eval harness** — a labelled-print fixture set (expected findings per category) + a **scorer** (precision/recall/F1 per `ExtractionFinding.category`/`type`, matched by normalized value + tolerance + bbox overlap) + a **threshold/baseline gate** (targets: classification ≈95%, field recall ≈65%, precision ≈85%; fail on regression-vs-baseline beyond a margin); a repeatable run config (**temperature 0, pinned model version, versioned prompt IDs**); a per-category metrics report + diff-vs-baseline; CI wiring to run on **M3-touching PRs / nightly** (not every PR — it calls the model). Spans all four Lens pipelines (file-processing, email-ingest, document-extraction, BOM-detection).
+- **Scope (out):** the deterministic guard/schema tests (they live with their blocks and gate every PR); authoring labelled fixtures beyond the seed set (accrues over the pilot); model fine-tuning.
+- **Depends on:** M3.1 (extraction + `ExtractionFinding`), M1.13 (the fixtures harness it extends)
+- **Implements (spec):** [#lens-models](../docs/spec/Bid-Factory-Build-Spec.html#lens-models), [#ai-arch](../docs/spec/Bid-Factory-Build-Spec.html#ai-arch)
+- **Internals (provenance):** ../docs/spec/folded-subspecs/AI-LENS-ENGINE-SPEC.md (confidence targets + the four pipelines + never-hallucinate)
+- **KB:** [KB: wingman-assistance](https://help.paperlessparts.com/s/article/wingman-assistance)
+- **Decisions:** ../docs/decisions/DECISIONS.md → *Fixture packages* (the labelled set grows as the Fechner packages land 2026-06-23); *LLM provider = Anthropic* (temp 0, pinned version for repeatability)
+- **Acceptance criteria:** the suite scores the labelled set and reports per-category precision/recall/F1; the gate **fails on a baseline regression** and **passes on benign phrasing variance**; the run is repeatable (temp 0 / pinned model / versioned prompts); it does **not** run on every PR (cost).
+- **Test plan (fixtures):** the harness *is* the test — seed 2–3 labelled prints now, expand on fixture delivery; a meta-test asserts the scorer's precision/recall math on a hand-checked mini-case.
+- **Golden-thread role:** none directly — it is the quality gate that keeps the thread's *real* M3 intake (M3.3/M3.4) trustworthy as prompts and models change.
 
 ---
 

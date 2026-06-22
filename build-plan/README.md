@@ -76,6 +76,20 @@ Each block carries a **T-shirt size** — the currency is context, not hours:
 
 ---
 
+### Testing the two kinds of block
+
+Most blocks are **deterministic** — schema, pricing math, rules evaluation, state machines, parsing. They get **exact fixture-bound assertions that gate every PR** (a wrong number fails the build — that's the point, e.g. M1.13's $2,160.84).
+
+The **Lens / AI blocks (M3) are probabilistic** — an LLM/vision model produces them, so exact-match tests would be flaky and a benign phrasing difference would fail CI for nothing. They are tested on a **second track**:
+
+- **Split the work.** The **deterministic core** around the model — the `ExtractionFinding` schema, the never-hallucinate *guard logic*, the rules AST, review-item lifecycle, email parsing — gets exact unit tests and **mocks the model**. Only the **extraction quality itself** is probabilistic.
+- **Score, don't match.** That quality is measured by the **extraction eval suite (M3.11)**: a labelled fixture set scored on **precision / recall / F1 per field category** against the spec targets (classification ≈95%, recall ≈65%, precision ≈85%), run at **temperature 0 + pinned model + versioned prompts**.
+- **Gate on thresholds, not output.** CI gates the eval suite on **thresholds + regression-vs-baseline** — benign variance passes, a real quality drop or a bad prompt change fails. Prompt/model changes are validated by re-running the suite and diffing the metrics.
+
+So: deterministic blocks → exact, PR-gating; probabilistic blocks → eval-suite, threshold-gating. **Never write an exact-match test against raw model output.**
+
+---
+
 ## 4. The golden thread (end-to-end discipline)
 
 Beyond the M0 architectural tracer bullet, one **golden-thread fixture** stays runnable and green from the end of **M1** onward — the spine a real RFQ travels: *intake → quote → line item → part → costing/pricing → send*. Each later milestone **replaces a mock segment with the real subsystem**; the thread's integration test runs in CI every milestone and can only get *more real*, never break.
@@ -121,13 +135,13 @@ M0 Foundations ──┬─> M1 Quote core + Pricing ──┬─> M2 Files & Vi
 | [M0-foundations.md](M0-foundations.md) | Scaffold + tenancy + auth + seed | 5 | Full | Low |
 | [M1-quote-core-pricing.md](M1-quote-core-pricing.md) | Quote core + full pricing engine | 14 | Full | Low–Med |
 | [M2-files-viewers.md](M2-files-viewers.md) | PDF/3D viewers, Part Library | 12 | Full | Med |
-| [M3-intelligence.md](M3-intelligence.md) | Lens, Rules, email ingest/threading | 10 | Full | Med |
+| [M3-intelligence.md](M3-intelligence.md) | Lens, Rules, email ingest/threading | 11 | Full | Med |
 | [M4-geometry-manufacturing.md](M4-geometry-manufacturing.md) | GeometryService, sheet metal, nesting, BOM | 14 | Spike-gated | **High** |
 | [M5-outputs-orders.md](M5-outputs-orders.md) | Digital quote, checkout, PDF, orders | 12 | Full | Med |
 | [M6-differentiators-hardening.md](M6-differentiators-hardening.md) | Dashboard, Vendor RFQ, adapters, pilot | 10 | Full | Med |
 | ↳ M7 (appendix in M6 file) | **Analytics query-builder** — deferred, post-pilot | ~6 | Outline | — |
 
-≈ **77 blocks** (+ deferred post-pilot work: a self-serve onboarding wizard and the M7 analytics milestone). At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
+≈ **78 blocks** (+ deferred post-pilot work: a self-serve onboarding wizard and the M7 analytics milestone). At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
 
 The 14 demos that define *done* are mapped to their implementing blocks, screenshots, and replay fixtures in **[DEMOS-TRACEABILITY.md](DEMOS-TRACEABILITY.md)** — the acceptance oracle.
 
