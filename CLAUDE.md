@@ -22,7 +22,7 @@ All planning docs live under `docs/`, organized so **folder = precedence tier** 
 │   ├── analysis/  (+ ui/)         ← TIER 4  gap audits, research, UI mock
 │   └── reference/                 ← TIER 5  screenshots/ + Screenshot-Mapping.* (kb/ = signpost; PP KB parked in archive/)
 ├── ui-prototype/                  ← throwaway UI prototype (separate session)
-├── build-plan/                    ← milestone → build-block plan (added next)
+├── build-plan/                    ← execution map: README + M0–M6 + DEMOS-TRACEABILITY.md (the build blocks; see §8)
 └── archive/                       ← backups + parked PP KB (kb-reference/) — ignored (folded sub-specs now tracked at docs/spec/folded-subspecs/)
 ```
 
@@ -135,3 +135,15 @@ Foundations first, then the engines, then the workflow:
 6. Apply **`DACH-DELTA-LAYER.md`** throughout (not a final step — a constraint on every layer).
 
 Verify each milestone against the **golden fixtures** (`SEED-AND-FIXTURES.md` Part 2); slot in the Fechner packages on **2026-06-23**.
+
+---
+
+## 8. Build-time source protocol — demos, screenshots, KB
+
+The execution map is in `build-plan/`: `README.md` (the spine — sizing rubric, golden-thread, dependency graph, per-session protocol), one file per milestone `M0`–`M6`, and `DEMOS-TRACEABILITY.md` (the demo → block → screenshot → fixture map). When executing a build block:
+
+- **Load only the block's cited sources** — its spec anchors, the one folded sub-spec, its `KB:` links. Navigate via `docs/spec/SPEC-INDEX.md`; don't load the whole spec. Conserving context is the sizing constraint.
+- **Demos are the acceptance oracle.** Via `DEMOS-TRACEABILITY.md`, a block's demo points to the narrative (`Bid-Factory-Build-Spec.html#demos` / `#acceptance`) and the `docs/reference/screenshots/Demo<X>/` frames. The **screenshots are the UI ground truth** (layout, controls, copy) — build to them; the **fixture is the machine-checkable form** — verify against it.
+- **KB** (`[KB: slug]` → `https://help.paperlessparts.com/s/article/{slug}`, or grep `archive/kb-reference/` by slug) is the upstream behavioural detail behind a feature (tier-5, descriptive).
+- **Reference, never copy.** Demo / spec / KB text is not duplicated into code or the plan — it would drift from its source (DRY).
+- **Precedence holds:** `DECISIONS.md` > spec > folded sub-spec > analysis/screenshots > KB; the **DACH delta overrides** any US/imperial/ITAR/QuickBooks behaviour a screenshot or KB article shows. A pixel never outranks the spec. Don't guess — **block-and-log** (§6).

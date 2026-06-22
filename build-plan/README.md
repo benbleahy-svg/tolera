@@ -13,7 +13,7 @@
 A Claude Code session executes **exactly one block**. The protocol:
 
 1. **Pick the block.** Take the lowest-numbered block in the current milestone whose `Depends on` are all merged. Orthogonal blocks (marked ⟂) may be taken in parallel branches.
-2. **Load only its sources.** Open the block's `Implements (spec)` anchors, its one `Internals (provenance)` sub-spec, and skim the linked `KB:` articles. Do **not** load the whole 640 KB spec — that is what `docs/spec/SPEC-INDEX.md` and these anchors are for. Conserving context *is* the sizing constraint (see §3).
+2. **Load only its sources.** Open the block's `Implements (spec)` anchors, its one `Internals (provenance)` sub-spec, and skim the linked `KB:` articles. Do **not** load the whole 640 KB spec — that is what `docs/spec/SPEC-INDEX.md` and these anchors are for. Conserving context *is* the sizing constraint (see §3). If the block names a demo, open its row in [DEMOS-TRACEABILITY.md](DEMOS-TRACEABILITY.md) → the demo narrative + the `DemoX/` screenshots (the UI ground truth).
 3. **Branch.** `feature/{m}-{slug}` off `develop` (per the spec's Development Workflow, `#devworkflow`).
 4. **Build to the acceptance criteria**, test-first where it pays (the `tdd` skill; mandatory for pricing/geometry math).
 5. **Prove it against the fixtures.** Every block names a test bound to `/fixtures` (`docs/fixtures/SEED-AND-FIXTURES.md`). Green or it is not done.
@@ -128,6 +128,8 @@ M0 Foundations ──┬─> M1 Quote core + Pricing ──┬─> M2 Files & Vi
 
 ≈ **74 blocks** (+ a deferred M7 analytics milestone). At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
 
+The 14 demos that define *done* are mapped to their implementing blocks, screenshots, and replay fixtures in **[DEMOS-TRACEABILITY.md](DEMOS-TRACEABILITY.md)** — the acceptance oracle.
+
 ---
 
 ## 6. Spike register (the explicit unknowns)
@@ -144,6 +146,7 @@ Two places where the design is only knowable once code runs. Both are isolated s
 - **Spec anchors** → `[#anchor](../docs/spec/Bid-Factory-Build-Spec.html#anchor)`; jump via `docs/spec/SPEC-INDEX.md`.
 - **Internals (provenance)** → the one folded sub-spec under `../docs/spec/folded-subspecs/` whose schema/math/contract the block implements. *Edit the spec, never the folded provenance* — it is frozen.
 - **KB** → `[KB: {slug}](https://help.paperlessparts.com/s/article/{slug})`. The KB is the upstream Paperless Parts behaviour the spec was distilled from (tier-5, descriptive); link it so the genuine logic/UI behind a feature is one click away. Superseded by the spec and always by the DACH delta where they speak.
+- **Demos & screenshots** → via [DEMOS-TRACEABILITY.md](DEMOS-TRACEABILITY.md): the demo is the **acceptance oracle** — its narrative ([#demos](../docs/spec/Bid-Factory-Build-Spec.html#demos) / [#acceptance](../docs/spec/Bid-Factory-Build-Spec.html#acceptance)) plus the `../docs/reference/screenshots/DemoX/` frames are the **UI ground truth** (build to them), and the fixture is the machine-checkable form (verify against it). Never inline demo text (DRY); the **DACH delta overrides** any US/imperial behaviour a screenshot shows.
 - **Decisions** → `../docs/decisions/DECISIONS.md` (tier-1). Cited per block where a resolved decision constrains it; the next session reads this file first.
 
 ---
