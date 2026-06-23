@@ -1,0 +1,86 @@
+[project]
+name = "tolera"
+version = "0.1.0"
+description = "Tolera — DACH instant-quoting platform (backend walking skeleton)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "sqlalchemy>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "celery>=5.4.0",
+    "redis>=5.2.0",
+    "prometheus-client>=0.21.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8.0",
+]
+
+[tool.uv]
+package = false
+
+# ---------------------------------------------------------------------------
+# Ruff — lint + format (CI runs `ruff check .` and `ruff format --check .`).
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["clerk-react", "clerk-nextjs", "ui-prototype"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic migration scaffolding keeps its generated shape.
+"alembic/**" = ["E402", "F401"]
+
+# ---------------------------------------------------------------------------
+# mypy — type checking (CI runs `mypy .`).
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+exclude = ['(^|/)(alembic|clerk-react|clerk-nextjs|ui-prototype|frontend|e2e)/']
+
+[[tool.mypy.overrides]]
+module = ["celery.*"]
+ignore_missing_imports = true
+
+# Celery is untyped; its decorator + base class would otherwise trip strict mode.
+[[tool.mypy.overrides]]
+module = ["app.tasks", "app.celery_app"]
+disallow_untyped_decorators = false
+disallow_subclassing_any = false
+
+# ---------------------------------------------------------------------------
+# pytest + coverage.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+    # Starlette's TestClient prefers the (not-yet-pinned) httpx2; harmless here.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/celery_app.py"]
+
+[tool.coverage.report]
+show_missing = true

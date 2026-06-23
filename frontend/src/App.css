@@ -1,0 +1,42 @@
+.shell {
+  max-width: 32rem;
+  margin: 4rem auto;
+  padding: 0 1.5rem;
+}
+
+.shell h1 {
+  margin: 0;
+  font-size: 2.5rem;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 0.25rem 0 2rem;
+  color: #8a8f98;
+}
+
+.status {
+  padding: 1rem 1.25rem;
+  border: 1px solid #262b35;
+  border-radius: 0.75rem;
+  background: #171a21;
+}
+
+.status--error {
+  color: #ff6b6b;
+}
+
+dl.status {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 1rem;
+}
+
+dl.status dt {
+  color: #8a8f98;
+}
+
+dl.status dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
