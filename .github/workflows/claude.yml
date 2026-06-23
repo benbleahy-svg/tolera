@@ -1,0 +1,29 @@
+# @claude GitHub Action — mention @claude in an issue/PR comment and it acts (reads context, can push a fix).
+# CANONICAL SETUP: run `claude /install-github-app` from the repo — it installs the GitHub App, stores the
+# ANTHROPIC_API_KEY secret, and writes/updates this file with the correct inputs for your account.
+# This file is a reference; confirm the input name against what /install-github-app generates.
+name: Claude
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+
+jobs:
+  claude:
+    if: contains(github.event.comment.body, '@claude') || contains(github.event.issue.body, '@claude')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # lets @claude push fixes to the PR branch
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

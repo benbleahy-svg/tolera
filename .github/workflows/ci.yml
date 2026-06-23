@@ -1,0 +1,40 @@
+# CI — gates every PR into develop/main. SCAFFOLD: M0.1 wires this to the real app code.
+# Until M0.1 lands code, expect this to no-op/skip; do not enable branch-protection "required check"
+# on it until the first real job passes.
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync deps
+        run: uv sync --all-extras --dev
+      - name: Lint (ruff)
+        run: uv run ruff check .
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+      - name: Types (mypy)
+        run: uv run mypy .
+      - name: Tests + coverage (pytest)
+        run: uv run pytest --cov --cov-report=term-missing --cov-fail-under=80
+
+  # eval-suite:  # ENABLE AT M3.11 — Lens extraction quality gate.
+  #   Scores precision/recall/F1 per field category vs. spec thresholds at temperature 0 + pinned model.
+  #   Gates on thresholds + regression-vs-baseline, NOT exact-match of model output.
+  #   runs-on: ubuntu-latest
+  #   steps: [ ... ]

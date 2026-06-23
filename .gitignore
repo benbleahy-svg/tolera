@@ -43,3 +43,10 @@ build/
 *.log
 .cache/
 coverage/
+
+# --- Claude Code (team config IS tracked: settings.json, commands/, skills/, hooks/) ---
+.claude/settings.local.json
+.claude/worktrees/
+.claude/credentials/
+.claude/cache/
+.claude/todos/

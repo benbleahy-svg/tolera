@@ -1,0 +1,28 @@
+# CODEOWNERS — who must approve changes to each area.
+# Solo for now: everything maps to @benbleahy-svg. As the team grows, split the subsystem lines
+# (lens / geometry / frontend) onto their owners.
+# NOTE: this only takes effect once branch protection has "Require review from Code Owners" ON.
+# Keep that OFF while solo (you can't approve your own PRs) — see build-plan/GITHUB-SETUP.md.
+
+# Default owner for everything
+*                           @benbleahy-svg
+
+# --- Tier-1 / irreversible ---
+/CLAUDE.md                  @benbleahy-svg
+/docs/decisions/            @benbleahy-svg
+/REVIEW.md                  @benbleahy-svg
+**/migrations/              @benbleahy-svg
+**/models/                  @benbleahy-svg
+**/pricing/                 @benbleahy-svg
+**/auth/                    @benbleahy-svg
+
+# --- Subsystem owners (split these onto real people as the team grows) ---
+**/lens/                    @benbleahy-svg
+**/geometry/                @benbleahy-svg
+/frontend/                  @benbleahy-svg
+
+# --- CI / infra / config ---
+/.github/                   @benbleahy-svg
+/.claude/                   @benbleahy-svg
+/Dockerfile                 @benbleahy-svg
+/deploy/                    @benbleahy-svg

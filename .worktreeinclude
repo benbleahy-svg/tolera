@@ -1,0 +1,5 @@
+# Files copied into each `claude --worktree` checkout (gitignore syntax).
+# Only files that match AND are gitignored are copied — tracked files are never duplicated.
+.env
+.env.local
+.claude/settings.local.json

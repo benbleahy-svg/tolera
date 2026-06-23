@@ -154,3 +154,18 @@ The execution map is in `build-plan/`: `README.md` (the spine — sizing rubric,
 - **KB** (`[KB: slug]` → `https://help.paperlessparts.com/s/article/{slug}`, or grep `archive/kb-reference/` by slug) is the upstream behavioural detail behind a feature (tier-5, descriptive).
 - **Reference, never copy.** Demo / spec / KB text is not duplicated into code or the plan — it would drift from its source (DRY).
 - **Precedence holds:** `DECISIONS.md` > spec > folded sub-spec > analysis/screenshots > KB; the **DACH delta overrides** any US/imperial/ITAR/QuickBooks behaviour a screenshot or KB article shows. A pixel never outranks the spec. Don't guess — **block-and-log** (§6).
+
+---
+
+## 9. Operating procedure — the per-block loop (hook-enforced)
+
+Every build block runs this loop. The **start and end are human-gated** (per the build plan); the **middle is automated**. Local hooks in `.claude/hooks/` make parts fire on their own — they stay inert until the Python project exists (M0.1), and the test gate is bypassable with `CLAUDE_SKIP_TEST_GATE=1`.
+
+1. **`/block <id>`** — loads only the block's sources, branches off `develop`, then **grills** you before any code. *(human: you answer the grill.)*
+2. **Build test-first** — red → green → refactor; the fixture is the target. Mandatory for pricing/geometry math.
+3. **Diagnose, don't guess** — when something breaks, run the diagnosis loop.
+4. After each edit the **PostToolUse hook** lints the changed file (ruff); fix what it reports.
+5. **`/ship`** — runs ruff + mypy + pytest + CodeRabbit + `/code-review`, then opens the PR. The **Stop hook** won't let a turn end with red lint/tests when Python changed.
+6. **Human gate:** a teammate clicks the demo and approves the PR; the Code Owner signs off money/tax/schema/auth — never self-merged, never bot-only.
+
+Tier-1 invariants (§5) hold throughout: money = integer minor units + currency; every table org-scoped (RLS); Lens never auto-fed into Kalk; reversible migrations only. Full workflow: `build-plan/WORKFLOW-PLAYBOOK.html` + `CONTRIBUTING.md`.

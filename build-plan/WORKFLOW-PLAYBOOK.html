@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tolera — Claude Code Workflow Playbook</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1a1d24; --muted:#5b6472; --line:#e4e7ec;
+    --indigo:#4f46e5; --indigo-soft:#eef2ff;
+    --green:#0e9f6e; --green-soft:#e7f7f0;
+    --amber:#b45309; --amber-soft:#fdf3e3;
+    --red:#c0392b; --red-soft:#fdeceb;
+    --teal:#0e7490; --teal-soft:#e3f5f8;
+    --purple:#7c3aed; --purple-soft:#f3ecfe;
+    --slate:#334155; --slate-soft:#eef1f5;
+    --radius:14px; --shadow:0 1px 2px rgba(16,24,40,.05),0 6px 20px rgba(16,24,40,.06);
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:40px 24px 80px}
+  header.hero{background:linear-gradient(135deg,#1e1b4b 0%,#312e81 55%,#3730a3 100%);color:#fff;border-radius:20px;padding:34px 36px;box-shadow:var(--shadow)}
+  header.hero .kicker{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#c7d2fe;font-weight:700}
+  header.hero h1{margin:8px 0 6px;font-size:30px;line-height:1.15}
+  header.hero p{margin:0;color:#dcdcf5;max-width:760px;font-size:15px}
+  .hero-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+  .pill{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);color:#fff;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600}
+
+  h2{font-size:22px;margin:46px 0 6px;letter-spacing:-.01em}
+  h2 .num{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--indigo);color:#fff;font-size:14px;margin-right:10px;vertical-align:middle}
+  .lede{color:var(--muted);margin:0 0 18px;max-width:850px}
+  h3{font-size:15px;margin:0 0 10px;letter-spacing:.01em}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:820px){.g2,.g3{grid-template-columns:1fr}}
+
+  .tldr{border-left:5px solid var(--indigo);background:var(--indigo-soft)}
+  .tldr ul{margin:8px 0 0;padding-left:20px}
+  .tldr li{margin:6px 0}
+
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;letter-spacing:.02em;white-space:nowrap}
+  .b-indigo{background:var(--indigo-soft);color:var(--indigo)} .b-green{background:var(--green-soft);color:var(--green)}
+  .b-amber{background:var(--amber-soft);color:var(--amber)} .b-red{background:var(--red-soft);color:var(--red)}
+  .b-teal{background:var(--teal-soft);color:var(--teal)} .b-purple{background:var(--purple-soft);color:var(--purple)}
+  .b-slate{background:var(--slate-soft);color:var(--slate)}
+
+  code,kbd{font-family:var(--mono);font-size:12.5px}
+  .cmd{font-family:var(--mono);font-size:12.5px;background:#0f172a;color:#e2e8f0;border-radius:9px;padding:10px 13px;display:block;overflow-x:auto;margin:8px 0;white-space:pre}
+  .cmd .c{color:#7dd3fc} .cmd .g{color:#86efac} .cmd .m{color:#fcd34d} .cmd .dim{color:#94a3b8}
+  .inline{background:#eef1f5;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-family:var(--mono);font-size:12px}
+
+  /* step flow */
+  .flow{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;margin-top:8px}
+  .step{flex:1 1 150px;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 13px 14px;position:relative;box-shadow:var(--shadow)}
+  .step + .step{margin-left:26px}
+  .step + .step::before{content:"";position:absolute;left:-22px;top:50%;width:18px;height:2px;background:#c4c9d4}
+  .step + .step::after{content:"";position:absolute;left:-9px;top:calc(50% - 4px);border:5px solid transparent;border-left-color:#c4c9d4}
+  .step .n{font-size:11px;font-weight:800;color:var(--indigo)}
+  .step h4{margin:3px 0 6px;font-size:13.5px}
+  .step p{margin:0;font-size:12px;color:var(--muted)}
+  .step .tool{margin-top:9px;display:flex;flex-wrap:wrap;gap:4px}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin:6px 0 0;font-size:12px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--slate-soft)}
+  tr:last-child td{border-bottom:none}
+  td .inline{white-space:nowrap}
+
+  .loop{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .loop .ring{position:absolute;right:-18px;top:-18px;width:70px;height:70px;border:8px solid var(--indigo-soft);border-top-color:var(--indigo);border-radius:50%}
+  .loop h4{margin:0 0 4px;font-size:14px}
+  .loop .when{font-size:11.5px;color:var(--muted);margin:0 0 8px}
+  .loop .row{font-size:12px;margin:4px 0}
+  .loop .row b{color:var(--ink)}
+
+  .callout{border-radius:12px;padding:15px 17px;font-size:13.5px}
+  .warn{background:var(--red-soft);border:1px solid #f3c9c4}
+  .warn b{color:var(--red)}
+  .ok{background:var(--green-soft);border:1px solid #bfe8d6}
+  .ok b{color:var(--green)}
+  .note{background:var(--amber-soft);border:1px solid #f1dcae}
+  .note b{color:var(--amber)}
+
+  .checklist{list-style:none;margin:0;padding:0}
+  .checklist li{padding:8px 0 8px 28px;position:relative;border-bottom:1px dashed var(--line);font-size:13.5px}
+  .checklist li:last-child{border-bottom:none}
+  .checklist li::before{content:"";position:absolute;left:0;top:11px;width:15px;height:15px;border:2px solid var(--indigo);border-radius:5px}
+  .checklist li.done::before{background:var(--green);border-color:var(--green)}
+  .checklist li.done::after{content:"✓";position:absolute;left:3px;top:7px;color:#fff;font-size:11px;font-weight:800}
+
+  .miniwrap{overflow-x:auto;margin-top:8px}
+  .footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  a{color:var(--indigo);text-decoration:none} a:hover{text-decoration:underline}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.two-col{grid-template-columns:1fr}}
+  .tag-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">Tolera · “Bid Factory” — Build Operations</div>
+  <h1>Claude Code Workflow Playbook</h1>
+  <p>How a 2–3 person team + Claude Code turns 78 spec'd blocks into a shipped DACH quoting platform — what to run, when to run it, when to open a second terminal, and how to hand work off. Built around your actual plan (one block = one session = one PR), your installed Matt Pocock skills, and a layered review stack that reads the diff when humans can't.</p>
+  <div class="hero-meta">
+    <span class="pill">Stack: Python/FastAPI + Vite front-end</span>
+    <span class="pill">78 blocks · M0→M6</span>
+    <span class="pill">2–3 devs + Claude Code</span>
+    <span class="pill">Context is the scarce resource</span>
+  </div>
+</header>
+
+<!-- TL;DR -->
+<div class="card tldr" style="margin-top:24px">
+  <h3 style="color:var(--indigo)">The one-paragraph answer</h3>
+  <p style="margin:0;max-width:880px">Run <b>one Claude per block, one block per session, one PR</b> — that is the spine, and it's already baked into your plan. Don't reach for an orchestrator-spawns-builders pattern: your blocks share a schema, migrations and a golden thread, so N&nbsp;Claudes writing in parallel creates merge hell. Instead, get <b>parallelism for free in two safer ways</b>: (1) <b>sub-agents inside one session</b> for read-only fan-out (explore, research, review) and (2) <b>git worktrees + a second Claude</b> only on the blocks your plan marks orthogonal&nbsp;(⟂). Wrap every block in a tight loop — <b>grill → TDD build → diagnose → local review → fixtures green → PR → bot review → you accept → merge</b> — and you stay the human gate on exactly the thing you care about: a working module.</p>
+  <ul>
+    <li><b>Multi-Clauding &amp; worktrees:</b> yes — but as a scalpel for ⟂ blocks, not a default. The <span class="inline">/rename</span> + <span class="inline">/colour</span> terminal trick is genuinely worth it.</li>
+    <li><b>Loops:</b> five of them, nested. The inner TDD loop does the heavy lifting; an autonomous CI loop comes later (M6), not now.</li>
+    <li><b>Install now:</b> Matt Pocock skills + <span class="inline">/setup-matt-pocock-skills</span>, CodeRabbit CLI (free), git-guardrails hooks, <span class="inline">REVIEW.md</span>. Python toolchain via <span class="inline">uv</span>; bun only touches the front-end.</li>
+    <li><b>Team (2–3):</b> claim each block as a GitHub issue (assignment = the lock), let CodeRabbit + Claude read the diff, and hand off with <span class="inline">/handoff</span> + the PR description. CODEOWNERS keeps money/schema/auth changes gated to the lead.</li>
+  </ul>
+</div>
+
+<!-- 1. BIG PICTURE -->
+<h2><span class="num">1</span>The shape of the work</h2>
+<p class="lede">Your plan is a <b>dependency chain with two parallel windows</b>, not a wide field of independent tasks. That single fact drives every workflow decision below — where you can run a second Claude, and where you must go one at a time.</p>
+<div class="card">
+<div class="miniwrap">
+<svg viewBox="0 0 1040 300" width="100%" role="img" aria-label="Milestone dependency graph" style="min-width:760px">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a3b8"/></marker>
+    <style>
+      .box{rx:11; stroke-width:1.5}
+      .lbl{font:600 13px var(--sans,sans-serif); fill:#1a1d24}
+      .sub{font:500 10.5px var(--sans,sans-serif); fill:#5b6472}
+      .edge{stroke:#94a3b8; stroke-width:2; fill:none; marker-end:url(#arr)}
+    </style>
+  </defs>
+  <!-- parallel window shading -->
+  <rect x="392" y="22" width="206" height="256" fill="#eef2ff" stroke="#c7d2fe" stroke-dasharray="5 4" rx="12"/>
+  <text x="495" y="40" text-anchor="middle" class="sub" style="fill:#4f46e5;font-weight:700">⟂ parallel window</text>
+
+  <!-- M0 -->
+  <rect class="box" x="20" y="116" width="150" height="64" fill="#eef2ff" stroke="#4f46e5"/>
+  <text x="95" y="142" text-anchor="middle" class="lbl">M0 Foundations</text>
+  <text x="95" y="160" text-anchor="middle" class="sub">tenancy + auth spine</text>
+
+  <!-- M1 -->
+  <rect class="box" x="210" y="116" width="160" height="64" fill="#e7f7f0" stroke="#0e9f6e"/>
+  <text x="290" y="142" text-anchor="middle" class="lbl">M1 Quote + Pricing</text>
+  <text x="290" y="160" text-anchor="middle" class="sub">golden thread closes</text>
+
+  <!-- M2 -->
+  <rect class="box" x="410" y="60" width="170" height="58" fill="#fff" stroke="#94a3b8"/>
+  <text x="495" y="84" text-anchor="middle" class="lbl">M2 Files &amp; Viewers</text>
+  <text x="495" y="101" text-anchor="middle" class="sub">PDF/3D · part library</text>
+
+  <!-- M3 -->
+  <rect class="box" x="410" y="186" width="170" height="58" fill="#f3ecfe" stroke="#7c3aed"/>
+  <text x="495" y="210" text-anchor="middle" class="lbl">M3 Intelligence</text>
+  <text x="495" y="227" text-anchor="middle" class="sub">Lens · Rules · email</text>
+
+  <!-- M4 -->
+  <rect class="box" x="620" y="116" width="170" height="64" fill="#fdf3e3" stroke="#b45309"/>
+  <text x="705" y="138" text-anchor="middle" class="lbl">M4 Geometry</text>
+  <text x="705" y="155" text-anchor="middle" class="sub">OCCT · spike-gated</text>
+  <text x="705" y="171" text-anchor="middle" class="sub" style="fill:#b45309;font-weight:700">⚠ high uncertainty</text>
+
+  <!-- M5 -->
+  <rect class="box" x="830" y="116" width="150" height="64" fill="#e7f7f0" stroke="#0e9f6e"/>
+  <text x="905" y="142" text-anchor="middle" class="lbl">M5 Outputs</text>
+  <text x="905" y="160" text-anchor="middle" class="sub">PDF · checkout · orders</text>
+
+  <!-- M6 -->
+  <rect class="box" x="830" y="218" width="150" height="56" fill="#eef2ff" stroke="#4f46e5"/>
+  <text x="905" y="241" text-anchor="middle" class="lbl">M6 Hardening</text>
+  <text x="905" y="258" text-anchor="middle" class="sub">+ pilot (Fechner)</text>
+
+  <!-- edges -->
+  <path class="edge" d="M170,148 L206,148"/>
+  <path class="edge" d="M370,140 C388,120 392,108 406,95"/>
+  <path class="edge" d="M370,156 C388,180 392,196 406,205"/>
+  <path class="edge" d="M580,92 C600,108 600,120 616,134"/>
+  <path class="edge" d="M580,212 C600,196 600,176 616,162"/>
+  <path class="edge" d="M790,148 L826,148"/>
+  <path class="edge" d="M905,180 L905,216"/>
+  <!-- M0 also feeds M4 directly (off critical UI path) -->
+  <path class="edge" d="M95,180 C95,275 480,288 705,288 C760,288 760,210 730,182" stroke-dasharray="5 4"/>
+  <text x="430" y="287" class="sub" style="fill:#b45309">M4 sits off the UI path — feeds M3 rules &amp; M2 viewers</text>
+</svg>
+</div>
+<div class="legend">
+  <span><span class="dot" style="background:#4f46e5"></span>irreversible-first (schema/auth/money)</span>
+  <span><span class="dot" style="background:#0e9f6e"></span>golden-thread milestone</span>
+  <span><span class="dot" style="background:#7c3aed"></span>probabilistic / AI</span>
+  <span><span class="dot" style="background:#b45309"></span>spike-gated unknown</span>
+  <span><span class="dot" style="background:#c7d2fe;border:1px dashed #4f46e5"></span>safe to run 2 Claudes</span>
+</div>
+<p style="margin:14px 0 0;font-size:13px;color:var(--muted)"><b>Read it like this:</b> everything funnels through M0→M1 single-file (you cannot parallelize the foundation). Once M1 is green, <b>M2 and M3 are orthogonal</b> — viewers vs. extraction don't touch the same files — so that's your first real two-Claude window. M4 is the danger zone: don't build its internals until the <b>OCCT spike (M4.0)</b> tells you what's actually possible.</p>
+</div>
+
+<!-- 2. PHASE 0 SETUP -->
+<h2><span class="num">2</span>Phase 0 — stand up the machine (one time, before M0.1)</h2>
+<p class="lede">You're here right now: repo is docs-only, only <span class="inline">main</span> exists. Do this once. It's separate from the <a href="M0.0-prerequisites.md">M0.0 accounts/secrets gate</a> (Hetzner, Clerk, Mailgun, Anthropic DPA…) — that runbook already exists and is excellent; finish it in parallel. This section is the <b>Claude Code + dev-loop</b> setup it doesn't cover.</p>
+<div class="grid g2">
+  <div class="card">
+    <h3><span class="badge b-indigo">A</span>&nbsp; Claude Code config &amp; skills</h3>
+    <ul class="checklist">
+      <li class="done"><b>CLAUDE.md</b> — already written and excellent. Code Review reads it too: violations get flagged automatically. Leave it as your tier-1 orientation.</li>
+      <li>Install Matt Pocock skills, then run the one-time setup:
+        <span class="cmd"><span class="dim"># installs to .claude/skills, pick GitHub as the tracker</span>
+npx skills@latest add mattpocock/skills
+<span class="dim"># then, inside a claude session:</span>
+<span class="c">/setup-matt-pocock-skills</span></span>
+      </li>
+      <li>Add <b>git guardrails</b> (blocks <span class="inline">push</span>/<span class="inline">reset --hard</span>/<span class="inline">clean</span> before they run) — vital once a 2nd Claude is loose:
+        <span class="cmd"><span class="c">/git-guardrails-claude-code</span></span>
+      </li>
+      <li class="done"><b>REVIEW.md</b> — <b>done</b> (scaffolded, DACH-tuned): review-only rules injected at highest priority. Skim it.</li>
+      <li class="done"><span class="inline">.claude/settings.json</span> — <b>done</b>: auto-allow the inner loop (<span class="inline">pytest</span>/<span class="inline">mypy</span>/<span class="inline">ruff</span>/<span class="inline">alembic</span>/<span class="inline">uv</span>) + deny dangerous git/rm, so the TDD loop never stops for permission.</li>
+      <li class="done">Worktree prep — <b>done</b>: <span class="inline">.claude/worktrees/</span> gitignored + <span class="inline">.worktreeinclude</span> copies <span class="inline">.env</span> into each worktree.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3><span class="badge b-teal">B</span>&nbsp; Dev environment &amp; feedback loops</h3>
+    <ul class="checklist">
+      <li><b>Backend = Python.</b> Use <span class="inline">uv</span> for env/deps (fast), <span class="inline">ruff</span> (lint+format), <span class="inline">mypy</span> (types), <span class="inline">pytest</span>. These are the feedback loops Claude needs to not fly blind.
+        <span class="cmd"><span class="dim"># M0.1 scaffolds these; create them here if starting cold</span>
+uv init &amp;&amp; uv add fastapi pydantic celery alembic
+uv add --dev pytest mypy ruff</span>
+      </li>
+      <li><b>Front-end = Vite.</b> This is the <b>only</b> place <span class="inline">bun</span> is relevant — as a fast install/test runner. <span class="inline">bun</span> or <span class="inline">pnpm</span> both fine; nothing in the backend uses it.</li>
+      <li><b>pre-commit</b> hooks so junk never reaches a PR (Python-native, not Husky):
+        <span class="cmd">uv add --dev pre-commit
+<span class="dim"># .pre-commit-config.yaml: ruff, ruff-format, mypy</span>
+pre-commit install</span>
+      </li>
+      <li><b>CodeRabbit CLI</b> (free) — senior-level review in the terminal before you even open a PR:
+        <span class="cmd">curl -fsSL https://cli.coderabbit.ai/install.sh | sh
+coderabbit auth login</span>
+      </li>
+      <li><b>Branches:</b> create <span class="inline">develop</span>, protect <span class="inline">main</span> + <span class="inline">develop</span> (require PR + green CI). M0.0 §2 covers this.</li>
+      <li class="done"><b>CI</b> — <span class="inline">.github/workflows/ci.yml</span> scaffolded (ruff · mypy · pytest · coverage; eval-suite stub for M3.11). Wire to real code at M0.1.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- 3. THE PER-BLOCK LOOP -->
+<h2><span class="num">3</span>The per-block loop — your daily rhythm</h2>
+<p class="lede">This is the answer to “what should I be doing and when.” Every one of the 78 blocks runs through the same nine beats. Steps 2–7 are mostly Claude; <b>you are the gate at step 8</b> — exactly the human-tests-the-module checkpoint you asked for. Most blocks take one focused session.</p>
+<div class="card">
+  <div class="flow">
+    <div class="step"><div class="n">01 · PICK</div><h4>Grab the block</h4><p>Lowest-numbered block whose deps are merged. Open only its spec anchors + 1 sub-spec.</p><div class="tool"><span class="badge b-slate">you</span><span class="badge b-slate">SPEC-INDEX</span></div></div>
+    <div class="step"><div class="n">02 · ALIGN</div><h4>Grill it</h4><p>Make Claude interview you on scope &amp; edge cases before any code. Catches misalignment early.</p><div class="tool"><span class="badge b-indigo">/grill-with-docs</span></div></div>
+    <div class="step"><div class="n">03 · BRANCH</div><h4>Cut the branch</h4><p><span class="inline">feature/{m}-{slug}</span> off <span class="inline">develop</span>. (Worktree if it's a ⟂ block — see §4.)</p><div class="tool"><span class="badge b-slate">git</span></div></div>
+    <div class="step"><div class="n">04 · BUILD</div><h4>TDD the slice</h4><p>Red→green→refactor. Mandatory for pricing/geometry math. Fixture is the target.</p><div class="tool"><span class="badge b-green">/tdd</span><span class="badge b-indigo">/implement</span></div></div>
+    <div class="step"><div class="n">05 · DEBUG</div><h4>Diagnose breaks</h4><p>When it's red and you don't know why: reproduce → minimise → instrument → fix.</p><div class="tool"><span class="badge b-amber">/diagnosing-bugs</span></div></div>
+    <div class="step"><div class="n">06 · REVIEW</div><h4>Review locally</h4><p>Catch issues before the PR exists — staged + unstaged diff.</p><div class="tool"><span class="badge b-teal">coderabbit</span><span class="badge b-teal">/code-review</span></div></div>
+    <div class="step"><div class="n">07 · PROVE</div><h4>Fixtures + thread</h4><p>Block's fixture green, golden-thread test still green. Else it's not done.</p><div class="tool"><span class="badge b-green">pytest</span></div></div>
+    <div class="step"><div class="n">08 · GATE</div><h4>You test &amp; PR</h4><p>Open the demo/screenshot, click through the real module, then open the PR.</p><div class="tool"><span class="badge b-red">you ✋</span></div></div>
+    <div class="step"><div class="n">09 · MERGE</div><h4>Bot + merge</h4><p>CI + Code Review bot run. Address 🔴 findings, squash-merge to <span class="inline">develop</span>.</p><div class="tool"><span class="badge b-green">CI</span><span class="badge b-teal">@claude review</span></div></div>
+  </div>
+  <div class="callout note" style="margin-top:18px">
+    <b>Side-branch — when context fills.</b> If a session gets long and Claude starts losing the thread (the #1 cause of bad output on this project, since <i>context is your scarce resource</i>), don't push through. Run <span class="inline">/handoff</span> to compact the session into a handoff doc, start a <b>fresh Claude</b>, and resume. A clean 40%-full context beats a degraded 90%-full one every time.
+  </div>
+  <div class="callout ok" style="margin-top:12px">
+    <b>Now hook-enforced.</b> Three hooks in <span class="inline">.claude/hooks/</span> automate the middle of this loop: <b>SessionStart</b> reminds Claude of the procedure, <b>PostToolUse</b> lints each edited file (ruff), and <b>Stop</b> blocks finishing while lint/tests are red (bypass <span class="inline">CLAUDE_SKIP_TEST_GATE=1</span>). They stay inert until the Python project exists. Steps 02 (grill) and 08 (you test the demo) stay human — that's by design.
+  </div>
+</div>
+
+<!-- 4. SINGLE VS MULTI -->
+<h2><span class="num">4</span>One Claude or many? The honest verdict</h2>
+<p class="lede">“Multi-Clauding” is real and the context-switching argument is right — but it only pays when tasks <b>don't touch the same files</b>. Your plan literally marks those with ⟂. Here's the decision rule.</p>
+<div class="grid g3">
+  <div class="card" style="border-top:4px solid var(--indigo)">
+    <h3>① Default — the spine</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 8px"><b>1 Claude · 1 block · 1 PR.</b></p>
+    <p style="font-size:13px;margin:0">Use for <b>all of M0, all of M1</b>, and any block on the dependency chain. The schema, migrations, auth and golden thread are shared state — serialise them. This is ~70% of the build.</p>
+    <div class="tag-row"><span class="badge b-indigo">always start here</span></div>
+  </div>
+  <div class="card" style="border-top:4px solid var(--teal)">
+    <h3>② Fan-out — inside one session</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 8px"><b>1 Claude · N read-only sub-agents.</b></p>
+    <p style="font-size:13px;margin:0">For <b>research, exploration, and review</b> — “survey how PP handles X across the KB,” “review this diff from 3 angles.” Sub-agents read; they don't write. Zero merge risk; saves your main context.</p>
+    <div class="tag-row"><span class="badge b-teal">explore · review · research</span></div>
+  </div>
+  <div class="card" style="border-top:4px solid var(--green)">
+    <h3>③ Parallel — worktrees</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 8px"><b>N worktrees · N Claudes · N branches.</b></p>
+    <p style="font-size:13px;margin:0">Only on <b>⟂ orthogonal blocks</b>: M2 viewers ∥ M3 extraction; settings sub-trees; file-storage ∥ saved-views. Each in its own worktree + terminal.</p>
+    <div class="tag-row"><span class="badge b-green">⟂ blocks only</span></div>
+  </div>
+</div>
+
+<div class="two-col" style="margin-top:16px">
+  <div class="card">
+    <h3>How to actually run worktrees</h3>
+    <span class="cmd"><span class="dim"># Claude makes the isolated dir + branch for you</span>
+claude <span class="m">--worktree</span> m2-pdf-viewer
+claude <span class="m">--worktree</span> m3-lens-extract
+<span class="dim"># → .claude/worktrees/&lt;name&gt;/ on branch worktree-&lt;name&gt;</span></span>
+    <p style="font-size:12.5px;color:var(--muted);margin:8px 0 0"><b>Tell your terminals apart</b> (the trick you mentioned — it works): in each session run <span class="inline">/rename m2-viewer</span> and <span class="inline">/colour blue</span>, the other <span class="inline">/rename m3-lens</span> + <span class="inline">/colour purple</span>. No more “which Claude is mid-edit?”.</p>
+    <p style="font-size:12.5px;color:var(--muted);margin:8px 0 0"><b>Merge discipline:</b> one branch at a time → run the full suite → then the next. Conflicts? <span class="inline">/resolving-merge-conflicts</span>.</p>
+  </div>
+  <div class="card warn">
+    <h3 style="color:var(--red)">⚠ The merge-hell trap — avoid this</h3>
+    <p style="font-size:13px;margin:0 0 8px">Do <b>not</b> point two Claudes at blocks that share files. The classic failure on a schema-heavy project:</p>
+    <ul style="font-size:12.5px;margin:0;padding-left:18px;color:var(--slate)">
+      <li>Two branches both edit <span class="inline">DB-SCHEMA</span> / add Alembic migrations → revision conflicts, broken history.</li>
+      <li>Both edit the shared pricing roll-up or the domain model → silent logic clobber.</li>
+      <li>“Hold on, the other Claude just renamed that module” → wasted session.</li>
+    </ul>
+    <p style="font-size:12.5px;margin:8px 0 0"><b>Rule:</b> before opening a 2nd worktree, list the files each block touches. Overlap → sequential. Disjoint → parallel.</p>
+  </div>
+</div>
+
+<!-- T. TEAM -->
+<h2><span class="num" style="background:var(--green)">T</span>Working as a 2–3 person team</h2>
+<p class="lede">Your plan was written for one builder; this is the thin layer that makes it safe for a few. Three themes: <b>claim before you build</b>, <b>let the bots read the diff</b>, and <b>hand off in writing</b> — never leave state trapped in one person's chat.</p>
+<div class="grid g3">
+  <div class="card"><h3><span class="badge b-indigo">claim</span>&nbsp; No collisions</h3><p style="font-size:13px;margin:0">Each block is a GitHub issue. <b>Assigning it to yourself is the lock.</b> Take the lowest-numbered block whose deps are merged — two people never grab the same one.</p></div>
+  <div class="card"><h3><span class="badge b-amber">gate</span>&nbsp; CODEOWNERS</h3><p style="font-size:13px;margin:0">Changes to <span class="inline">models/</span>, <span class="inline">migrations/</span>, <span class="inline">pricing/</span>, <span class="inline">auth/</span> auto-require the lead's approval. The irreversible stuff stays human-gated.</p></div>
+  <div class="card"><h3><span class="badge b-teal">handoff</span>&nbsp; In writing</h3><p style="font-size:13px;margin:0"><span class="inline">/handoff</span> compacts a session → commit it to the branch / PR. With <span class="inline">CLAUDE.md</span> as the shared brain, a teammate (or a fresh Claude) resumes cold.</p></div>
+</div>
+<div class="two-col" style="margin-top:16px">
+  <div class="card ok"><h3 style="color:var(--green)">Two people, two tracks</h3><p style="font-size:13px;margin:0 0 6px">Run in parallel <b>only on ⟂ blocks</b> (M2 viewers ∥ M3 extraction is the first window). Each in its own worktree + terminal (<span class="inline">/rename</span>, <span class="inline">/colour</span>).</p><p style="font-size:12.5px;color:var(--muted);margin:0"><b>One rule above all:</b> only one person touches schema/migrations at a time — serialise <span class="inline">models/</span>, <span class="inline">migrations/</span>, <span class="inline">pricing/</span>. Merge one branch at a time, test between.</p></div>
+  <div class="card"><h3>Onboard a teammate in ~15 min</h3><p style="font-size:13px;margin:0">Clone → <span class="inline">cp .env.example .env</span> (fill from the vault) → <span class="inline">uv sync</span> → <span class="inline">pre-commit install</span> → Matt Pocock skills + CodeRabbit CLI. Then read <span class="inline">CLAUDE.md</span> → this playbook → <a href="../CONTRIBUTING.md">CONTRIBUTING.md</a>. Shared <span class="inline">.claude/settings.json</span> ships in the repo.</p></div>
+</div>
+
+<!-- 5. LOOPS -->
+<h2><span class="num">5</span>The five loops (nested, fastest on the inside)</h2>
+<p class="lede">“Are loops a good thing?” — yes, and you already run more than you think. The art is keeping the <b>fast</b> loops fast and the <b>expensive</b> ones rare. Inner loops run hundreds of times a day; the outer ones a few times a milestone.</p>
+<div class="grid g3">
+  <div class="loop"><div class="ring"></div><h4>① Inner — TDD</h4><p class="when">seconds–minutes · constant</p><div class="row"><b>Trigger:</b> writing any logic</div><div class="row"><b>Tool:</b> <span class="badge b-green">/tdd</span> red→green→refactor</div><div class="row"><b>Exit:</b> fixture assertion green</div></div>
+  <div class="loop"><div class="ring"></div><h4>② Bug — Diagnose</h4><p class="when">minutes · as needed</p><div class="row"><b>Trigger:</b> a test/behaviour breaks</div><div class="row"><b>Tool:</b> <span class="badge b-amber">/diagnosing-bugs</span></div><div class="row"><b>Exit:</b> root cause + regression test</div></div>
+  <div class="loop"><div class="ring"></div><h4>③ Review — pre-PR</h4><p class="when">~once per block</p><div class="row"><b>Trigger:</b> block looks done</div><div class="row"><b>Tool:</b> <span class="badge b-teal">coderabbit</span> + <span class="badge b-teal">/code-review</span> + <span class="badge b-purple">@claude review</span></div><div class="row"><b>Exit:</b> no 🔴, you accept</div></div>
+  <div class="loop"><div class="ring"></div><h4>④ Architecture</h4><p class="when">every few days</p><div class="row"><b>Trigger:</b> entropy creeping in</div><div class="row"><b>Tool:</b> <span class="badge b-indigo">/improve-codebase-architecture</span></div><div class="row"><b>Exit:</b> ball-of-mud risks logged/fixed</div></div>
+  <div class="loop"><div class="ring"></div><h4>⑤ Golden thread</h4><p class="when">every milestone</p><div class="row"><b>Trigger:</b> milestone exit</div><div class="row"><b>Tool:</b> end-to-end fixture in CI</div><div class="row"><b>Exit:</b> thread still green, one mock made real</div></div>
+  <div class="loop" style="background:var(--slate-soft);border-style:dashed"><div class="ring" style="border-color:#e2e8f0;border-top-color:#64748b"></div><h4>⑥ Autonomous <span class="badge b-slate">later</span></h4><p class="when">M6+ · optional</p><div class="row"><b>The “RoboBun” pattern:</b> a GitHub Action where <span class="inline">@claude</span> reads an issue → reproduces → writes a test/fix → opens a PR.</div><div class="row"><b>Hold until:</b> suite is mature. Premature = noise.</div></div>
+</div>
+
+<!-- 6. REVIEW STACK -->
+<h2><span class="num">6</span>The review stack — four layers, bots do the reading</h2>
+<p class="lede">You told me the team can't reliably review code by eye — so the machines read the diff and the human verifies <b>behaviour</b>. Four layers, each catching what the last missed; the bots can even fix each other's findings, leaving a human only "does the demo do the right thing" plus signing off the irreversible.</p>
+<table>
+  <thead><tr><th style="width:20%">Layer</th><th style="width:16%">When</th><th style="width:14%">Cost</th><th>What it's good for</th></tr></thead>
+  <tbody>
+    <tr><td><b>CodeRabbit CLI</b><br><span class="badge b-teal">terminal</span></td><td>Before commit / before PR</td><td><b>Free</b> (rate-limited)</td><td>Fastest gut-check on staged + unstaged changes, right in the loop. Integrates with Claude Code. Your everyday layer.</td></tr>
+    <tr><td><b>Claude <span class="inline">/code-review</span></b><br><span class="badge b-indigo">in-session</span></td><td>Before PR, on demand</td><td>Your usage</td><td>Same-session review of the branch diff; <span class="inline">--fix</span> applies findings, <span class="inline">ultra</span> runs the deep cloud review. No GitHub App needed.</td></tr>
+    <tr><td><b>Code Review bot</b><br><span class="badge b-purple">on PR</span></td><td>On PR open / push</td><td>~$15–25/review · Team/Ent · preview</td><td>Multi-agent review of the diff vs. your whole codebase, inline on the PR. Gated to Team/Enterprise — adopt if/when you're on it; otherwise the two local layers cover you.</td></tr>
+    <tr><td><b>@claude triage</b><br><span class="badge b-purple">on PR</span></td><td>After the bots comment</td><td>Your usage</td><td>Comment <span class="inline">@claude address the review findings and push a fix</span> — it reads CodeRabbit's + Code Review's comments and commits the fixes. This is the "bots talking to each other" you asked for.</td></tr>
+    <tr><td><b>A teammate</b><br><span class="badge b-red">human gate ✋</span></td><td>Step 8, every block</td><td>—</td><td>Approves the PR and <b>clicks the demo</b> to confirm behaviour. Money, tax, schema, auth, customer data: the Code Owner signs off — never a bot alone.</td></tr>
+  </tbody>
+</table>
+<div class="callout ok" style="margin-top:14px"><b>REVIEW.md tip.</b> Put repo-specific gates here (injected at highest priority): “DACH money is integer minor-units + currency, never a float”; “every new table is org-scoped with RLS”; “Lens output is never auto-fed into Kalk”; “cap nits at 5.” It makes the bot enforce your tier-1 rules instead of generic style nits. <b>I've already written this file</b> — DACH-tuned — at the repo root.</div>
+<div class="callout warn" style="margin-top:12px"><b>The one thing the bots can't do for you.</b> AI reviewers catch bugs, leaks and rule violations well — but they can miss a value that's <i>plausible but wrong for your domain</i> (a misread tax rule, a subtly wrong pricing rounding). That's why the <b>demo/fixture is the real acceptance oracle</b> and a human owns money/tax/schema sign-off. Lean hard on tests + fixtures + types — they're your team's actual safety net, not eyeballing the diff.</div>
+
+<!-- 7. SKILL MAP -->
+<h2><span class="num">7</span>When to run which skill</h2>
+<p class="lede">You have Matt Pocock's skill set installed. Here's the trigger for each — most fire <i>inside</i> the per-block loop above.</p>
+<table>
+  <thead><tr><th style="width:22%">Skill</th><th style="width:26%">Run it when…</th><th>Why / note</th></tr></thead>
+  <tbody>
+    <tr><td><span class="inline">/setup-matt-pocock-skills</span></td><td><b>Once, now</b></td><td>Wires the skills to GitHub as your tracker + label vocabulary. Do before the rest.</td></tr>
+    <tr><td><span class="inline">/grill-with-docs</span></td><td>Start of <b>every block</b> (step 2)</td><td>Aligns you + Claude before code; updates a CONTEXT/glossary + ADRs. Your single highest-leverage habit.</td></tr>
+    <tr><td><span class="inline">/tdd</span></td><td>Building any logic (step 4)</td><td>Red-green-refactor. <b>Mandatory</b> for Kalk pricing &amp; geometry math per the plan.</td></tr>
+    <tr><td><span class="inline">/implement</span></td><td>Executing a fully-specced block</td><td>Drives a block from its acceptance criteria when the approach is already clear.</td></tr>
+    <tr><td><span class="inline">/diagnosing-bugs</span></td><td>Something breaks (step 5)</td><td>Disciplined loop — stops “try random fixes” flailing. Especially the Kalk sandbox + OCCT spikes.</td></tr>
+    <tr><td><span class="inline">/code-review</span></td><td>Block looks done (step 6)</td><td>In-session diff review before the PR.</td></tr>
+    <tr><td><span class="inline">/handoff</span></td><td>Context filling, block unfinished</td><td>Compact → fresh session. Cheap insurance against degraded output.</td></tr>
+    <tr><td><span class="inline">/improve-codebase-architecture</span></td><td>Every few days (loop ④)</td><td>Finds deepening opportunities before the codebase becomes a ball of mud.</td></tr>
+    <tr><td><span class="inline">/resolving-merge-conflicts</span></td><td>Merging worktree branches</td><td>Only relevant once you're running parallel ⟂ work.</td></tr>
+    <tr><td><span class="inline">/to-issues</span></td><td>Optional, up front</td><td>Convert build-plan blocks → GitHub issues so each session “grabs” one. Nice with the autonomous loop later.</td></tr>
+    <tr><td><span class="inline">/domain-modeling</span> · <span class="inline">/codebase-design</span></td><td>When a seam/interface needs design</td><td>Your specs already do much of this; reach for them on the deep modules (GeometryService, Kalk, Lens).</td></tr>
+  </tbody>
+</table>
+
+<!-- 8. MILESTONE PIPELINE -->
+<h2><span class="num">8</span>Milestone pipeline — gates &amp; spikes</h2>
+<p class="lede">The same per-block loop repeats; what changes per milestone is <b>how many Claudes</b> you can run and <b>which spike de-risks it</b>. Don't start a milestone until the prior one's fixture exit-criteria pass.</p>
+<table>
+  <thead><tr><th>Milestone</th><th style="width:11%">Blocks</th><th style="width:16%">Claudes</th><th>Spike / gate before you build</th></tr></thead>
+  <tbody>
+    <tr><td><b>M0</b> Foundations</td><td>5</td><td><span class="badge b-indigo">1 — serialise</span></td><td>Cross-org denial test is the tracer bullet. Tenancy/auth = least reversible → first.</td></tr>
+    <tr><td><b>M1</b> Quote + Pricing</td><td>14</td><td><span class="badge b-indigo">1 — serialise</span></td><td><b>SPIKE M1.8</b> Kalk sandbox (secure + bit-deterministic) before the editor/variables. Golden thread first closes here.</td></tr>
+    <tr><td><b>M2</b> Files &amp; Viewers</td><td>12</td><td><span class="badge b-green">2 ∥ with M3</span></td><td>Orthogonal to M3 — first real two-worktree window once M1 is green.</td></tr>
+    <tr><td><b>M3</b> Intelligence</td><td>11</td><td><span class="badge b-green">2 ∥ with M2</span></td><td>Two-track testing: deterministic core (mock the model) vs. <b>eval-suite M3.11</b> (precision/recall thresholds). Never exact-match raw model output.</td></tr>
+    <tr><td><b>M4</b> Geometry</td><td>14</td><td><span class="badge b-amber">1 — after spike</span></td><td><b>SPIKE M4.0</b> OCCT capability probe. Greenlights M4 <i>or</i> triggers the Spatial-license talk (procurement lead time). Internals stay thin till it resolves.</td></tr>
+    <tr><td><b>M5</b> Outputs &amp; Orders</td><td>12</td><td><span class="badge b-indigo">1 — serialise</span></td><td>Thread's “sent” becomes a real PDF + email + buyer portal.</td></tr>
+    <tr><td><b>M6</b> Hardening + Pilot</td><td>10</td><td><span class="badge b-green">2 — adapters ∥</span></td><td>Mock-first adapters (Würth/HubSpot) parallelize well. Optional: stand up the autonomous CI loop now.</td></tr>
+  </tbody>
+</table>
+
+<!-- R. RECOMMENDATIONS -->
+<h2><span class="num" style="background:var(--teal)">+</span>Worth adding (beyond the basics)</h2>
+<p class="lede">Opinionated picks for <i>your</i> situation — a team that can't review code by eye, building money- and geometry-critical software. The theme: turn judgement you can't reliably apply into automation you can trust.</p>
+<table>
+  <thead><tr><th style="width:14%">When</th><th style="width:24%">Add</th><th>Why it fits Tolera</th></tr></thead>
+  <tbody>
+    <tr><td><span class="badge b-teal">done</span></td><td><b>Playwright</b> (browser E2E)</td><td><b>Scaffolded in <span class="inline">e2e/</span></b> — the 14 demos as <span class="inline">fixme</span> tests; promote each as its milestone lands. Your "human clicks the demo" gate becomes a regression test — the biggest win for a team that can't read diffs.</td></tr>
+    <tr><td><span class="badge b-green">now</span></td><td><b>Hypothesis</b> (property tests)</td><td>Property-based tests for <b>Kalk pricing &amp; geometry</b> — generates thousands of inputs to break your math. Far stronger than example tests for the parts that must be bit-exact.</td></tr>
+    <tr><td><span class="badge b-green">now</span></td><td><b>gitleaks</b> pre-commit hook</td><td>You handle a lot of secrets (M0.0). Stops a key ever being committed — free, local, no GitHub Advanced Security needed.</td></tr>
+    <tr><td><span class="badge b-green">now</span></td><td>Custom <span class="inline">/block</span> + <span class="inline">/ship</span></td><td>Scaffolded in <span class="inline">.claude/commands/</span> — they standardise the per-block loop so everyone (and every Claude) runs it identically.</td></tr>
+    <tr><td><span class="badge b-amber">soon</span></td><td><b>testcontainers</b> + <b>Schemathesis</b></td><td>Real Postgres in tests (catches RLS/tenancy bugs bots miss); auto-fuzzes your API against its OpenAPI contract.</td></tr>
+    <tr><td><span class="badge b-amber">soon</span></td><td><b>Dependabot</b> + <b>GitHub MCP</b></td><td>Automated dependency PRs; let Claude manage issues/PRs directly from a session via the GitHub MCP server.</td></tr>
+    <tr><td><span class="badge b-slate">later</span></td><td><b>Sentry (EU)</b> + uptime checks</td><td>Error monitoring for the pilot (M6). EU region keeps you GDPR-clean.</td></tr>
+  </tbody>
+</table>
+<p style="font-size:12.5px;color:var(--muted);margin-top:10px"><b>Skills you already have but will underuse:</b> <span class="inline">/handoff</span> (every time context fills), <span class="inline">/improve-codebase-architecture</span> (run weekly — entropy is faster with agents), <span class="inline">/resolving-merge-conflicts</span> (parallel merges). Make these habit before adding new skills.</p>
+
+<!-- 9. NEXT ACTIONS -->
+<h2><span class="num">9</span>Your literal next five actions</h2>
+<div class="card">
+  <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.9">
+    <li>Finish the <a href="M0.0-prerequisites.md">M0.0 accounts gate</a> (long-poles first: Anthropic DPA, Google OAuth verification, DNS), then run <a href="GITHUB-SETUP.md">GITHUB-SETUP.md</a> — repo, <span class="inline">develop</span>, branch protection, CODEOWNERS, secrets, the <span class="inline">@claude</span> app.</li>
+    <li>Review &amp; commit the config I scaffolded (<span class="inline">.claude/</span>, <span class="inline">REVIEW.md</span>, <span class="inline">.coderabbit.yaml</span>, <span class="inline">.github/</span>, <span class="inline">CONTRIBUTING.md</span>) — fill real handles in <span class="inline">CODEOWNERS</span>. Then <span class="inline">npx skills add mattpocock/skills</span> → <span class="inline">/setup-matt-pocock-skills</span> → CodeRabbit CLI.</li>
+    <li>Open <b>one</b> Claude session on M0.1 (walking skeleton). <b>Single Claude — no worktrees yet.</b> Run the per-block loop end to end once to feel the rhythm.</li>
+    <li>Carry the <b>golden thread</b> from the end of M1; keep its CI test green every milestone after.</li>
+    <li>At <b>M2/M3</b>, open your first second worktree (<span class="inline">/rename</span> + <span class="inline">/colour</span>). That's when multi-Clauding starts earning its keep.</li>
+  </ol>
+</div>
+
+<div class="footer">
+  <b>Tolera / Bid Factory — Workflow Playbook.</b> Precedence unchanged: <span class="inline">DECISIONS.md</span> &gt; spec &gt; folded sub-specs &gt; analysis &gt; KB; DACH delta overrides US/imperial behaviour. This playbook governs <i>how</i> you build, not <i>what</i> — the plan in <span class="inline">build-plan/</span> remains the source of truth for scope. Sources: Claude Code docs (worktrees, code-review, GitHub Actions), CodeRabbit (pricing + CLI), mattpocock/skills, robobun.
+</div>
+
+</div>
+</body>
+</html>

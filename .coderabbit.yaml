@@ -1,0 +1,39 @@
+# CodeRabbit config — https://docs.coderabbit.ai/configure-coderabbit
+# Our human review is light, so review assertively and enforce the tier-1 rules in REVIEW.md.
+language: en-US
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - develop
+      - main
+  path_filters:
+    - "!**/*.lock"
+    - "!docs/reference/**"
+    - "!archive/**"
+    - "!**/migrations/versions/**"   # generated; review the model + upgrade/downgrade only
+  path_instructions:
+    - path: "**/*.py"
+      instructions: >
+        Enforce CLAUDE.md tier-1 rules. Money = integer minor units + explicit currency (EUR/CHF), never a float.
+        Every domain table/query must be org-scoped (RLS) — flag any cross-org read. Schema changes require a
+        reversible Alembic migration. Never log secrets, customer PII, or CAD/print contents.
+    - path: "**/pricing/**"
+      instructions: >
+        Kalk pricing must be deterministic — no time, randomness, network, or unordered iteration. Confirm golden
+        fixture figures are unchanged. AI/Lens values must never be auto-fed into costing.
+    - path: "**/lens/**"
+      instructions: >
+        Lens output is suggestion-only and must be explicitly accepted, never auto-applied. Never invent a value
+        absent from the source document. Export-control-flagged files must not be sent to any external LLM.
+    - path: "frontend/**"
+      instructions: >
+        German-first UI. Currency and number formatting must use the German locale. Flag hardcoded English strings.
+chat:
+  auto_reply: true
