@@ -14,12 +14,17 @@ changed="$( { git diff --name-only -- '*.py'; git diff --cached --name-only -- '
 
 fail() { printf 'Stop gate: %s\n' "$1" >&2; exit 2; }
 
-# Resolve ruff / pytest only if they genuinely run.
+# Resolve ruff / pytest only if they genuinely run. Prefer the project's own
+# environment (the uv-managed .venv, then `uv run`) over a bare tool on PATH:
+# a stray global pytest/ruff (wrong Python, missing project deps) would otherwise
+# shadow the pinned interpreter and fail to even import the app — a false red.
 RUFF=(); PYTEST=()
-if command -v ruff >/dev/null 2>&1; then RUFF=(ruff)
-elif command -v uv >/dev/null 2>&1 && uv run ruff --version >/dev/null 2>&1; then RUFF=(uv run ruff); fi
-if command -v pytest >/dev/null 2>&1; then PYTEST=(pytest)
-elif command -v uv >/dev/null 2>&1 && uv run pytest --version >/dev/null 2>&1; then PYTEST=(uv run pytest); fi
+if [ -x .venv/bin/ruff ]; then RUFF=(.venv/bin/ruff)
+elif command -v uv >/dev/null 2>&1 && uv run ruff --version >/dev/null 2>&1; then RUFF=(uv run ruff)
+elif command -v ruff >/dev/null 2>&1; then RUFF=(ruff); fi
+if [ -x .venv/bin/pytest ]; then PYTEST=(.venv/bin/pytest)
+elif command -v uv >/dev/null 2>&1 && uv run pytest --version >/dev/null 2>&1; then PYTEST=(uv run pytest)
+elif command -v pytest >/dev/null 2>&1; then PYTEST=(pytest); fi
 
 # 1) ruff (fast) — block on lint failures.
 if [ ${#RUFF[@]} -gt 0 ]; then
