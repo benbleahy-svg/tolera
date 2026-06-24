@@ -25,6 +25,10 @@ from sqlalchemy.orm import DeclarativeBase
 
 # The GUC the RLS policies key on. Must match the migration's policy definitions.
 ORG_ID_GUC = "app.current_org_id"
+# The GUC carrying the authenticated user. Not used by RLS; it binds the
+# ``app_current_identity()`` SECURITY DEFINER read to the caller (migration 0004),
+# so that scoped read can't be aimed at another user via a function argument.
+USER_ID_GUC = "app.current_user_id"
 
 
 class Base(DeclarativeBase):
