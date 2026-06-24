@@ -33,13 +33,23 @@ from .db import Base
 
 
 class MembershipRole(enum.StrEnum):
-    """App role held within an org. The full persona set is reconciled in M0.3
-    (#personas); M0.2 seeds the four-value starter set from the folded schema."""
+    """App role held within an org. The canonical persona set from the spec
+    ``#authz``/``#personas`` matrix (DECISIONS.md 2026-06-24 "Authorization role
+    set"). ``viewer`` is an explicit non-spec read-only role we retain. The
+    role→capability mapping lives in ``app.authz`` (the single source of truth);
+    a user may hold several roles and effective permissions are their union.
+
+    Values are append-only — the order here mirrors the Postgres enum (M0.2's
+    four, then M0.3's four). Renaming/removing a value is a type rebuild."""
 
     admin = "admin"
     estimator = "estimator"
     salesperson = "salesperson"
     viewer = "viewer"
+    manager = "manager"
+    engineer = "engineer"
+    material_purchasing = "material_purchasing"
+    outside_service = "outside_service"
 
 
 class MembershipStatus(enum.StrEnum):

@@ -214,6 +214,27 @@
 **Resolved:** 2026-06-24 (M0.2 grill)
 **Affects:** M0.2 (auth wiring, active-org claim, webhook endpoint stub), M0.4 (org switcher), M5.12 (invite → Clerk invitation).
 
+## [2026-06-24] Authorization role set — adopt the 7 spec personas + retain `viewer` (M0.3)
+**Status:** RESOLVED
+**Question:** Three sources disagree on the canonical role enum. M0.2 shipped `membership_role = {admin, estimator, salesperson, viewer}` (a 4-value starter); the build-plan M0.3 example lists "Admin, Manager, Estimator, Salesperson, Viewer" (5, *"confirm against the spec"*); the authoritative spec `#authz`/`#personas` matrix defines **7** roles — Admin, Exec/Manager, Sales, Estimator, Engineer, Material/Purchasing, Outside-Service — and has **no Viewer**. The enum is schema (a Postgres type), expensive to reshape later and touched by every permission check.
+**Decision:** **Adopt the 7 spec personas and keep `viewer` as an 8th, explicitly-non-spec read-only role.** Final `membership_role` = `{admin, manager, salesperson, estimator, engineer, material_purchasing, outside_service, viewer}`. Existing M0.2 spellings (`admin/estimator/salesperson/viewer`) are kept verbatim to avoid a PG enum *rename* (painful, breaks the M0.2 tenancy test); the migration only **adds** the four new values (`manager`, `engineer`, `material_purchasing`, `outside_service`). `viewer` is retained (not in the spec) because dropping a PG enum value requires a full type-rebuild and would break M0.2's `test_tenancy`; it is granted **`view_all` only**. The extension migration is **reversible** (CLAUDE.md §5 — reversible migrations only): `upgrade` adds the values online (`ALTER TYPE … ADD VALUE`, no table rewrite); `downgrade` rebuilds the type to the M0.2 set and re-casts the one dependent column (`user_org_membership.roles`) through `text[]`, raising by design if any membership still uses an M0.3 role (block the rollback rather than lose data). *(Tightened from an initial no-op-downgrade plan during M0.3 code review, to honor the reversible-migration convention.)*
+**Resolved:** 2026-06-24 (M0.3 grill)
+**Affects:** M0.3 (role enum, migration, permission matrix), M0.5 (seeded memberships use real roles), M5.12 (role-edit UI).
+
+## [2026-06-24] Permission matrix — role-level only; owner/assigned/annotate refinements deferred (M0.3)
+**Status:** RESOLVED
+**Question:** The spec `#authz` matrix has cells that are **not** pure role→allow: Delete = *"owner"* for Sales/Estimator (only quotes they own); Create/edit = *"view + annotate"* for Engineer/Material/Outside (read + comment, not edit costing); review-step update is *per-assigned-stage*. M0.3 has no `QuoteItem`/ownership/`WorkflowStep` to evaluate object-level conditions against, and the build-plan defers "field-/object-level ABAC beyond role + org (post-pilot)." How permissive should M0.3 be in the meantime?
+**Decision:** **Under-grant, never over-grant.** The matrix is **role → capability boolean** only. (1) `quote_delete` is granted to **admin + manager only** — Sales/Estimator get *no* delete in M0.3 (granting it role-wide would let them delete *any* quote, strictly more permissive than the spec's owner-only); owner-scoped delete is added when ownership exists (M1/M5). (2) "view + annotate" is modelled as a real `quote_annotate` capability (held by all 7 spec roles) distinct from `quote_edit` (admin/manager/sales/estimator), so Engineer/Material/Outside are correctly read-plus-annotate, not edit. (3) `review_step_update` enforcement is **deferred to M1** (no quote item/stage yet); granted coarsely to admin/manager, the granular per-stage/assigned mapping lands with `WorkflowStep`. Object-/field-level ABAC remains post-pilot.
+**Resolved:** 2026-06-24 (M0.3 grill)
+**Affects:** M0.3 (permission matrix), M1 (QuoteItem ownership + WorkflowStep → owner/stage refinement), post-pilot (ABAC).
+
+## [2026-06-24] Manager may finalize/send/convert — intentional divergence from spec `#authz` (M0.3)
+**Status:** RESOLVED
+**Question:** The spec `#authz` matrix marks Finalize/Send/Convert as `—*` for Exec/Manager: an Exec gets it **only** if also granted a Sales or Estimator role (footnote: *"kept off the Exec preset to mirror the Sales + Estimators + Admin decision"*). Should Tolera keep that exclusion?
+**Decision:** **Diverge from the spec — grant `quote_finalize` to `manager` directly** (Benjamin's call). A manager no longer needs a union'd sales/estimator role to send/convert/edit-orders. This is a deliberate override recorded here so it is not later read as a transcription error; per `CLAUDE.md` §2 a tier-1 `DECISIONS.md` entry overrides the spec. Net effect: `admin` and `manager` hold an identical permission set in M0.3 (the two diverge only if a later capability distinguishes them).
+**Resolved:** 2026-06-24 (M0.3 grill)
+**Affects:** M0.3 (permission matrix — manager row).
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*

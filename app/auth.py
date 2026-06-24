@@ -15,13 +15,11 @@ exercise the *tenancy* boundary, not the IdP.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated
 
 import anyio
 import jwt
-from fastapi import Depends, Request, status
+from fastapi import Request, status
 
 from .config import Settings
 from .errors import AppError
@@ -115,23 +113,3 @@ async def get_principal(request: Request) -> Principal:
         active_org_id=_parse_uuid_claim(claims, CLAIM_ORG_ID),
         roles=_parse_roles_claim(claims),
     )
-
-
-def require_role(
-    *allowed: MembershipRole,
-) -> Callable[[Principal], Awaitable[Principal]]:
-    """Dependency factory: allow the request only if the principal holds one of
-    ``allowed`` (union over the membership's roles). A minimal gate to prove
-    API-layer RBAC in M0.2; the full permission matrix lands in M0.3."""
-    allowed_set = frozenset(allowed)
-
-    async def _guard(principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
-        if allowed_set.isdisjoint(principal.roles):
-            raise AppError(
-                "forbidden",
-                "You do not have permission to perform this action",
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-        return principal
-
-    return _guard
