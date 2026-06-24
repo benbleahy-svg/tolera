@@ -8,6 +8,12 @@ can override without editing files.
 M0.1 only needs ``database_url`` + ``redis_url``; auth/LLM/mail settings land in
 later blocks, so every non-infra field has a safe default and the app boots
 without them.
+
+M0.2 adds the tenancy spine: ``app_database_url`` (the restricted, ``NOBYPASSRLS``
+role the app serves requests as — distinct from the owner role that runs
+migrations; see DECISIONS.md 2026-06-24 "RLS enforcement mechanism + DB role
+split") and the Clerk session-auth settings (DECISIONS.md "Login type / auth
+flow"; "Org identity model — Clerk native Organizations").
 """
 
 from __future__ import annotations
@@ -33,8 +39,57 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # --- Infra (M0.1) ---
+    # ``database_url`` connects as the OWNER role (runs migrations / DDL).
     database_url: str = "postgresql+asyncpg://tolera:tolera@localhost:5432/tolera"
     redis_url: str = "redis://localhost:6379/0"
+
+    # --- Tenancy (M0.2) ---
+    # The app serves requests as a restricted, NOBYPASSRLS role so Postgres RLS
+    # is actually enforced (the owner/superuser would bypass it). Falls back to
+    # ``database_url`` only when unset — set it in every real deployment.
+    app_database_url: str | None = None
+
+    # --- Auth / Clerk (M0.2) ---
+    # Session JWTs are RS256, verified against Clerk's JWKS. Empty by default so
+    # the app still boots locally / in tests (where ``get_principal`` is
+    # dependency-overridden and never calls Clerk).
+    clerk_secret_key: str = ""
+    clerk_publishable_key: str = ""
+    clerk_jwt_issuer: str = ""
+    clerk_jwks_url: str = ""
+    # Optional comma-separated list of accepted `azp` (authorized-party) values.
+    # Clerk session tokens are audience-less; when set, the token's `azp` must
+    # match one of these (defence against tokens minted for another app).
+    clerk_authorized_parties: str = ""
+
+    @property
+    def effective_app_database_url(self) -> str:
+        """The DSN the request-serving engine connects with (restricted role).
+
+        Fails closed: outside dev/test the restricted ``app_database_url`` MUST be
+        set, so a misconfiguration can't silently fall back to the owner DSN and
+        bypass RLS (which would expose every org's data).
+        """
+        if self.app_database_url:
+            return self.app_database_url
+        if self.environment.lower() in {"development", "test"}:
+            return self.database_url
+        raise ValueError(
+            "APP_DATABASE_URL must be set outside development/test — the app must "
+            "connect as the restricted, RLS-bound role, never the owner."
+        )
+
+    @property
+    def clerk_authorized_party_set(self) -> frozenset[str]:
+        """Parsed ``azp`` allow-list. Required outside dev/test (fails closed): an
+        empty list there would skip ``azp`` validation and accept same-issuer
+        tokens minted for a different frontend under the same Clerk tenant."""
+        parties = frozenset(
+            p.strip() for p in self.clerk_authorized_parties.split(",") if p.strip()
+        )
+        if not parties and self.environment.lower() not in {"development", "test"}:
+            raise ValueError("CLERK_AUTHORIZED_PARTIES must be set outside development/test.")
+        return parties
 
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"

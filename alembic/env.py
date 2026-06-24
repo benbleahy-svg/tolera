@@ -24,7 +24,9 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return get_settings().database_url
+    # Honour an explicit override (tests migrate a specific DB via
+    # ``Config.set_main_option``); otherwise use the owner DSN from settings.
+    return config.get_main_option("sqlalchemy.url") or get_settings().database_url
 
 
 def run_migrations_offline() -> None:
