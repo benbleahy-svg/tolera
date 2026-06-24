@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Annotated
 
+import anyio
 import jwt
 from fastapi import Depends, Request, status
 
@@ -106,7 +107,9 @@ def _parse_roles_claim(claims: dict[str, object]) -> tuple[MembershipRole, ...]:
 async def get_principal(request: Request) -> Principal:
     """Resolve the caller from their Clerk session JWT. Overridden in tests."""
     settings: Settings = request.app.state.settings
-    claims = _verify_clerk_jwt(_bearer_token(request), settings)
+    token = _bearer_token(request)
+    # JWKS resolution + decode can do blocking network I/O; keep it off the loop.
+    claims = await anyio.to_thread.run_sync(_verify_clerk_jwt, token, settings)
     return Principal(
         user_id=_parse_uuid_claim(claims, CLAIM_USER_ID),
         active_org_id=_parse_uuid_claim(claims, CLAIM_ORG_ID),

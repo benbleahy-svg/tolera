@@ -25,9 +25,10 @@ def test_effective_app_database_url_prefers_restricted_role() -> None:
     assert settings.effective_app_database_url == "postgresql+asyncpg://app:x@h/db"
 
 
-def test_effective_app_database_url_falls_back_only_in_dev_or_test() -> None:
-    dev = Settings(environment="development", database_url="postgresql+asyncpg://owner:x@h/db")
-    assert dev.effective_app_database_url.endswith("@h/db")
+@pytest.mark.parametrize("environment", ["development", "test"])
+def test_effective_app_database_url_falls_back_in_dev_and_test(environment: str) -> None:
+    settings = Settings(environment=environment, database_url="postgresql+asyncpg://owner:x@h/db")
+    assert settings.effective_app_database_url == "postgresql+asyncpg://owner:x@h/db"
 
 
 def test_effective_app_database_url_fails_closed_in_production() -> None:

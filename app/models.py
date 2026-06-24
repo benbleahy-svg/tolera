@@ -26,7 +26,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -121,7 +121,8 @@ class AppUser(Base):
     __tablename__ = "app_user"
 
     id: Mapped[uuid.UUID] = _pk()
-    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    # CITEXT to match the DB column (case-insensitive uniqueness; see migration).
+    email: Mapped[str] = mapped_column(CITEXT, nullable=False, unique=True)
     first_name: Mapped[str | None] = mapped_column(String)
     last_name: Mapped[str | None] = mapped_column(String)
     clerk_user_id: Mapped[str | None] = mapped_column(String, unique=True)  # Clerk identity mirror

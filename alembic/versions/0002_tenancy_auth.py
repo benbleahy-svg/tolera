@@ -114,6 +114,10 @@ def upgrade() -> None:
         $$
         """
     )
+    # Harden unconditionally: a pre-provisioned role (initdb / runbook) must also
+    # be NOSUPERUSER + NOBYPASSRLS, or it would silently bypass the RLS policies
+    # below. (APP_ROLE is a constant, not user input — no injection surface.)
+    op.execute(f"ALTER ROLE {APP_ROLE} NOSUPERUSER NOBYPASSRLS")
     op.execute(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}")
     # NB: app_user is deliberately excluded — it is global identity (email,
     # clerk_user_id) with no org_id and thus no org RLS, so granting the app role

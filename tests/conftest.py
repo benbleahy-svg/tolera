@@ -111,12 +111,19 @@ async def _set_app_role_password(owner_url: str) -> None:
 @pytest.fixture(scope="session")
 def tenancy_db() -> Iterator[str]:
     """Ensure the test DB is migrated and the app role is usable; yield the owner DSN."""
+    # Fail closed in CI: the RLS/auth exit gate must never silently skip there,
+    # or a broken DB service could let the security suite "pass" untested.
+    in_ci = bool(os.environ.get("CI"))
     owner = _owner_url()
     if not owner:
+        if in_ci:
+            pytest.fail("TEST_DATABASE_URL not set — tenancy gate cannot be skipped in CI")
         pytest.skip("TEST_DATABASE_URL not set — tenancy tests skipped")
     try:
         asyncio.run(_ping(owner))
-    except Exception:
+    except Exception as exc:
+        if in_ci:
+            pytest.fail(f"TEST_DATABASE_URL unreachable in CI — cannot skip the gate: {exc!r}")
         pytest.skip("TEST_DATABASE_URL not reachable — tenancy tests skipped")
 
     cfg = Config("alembic.ini")

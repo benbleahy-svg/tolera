@@ -128,3 +128,40 @@ async def test_token_without_a_known_role_is_rejected(
     with pytest.raises(AppError) as exc:
         await get_principal(_request(_settings(), token))
     assert exc.value.status_code == 401
+
+
+async def test_token_with_allowed_azp_passes(
+    monkeypatch: pytest.MonkeyPatch, signing_key: rsa.RSAPrivateKey
+) -> None:
+    _patch_jwks(monkeypatch, signing_key.public_key())
+    settings = _settings(clerk_authorized_parties="app.tolera.eu, other.example")
+    token = _mint(
+        signing_key,
+        {
+            CLAIM_USER_ID: str(uuid.uuid4()),
+            CLAIM_ORG_ID: str(uuid.uuid4()),
+            CLAIM_ROLES: ["admin"],
+            "azp": "app.tolera.eu",
+        },
+    )
+    principal = await get_principal(_request(settings, token))
+    assert [r.value for r in principal.roles] == ["admin"]
+
+
+async def test_token_with_disallowed_azp_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, signing_key: rsa.RSAPrivateKey
+) -> None:
+    _patch_jwks(monkeypatch, signing_key.public_key())
+    settings = _settings(clerk_authorized_parties="app.tolera.eu")
+    token = _mint(
+        signing_key,
+        {
+            CLAIM_USER_ID: str(uuid.uuid4()),
+            CLAIM_ORG_ID: str(uuid.uuid4()),
+            CLAIM_ROLES: ["admin"],
+            "azp": "attacker.example",
+        },
+    )
+    with pytest.raises(AppError) as exc:
+        await get_principal(_request(settings, token))
+    assert exc.value.status_code == 401

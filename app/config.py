@@ -81,8 +81,15 @@ class Settings(BaseSettings):
 
     @property
     def clerk_authorized_party_set(self) -> frozenset[str]:
-        """Parsed, non-empty ``azp`` allow-list (empty → no azp check)."""
-        return frozenset(p.strip() for p in self.clerk_authorized_parties.split(",") if p.strip())
+        """Parsed ``azp`` allow-list. Required outside dev/test (fails closed): an
+        empty list there would skip ``azp`` validation and accept same-issuer
+        tokens minted for a different frontend under the same Clerk tenant."""
+        parties = frozenset(
+            p.strip() for p in self.clerk_authorized_parties.split(",") if p.strip()
+        )
+        if not parties and self.environment.lower() not in {"development", "test"}:
+            raise ValueError("CLERK_AUTHORIZED_PARTIES must be set outside development/test.")
+        return parties
 
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"

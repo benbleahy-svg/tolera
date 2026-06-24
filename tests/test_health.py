@@ -22,9 +22,10 @@ def test_readyz_round_trips_postgres(db_client: TestClient) -> None:
     assert body["status"] == "ready"
     assert body["db"] == "ok"
     assert body["select_1"] == 1
-    # alembic_rev is None on a fresh DB, else whatever revision is applied. Kept
+    # alembic_rev is None on a fresh DB, else a non-empty revision string. Kept
     # revision-agnostic so each new migration doesn't break the readiness test.
-    assert body["alembic_rev"] is None or isinstance(body["alembic_rev"], str)
+    rev = body["alembic_rev"]
+    assert rev is None or (isinstance(rev, str) and rev)
 
 
 def test_readyz_returns_503_when_db_unreachable() -> None:
