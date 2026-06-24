@@ -193,6 +193,27 @@
 **Resolved:** 2026-06-23 (M0.1 grill)
 **Affects:** M0.1 (pyproject, Docker, CI).
 
+## [2026-06-24] Membership role cardinality — multi-role per membership (M0.2)
+**Status:** RESOLVED
+**Question:** Does a `UserOrgMembership` carry exactly one role or many? Tier conflict: tier-1 E4-a says *"role per membership"* (reads singular) and the folded `DB-SCHEMA.sql` has `role membership_role NOT NULL`; tier-2 spec `#authz` says *"users may hold multiple roles; effective permissions = union"* and the `#auth` invite modal is a multi-select (`roles TEXT[]`). Schema-shape, expensive to migrate later (touches every permission check).
+**Decision:** **Multi-role from the start.** `user_org_membership.roles membership_role[]` — `NOT NULL`, enforced non-empty (CHECK `cardinality(roles) > 0`). M0.3's `require()` computes effective permissions as the **union** across the array. Resolves the conflict in favour of the explicit spec model; "role per membership" (E4-a) is read as "a role set attached to each membership," not "exactly one." The single `role` column in the folded schema is superseded (folded schema is frozen provenance; tier-2 spec + this tier-1 entry win per `CLAUDE.md` §2).
+**Resolved:** 2026-06-24 (M0.2 grill)
+**Affects:** M0.2 (schema: membership table), M0.3 (permission matrix = union over roles), M5.12 (invite/role-edit UI).
+
+## [2026-06-24] RLS enforcement mechanism + DB role split (M0.2)
+**Status:** RESOLVED
+**Question:** How is org-scoped Row-Level Security actually enforced *at the DB*? The folded `DB-SCHEMA.sql` only *notes* "enforce RLS by org_id" — no `CREATE POLICY` DDL, no session-variable mechanism, and M0.1 ships a single `tolera` DB role that owns the schema. Postgres RLS is **bypassed for a table's owner / superusers** unless forced, so naïve policies would be a silent no-op (and the cross-org test could pass for the wrong reason). M0.2 must *define* the pattern every later block inherits.
+**Decision:** **Two-role split + forced RLS.** (1) Migrations/DDL run as the **owner/admin** role; (2) the **application connects as a dedicated restricted role** (`NOBYPASSRLS`, not the table owner). (3) Every tenant-scoped table gets `ENABLE` **and** `FORCE ROW LEVEL SECURITY`. (4) Org context is carried per-request as a transaction-local GUC: `SET LOCAL app.current_org_id = :org`, with policies keyed on `current_setting('app.current_org_id', true)::uuid` (`missing_ok = true` so an unset GUC yields zero rows rather than erroring). (5) The org-scoped DB session is transaction-scoped and the GUC is set after auth resolves the active org; connections are reset on pool check-in. This is the **inherited tenancy pattern** for all later blocks. Requires a docker-compose + connection-config change to provision the two roles.
+**Resolved:** 2026-06-24 (M0.2 grill)
+**Affects:** M0.2 (RLS policies, DB roles, docker-compose, db session), every later org-scoped table.
+
+## [2026-06-24] Org identity model — Clerk native Organizations + webhook mirror (M0.2)
+**Status:** RESOLVED
+**Question:** DECISIONS (Login type / E4-a) says *"active-org as session state (Clerk claim)."* Do we use **Clerk's native Organizations** feature (Clerk orgs ↔ our `organization`, Clerk membership + active-org in the session) and mirror to our DB, or model orgs entirely in our DB and carry a self-managed `active_org_id` custom claim with Clerk doing identity only?
+**Decision:** **Clerk native Organizations.** Clerk is the source of user identity, org membership existence, and the **active-org session claim**; memberships are **mirrored into our tables via Clerk webhooks** (`organizationMembership.created/updated/deleted`). The **app role is authored in our DB** (`user_org_membership.roles`) — our domain roles (estimator/salesperson/outside-service/…) are richer than Clerk's member/admin, so Clerk org roles are kept minimal and not the authority for app permissions. The active-org claim is verified server-side and drives the RLS GUC. Matches the spec `#auth` webhook-sync build notes.
+**Resolved:** 2026-06-24 (M0.2 grill)
+**Affects:** M0.2 (auth wiring, active-org claim, webhook endpoint stub), M0.4 (org switcher), M5.12 (invite → Clerk invitation).
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*

@@ -13,12 +13,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .config import Settings, get_settings
-from .db import make_engine
+from .db import make_engine, make_sessionmaker
 from .errors import register_exception_handlers
 from .health import router as health_router
 from .logging import configure_logging
 from .metrics import register_metrics
 from .middleware import RequestContextMiddleware
+from .notes import router as notes_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -28,7 +29,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.engine = make_engine(settings.database_url)
+        # The app serves requests as the restricted, RLS-bound role (M0.2);
+        # migrations run separately as the owner role.
+        app.state.engine = make_engine(settings.effective_app_database_url)
+        app.state.sessionmaker = make_sessionmaker(app.state.engine)
         try:
             yield
         finally:
@@ -41,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_exception_handlers(app)
     register_metrics(app)
     app.include_router(health_router)
+    app.include_router(notes_router)
 
     return app
 
