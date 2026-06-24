@@ -46,7 +46,7 @@ def _request(settings: Settings, token: str | None = None) -> Any:
 
 def _patch_jwks(monkeypatch: pytest.MonkeyPatch, public_key: Any) -> None:
     class _FakeClient:
-        def __init__(self, _url: str) -> None: ...
+        def __init__(self, _url: str, **_kwargs: Any) -> None: ...  # accepts timeout=
 
         def get_signing_key_from_jwt(self, _token: str) -> Any:
             return SimpleNamespace(key=public_key)

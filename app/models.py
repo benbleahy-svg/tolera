@@ -73,8 +73,18 @@ def _pk() -> Mapped[uuid.UUID]:
 
 
 def _ts() -> Mapped[datetime]:
-    """A non-null ``timestamptz`` defaulting to ``now()``."""
+    """A non-null ``timestamptz`` defaulting to ``now()`` (set once on insert)."""
     return mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+def _updated_ts() -> Mapped[datetime]:
+    """A non-null ``timestamptz`` that also bumps to ``now()`` on every update."""
+    return mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 def _org_fk() -> Mapped[uuid.UUID]:
@@ -86,6 +96,10 @@ class Organization(Base):
     """A tenant. Every org-scoped row carries ``org_id``; RLS keys on it."""
 
     __tablename__ = "organization"
+    __table_args__ = (
+        # DACH money convention: EUR (DE/AT) or CHF (CH) only — no bare currency.
+        CheckConstraint("currency IN ('EUR', 'CHF')", name="ck_organization_currency"),
+    )
 
     id: Mapped[uuid.UUID] = _pk()
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -98,7 +112,7 @@ class Organization(Base):
     # Clerk Organizations mirror (DECISIONS.md 2026-06-24 "Org identity model").
     clerk_org_id: Mapped[str | None] = mapped_column(String, unique=True)
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
 
 
 class AppUser(Base):
@@ -112,7 +126,7 @@ class AppUser(Base):
     last_name: Mapped[str | None] = mapped_column(String)
     clerk_user_id: Mapped[str | None] = mapped_column(String, unique=True)  # Clerk identity mirror
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
 
 
 class UserOrgMembership(Base):

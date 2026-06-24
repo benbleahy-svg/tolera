@@ -57,11 +57,32 @@ class Settings(BaseSettings):
     clerk_publishable_key: str = ""
     clerk_jwt_issuer: str = ""
     clerk_jwks_url: str = ""
+    # Optional comma-separated list of accepted `azp` (authorized-party) values.
+    # Clerk session tokens are audience-less; when set, the token's `azp` must
+    # match one of these (defence against tokens minted for another app).
+    clerk_authorized_parties: str = ""
 
     @property
     def effective_app_database_url(self) -> str:
-        """The DSN the request-serving engine connects with (restricted role)."""
-        return self.app_database_url or self.database_url
+        """The DSN the request-serving engine connects with (restricted role).
+
+        Fails closed: outside dev/test the restricted ``app_database_url`` MUST be
+        set, so a misconfiguration can't silently fall back to the owner DSN and
+        bypass RLS (which would expose every org's data).
+        """
+        if self.app_database_url:
+            return self.app_database_url
+        if self.environment.lower() in {"development", "test"}:
+            return self.database_url
+        raise ValueError(
+            "APP_DATABASE_URL must be set outside development/test — the app must "
+            "connect as the restricted, RLS-bound role, never the owner."
+        )
+
+    @property
+    def clerk_authorized_party_set(self) -> frozenset[str]:
+        """Parsed, non-empty ``azp`` allow-list (empty → no azp check)."""
+        return frozenset(p.strip() for p in self.clerk_authorized_parties.split(",") if p.strip())
 
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"

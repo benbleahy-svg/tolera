@@ -59,7 +59,8 @@ def upgrade() -> None:
             locale text NOT NULL DEFAULT 'de-DE',
             clerk_org_id text UNIQUE,
             created_at timestamptz NOT NULL DEFAULT now(),
-            updated_at timestamptz NOT NULL DEFAULT now()
+            updated_at timestamptz NOT NULL DEFAULT now(),
+            CONSTRAINT ck_organization_currency CHECK (currency IN ('EUR', 'CHF'))
         )
         """
     )
@@ -114,9 +115,14 @@ def upgrade() -> None:
         """
     )
     op.execute(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}")
+    # NB: app_user is deliberately excluded — it is global identity (email,
+    # clerk_user_id) with no org_id and thus no org RLS, so granting the app role
+    # DML on it would expose every user's PII across orgs. M0.2 needs no app-role
+    # access to it (auth reads the JWT claims, not the table); a later block that
+    # must surface users will mediate via user_org_membership joins / a scoped view.
     op.execute(
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON "
-        f"organization, app_user, user_org_membership, note TO {APP_ROLE}"
+        f"organization, user_org_membership, note TO {APP_ROLE}"
     )
     # Readiness probe (served as the app role) reports the applied revision.
     op.execute(f"GRANT SELECT ON alembic_version TO {APP_ROLE}")
@@ -150,7 +156,7 @@ def downgrade() -> None:
         op.execute(f"DROP POLICY IF EXISTS org_isolation ON {table}")
     op.execute("DROP POLICY IF EXISTS org_self_isolation ON organization")
 
-    op.execute(f"REVOKE ALL ON organization, app_user, user_org_membership, note FROM {APP_ROLE}")
+    op.execute(f"REVOKE ALL ON organization, user_org_membership, note FROM {APP_ROLE}")
     op.execute(f"REVOKE SELECT ON alembic_version FROM {APP_ROLE}")
     op.execute(f"REVOKE USAGE ON SCHEMA public FROM {APP_ROLE}")
 
@@ -163,5 +169,5 @@ def downgrade() -> None:
     op.execute("DROP TYPE IF EXISTS membership_role")
     op.execute("DROP TYPE IF EXISTS org_country")
 
-    op.execute("DROP EXTENSION IF EXISTS citext")
-    op.execute("DROP EXTENSION IF EXISTS pgcrypto")
+    # pgcrypto + citext are database-wide infra (like the tolera_app role): other
+    # objects may depend on them, so they are intentionally left in place.

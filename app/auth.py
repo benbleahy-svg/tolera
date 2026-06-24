@@ -55,12 +55,19 @@ def _bearer_token(request: Request) -> str:
 
 
 def _verify_clerk_jwt(token: str, settings: Settings) -> dict[str, object]:
-    """Verify a Clerk session JWT against the configured JWKS, or raise 401."""
+    """Verify a Clerk session JWT against the configured JWKS, or raise 401.
+
+    ``verify_aud=False`` is intentional: Clerk session tokens are audience-less.
+    The authorized-party (``azp``) claim is the equivalent guard and is enforced
+    when ``clerk_authorized_parties`` is configured. The JWKS fetch is bounded by
+    a timeout so a slow/unreachable Clerk can't hang the request indefinitely.
+    """
     if not settings.clerk_jwks_url or not settings.clerk_jwt_issuer:
         # No IdP configured: there is no way to authenticate a real request.
         raise _unauthorized("Authentication is not configured")
     try:
-        signing_key = jwt.PyJWKClient(settings.clerk_jwks_url).get_signing_key_from_jwt(token)
+        client = jwt.PyJWKClient(settings.clerk_jwks_url, timeout=5)
+        signing_key = client.get_signing_key_from_jwt(token)
         claims = jwt.decode(
             token,
             signing_key.key,
@@ -70,6 +77,10 @@ def _verify_clerk_jwt(token: str, settings: Settings) -> dict[str, object]:
         )
     except jwt.PyJWTError as exc:
         raise _unauthorized("Invalid session token") from exc
+
+    allowed_parties = settings.clerk_authorized_party_set
+    if allowed_parties and claims.get("azp") not in allowed_parties:
+        raise _unauthorized("Session token from an unrecognised party")
     return claims
 
 
