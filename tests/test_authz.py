@@ -35,12 +35,25 @@ P = Permission
 _ALL: frozenset[Permission] = frozenset(Permission)
 _EDIT_SET = {P.view_all, P.quote_annotate, P.quote_edit, P.quote_finalize}
 _SUPPORT_SET = {P.view_all, P.quote_annotate}
+# Manager mirrors admin's M0.3 capabilities, pinned explicitly (not aliased to
+# _ALL) so a future permission is a deliberate decision, not an auto-grant.
+_MANAGER_SET = {
+    P.view_all,
+    P.quote_annotate,
+    P.quote_edit,
+    P.quote_finalize,
+    P.review_step_update,
+    P.config_edit,
+    P.settings_edit,
+    P.users_manage,
+    P.quote_delete,
+}
 
 # The declarative oracle: spec #authz matrix + DECISIONS.md 2026-06-24 overrides
-# (manager == admin; sales/estimator have no delete; viewer is read-only).
+# (manager mirrors admin for M0.3; sales/estimator have no delete; viewer read-only).
 EXPECTED: dict[MembershipRole, set[Permission]] = {
     R.admin: set(_ALL),
-    R.manager: set(_ALL),
+    R.manager: set(_MANAGER_SET),
     R.salesperson: set(_EDIT_SET),
     R.estimator: set(_EDIT_SET),
     R.engineer: set(_SUPPORT_SET),
@@ -92,7 +105,8 @@ def test_no_roles_grants_nothing() -> None:
 def test_manager_can_finalize() -> None:
     """Deliberate divergence from spec #authz (which keeps finalize off Exec)."""
     assert has_permission((R.manager,), P.quote_finalize)
-    assert permissions_for((R.manager,)) == permissions_for((R.admin,))
+    # Manager mirrors admin's M0.3 set but, by design, never exceeds the superuser.
+    assert permissions_for((R.manager,)) <= permissions_for((R.admin,))
 
 
 def test_sales_and_estimator_cannot_delete() -> None:
@@ -168,7 +182,11 @@ def test_require_denies_an_unauthorized_role_via_the_envelope() -> None:
     with TestClient(app) as client:
         resp = client.get("/guarded")
     assert resp.status_code == 403
-    assert resp.json()["code"] == "forbidden"
+    # Pin the whole error envelope (code, message, details), not just the code.
+    body = resp.json()
+    assert body["code"] == "forbidden"
+    assert isinstance(body["message"], str) and body["message"]
+    assert "details" in body
 
 
 def test_require_honors_the_union_across_roles() -> None:

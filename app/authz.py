@@ -81,12 +81,29 @@ _EDIT = frozenset(
 )
 _SUPPORT = frozenset({Permission.view_all, Permission.quote_annotate})
 _ALL = frozenset(Permission)
+# Manager equals admin across the M0.3 set (DECISIONS 2026-06-24 manager-finalize),
+# but is pinned **explicitly** rather than aliased to _ALL: a future sensitive
+# permission must be a deliberate matrix decision, never auto-flow to managers.
+_MANAGER = frozenset(
+    {
+        Permission.view_all,
+        Permission.quote_annotate,
+        Permission.quote_edit,
+        Permission.quote_finalize,
+        Permission.review_step_update,
+        Permission.config_edit,
+        Permission.settings_edit,
+        Permission.users_manage,
+        Permission.quote_delete,
+    }
+)
 
 #: The authoritative role → permission map. Every :class:`MembershipRole` has an
 #: explicit entry (enforced at import below) so a forgotten role fails closed.
 ROLE_PERMISSIONS: dict[MembershipRole, frozenset[Permission]] = {
+    # admin is the intentional org superuser: new capabilities default to admin.
     MembershipRole.admin: _ALL,
-    MembershipRole.manager: _ALL,  # == admin (DECISIONS 2026-06-24 manager-finalize)
+    MembershipRole.manager: _MANAGER,
     MembershipRole.salesperson: _EDIT,  # no delete (under-grant)
     MembershipRole.estimator: _EDIT,  # no delete (under-grant)
     MembershipRole.engineer: _SUPPORT,

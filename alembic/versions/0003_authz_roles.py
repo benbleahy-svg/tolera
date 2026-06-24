@@ -12,12 +12,15 @@ personas + retain ``viewer``").
 The permission *matrix* that maps these roles to capabilities lives in
 ``app/authz.py`` (code, not schema) — this migration only widens the type.
 
-Irreversible by design: ``ALTER TYPE … ADD VALUE`` cannot be reversed (Postgres
-has no ``DROP VALUE``), so ``downgrade()`` is a deliberate no-op — the added
-values are harmless when unused, and removing them would require rebuilding the
-type and rewriting every dependent column. Each ADD is ``IF NOT EXISTS`` so the
-migration is idempotent. On Postgres 12+ these run inside the migration's
-transaction because the new values are not *used* within it.
+Reversible (CLAUDE.md §5 — reversible migrations only). Postgres has no
+``DROP VALUE``, so the directions are asymmetric: ``upgrade`` adds values online
+with ``ALTER TYPE … ADD VALUE`` (no table rewrite); ``downgrade`` rebuilds the
+type with just the M0.2 values and re-casts the one dependent column
+(``user_org_membership.roles``). The downgrade fails by design if any membership
+still references an M0.3 role — you cannot roll back past data that depends on
+the new values, which is the correct contract rather than silent data loss. On
+Postgres 12+ ``ADD VALUE`` runs inside the migration transaction because the new
+values are not *used* within it.
 
 Revision ID: 0003_authz_roles
 Revises: 0002_tenancy_auth
@@ -37,6 +40,8 @@ depends_on: str | Sequence[str] | None = None
 
 # The personas added in M0.3 (the M0.2 four already exist on the type).
 _NEW_ROLES = ("manager", "engineer", "material_purchasing", "outside_service")
+# The M0.2 starter set the downgrade rebuilds the type back to.
+_M02_ROLES = ("admin", "estimator", "salesperson", "viewer")
 
 
 def upgrade() -> None:
@@ -45,7 +50,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Intentional no-op: Postgres enum values cannot be dropped without rebuilding
-    # the type and every column that uses it. The added values are inert if unused.
-    # See this revision's docstring + DECISIONS.md 2026-06-24 (role set).
-    pass
+    # Rebuild the enum with only the M0.2 values and re-point the one column that
+    # uses it. Casting through text[] converts the array element-wise; a row that
+    # still holds an M0.3 role makes the cast raise (intended — block the rollback
+    # rather than drop data). The CHECK on ``roles`` is type-agnostic and survives.
+    members = ", ".join(f"'{r}'" for r in _M02_ROLES)
+    op.execute("ALTER TYPE membership_role RENAME TO membership_role_old")
+    op.execute(f"CREATE TYPE membership_role AS ENUM ({members})")
+    op.execute(
+        "ALTER TABLE user_org_membership "
+        "ALTER COLUMN roles TYPE membership_role[] "
+        "USING roles::text[]::membership_role[]"
+    )
+    op.execute("DROP TYPE membership_role_old")
