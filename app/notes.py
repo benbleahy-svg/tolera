@@ -16,9 +16,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import Principal, require_role
+from .auth import Principal
+from .authz import Permission, require
 from .deps import get_session
-from .models import MembershipRole, Note
+from .models import Note
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -47,9 +48,10 @@ async def list_notes(session: Annotated[AsyncSession, Depends(get_session)]) -> 
 async def create_note(
     payload: NoteIn,
     session: Annotated[AsyncSession, Depends(get_session)],
-    principal: Annotated[Principal, Depends(require_role(MembershipRole.admin))],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> NoteOut:
-    """Create a note in the active org. Admin-only (RBAC smoke gate)."""
+    """Create a note in the active org. Gated on ``quote_edit`` (RBAC smoke gate
+    through the M0.3 policy module — a viewer is denied, an editor allowed)."""
     note = Note(org_id=principal.active_org_id, body=payload.body)
     session.add(note)
     await session.flush()
