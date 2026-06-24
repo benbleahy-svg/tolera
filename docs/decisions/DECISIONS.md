@@ -179,6 +179,20 @@
 **Decision:** **Post-pilot.** MBD/PMI needs Spatial-grade extraction (v1 OCCT can't); managed connector + MSSQL import are covered for v1 by adapters + SFTP. Keep viewer toggle / adapter interfaces as stubs; build later. See `E4-Behavioral-Gaps.md` post-pilot section.
 **Affects:** Post-v1 (geometry/PMI, integrations).
 
+## [2026-06-23] Local config / secrets loader — Infisical → `.env` + pydantic-settings
+**Status:** RESOLVED
+**Question:** The spec's seed CLAUDE.md (`#devworkflow`) says secrets load "from environment via **Infisical** (self-hosted on Hetzner)." The newer M0.0 runbook instead standardises on a gitignored **`.env`** (dev) + **GitHub Actions secrets** (CI) + **Kamal secrets** (prod). Which governs the build?
+**Decision:** **Follow M0.0 — `.env` + `pydantic-settings` now; GitHub Actions + Kamal secrets for CI/prod; Infisical dropped for v1.** Real environment variables override `.env`, so Docker Compose / CI inject config without editing files. The committed `.env.example` is the env contract (names only). Revisit a dedicated secrets manager post-pilot only if operational need appears. Supersedes the spec's Infisical wording (this tier-1 entry wins per `CLAUDE.md` §2).
+**Resolved:** 2026-06-23 (M0.1 grill)
+**Affects:** M0.1 (config module), every later block's settings, CI, deploy.
+
+## [2026-06-23] Python runtime version — 3.12
+**Status:** RESOLVED
+**Question:** The `uv init` scaffold pinned Python `>=3.10`; the spec (`#stack`, `#devworkflow`) specifies Python **3.12**.
+**Decision:** **Pin 3.12** — `.python-version` = `3.12`, `requires-python = ">=3.12,<3.13"`, ruff/mypy target `py312`, Docker `python:3.12-slim` — so dev matches prod. Matches the spec; not a deviation, recorded for traceability.
+**Resolved:** 2026-06-23 (M0.1 grill)
+**Affects:** M0.1 (pyproject, Docker, CI).
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*

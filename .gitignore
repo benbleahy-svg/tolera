@@ -43,6 +43,9 @@ build/
 *.log
 .cache/
 coverage/
+.coverage
+.coverage.*
+htmlcov/
 
 # --- Claude Code (team config IS tracked: settings.json, commands/, skills/, hooks/) ---
 .claude/settings.local.json

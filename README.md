@@ -18,7 +18,22 @@ A **DACH-region instant-quoting / RFQ platform** for custom manufacturers (CNC, 
 | `build-plan/` | — | Milestone → build-block plan (added in the next phase) |
 | `archive/` | — | Superseded spec backups + parked PP KB (`kb-reference/`) — gitignored |
 
-Application code (e.g. `backend/`, `frontend/`) is added at the repo root during the build.
+Application code lives at the repo root: `app/` (FastAPI backend package), `frontend/` (React + TypeScript + Vite), `alembic/` (migrations), `scripts/` (seed/ops), `tests/`.
+
+## Running locally (M0.1 walking skeleton)
+
+Requires Docker + Docker Compose. Copy `.env.example` → `.env` (the dev secrets live there; never commit `.env`).
+
+```bash
+docker compose up                                   # db + redis + app (:8000) + worker
+docker compose exec app pytest                      # backend tests
+docker compose exec app mypy app/                   # type check
+docker compose exec app python -m scripts.seed_demo # seed (no-op until M0.5)
+```
+
+- Health: `GET /healthz` (liveness) · `GET /readyz` (Postgres round-trip) · `GET /metrics` (Prometheus).
+- Frontend dev server: `npm install && npm run dev` in `frontend/` (serves `:5173`, proxies API to `:8000`).
+- Without Docker: `uv sync` then `uv run pytest` (the Postgres round-trip test skips unless `TEST_DATABASE_URL` is set).
 
 ## Precedence (when docs disagree)
 
