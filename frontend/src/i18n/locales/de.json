@@ -1,0 +1,37 @@
+{
+  "nav": {
+    "dashboard": "Übersicht",
+    "parts": "Teile",
+    "quotes": "Angebote",
+    "orders": "Aufträge",
+    "contacts": "Kontakte",
+    "configure": "Konfiguration",
+    "analytics": "Auswertungen"
+  },
+  "shell": {
+    "primary_nav": "Hauptnavigation",
+    "search_placeholder": "Suchen …",
+    "collapse": "Seitenleiste einklappen",
+    "expand": "Seitenleiste ausklappen"
+  },
+  "account": {
+    "menu": "Konto",
+    "appearance": "Darstellung",
+    "theme_light": "Heller Modus",
+    "theme_dark": "Dunkler Modus",
+    "language": "Sprache",
+    "sign_out": "Abmelden"
+  },
+  "org": {
+    "switcher_title": "Organisation",
+    "active": "Aktiv",
+    "switch_unavailable": "Wechsel folgt"
+  },
+  "page": {
+    "placeholder_body": "Dieser Bereich wird in einem späteren Schritt umgesetzt."
+  },
+  "session": {
+    "loading": "Sitzung wird geladen …",
+    "error": "Sitzung konnte nicht geladen werden."
+  }
+}

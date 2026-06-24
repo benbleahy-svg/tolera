@@ -17,6 +17,7 @@ from .db import make_engine, make_sessionmaker
 from .errors import register_exception_handlers
 from .health import router as health_router
 from .logging import configure_logging
+from .me import router as me_router
 from .metrics import register_metrics
 from .middleware import RequestContextMiddleware
 from .notes import router as notes_router
@@ -46,6 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_metrics(app)
     app.include_router(health_router)
     app.include_router(notes_router)
+    app.include_router(me_router)
 
     return app
 

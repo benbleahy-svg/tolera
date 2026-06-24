@@ -1,52 +1,30 @@
-import { useEffect, useState } from 'react'
-import './App.css'
+/**
+ * Routes. Each primary-nav destination renders inside the persistent `AppShell`;
+ * the destination screens themselves arrive in later blocks (placeholder for
+ * now). Sign-out is wired here (the only Clerk touch-point below the auth gate)
+ * and handed to the shell.
+ */
 
-interface Readiness {
-  status: string
-  db: string
-  select_1?: number
-  alembic_rev?: string | null
-}
+import { useClerk } from '@clerk/clerk-react';
+import { Navigate, Route, Routes } from 'react-router-dom';
 
-// M0.1 placeholder shell: proves the request travels React -> FastAPI -> Postgres.
-// The real app shell, navigation, and i18n catalogs arrive in M0.4.
-function App() {
-  const [readiness, setReadiness] = useState<Readiness | null>(null)
-  const [error, setError] = useState<string | null>(null)
+import { PlaceholderPage } from './pages/PlaceholderPage';
+import { AppShell } from './shell/AppShell';
+import { NAV_ITEMS } from './shell/nav';
 
-  useEffect(() => {
-    fetch('/readyz')
-      .then((response) => {
-        // fetch only rejects on network errors; a 503/4xx still resolves, so
-        // guard before parsing or the error envelope renders as undefined fields.
-        if (!response.ok) {
-          throw new Error(`readyz ${response.status}`)
-        }
-        return response.json() as Promise<Readiness>
-      })
-      .then(setReadiness)
-      .catch(() => setError('Backend nicht erreichbar'))
-  }, [])
+export default function App() {
+  const { signOut } = useClerk();
 
   return (
-    <main className="shell">
-      <h1>Tolera</h1>
-      <p className="subtitle">Grundgerüst · M0.1</p>
-
-      {error && <p className="status status--error">{error}</p>}
-      {!error && !readiness && <p className="status">Verbinde mit dem Backend …</p>}
-      {readiness && (
-        <dl className="status">
-          <dt>Status</dt>
-          <dd>{readiness.status}</dd>
-          <dt>Datenbank</dt>
-          <dd>{readiness.db}</dd>
-          <dt>Migration</dt>
-          <dd>{readiness.alembic_rev ?? '—'}</dd>
-        </dl>
-      )}
-    </main>
-  )
+    <Routes>
+      <Route element={<AppShell onSignOut={() => void signOut()} />}>
+        {NAV_ITEMS.map(({ to, labelKey }) => (
+          <Route key={to} path={to} element={<PlaceholderPage titleKey={labelKey} />} />
+        ))}
+        {/* Unknown paths redirect home rather than rendering the dashboard at a
+            wrong URL (keeps the landing route distinct from the catch-all). */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
 }
-
-export default App

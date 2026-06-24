@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 // In dev the SPA is served on :5173 and proxies backend routes to FastAPI
 // (:8000), so React -> FastAPI -> Postgres round-trips without CORS.
@@ -15,5 +15,11 @@ export default defineConfig({
       '/readyz': API_TARGET,
       '/metrics': API_TARGET,
     },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    css: false,
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 })

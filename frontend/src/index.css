@@ -1,15 +1,81 @@
-:root {
+/*
+ * Design tokens — the Claude/Anthropic aesthetic (spec #ui-system, confirmed
+ * 2026-06-13). All components consume these CSS custom properties; never raw
+ * hex. `data-theme="claude"` selects the palette, `data-mode="light|dark"`
+ * inverts it (see theme.ts). v1 ships only the Claude theme; the token
+ * architecture supports per-tenant re-theming later with no code changes.
+ *
+ * Default mode is light (DECISIONS.md 2026-06-24 "Default colour mode"). The
+ * sidebar background is INVARIANT — always dark, ignoring data-mode (spec rule).
+ */
+
+:root,
+[data-theme='claude'][data-mode='light'] {
+  --p: #cc6431; /* primary / terracotta */
+  --p-h: #b35428; /* primary hover */
+  --p-bg: #faeee5; /* primary tint */
+  --p-t: #8b3918; /* primary text on p-bg */
+  --canvas: #f7f2ea; /* page background — warm sand */
+  --surface: #fffdf9; /* card / panel */
+  --s2: #f2ede4; /* secondary surface (hover rows) */
+  --s3: #eae4da; /* tertiary surface (pressed/selected) */
+  --border: #e2dad0;
+  --text: #2e2c29;
+  --t2: #6b6862; /* muted */
+  --t3: #b3b0a9; /* disabled / placeholder */
+
+  /* Sidebar is invariant — always dark. Do not theme it. */
+  --sidebar-bg: #1c1916; /* warm charcoal (light mode) */
+  --sidebar-text: rgba(255, 255, 255, 0.92);
+  --sidebar-muted: rgba(255, 255, 255, 0.45);
+  --sidebar-faint: rgba(255, 255, 255, 0.3);
+  --sidebar-hover: rgba(255, 255, 255, 0.07);
+
+  --sw: 216px; /* expanded sidebar width */
+  --sw-collapsed: 56px; /* collapsed icon rail */
+
+  color-scheme: light;
+}
+
+[data-theme='claude'][data-mode='dark'] {
+  --p: #e07845;
+  --p-h: #ce6538;
+  --p-bg: #28140a;
+  --p-t: #f0a882;
+  --canvas: #13110e; /* warm near-black */
+  --surface: #1a1714;
+  --s2: #1f1c18;
+  --s3: #252119;
+  --border: #2b2820;
+  --text: #e4e2dd;
+  --t2: #8c8a85;
+  --t3: #555350;
+
+  --sidebar-bg: #0e0c0a; /* deepest warm near-black (dark mode) */
+
   color-scheme: dark;
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 body {
   margin: 0;
-  background: #0f1115;
-  color: #e6e8eb;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--canvas);
+  color: var(--text);
 }
 
-code {
-  font-family: ui-monospace, Consolas, monospace;
+code,
+.mono {
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
 }

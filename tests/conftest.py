@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from alembic import command
 from app.auth import Principal, get_principal
 from app.main import create_app
-from app.models import AppUser, MembershipRole, Note, Organization, UserOrgMembership
+from app.models import AppUser, MembershipRole, Note, Organization, OrgCountry, UserOrgMembership
 from tests.support import build_settings
 
 APP_ROLE_PASSWORD = "tolera_app"
@@ -148,8 +148,18 @@ class Seeder:
         self._loop = loop
         self._engine = engine
 
-    def org(self, slug: str, name: str | None = None) -> uuid.UUID:
-        return self._loop.run_until_complete(self._org(slug, name))
+    def org(
+        self,
+        slug: str,
+        name: str | None = None,
+        *,
+        country: str = "DE",
+        currency: str = "EUR",
+        locale: str = "de-DE",
+    ) -> uuid.UUID:
+        return self._loop.run_until_complete(
+            self._org(slug, name, country=country, currency=currency, locale=locale)
+        )
 
     def user(self, email: str) -> uuid.UUID:
         return self._loop.run_until_complete(self._user(email))
@@ -162,9 +172,17 @@ class Seeder:
     def note(self, org_id: uuid.UUID, body: str) -> uuid.UUID:
         return self._loop.run_until_complete(self._note(org_id, body))
 
-    async def _org(self, slug: str, name: str | None) -> uuid.UUID:
+    async def _org(
+        self, slug: str, name: str | None, *, country: str, currency: str, locale: str
+    ) -> uuid.UUID:
         async with AsyncSession(self._engine) as session, session.begin():
-            row = Organization(slug=slug, name=name or slug)
+            row = Organization(
+                slug=slug,
+                name=name or slug,
+                country=OrgCountry(country),
+                currency=currency,
+                locale=locale,
+            )
             session.add(row)
             await session.flush()
             return row.id
