@@ -57,7 +57,7 @@ export function AccountMenu({
         type="button"
         className="account-trigger"
         aria-label={t('account.menu')}
-        aria-haspopup="menu"
+        aria-haspopup="true"
         aria-expanded={open}
         title={collapsed ? `${name} · ${active_org.name}` : undefined}
         onClick={() => setOpen((o) => !o)}

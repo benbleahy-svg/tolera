@@ -26,7 +26,7 @@ from .auth import Principal, get_principal
 from .authz import permissions_for
 from .deps import get_session
 from .errors import AppError
-from .models import MembershipRole
+from .models import MembershipRole, MembershipStatus
 
 router = APIRouter(prefix="/api", tags=["session"])
 
@@ -97,15 +97,22 @@ async def get_me(
         )
 
     memberships = identity.get("memberships") or []
+    # Match the active org AND require the membership be active — a pending or
+    # disabled membership must not grant roles/capabilities (fail closed).
     active = next(
-        (m for m in memberships if m["org_id"] == str(principal.active_org_id)),
+        (
+            m
+            for m in memberships
+            if m["org_id"] == str(principal.active_org_id)
+            and m["status"] == MembershipStatus.active.value
+        ),
         None,
     )
     if active is None:
-        # The claim's active org isn't one of the caller's memberships — fail closed.
+        # The claim's active org isn't an active membership of the caller — fail closed.
         raise AppError(
             "forbidden",
-            "You are not a member of the active organization",
+            "You do not have an active membership in the active organization",
             status_code=status.HTTP_403_FORBIDDEN,
         )
 

@@ -16,7 +16,7 @@ import uuid
 from fastapi.testclient import TestClient
 
 from app.authz import Permission, permissions_for
-from app.models import MembershipRole
+from app.models import MembershipRole, MembershipStatus
 from tests.conftest import Seeder, authed
 
 R = MembershipRole
@@ -100,6 +100,22 @@ def test_me_reports_db_membership_roles_not_a_stale_claim(
     assert body["roles"] == ["viewer"]
     assert body["effective_permissions"] == sorted(p.value for p in permissions_for((R.viewer,)))
     assert Permission.config_edit.value not in body["effective_permissions"]
+
+
+def test_me_rejects_a_disabled_membership_in_the_active_org(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """A disabled (or pending) membership must not grant access — fail closed even
+    though the org_id matches the claim."""
+    org = seeder.org("suspended")
+    user = seeder.user("ex@suspended.example")
+    seeder.membership(user, org, [R.admin], status=MembershipStatus.disabled)
+
+    with authed(app_client, user_id=user, org_id=org, roles=[R.admin]):
+        resp = app_client.get("/api/me")
+
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "forbidden"
 
 
 def test_me_requires_authentication(app_client: TestClient) -> None:

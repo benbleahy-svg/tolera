@@ -36,7 +36,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from alembic import command
 from app.auth import Principal, get_principal
 from app.main import create_app
-from app.models import AppUser, MembershipRole, Note, Organization, OrgCountry, UserOrgMembership
+from app.models import (
+    AppUser,
+    MembershipRole,
+    MembershipStatus,
+    Note,
+    Organization,
+    OrgCountry,
+    UserOrgMembership,
+)
 from tests.support import build_settings
 
 APP_ROLE_PASSWORD = "tolera_app"
@@ -165,9 +173,14 @@ class Seeder:
         return self._loop.run_until_complete(self._user(email))
 
     def membership(
-        self, user_id: uuid.UUID, org_id: uuid.UUID, roles: list[MembershipRole]
+        self,
+        user_id: uuid.UUID,
+        org_id: uuid.UUID,
+        roles: list[MembershipRole],
+        *,
+        status: MembershipStatus = MembershipStatus.active,
     ) -> uuid.UUID:
-        return self._loop.run_until_complete(self._membership(user_id, org_id, roles))
+        return self._loop.run_until_complete(self._membership(user_id, org_id, roles, status))
 
     def note(self, org_id: uuid.UUID, body: str) -> uuid.UUID:
         return self._loop.run_until_complete(self._note(org_id, body))
@@ -195,10 +208,14 @@ class Seeder:
             return row.id
 
     async def _membership(
-        self, user_id: uuid.UUID, org_id: uuid.UUID, roles: list[MembershipRole]
+        self,
+        user_id: uuid.UUID,
+        org_id: uuid.UUID,
+        roles: list[MembershipRole],
+        status: MembershipStatus,
     ) -> uuid.UUID:
         async with AsyncSession(self._engine) as session, session.begin():
-            row = UserOrgMembership(user_id=user_id, org_id=org_id, roles=roles)
+            row = UserOrgMembership(user_id=user_id, org_id=org_id, roles=roles, status=status)
             session.add(row)
             await session.flush()
             return row.id
