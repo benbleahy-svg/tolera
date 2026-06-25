@@ -1,0 +1,161 @@
+/*
+ * Quotes list (M1.3) — the two-pane saved-view sidebar + filtered grid. Consumes
+ * the design tokens from index.css (never raw hex). Reuses the CRM table/toolbar/
+ * button styles; adds only the sidebar, filter chips, and pagination chrome.
+ */
+
+.quotes-page {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+/* --------------------------------------------------------------- sidebar */
+.quotes-sidebar {
+  flex: 0 0 220px;
+  border-right: 1px solid var(--border);
+  padding-right: 16px;
+  min-height: 60vh;
+}
+.quotes-sidebar-title {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0 0 12px;
+}
+.quotes-views {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.quotes-views-heading {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--t2);
+  margin: 14px 0 6px;
+}
+.quotes-views-muted {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.quotes-soon {
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--t3);
+  background: var(--s2);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.quotes-view-row {
+  display: flex;
+  align-items: center;
+}
+.quotes-view {
+  flex: 1;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.quotes-view:hover {
+  background: var(--s2);
+}
+.quotes-view.is-active {
+  background: var(--p-bg);
+  color: var(--p-t);
+  font-weight: 600;
+}
+.quotes-view-delete {
+  font: inherit;
+  font-size: 11px;
+  background: none;
+  border: none;
+  color: var(--t3);
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.quotes-view-delete:hover {
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------------------ main */
+.quotes-main {
+  flex: 1;
+  min-width: 0; /* let the table scroll instead of overflowing the row */
+}
+.quotes-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--t2);
+  font-size: 12px;
+}
+.quotes-status-select {
+  min-width: 160px;
+}
+
+/* filter chips */
+.quotes-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--s3);
+  color: var(--t2);
+}
+.quotes-chip-remove {
+  font: inherit;
+  font-size: 11px;
+  background: none;
+  border: none;
+  color: var(--t2);
+  cursor: pointer;
+  line-height: 1;
+}
+.quotes-chip-remove:hover {
+  color: var(--danger);
+}
+
+.quotes-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------- footer */
+.quotes-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--t2);
+}
+.quotes-pager {
+  display: inline-flex;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .quotes-page {
+    flex-direction: column;
+  }
+  .quotes-sidebar {
+    flex-basis: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0;
+    padding-bottom: 12px;
+    min-height: 0;
+    width: 100%;
+  }
+}

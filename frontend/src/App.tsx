@@ -12,12 +12,13 @@ import { AccountDetailPage } from './contacts/AccountDetailPage';
 import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
 import { PartsPage } from './parts/PartsPage';
+import { QuotesPage } from './quotes/QuotesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
 /** Nav destinations that have a real screen; the rest render a placeholder. */
-const REAL_ROUTES = new Set(['/contacts', '/parts']);
+const REAL_ROUTES = new Set(['/contacts', '/parts', '/quotes']);
 
 export default function App() {
   const { signOut } = useClerk();
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/contacts/:accountId" element={<AccountDetailPage />} />
         <Route path="/contacts/:accountId/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/parts" element={<PartsPage />} />
+        <Route path="/quotes" element={<QuotesPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />

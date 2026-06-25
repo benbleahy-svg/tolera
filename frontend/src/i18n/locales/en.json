@@ -108,5 +108,53 @@
       "archive": "Archive",
       "restore": "Restore"
     }
+  },
+  "quotes": {
+    "sidebar_title": "Quotes & Line Items",
+    "create_quote": "Create quote",
+    "create_disabled_hint": "Quotes are created in a later step.",
+    "empty": "No quotes found.",
+    "save_view": "Save view",
+    "save_view_placeholder": "View name",
+    "save": "Save",
+    "cancel": "Cancel",
+    "remove_filter": "Remove filter",
+    "delete_view": "Delete view \"{{name}}\"",
+    "prev": "Previous",
+    "next": "Next",
+    "footer": "{{from}}-{{to}} of {{total}} quotes",
+    "section": {
+      "quotes": "Quotes",
+      "line_items": "Line Items",
+      "line_items_hint": "soon"
+    },
+    "views": {
+      "all": "All Quotes",
+      "mine": "My Quotes",
+      "drafts": "Drafts",
+      "outstanding": "Outstanding",
+      "overdue": "Overdue",
+      "filtered": "Filtered"
+    },
+    "filter": {
+      "status_label": "Status",
+      "all_statuses": "All statuses"
+    },
+    "col": {
+      "number": "Quote",
+      "rfq": "RFQ #",
+      "status": "Status",
+      "priority": "Priority",
+      "account": "Account",
+      "salesperson": "Salesperson",
+      "created": "Created"
+    },
+    "status": {
+      "draft": "Draft",
+      "sent": "Sent",
+      "won": "Won",
+      "lost": "Lost",
+      "expired": "Expired"
+    }
   }
 }
