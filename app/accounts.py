@@ -45,6 +45,7 @@ accounts_router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 contacts_router = APIRouter(prefix="/api/contacts", tags=["contacts"])
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_EMAIL_MAX_LENGTH = 320  # RFC 5321 max (64 local + @ + 255 domain)
 
 # List endpoints are bounded so a large org can't turn a list into unbounded
 # DB/API work. Cursor pagination can layer on later; offset is enough for v1.
@@ -70,7 +71,7 @@ class ContactCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    email: str
+    email: str = Field(max_length=_EMAIL_MAX_LENGTH)
     first_name: str | None = Field(default=None, max_length=200)
     last_name: str | None = Field(default=None, max_length=200)
     role: str | None = Field(default=None, max_length=200)
@@ -88,7 +89,7 @@ class ContactUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    email: str | None = None
+    email: str | None = Field(default=None, max_length=_EMAIL_MAX_LENGTH)
     first_name: str | None = Field(default=None, max_length=200)
     last_name: str | None = Field(default=None, max_length=200)
     role: str | None = Field(default=None, max_length=200)
@@ -131,7 +132,7 @@ class AccountCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=300)
     type: AccountType = AccountType.customer
-    email: str | None = None
+    email: str | None = Field(default=None, max_length=_EMAIL_MAX_LENGTH)
     phone: str | None = Field(default=None, max_length=50)
     phone_ext: str | None = Field(default=None, max_length=20)
     website: str | None = Field(default=None, max_length=500)
@@ -152,7 +153,7 @@ class AccountUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=300)
     type: AccountType | None = None
-    email: str | None = None
+    email: str | None = Field(default=None, max_length=_EMAIL_MAX_LENGTH)
     phone: str | None = Field(default=None, max_length=50)
     phone_ext: str | None = Field(default=None, max_length=20)
     website: str | None = Field(default=None, max_length=500)

@@ -50,11 +50,18 @@ export async function apiFetch<T>(
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   if (req.body !== undefined) headers['Content-Type'] = 'application/json';
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: req.method ?? 'GET',
-    headers,
-    body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: req.method ?? 'GET',
+      headers,
+      body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
+    });
+  } catch (cause) {
+    // Offline / DNS / CORS reject with a native TypeError — normalise to the
+    // ApiError contract so every caller handles failures the same way.
+    throw new ApiError(0, 'network_error', 'Network request failed', cause);
+  }
   if (!res.ok) {
     let code = 'error';
     let message = `Request failed (${res.status})`;

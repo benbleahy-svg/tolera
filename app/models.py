@@ -233,6 +233,8 @@ class Account(Base):
         # Composite-FK target so contact.account_id can be scoped same-org.
         UniqueConstraint("org_id", "id", name="uq_account_org_id_id"),
         _salesperson_membership_fk("account"),
+        # List/archive paths filter org_id (RLS) + deleted_at; lead with org_id.
+        Index("ix_account_org_deleted_at", "org_id", "deleted_at"),
     )
     # Fetch server-generated values (created_at/updated_at) via RETURNING on the
     # write itself, so building the response after flush() doesn't trigger an

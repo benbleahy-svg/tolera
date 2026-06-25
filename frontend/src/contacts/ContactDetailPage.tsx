@@ -4,7 +4,7 @@
  * back to the parent account.
  */
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -27,6 +27,7 @@ export function ContactDetailPage() {
   const [lastName, setLastName] = useState('');
   const [role, setRole] = useState('');
   const [phone, setPhone] = useState('');
+  const loadSeq = useRef(0);
 
   const seed = useCallback((c: Contact) => {
     setContact(c);
@@ -43,8 +44,19 @@ export function ContactDetailPage() {
   );
 
   useEffect(() => {
+    // Clear the old contact and ignore an out-of-order response, so navigating
+    // between contacts can't leave stale data in the edit form.
+    const seq = ++loadSeq.current;
     setError(null);
-    api.getContact(contactId).then(seed).catch(reportError);
+    setContact(null);
+    api
+      .getContact(contactId)
+      .then((next) => {
+        if (seq === loadSeq.current) seed(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === loadSeq.current) reportError(e);
+      });
   }, [api, contactId, seed, reportError]);
 
   const save = (event: FormEvent) => {

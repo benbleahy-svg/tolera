@@ -5,7 +5,7 @@
  * The spec's Quotes/Settings tabs depend on later milestones and are out of M1.1.
  */
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -31,6 +31,7 @@ export function AccountDetailPage() {
   const [phone, setPhone] = useState('');
   const [website, setWebsite] = useState('');
   const [notes, setNotes] = useState('');
+  const loadSeq = useRef(0);
 
   const seed = useCallback((acc: Account) => {
     setAccount(acc);
@@ -46,15 +47,35 @@ export function AccountDetailPage() {
     [],
   );
 
+  // Reload after a contact is added (a user action — no race concern).
   const loadContacts = useCallback(() => {
     api.listAccountContacts(accountId).then(setContacts).catch(reportError);
   }, [api, accountId, reportError]);
 
   useEffect(() => {
+    // Reset and seq-guard so navigating A→B can't leave A's form/contacts on
+    // screen, nor let a late A response (or a Save of A's data) land under B.
+    const seq = ++loadSeq.current;
     setError(null);
-    api.getAccount(accountId).then(seed).catch(reportError);
-    loadContacts();
-  }, [api, accountId, seed, reportError, loadContacts]);
+    setAccount(null);
+    setContacts([]);
+    api
+      .getAccount(accountId)
+      .then((next) => {
+        if (seq === loadSeq.current) seed(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === loadSeq.current) reportError(e);
+      });
+    api
+      .listAccountContacts(accountId)
+      .then((next) => {
+        if (seq === loadSeq.current) setContacts(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === loadSeq.current) reportError(e);
+      });
+  }, [api, accountId, seed, reportError]);
 
   const saveAccount = (event: FormEvent) => {
     event.preventDefault();

@@ -110,6 +110,9 @@ def upgrade() -> None:
     )
 
     # --- indexes ---
+    # The account list/archive paths always filter org_id (RLS) + deleted_at; lead
+    # with org_id so they don't seq-scan other tenants' rows as the table grows.
+    op.execute("CREATE INDEX ix_account_org_deleted_at ON account (org_id, deleted_at)")
     # Email is unique per org among LIVE rows only — an archived contact's email
     # frees up for reuse (DECISIONS.md 2026-06-25). Account name is intentionally
     # NOT unique (multiple sites/legal entities may share a name).

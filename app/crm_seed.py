@@ -5,11 +5,15 @@ M1.13 harness). ``OrgService``'s scope is frozen to org identity + users +
 memberships (DECISIONS.md 2026-06-24 "M0.5 seed scope"), so rather than widen
 ``OrgSpec`` we seed the CRM rows here, as a hook the M1.13 harness builds on.
 
-Idempotent like the org seed: each row is matched on its natural key (account by
-``(org_id, name)``, contact by its live ``(org_id, email)``) and inserted only if
-absent, so re-running reconciles rather than duplicating. Runs on the **owner**
-connection (a superuser that bypasses RLS) the same way ``scripts.seed_demo``
-provisions across orgs; the explicit ``org_id`` filter is what scopes the writes.
+Idempotent under **sequential** re-runs: each row is matched on its natural key
+(account by ``(org_id, name)``, contact by its live ``(org_id, email)``) and either
+inserted or reconciled back to spec, so re-running never duplicates. It is a
+single-process provisioning step (the seed CLI / a test fixture), so the
+SELECT-then-write needs no concurrency guard — and ``account.name`` is deliberately
+not a DB unique key (multiple sites may share a name), so account can't be a single
+atomic upsert anyway. Runs on the **owner** connection (a superuser that bypasses
+RLS) the same way ``scripts.seed_demo`` provisions across orgs; the explicit
+``org_id`` filter is what scopes the writes.
 
 These are **placeholder demo values** until Benjamin's anonymised Fechner packages
 land (DECISIONS.md "Fixture packages", target 2026-06-23); the harness will pin
@@ -48,19 +52,23 @@ class CrmSeedResult:
 
 async def seed_pilot_crm(session: AsyncSession, *, org_id: uuid.UUID) -> CrmSeedResult:
     """Idempotently ensure the Fechner golden account + its primary contact exist."""
-    account_id = await session.scalar(
-        select(Account.id).where(
+    account = await session.scalar(
+        select(Account).where(
             Account.org_id == org_id,
             Account.name == FECHNER_ACCOUNT_NAME,
             Account.deleted_at.is_(None),
         )
     )
-    account_created = account_id is None
-    if account_id is None:
+    account_created = account is None
+    if account is None:
         account = Account(org_id=org_id, name=FECHNER_ACCOUNT_NAME, type=AccountType.customer)
         session.add(account)
         await session.flush()
-        account_id = account.id
+    else:
+        # Reconcile an existing golden account back to spec (account.name is not a
+        # DB unique key, so this can't be a single upsert).
+        account.type = AccountType.customer
+    account_id = account.id
 
     contact = await session.scalar(
         select(Contact).where(
