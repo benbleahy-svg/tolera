@@ -1,0 +1,11 @@
+{
+  "slug": "fechner",
+  "name": "Fechner (Pilot)",
+  "country": "DE",
+  "currency": "EUR",
+  "locale": "de-DE",
+  "users": [
+    { "email": "admin@fechner.example", "roles": ["admin"], "first_name": "Pilot", "last_name": "Admin" },
+    { "email": "estimator@fechner.example", "roles": ["estimator"] }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "slug": "acme",
+  "name": "Acme Manufacturing",
+  "country": "DE",
+  "currency": "EUR",
+  "locale": "en",
+  "users": [
+    { "email": "admin@acme.example", "roles": ["admin"] },
+    { "email": "estimator@acme.example", "roles": ["estimator"] }
+  ]
+}

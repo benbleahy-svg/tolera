@@ -270,6 +270,28 @@
 **Resolved:** 2026-06-24 (M0.4 grill)
 **Affects:** M0.4 (`0004` migration, `/api/me`), any later user-surfacing read (reuses this function/pattern).
 
+## [2026-06-24] Seed framework — Clerk provisioning scope (M0.5)
+**Status:** RESOLVED
+**Question:** Spec `#onboarding` says the seed script "calls `Clerk.organizations.createMembership()` for the admin user (Clerk fires the invite email)". But `SEED-AND-FIXTURES.md` reuses the *same* idempotent runner for tests (every test run seeds a clean org), where hitting the Clerk API is neither idempotent nor desirable. Should the M0.5 seed call the Clerk API, or only write DB rows?
+**Options considered:** (A) DB-only seed — create `Organization`/`AppUser`/`UserOrgMembership` rows idempotently; `clerk_user_id`/`clerk_org_id` left nullable; "login works" proven in tests via the existing `authed()` Principal injection + RLS isolation; real Clerk linkage (createMembership/invite + claim metadata) deferred to the established Clerk→DB webhook mirror (M0.2 stub → M5.12) or a one-off `--with-clerk` side-effect run for the real pilot. (B) Call the Clerk API now (create org + invite admin + set `tolera_*` metadata), mocked/skipped in tests.
+**Decision:** **(A) DB-only.** The seed is the DB source of truth; Clerk identity linkage is a separate, deferred side-effect handled by the already-decided *Clerk native Organizations + webhook mirror* path (2026-06-24, M0.2). The spec's "seed calls Clerk" remains the eventual provisioning behaviour for a *real* new org, layered on later — it does not belong in the idempotent, test-reused M0.5 runner. The M0 exit "login works" is satisfied at the test level (a seeded principal authenticates against the seeded pair + cross-org denial passes); real Clerk login is wired when the webhook/`--with-clerk` path lands.
+**Resolved:** 2026-06-24 (M0.5 grill)
+**Affects:** M0.5 (seed framework), M0.2/M5.12 (Clerk webhook + user-management). Spec-vs-practicality tension logged here per block-and-log (§6).
+
+## [2026-06-24] M0.5 seed scope — §1 only, migration-free
+**Status:** RESOLVED
+**Question:** `seed.skeleton.json`'s `organization` block carries `default_tolerance_class`, `export_regime`, `brand`, and `rfq_ingest`, but none of these columns exist on the `Organization` model (M0.2). Does M0.5 add them?
+**Decision:** **No — M0.5 ships zero new migration.** Scope is `SEED-AND-FIXTURES.md` Part 1 §1 only (org identity + users + `user_org_memberships`), seeding only columns that already exist (`slug`/`name`/`country`/`currency`/`locale`). `rfq_ingest` is **derived** from the slug (`{slug}@rfq.tolera.eu`) per the 2026-06-14 pilot-slug decision, not stored. `default_tolerance_class` (→ M1/geometry), `brand`/white-label (→ M0.4), and `export_regime` (→ M6 export control) are each deferred to their consuming block, which adds the column via its own reversible Alembic migration. The remaining `seed.skeleton.json` sections (materials, 54-op library, processes, interrogation profiles, pricing, rules, templates) are out of M0.5 → extend the framework in M1.12.
+**Resolved:** 2026-06-24 (M0.5 grill)
+**Affects:** M0.5 (seed scope), M0.4 (brand column), M1 (tolerance/catalog), M6 (export regime).
+
+## [2026-06-24] Second seed org identity (M0.5)
+**Status:** RESOLVED
+**Question:** The build-plan seeds "two orgs (incl. `fechner`)" to drive the cross-org denial test, but only specifies fechner. What is org #2?
+**Decision:** A minimal second org: **`currency=EUR`, `locale=en`** (English UI, to exercise the non-`de` path) — distinct from fechner's `de-DE`. `Organization.country` is a hard enum (`DE`/`AT`/`CH` only, no "EN"), so country is set to **`DE`** (a valid enum value; the org merely prefers English UI). Slug/name are demo data (reversible). One global `AppUser` may hold memberships in both orgs (E4-a) so the framework can later feed M0.4's org-switcher test.
+**Resolved:** 2026-06-24 (M0.5 grill)
+**Affects:** M0.5 (seed), M0.4 (org-switcher test fixture).
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*
