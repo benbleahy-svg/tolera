@@ -327,6 +327,67 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Resolved:** 2026-06-25 (M1.1 grill; FK approach strengthened in review)
 **Affects:** M1.1 (account/contact schema + write validation + test), any later entity that references a `User`/account cross-row (reuse the composite-FK-to-membership pattern + active-member check).
 
+## [2026-06-25] M1.2 file-owner model — files attach to `part`; minimal `part` stub created now (M1.2)
+**Status:** RESOLVED
+**Question:** What entity owns an uploaded file in M1.2? The canonical `DB-SCHEMA.sql` models `part_file.part_id → part(id)` + `part.primary_file_id`, and the spec/KB are explicit that files belong to a **Part** (PRIMARY = the part's geometry source of truth). But the M1.2 block text says "upload a file to a **quote**" / "file↔**line-item** association", and `quote`/`quote_item`/full `part` are M1.4/M1.5 — none of which M1.2 depends on (M1.2 is orthogonal, depends only on M0.2). Files can't honour "file↔part" while staying standalone unless the owner is resolved. (Schema/FK — expensive to reverse, block-and-log §6.)
+**Options considered:** (a) create a **minimal `part` stub** now (only the columns `part_file` needs) and attach files to it, M1.5 extends `part`; (b) attach files to a generic/polymorphic owner and reconcile in M1.5; (c) pull `quote`/`quote_item` forward (breaks orthogonality, expands scope).
+**Decision:** **(a) Minimal `part` stub.** KB + domain model confirm files are **part-level**, never line-item-level: the *Part Library* (`uploading-parts-to-your-part-library`) creates a Part by **file upload alone, no quote involved**, and the Quote-level "Quote Files" panel is a *UI aggregation* of all parts' files in a quote, not a storage layer. A Part therefore legitimately exists independently of any quote → a standalone stub is upstream-correct. M1.2 creates `part` with exactly `{id, org_id uuid NOT NULL → organization, primary_file_id uuid NULL (FK part_file, added after part_file exists), created_at, updated_at, deleted_at}` plus `part_file(part_id → part)`. The block's "upload to a quote" wording resolves to "upload to a part." M1.5 **extends** `part` (part_number, revision, is_assembly, obtain_method, BOM/Node tree, geom_hash, export_controlled…) via a forward reversible migration — no reshaping of what M1.2 lays down.
+**Resolved:** 2026-06-25 (M1.2 grill)
+**Affects:** M1.2 (part stub + part_file schema), M1.5 (extends part; Component/Node/QuoteItem link the part to a quote).
+
+## [2026-06-25] PRIMARY-per-part — `part.primary_file_id` authoritative + partial-unique enforcement (M1.2)
+**Status:** RESOLVED
+**Question:** The canonical schema represents the PRIMARY relationship **twice** — `part.primary_file_id` (FK) *and* `part_file.role ∈ {primary, supporting}`. Dual representation can drift; which is the source of truth, and how is "exactly one PRIMARY per part" enforced?
+**Decision:** **`part.primary_file_id` is the authority**; `part_file.role` is a denormalized convenience kept in sync **within the same transaction**. One-PRIMARY-per-part is also enforced at the DB with a **partial unique index** `UNIQUE (part_id) WHERE role = 'primary'` (belt-and-braces alongside the single FK). Auto-PRIMARY on first upload uses a **file-type-tier rank** (B-Rep CAD > mesh > 2D/vector/print) matching the upstream "most geometric information wins" heuristic; ties → first uploaded. **Swap** = one transaction flipping the FK + both rows' `role`. Multi-quote/assembly swap guards (deep-copy / replace-referenced-part) are **deferred to M1.5+** (no Node/Component/multi-quote refs exist yet).
+**Resolved:** 2026-06-25 (M1.2 grill)
+**Affects:** M1.2 (primary enforcement + swap), M1.5+ (multi-quote/assembly swap guards).
+
+## [2026-06-25] Object-storage backend — S3 API via MinIO (dev/CI), tenant-scoped key scheme (M1.2)
+**Status:** RESOLVED
+**Question:** No object storage exists. What backend + abstraction + key layout does M1.2 build against, and how is tenant isolation enforced in storage?
+**Decision:** Build against the **S3 API** (`aioboto3` / `boto3`) behind a thin storage-service seam so the provider is swappable. **Dev/CI:** add **MinIO** to docker-compose. Object keys are **tenant-scoped**: `org/<org_id>/part/<part_id>/<file_id>/<filename>` (the `org_id` prefix is defence-in-depth alongside RLS on `part_file`). Stored bytes are **raw / unmodified** (acceptance: byte-identical round-trip). **No** content-hash dedup/versioning in M1.2 (schema carries no hash column). Bucket name from config. The S3 access/secret keys live in `Settings` as plain strings, **consistent with the existing M0 pattern** (`clerk_secret_key`, the DB DSNs); they are never logged or dumped. Production provider is a separate OPEN (EU residency — below).
+
+> **Follow-up (ship review, 2026-06-25, CodeRabbit):** secret-bearing `Settings` fields (S3 keys + the pre-existing `clerk_secret_key` / DB DSNs) should adopt Pydantic `SecretStr` **repo-wide** so an accidental `Settings` repr/`model_dump` can't expose them. Deferred from M1.2 as a cross-cutting hardening (doing it piecemeal for only the S3 fields would be inconsistent with the merged M0 convention) — track as a config-hardening task.
+**Resolved:** 2026-06-25 (M1.2 grill)
+**Affects:** M1.2 (storage service, docker-compose MinIO, config), all later file-handling blocks (reuse the storage seam); a later config-hardening pass (SecretStr).
+
+## [2026-06-25] File upload constraints + type validation — 200 MB, allow-list + magic-byte, proxy-stream (M1.2)
+**Status:** RESOLVED
+**Question:** What size cap, transport, and type-validation does M1.2 enforce on uploads? `MAX_UPLOAD_MB` is spec-sourced (`#viewer3d-limits` = 200) but was absent from DECISIONS.
+**Decision:** **`MAX_UPLOAD_MB = 200`** (config constant) — reconciles the upstream conflict (3D viewer 250 / supported-file-types 150 / Lens ≤250) per spec `#viewer3d-limits`; recorded here as resolved. **Transport:** proxy-through-API with **streaming** to storage (never buffer 200 MB in memory); presigned direct-to-S3 is a later optimisation. **Type gate:** an **app-level allow-list constant/enum** (the `VIEWER-AND-FILE-TYPES.md` ~50-extension matrix, grouped B-Rep / mesh / 2D-vector / office-email / zip) **plus** a cheap **magic-byte sniff** for common containers (ZIP, PDF) to resist extension spoofing; full content validation belongs to interrogation (M4). Disallowed types are rejected at the edge (Pydantic v2 + the standard error envelope).
+**Resolved:** 2026-06-25 (M1.2 grill)
+**Affects:** M1.2 (upload endpoint, validation, config), M4 (interrogation-grade content validation).
+
+## [2026-06-25] File delete semantics — hard-delete blob; PRIMARY-delete blocked while supporting files remain (M1.2)
+**Status:** RESOLVED
+**Question:** `part_file`'s DDL has no `deleted_at` (implies hard delete) while M1.1/`part` use soft-delete; and deleting the current PRIMARY must not leave a dangling `part.primary_file_id`. What are the delete semantics?
+**Decision:** **Hard-delete the blob from object storage always** (GDPR erasure), and **hard-delete the `part_file` row** (matches the DDL; cleanest erasure). **PRIMARY-delete guard:** deleting the current PRIMARY is **rejected while any supporting file remains** (force an explicit swap first); the FK is nulled only when the PRIMARY is the part's **last** file. (Rejected: auto-promote-next — it silently changes the part's geometry source of truth.) `part` itself keeps soft-delete (`deleted_at`), consistent with M1.1.
+
+> **Implementation note (M1.2 ship review, 2026-06-25):** the blob is purged via a FastAPI `BackgroundTask` that runs *after* the DB commit (so a failed commit never deletes a referenced object). A single S3 `delete_object` is short + idempotent, so it isn't Celery-class "long work" — but a failed background delete has **no retry/dead-letter**, leaving an orphan blob. **Follow-up (post-pilot hardening):** move the orphan purge to a retried Celery task for GDPR-erasure durability; pairs naturally with the AV-scan/quarantine OPEN below.
+**Resolved:** 2026-06-25 (M1.2 grill)
+**Affects:** M1.2 (delete endpoint + guard), later GDPR erasure flows + M6 hardening (Celery-backed blob purge).
+
+## [2026-06-25] M1.2 surface scope — minimal Files panel + file-op permissions; ZIP/redaction/dedup/AV deferred (M1.2)
+**Status:** RESOLVED
+**Question:** How much of the rich `#partview` Files UI ships in M1.2, who may upload/delete, and which adjacent features are out?
+**Decision:** **API + storage + a minimal React Files panel** in the existing shell (list, upload, set/swap PRIMARY, download, delete) — enough to demo the vertical slice; drag-drop reorder, "Download All", and explicit file ordering (no `sort_order` column) are deferred. **Permissions:** file *writes* (upload / set-primary / delete) gate on the **existing `quote_edit`** capability (admin / manager / salesperson / estimator) — managing a part's files is editing the quote's content, and reusing `quote_edit` keeps the M0.3 matrix untouched; reads need only an authenticated org session (`view_all`). The support roles (engineer / material-purchasing / outside-service) are therefore **read-only** on files — consistent with their spec "view + annotate" semantics (uploading changes the part's geometry source-of-truth, which is an edit, not an annotation). *(This refines the grill-time sketch "estimator/engineer/admin/manager" to the spec-consistent `quote_edit` set: drops engineer, adds salesperson; a dedicated `file_manage` capability for support roles can be added later if a real need appears.)* **Explicitly OUT of M1.2** (confirmed): ZIP pack-and-go *unpacking* (.zip is stored opaque, unpacked in M4); redaction logic (`is_redacted` column exists, unused — later GDPR feature); content-hash dedup/versioning; thumbnails / rendering / interrogation (M2/M4).
+**Resolved:** 2026-06-25 (M1.2 grill)
+**Affects:** M1.2 (Files panel, file-op capabilities), M2/M4 (rendering, ZIP unpack, interrogation), later GDPR (redaction).
+
+## [2026-06-25] OPEN: Production object-store provider — EU data residency (M1.2)
+**Status:** OPEN
+**Question:** Customer CAD/print files are personal-data-bearing under GDPR and must reside in the EU. M1.2 builds against the S3 API (MinIO locally) but the **production** provider is unchosen. Candidates: **Hetzner Object Storage** (matches the Hetzner infra anchor), **Cloudflare R2** (EU jurisdiction), **AWS S3 `eu-central-1`**, **Scaleway** — differ on cost, EU-residency guarantees, and S3-API compatibility.
+**Options considered:** Hetzner (cheapest, in-region, S3-compatible, smaller ecosystem); R2 (no egress fees, EU-jurisdiction toggle); S3 eu-central-1 (most mature, dearer + egress).
+**Recommended default:** Hetzner Object Storage (region-aligned, S3 API, cost) unless an existing AWS footprint argues otherwise. No code impact — deploy-time config behind the storage seam.
+**Affects:** M1.2 (storage config / deploy), any block that stores blobs.
+
+## [2026-06-25] OPEN: Antivirus / malware scanning of customer uploads (M1.2)
+**Status:** OPEN
+**Question:** Customers (and later, external vendors via email ingest) upload arbitrary files that staff download and forward to vendors. Should uploads be AV/malware-scanned, and where (sync at upload vs async Celery post-store vs at download/forward)?
+**Options considered:** ClamAV sidecar scanned async on a Celery task after store (quarantine flag on `part_file`); a cloud scanning API; or accept-risk for the pilot.
+**Recommended default:** **Defer to a later hardening block** (not M1.2) but logged now: async ClamAV scan on store with a quarantine flag, blocking download/forward until clean. Revisit before email-ingest (M3) opens an untrusted upload path.
+**Affects:** M3 (email ingest = untrusted uploads), M6 (hardening), `part_file` (possible future `scan_status` column).
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*

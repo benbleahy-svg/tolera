@@ -16,6 +16,9 @@ dependencies = [
     "redis>=5.2.0",
     "prometheus-client>=0.21.0",
     "pyjwt[crypto]>=2.10.0",
+    # M1.2 — file upload & storage
+    "python-multipart>=0.0.12",  # FastAPI multipart/UploadFile parsing
+    "aioboto3>=13.0.0",  # async S3-compatible object storage (MinIO / EU bucket)
 ]
 
 [dependency-groups]
@@ -58,6 +61,11 @@ exclude = ['(^|/)(alembic|clerk-react|clerk-nextjs|ui-prototype|frontend|e2e)/']
 
 [[tool.mypy.overrides]]
 module = ["celery.*"]
+ignore_missing_imports = true
+
+# aioboto3 / boto3 ship incomplete stubs; the async S3 client is dynamic.
+[[tool.mypy.overrides]]
+module = ["aioboto3.*", "boto3.*", "botocore.*"]
 ignore_missing_imports = true
 
 # Celery is untyped; its decorator + base class would otherwise trip strict mode.

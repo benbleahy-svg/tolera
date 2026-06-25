@@ -29,6 +29,37 @@ services:
       timeout: 3s
       retries: 10
 
+  # MinIO — S3-compatible object store for part files (M1.2). Prod swaps in an
+  # EU-resident bucket behind the same S3 API (DECISIONS.md 2026-06-25).
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # web console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: create the bucket the app expects, then exit.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/tolera-files
+      "
+
   app:
     build:
       context: .
@@ -43,6 +74,13 @@ services:
       TEST_DATABASE_URL: postgresql+asyncpg://tolera:tolera@db:5432/tolera_test
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: INFO
+      # Object storage — MinIO in dev (M1.2).
+      STORAGE_BACKEND: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: tolera-files
+      S3_REGION: eu-central-1
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
     ports:
       - "8000:8000"
     volumes:
@@ -52,6 +90,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   worker:
@@ -64,6 +104,12 @@ services:
       APP_DATABASE_URL: postgresql+asyncpg://tolera_app:tolera_app@db:5432/tolera
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: INFO
+      STORAGE_BACKEND: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: tolera-files
+      S3_REGION: eu-central-1
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
     volumes:
       - .:/app
       - /app/.venv
@@ -75,3 +121,4 @@ services:
 
 volumes:
   pgdata:
+  miniodata:

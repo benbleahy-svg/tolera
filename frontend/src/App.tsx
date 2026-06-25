@@ -11,9 +11,13 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AccountDetailPage } from './contacts/AccountDetailPage';
 import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
+import { PartsPage } from './parts/PartsPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
+
+/** Nav destinations that have a real screen; the rest render a placeholder. */
+const REAL_ROUTES = new Set(['/contacts', '/parts']);
 
 export default function App() {
   const { signOut } = useClerk();
@@ -21,14 +25,15 @@ export default function App() {
   return (
     <Routes>
       <Route element={<AppShell onSignOut={() => void signOut()} />}>
-        {/* Contacts is the first real destination (M1.1); the others stay
-            placeholders until their block lands. */}
-        {NAV_ITEMS.filter((item) => item.to !== '/contacts').map(({ to, labelKey }) => (
+        {/* Contacts (M1.1) and Parts (M1.2) are real destinations; the others
+            stay placeholders until their block lands. */}
+        {NAV_ITEMS.filter((item) => !REAL_ROUTES.has(item.to)).map(({ to, labelKey }) => (
           <Route key={to} path={to} element={<PlaceholderPage titleKey={labelKey} />} />
         ))}
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/contacts/:accountId" element={<AccountDetailPage />} />
         <Route path="/contacts/:accountId/contacts/:contactId" element={<ContactDetailPage />} />
+        <Route path="/parts" element={<PartsPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -12,6 +12,7 @@ import { applyMode, getInitialMode } from './theme/theme'
 import './index.css'
 import './styles/shell.css'
 import './styles/contacts.css'
+import './styles/parts.css'
 
 // Apply the persisted colour mode + brand (title + colour token) before first paint.
 applyMode(getInitialMode())

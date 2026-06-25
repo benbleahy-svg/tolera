@@ -18,6 +18,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -310,3 +312,98 @@ class Contact(Base):
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
     deleted_at: Mapped[datetime | None] = _deleted_at()
+
+
+class FileRole(enum.StrEnum):
+    """A part file's role. The canonical schema stores this as ``text`` (not a
+    native enum) with a CHECK; this StrEnum is the app-side type. ``primary`` is the
+    part's geometry source of truth — at most one per part (DECISIONS.md 2026-06-25)."""
+
+    primary = "primary"
+    supporting = "supporting"
+
+
+class Part(Base):
+    """A manufacturable part — the entity uploaded files attach to (M1.2 **stub**).
+
+    Files belong to a Part, never to a quote/line-item: a Part can exist on its own
+    (the Part Library is created by a file upload alone), and the quote-level "Files"
+    panel is just a UI aggregation (DECISIONS.md 2026-06-25). M1.2 lays down only the
+    columns ``part_file`` needs; M1.5 **extends** this table (part_number, revision,
+    is_assembly, obtain_method, BOM/Node tree, geom_hash, export_controlled …) via a
+    forward reversible migration — it does not reshape what M1.2 creates.
+
+    ``primary_file_id`` is the authoritative pointer to the PRIMARY file; the FK to
+    ``part_file`` is added at the DB level by the migration (after ``part_file``
+    exists) — declared here as a plain column to avoid a circular ORM mapping, the
+    same way ``salesperson_id`` carries its FK in the migration only. That FK is
+    **composite** (``(primary_file_id, id) → part_file(id, part_id)``), so a part
+    can only point at one of its OWN files — a DB invariant, not just an app check."""
+
+    __tablename__ = "part"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        # Composite-FK target so part_file.(org_id, part_id) is pinned same-org.
+        UniqueConstraint("org_id", "id", name="uq_part_org_id_id"),
+        # List/archive paths filter org_id (RLS) + deleted_at; lead with org_id.
+        Index("ix_part_org_deleted_at", "org_id", "deleted_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    primary_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+
+
+class PartFile(Base):
+    """An uploaded file belonging to a :class:`Part` (M1.2; canonical ``part_file``).
+
+    Org-scoped (RLS keys on ``org_id``); the composite FK ``(org_id, part_id)`` pins
+    each file to a Part in its own org. Exactly one file per part may have
+    ``role = 'primary'`` — enforced by a partial unique index — and ``part.primary_
+    file_id`` is the authority kept in sync with it (DECISIONS.md 2026-06-25).
+
+    **Hard-deleted** (no ``deleted_at``): removing a file purges its row *and* the
+    object-store blob (GDPR erasure). ``is_redacted`` exists for the later
+    GDPR-redaction feature; it is always ``false`` in M1.2."""
+
+    __tablename__ = "part_file"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "part_id"],
+            ["part.org_id", "part.id"],
+            name="fk_part_file_part_same_org",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("role IN ('primary', 'supporting')", name="ck_part_file_role"),
+        # File size is a byte count — never negative (integrity at the boundary).
+        CheckConstraint("size_bytes >= 0", name="ck_part_file_size_nonneg"),
+        # Composite-FK target so part.(primary_file_id, id) can be pinned to a file
+        # OF THIS PART (the migration adds that FK on `part`).
+        UniqueConstraint("id", "part_id", name="uq_part_file_id_part"),
+        # At most one PRIMARY per part (DECISIONS.md 2026-06-25) — the DB backstop
+        # behind part.primary_file_id being the authority.
+        Index(
+            "uq_part_file_one_primary",
+            "part_id",
+            unique=True,
+            postgresql_where=text("role = 'primary'"),
+        ),
+        # Files are listed per part; index the FK we filter on.
+        Index("ix_part_file_part_id", "part_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    file_type: Mapped[str] = mapped_column(String, nullable=False)  # FileCategory value
+    content_type: Mapped[str | None] = mapped_column(String)  # MIME, for download headers
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False, server_default=FileRole.supporting)
+    is_redacted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = _ts()
