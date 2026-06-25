@@ -19,6 +19,42 @@
 
 ---
 
+## [2026-06-25] M1.3 build path — SavedView engine vs. quotes list (M1.4 not yet built)
+**Status:** RESOLVED
+**Question:** M1.3 ("Saved-view engine + quotes list") hard-depends on M1.4 (`Quote`/`QuoteItem`), which is not built. How to deliver M1.3 without owning M1.4's `quote` table?
+**Options considered:** (a) reorder — build M1.4 first; (b) build M1.3 against a **stub** read-only quotes source in the **pinned canonical `quote` row shape** (DB-SCHEMA.sql), shipping the real `SavedView` engine + the list/filter/sort/saved-view UI now; (c) create a minimal real `quote` table here (rejected — double-ownership of M1.4's table + migration).
+**Decision:** **(b), realized as a minimal real `quote` stub table** — the idiomatic form of "stub" in this codebase: M1.2 created a minimal `part` table that "M1.5 extends … does not reshape," and M1.3 does the same for `quote`. This gives **real RLS + real server-side SQL filtering** (durable — M1.4 keeps it) and lets the existing `Seeder` plant rows, instead of a low-fidelity in-memory stub that can't exercise the real RLS test harness. **Boundary:** M1.3 creates the minimal `quote` columns needed to **list/filter** (id, org_id, number, status, account_id, salesperson_id, estimator_id, rfq_number, due_date, created_at, updated_at — a subset of the canonical `quote` DDL) + `GET`-via-search list; it grants the app role **SELECT only** (no create endpoint). **M1.4 owns** quote creation, the lifecycle **state machine** (enforced transitions), `quote_item`, the Trash/soft-delete + `cancelled` decisions, and same-org composite-FK hardening — added by ALTER, not by reshaping. `SavedView` is a real org-scoped table (RLS) with `filters`/`sort` JSONB whose shape is **identical** to the `/quotes/search` request body, so applying a view = replaying its stored filters (one grammar, no translation layer).
+**Resolved:** 2026-06-25 (/block M1.3 grill + codebase verification — matches the M1.2 `part`→M1.5 stub precedent)
+**Affects:** M1.3 (this block), M1.4 (extends `quote` with lifecycle + `quote_item`; hardens FK rigor; grants INSERT/UPDATE).
+
+## [2026-06-25] SavedView sharing / visibility scope
+**Status:** OPEN
+**Question:** Spec calls saved views "user-owned" (`owner_id`); M1.3 AC says "org/user-scoped." Are views private to the owner, or shareable org-wide? Are there org-default / admin-managed views?
+**Options considered:** private-only; private + opt-in org-share; org-default views managed by admins.
+**Decision (v1 default, pending review):** **private-only.** `saved_view` is org-scoped (RLS) + `owner_id`; a `visibility` enum column (`private | org`) is **reserved** in the schema but only `private` is honored in v1 (avoids a later migration). System/derived views (All Quotes, My Quotes, Drafts, Outstanding, Overdue) are **computed in code, not stored**. Org-sharing UI deferred (→ M6 candidate).
+**Affects:** M1.3 (schema), M6.
+
+## [2026-06-25] `saved_view` absent from canonical DB-SCHEMA.sql
+**Status:** OPEN
+**Question:** The 53-table canonical `DB-SCHEMA.sql` has no `saved_view` table; the definition exists only as the spec's inline tier-2 build-implication (`view_scope`, `filters` JSONB, `sort`, `owner_id`).
+**Decision (proceeding):** Build `saved_view` per the spec build-implication (tier-2 > folded sub-spec). **Action:** fold the resulting DDL back into the canonical `DB-SCHEMA.sql` so the schema stays the single enumerated source.
+**Affects:** M1.3, docs/spec/folded-subspecs/DB-SCHEMA.sql.
+
+## [2026-06-25] Quote-level `priority` — home of the field
+**Status:** OPEN
+**Question:** The quotes grid shows a **Priority** column and the spec's "Highest Priority" saved view filters on it, but the canonical `quote` DDL has **no `priority` column** — the build-implication puts `priority` on `LineItem`. Where does quote-level priority live: on `quote`, derived/aggregated from line items, or both?
+**Options considered:** quote-level enum column; derived MAX over line-item priorities; both (quote default + per-line override).
+**Decision (revised — do not guess on a contested schema field):** M1.3's `quote` stub **does NOT add a `priority` column**, and **`priority` is dropped from the v1 filterable field set** (block-and-log: priority's home is genuinely open, and adding a column would commit schema to a contested field that may move to `line_item`). The quotes grid shows a Priority column rendered as a placeholder ("—") for now. The "Highest Priority" demo saved view is an *example*, not a hard M1.3 requirement, and is deferred. v1 filterable fields are therefore: `status`, `account_id`, `salesperson_id`, `estimator_id`, `created_at` (range), plus computed system views (My Quotes, Overdue via `due_date`). **M1.4/M1.6 decide priority's home**, then it can be added to the grammar with no breaking change (new allow-listed field).
+**Affects:** M1.4, M1.6, M1.3 (filter grammar + grid placeholder).
+
+## [2026-06-25] Quote status: 7 UI "folders" vs. 5-value canonical enum
+**Status:** OPEN
+**Question:** The spec narrative lists **7 status folders** (Drafts, Outstanding, Accepted, Expired, Lost, Cancelled, Trash); the canonical `quote_status` enum has **5 values** (`draft, sent, won, lost, expired`). Mapping: Drafts→draft, Outstanding→sent, Accepted→won, Expired→expired, Lost→lost; **Cancelled** and **Trash** are unmapped (Trash ≈ soft-delete; Cancelled ≈ ?).
+**Decision (proceeding):** out of M1.3 scope — M1.3 filters/displays whatever `quote_status` exists. **Flagged for M1.4** (owns the enum + lifecycle): decide whether to add `cancelled` to the enum and treat Trash as soft-delete.
+**Affects:** M1.4 (quote lifecycle enum).
+
+---
+
 ## [2026-06-14] Product name and domain
 **Status:** RESOLVED  
 **Question:** "Bid Factory" is a working title only. The product needs a real name before domain registration, Mailgun EU domain verification, Clerk OAuth redirect URIs, email from-addresses, and PDF/UI branding can be finalised.  

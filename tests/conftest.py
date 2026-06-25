@@ -23,6 +23,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from typing import cast
 
 import pytest
@@ -49,6 +50,11 @@ from app.models import (
     OrgCountry,
     Part,
     PartFile,
+    Quote,
+    QuoteStatus,
+    SavedView,
+    SavedViewScope,
+    SavedViewVisibility,
     UserOrgMembership,
 )
 from tests.support import build_settings
@@ -222,6 +228,54 @@ class Seeder:
             self._part_file(org_id, part_id, filename, role=role, file_type=file_type)
         )
 
+    def quote(
+        self,
+        org_id: uuid.UUID,
+        number: str,
+        *,
+        status: QuoteStatus = QuoteStatus.draft,
+        account_id: uuid.UUID | None = None,
+        salesperson_id: uuid.UUID | None = None,
+        estimator_id: uuid.UUID | None = None,
+        rfq_number: str | None = None,
+        due_date: datetime | None = None,
+    ) -> uuid.UUID:
+        return self._loop.run_until_complete(
+            self._quote(
+                org_id,
+                number,
+                status=status,
+                account_id=account_id,
+                salesperson_id=salesperson_id,
+                estimator_id=estimator_id,
+                rfq_number=rfq_number,
+                due_date=due_date,
+            )
+        )
+
+    def saved_view(
+        self,
+        org_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        name: str,
+        *,
+        view_scope: SavedViewScope = SavedViewScope.quotes,
+        filters: list[dict[str, object]] | None = None,
+        sort: list[dict[str, object]] | None = None,
+        visibility: SavedViewVisibility = SavedViewVisibility.private,
+    ) -> uuid.UUID:
+        return self._loop.run_until_complete(
+            self._saved_view(
+                org_id,
+                owner_id,
+                name,
+                view_scope=view_scope,
+                filters=filters or [],
+                sort=sort or [],
+                visibility=visibility,
+            )
+        )
+
     async def _org(
         self, slug: str, name: str | None, *, country: str, currency: str, locale: str
     ) -> uuid.UUID:
@@ -321,13 +375,65 @@ class Seeder:
                     part.primary_file_id = row.id
             return row.id
 
+    async def _quote(
+        self,
+        org_id: uuid.UUID,
+        number: str,
+        *,
+        status: QuoteStatus,
+        account_id: uuid.UUID | None,
+        salesperson_id: uuid.UUID | None,
+        estimator_id: uuid.UUID | None,
+        rfq_number: str | None,
+        due_date: datetime | None,
+    ) -> uuid.UUID:
+        async with AsyncSession(self._engine) as session, session.begin():
+            row = Quote(
+                org_id=org_id,
+                number=number,
+                status=status,
+                account_id=account_id,
+                salesperson_id=salesperson_id,
+                estimator_id=estimator_id,
+                rfq_number=rfq_number,
+                due_date=due_date,
+            )
+            session.add(row)
+            await session.flush()
+            return row.id
+
+    async def _saved_view(
+        self,
+        org_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        name: str,
+        *,
+        view_scope: SavedViewScope,
+        filters: list[dict[str, object]],
+        sort: list[dict[str, object]],
+        visibility: SavedViewVisibility,
+    ) -> uuid.UUID:
+        async with AsyncSession(self._engine) as session, session.begin():
+            row = SavedView(
+                org_id=org_id,
+                owner_id=owner_id,
+                name=name,
+                view_scope=view_scope,
+                filters=filters,
+                sort=sort,
+                visibility=visibility,
+            )
+            session.add(row)
+            await session.flush()
+            return row.id
+
 
 async def _truncate(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
         await conn.execute(
             text(
-                "TRUNCATE part_file, part, account, contact, note, user_org_membership, "
-                "app_user, organization CASCADE"
+                "TRUNCATE saved_view, quote, part_file, part, account, contact, note, "
+                "user_org_membership, app_user, organization CASCADE"
             )
         )
         await conn.commit()
