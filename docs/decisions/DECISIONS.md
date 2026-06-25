@@ -235,6 +235,41 @@
 **Resolved:** 2026-06-24 (M0.3 grill)
 **Affects:** M0.3 (permission matrix — manager row).
 
+## [2026-06-24] Primary navigation pattern — sidebar wins over top-bar tabs (M0.4)
+**Status:** RESOLVED
+**Question:** The spec is internally inconsistent on the global nav surface. `#ui-system` (confirmed 2026-06-13, with `BidFactory-LiveMock.html` as the reference implementation) states the **dark sidebar** is "the primary navigation surface" (216/56 px, `[` collapse toggle, `localStorage` persistence). `#shell` instead describes a persistent **dark top bar with horizontal nav tabs**. Same spec tier — which is authoritative?
+**Decision:** **Sidebar.** The collapsible dark sidebar is the primary nav surface (per the newer, explicitly *confirmed* `#ui-system` + its live reference mock); `#shell`'s top-bar-tabs layout is superseded. The **destinations** still come from `#shell` (Dashboard, Parts, Quotes, Orders, Contacts, Configure, Analytics). Global search lives in the sidebar top row; the account menu + org-switcher live in the sidebar's bottom account area (see next entry). Resolves a tier-2-internal conflict per CLAUDE.md §2 ("more specific / more recent confirmed wins").
+**Resolved:** 2026-06-24 (M0.4 grill)
+**Affects:** M0.4 (app shell layout), and every screen rendered inside the shell thereafter.
+
+## [2026-06-24] Org-switcher location — sidebar account area (amends E4-a) (M0.4)
+**Status:** RESOLVED
+**Question:** The "Multi-organization users (E4-a)" decision (2026-06-19) places the org-switcher in the **top-bar account menu**. M0.4 adopts a sidebar-primary layout with **no top bar** (previous entry). Where does the switcher live, and how functional is it in M0.4?
+**Decision:** The org-switcher lives in the **sidebar bottom account area** (alongside the user/account menu) — a wording amendment to E4-a, consistent with the confirmed sidebar design system; the substance of E4-a (switcher exists in v1, active-org as session state, cross-org notifications labelled) is unchanged. **M0.4 ships a stub:** it lists the user's memberships (from `/api/me`) and highlights the active org resolved from the JWT claim; the actual *switch* action (token re-mint via Clerk's native Organizations) is **deferred to M5.12**, where the membership-table → session-token sync is built. This satisfies the M0.4 acceptance criterion ("switcher lists the user's memberships") without depending on un-built sync.
+**Resolved:** 2026-06-24 (M0.4 grill)
+**Affects:** M0.4 (org-switcher stub), M5.12 (real switching + membership/token sync).
+
+## [2026-06-24] Default colour mode — light, both token sets shipped (M0.4)
+**Status:** RESOLVED
+**Question:** `#ui-system` states *"Active defaults: `data-theme=claude` · `data-mode=light`"*, but the build-plan M0.4 scope line says *"dark theme per the design system."* Which is the v1 default colour mode? (A spec-vs-build-plan conflict; per CLAUDE.md §2 the spec outranks the build-plan execution map.)
+**Decision:** **Default `data-mode="light"`** per the spec's explicit active default. Both the full light *and* dark token sets (CSS custom properties, the warm-dark palette `#ui-system` specifies) are shipped, with a persisted toggle (the build-plan's "dark theme" is honoured as *shipped & selectable*, not as the default). Reversible — it is a single default value, no schema impact.
+**Resolved:** 2026-06-24 (M0.4 grill)
+**Affects:** M0.4 (theming / design tokens).
+
+## [2026-06-24] `/api/me` session-bootstrap contract + permission-gated nav (M0.4)
+**Status:** RESOLVED
+**Question:** The app shell needs the current user, their active org (name/locale/currency/country), their cross-org memberships (for the switcher), and what nav/actions to show. No such endpoint exists. What is the contract, and does nav gate on roles or capabilities?
+**Decision:** Add **`GET /api/me`** (authenticated) returning `{ user, active_org, memberships[], effective_permissions[], roles[] }` — `active_org` carries locale/currency/country/slug/name; `roles`/`effective_permissions` are derived from the **active membership row** (the DB, which `user_org_membership` makes authoritative) via `app.authz.permissions_for(...)` (the M0.3 single source of truth) — **not** the JWT `principal.roles` cache, so a briefly-stale claim can't make the payload overstate access or self-contradict `memberships[*].roles`. The frontend **gates nav/actions on capabilities** (e.g. *Configure* requires `config_edit`), never re-encoding the role→capability matrix client-side. (API-layer `require()` still keys on the claim in M0.3; M5.12 keeps claim↔membership in sync.)
+**Resolved:** 2026-06-24 (M0.4 grill)
+**Affects:** M0.4 (`/api/me`, permission-gated nav), all later UI that conditions on permissions.
+
+## [2026-06-24] `/api/me` cross-org identity read under RLS — SECURITY DEFINER function (M0.4)
+**Status:** RESOLVED
+**Question:** The M0.2 migration deliberately grants the restricted `tolera_app` role **no access to `app_user`** (global PII, no org scope) and applies **FORCE RLS** keyed to the active org on `organization`/`user_org_membership`. `/api/me` must read the caller's *own* identity (name/email) and *cross-org* memberships — neither reachable through the normal request path. The migration's own note defers this: *"a later block that must surface users will mediate via … a scoped view."* How does M0.4 read it safely? (DB-schema + security — block-and-log §6, never guessed.)
+**Decision:** A **`SECURITY DEFINER` SQL function** `app_current_identity() → jsonb` (migration `0004`), owned by a dedicated **`BYPASSRLS`, `NOLOGIN`** role `tolera_identity` (a plain table-owner would still be subject to *FORCE* RLS), with a pinned `search_path`, returning `{user, memberships[]}` for the caller identified by the **transaction-local `app.current_user_id` GUC** (stamped by `app.deps.get_session` from the verified principal). The function takes **no argument** — binding to the GUC rather than a parameter means the *database* enforces "read only yourself"; there is no user-id argument to steer at another user. `tolera_app` gets `EXECUTE` only (revoked from `PUBLIC`). **RLS on every table is left untouched** (smallest blast radius); the one privileged path is a single audited function. The `tolera_identity` role follows the M0.2 `tolera_app` precedent (ensure-exists in-migration; attributes provisioned by infra in prod). Rejected: per-user GUC + RLS policy widening (broadens the visibility model app-wide) and a privileged BYPASSRLS connection in the request path (a code slip leaks everything; contradicts the fail-closed design).
+**Resolved:** 2026-06-24 (M0.4 grill)
+**Affects:** M0.4 (`0004` migration, `/api/me`), any later user-surfacing read (reuses this function/pattern).
+
 ## [2026-06-24] Seed framework — Clerk provisioning scope (M0.5)
 **Status:** RESOLVED
 **Question:** Spec `#onboarding` says the seed script "calls `Clerk.organizations.createMembership()` for the admin user (Clerk fires the invite email)". But `SEED-AND-FIXTURES.md` reuses the *same* idempotent runner for tests (every test run seeds a clean org), where hitting the Clerk API is neither idempotent nor desirable. Should the M0.5 seed call the Clerk API, or only write DB rows?

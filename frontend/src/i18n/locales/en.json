@@ -1,0 +1,37 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "parts": "Parts",
+    "quotes": "Quotes",
+    "orders": "Orders",
+    "contacts": "Contacts",
+    "configure": "Configure",
+    "analytics": "Analytics"
+  },
+  "shell": {
+    "primary_nav": "Primary navigation",
+    "search_placeholder": "Search …",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar"
+  },
+  "account": {
+    "menu": "Account",
+    "appearance": "Appearance",
+    "theme_light": "Light mode",
+    "theme_dark": "Dark mode",
+    "language": "Language",
+    "sign_out": "Sign out"
+  },
+  "org": {
+    "switcher_title": "Organization",
+    "active": "Active",
+    "switch_unavailable": "Switching soon"
+  },
+  "page": {
+    "placeholder_body": "This area is implemented in a later step."
+  },
+  "session": {
+    "loading": "Loading session …",
+    "error": "Could not load your session."
+  }
+}
