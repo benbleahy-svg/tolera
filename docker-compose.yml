@@ -43,7 +43,9 @@ services:
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # `mc ready local` needs a configured alias that doesn't exist in the server
+      # container; use the readiness endpoint via curl (present in minio/minio).
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -93,6 +95,9 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # Wait for the bucket to be created so the first upload can't hit NoSuchBucket.
+      minio-init:
+        condition: service_completed_successfully
 
   worker:
     build:
@@ -118,6 +123,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:

@@ -55,6 +55,7 @@ describe('FilesPanel', () => {
 
   it('shows write actions for an editor and downloads on click', async () => {
     listFiles.mockResolvedValue([file('bracket.step', 'primary')]);
+    downloadFile.mockResolvedValue(undefined);
     await renderWithProviders(<FilesPanel partId="p1" />); // default makeMe = estimator (quote_edit)
 
     expect(await screen.findByText('Dateien hochladen')).toBeInTheDocument();

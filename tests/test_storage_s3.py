@@ -12,7 +12,6 @@ Run locally with:
 
 from __future__ import annotations
 
-import contextlib
 import io
 import os
 
@@ -46,9 +45,14 @@ def _settings() -> Settings:
 
 async def _ensure_bucket(storage: S3Storage) -> None:
     async with storage._client() as s3:
-        # Only swallow the already-exists race, not arbitrary failures.
-        with contextlib.suppress(ClientError):
+        # Only swallow the already-exists race — let credential/endpoint errors
+        # surface instead of masquerading as a missing bucket later.
+        try:
             await s3.create_bucket(Bucket="tolera-files")
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code not in {"BucketAlreadyExists", "BucketAlreadyOwnedByYou"}:
+                raise
 
 
 async def test_s3_round_trip_byte_identical() -> None:

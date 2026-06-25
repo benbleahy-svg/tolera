@@ -77,3 +77,11 @@ def test_sniff_passes_unsniffed_types() -> None:
     """Types without a reliable magic signature are not sniffed (return True)."""
     assert sniff_matches_extension("scan.stl", b"anything") is True
     assert sniff_matches_extension("flat.dxf", b"0\nSECTION") is True
+
+
+@pytest.mark.parametrize("name", ["bom.xlsx", "deck.pptx", "sheet.ods", "model.3mf", "part.stpz"])
+def test_sniff_validates_zip_backed_containers(name: str) -> None:
+    """OOXML/ODF/3MF/zipped-STEP are ZIP containers → must carry PK magic, so a
+    renamed binary can't slip past the allow-list (CodeRabbit PR #8)."""
+    assert sniff_matches_extension(name, b"PK\x03\x04rest-of-zip") is True
+    assert sniff_matches_extension(name, b"MZ\x90\x00 not a zip") is False

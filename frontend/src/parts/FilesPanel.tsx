@@ -13,7 +13,15 @@ import { ApiError } from '../api/client';
 import { useHasPermission } from '../session/session';
 import { type PartFile, formatBytes, usePartsApi } from './api';
 
-export function FilesPanel({ partId }: { partId: string }) {
+export function FilesPanel({
+  partId,
+  onMutate,
+}: {
+  partId: string;
+  /** Called after a successful upload/swap/delete so a parent can refresh (e.g. the
+   * parts list's PRIMARY chip) and not contradict the server. */
+  onMutate?: () => void;
+}) {
   const { t, i18n } = useTranslation();
   const api = usePartsApi();
   const canEdit = useHasPermission('quote_edit');
@@ -22,13 +30,21 @@ export function FilesPanel({ partId }: { partId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const requestSeq = useRef(0);
 
   const load = useCallback(() => {
+    const seq = ++requestSeq.current;
     setError(null);
     api
       .listFiles(partId)
-      .then(setFiles)
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
+      .then((next) => {
+        // Ignore a slower earlier reload that resolves after a newer one, so two
+        // quick mutations can't restore stale rows / the wrong PRIMARY badge.
+        if (seq === requestSeq.current) setFiles(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === requestSeq.current) setError(e instanceof ApiError ? e.message : String(e));
+      });
   }, [api, partId]);
 
   useEffect(load, [load]);
@@ -40,19 +56,27 @@ export function FilesPanel({ partId }: { partId: string }) {
       try {
         await action();
         load();
+        onMutate?.(); // let the parent refresh derived state (e.g. the parts list)
       } catch (e: unknown) {
         setError(e instanceof ApiError ? e.message : String(e));
       } finally {
         setBusy(false);
       }
     },
-    [load],
+    [load, onMutate],
   );
 
   const onPick = (event: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(event.target.files ?? []);
     if (picked.length > 0) void run(() => api.uploadFiles(partId, picked));
     event.target.value = ''; // allow re-picking the same file
+  };
+
+  const onDownload = (fileId: string, filename: string) => {
+    // Surface download failures (403/404/network) instead of dropping the promise.
+    api
+      .downloadFile(partId, fileId, filename)
+      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
   };
 
   return (
@@ -117,7 +141,7 @@ export function FilesPanel({ partId }: { partId: string }) {
                   <button
                     type="button"
                     className="btn btn-link"
-                    onClick={() => void api.downloadFile(partId, file.id, file.filename)}
+                    onClick={() => onDownload(file.id, file.filename)}
                   >
                     {t('parts.files.download')}
                   </button>

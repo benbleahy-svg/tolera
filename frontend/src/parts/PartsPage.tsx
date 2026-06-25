@@ -103,7 +103,7 @@ export function PartsPage() {
           </ul>
         )}
 
-        {selected && <FilesPanel key={selected} partId={selected} />}
+        {selected && <FilesPanel key={selected} partId={selected} onMutate={load} />}
       </div>
     </section>
   );

@@ -20,7 +20,7 @@ from .health import router as health_router
 from .logging import configure_logging
 from .me import router as me_router
 from .metrics import register_metrics
-from .middleware import RequestContextMiddleware
+from .middleware import MaxBodySizeMiddleware, RequestContextMiddleware
 from .notes import router as notes_router
 from .parts import parts_router
 from .storage import make_storage
@@ -47,6 +47,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Tolera API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
 
+    # Order matters: RequestContextMiddleware is added last so it stays the
+    # outermost wrapper (it logs/meters every response, including the 413 below).
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_upload_bytes)
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     register_metrics(app)

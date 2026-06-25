@@ -25,5 +25,7 @@ def build_settings(
         app_database_url=app_database_url,
         redis_url="redis://localhost:6379/15",
         log_level="INFO",
+        # Pin the backend so a globally-set STORAGE_BACKEND can't switch tests to S3.
+        storage_backend="memory",
         max_upload_mb=max_upload_mb,
     )

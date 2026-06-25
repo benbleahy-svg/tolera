@@ -215,8 +215,10 @@ def test_spoofed_pdf_rejected_by_magic_sniff(app_client: TestClient, seeder: See
 
 
 def test_bad_file_in_batch_rejects_whole_request(app_client: TestClient, seeder: Seeder) -> None:
-    """One invalid file rejects the batch and stores nothing (no orphan blobs)."""
+    """One invalid file rejects the batch and stores nothing — no DB rows AND no
+    orphan blobs (even if the valid file would be stored first)."""
     org, admin = _org_with_admin(seeder, "org-a")
+    storage = _memory_storage(app_client)
     with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
         part_id = _create_part(app_client)
         resp = app_client.post(
@@ -225,6 +227,7 @@ def test_bad_file_in_batch_rejects_whole_request(app_client: TestClient, seeder:
         )
         assert resp.status_code == 415
         assert app_client.get(f"/api/parts/{part_id}/files").json() == []
+        assert len(storage._objects) == 0  # no leaked blob from the valid file
 
 
 def test_oversize_upload_rejected(seeder: Seeder, tenancy_db: str) -> None:
@@ -255,6 +258,10 @@ def test_cross_org_isolation(app_client: TestClient, seeder: Seeder) -> None:
     org_b, _admin_b = _org_with_admin(seeder, "org-b")
     part_b = seeder.part(org_b)
     file_b = seeder.part_file(org_b, part_b, role=FileRole.primary)
+    # Store org B's blob at the seeded key so /download would 200 IF the route
+    # bypassed the org-scoped DB check — the 404 below then proves RLS, not a
+    # missing object (CodeRabbit PR #8).
+    _memory_storage(app_client)._objects[f"seed/{org_b}/{part_b}/bracket.step"] = b"org-b-secret"
 
     with authed(app_client, user_id=admin_a, org_id=org_a, roles=ADMIN):
         assert app_client.get("/api/parts").json() == []

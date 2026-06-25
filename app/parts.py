@@ -156,9 +156,17 @@ def _received_size(upload: UploadFile) -> int:
     return size
 
 
-async def _get_part_or_404(session: AsyncSession, part_id: uuid.UUID) -> Part:
-    """Fetch a part in the active org, or raise 404 (RLS scopes the lookup)."""
-    part = await session.get(Part, part_id)
+async def _get_part_or_404(
+    session: AsyncSession, part_id: uuid.UUID, *, for_update: bool = False
+) -> Part:
+    """Fetch a part in the active org, or raise 404 (RLS scopes the lookup).
+
+    ``for_update`` takes a row lock (``SELECT … FOR UPDATE``) so a file mutation
+    (upload / set-primary / delete) serializes against concurrent mutations on the
+    same part — otherwise a last-primary delete racing an upload could strand
+    supporting files with a NULL primary, or racing swaps could surface a raw
+    unique-index error (CodeRabbit PR #8)."""
+    part = await session.get(Part, part_id, with_for_update=for_update or None)
     if part is None:
         raise AppError("not_found", "Part not found.", status_code=status.HTTP_404_NOT_FOUND)
     return part
@@ -260,7 +268,7 @@ async def upload_part_files(
     anything is stored, so a bad file in the batch rejects the whole request without
     leaving orphan blobs. If the part has no PRIMARY, the highest-geometric-rank
     uploaded file becomes PRIMARY (ties → first uploaded)."""
-    part = await _get_part_or_404(session, part_id)
+    part = await _get_part_or_404(session, part_id, for_update=True)
     if not files:
         raise AppError("no_files", "No files were provided.", status_code=422)
 
@@ -392,7 +400,7 @@ async def set_primary_file(
 
     Clears the previous PRIMARY's role *before* setting the new one, so the partial
     unique index never momentarily sees two primaries."""
-    part = await _get_part_or_404(session, part_id)
+    part = await _get_part_or_404(session, part_id, for_update=True)
     target = await _get_part_file_or_404(session, part_id, file_id)
     if part.primary_file_id == target.id:
         return _part_file_out(target)
@@ -424,7 +432,7 @@ async def delete_part_file(
     first); the pointer is nulled only when the PRIMARY is the part's last file. The
     blob is purged by a background task that runs *after* the DB commit, so a failed
     commit never deletes a still-referenced object."""
-    part = await _get_part_or_404(session, part_id)
+    part = await _get_part_or_404(session, part_id, for_update=True)
     target = await _get_part_file_or_404(session, part_id, file_id)
 
     if part.primary_file_id == target.id:

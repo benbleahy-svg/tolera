@@ -98,7 +98,9 @@ class Settings(BaseSettings):
     # (provider still OPEN — EU data residency).
     storage_backend: str = "memory"  # "memory" | "s3"
     s3_endpoint: str = ""  # e.g. http://minio:9000 (blank = AWS default endpoint)
-    s3_bucket: str = "tolera-files"
+    # No default bucket — an S3 deploy that forgets S3_BUCKET must fail closed
+    # (validate_storage), not silently write customer files to a fallback bucket.
+    s3_bucket: str = ""
     s3_region: str = "eu-central-1"
     s3_access_key: str = ""
     s3_secret_key: str = ""
@@ -118,6 +120,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"STORAGE_BACKEND must be 'memory' or 's3', got {self.storage_backend!r}"
             )
+        if self.max_upload_mb <= 0:
+            raise ValueError(f"MAX_UPLOAD_MB must be positive, got {self.max_upload_mb}.")
         is_dev = self.environment.lower() in {"development", "test"}
         if self.storage_backend == "memory" and not is_dev:
             raise ValueError("STORAGE_BACKEND=memory is not allowed outside development/test.")

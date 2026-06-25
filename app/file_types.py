@@ -117,15 +117,26 @@ _CATEGORY_RANK: dict[FileCategory, int] = {
     FileCategory.archive: 0,
 }
 
+# ZIP local-file-header / empty / spanned signatures. Every OOXML/ODF/3MF/OPC
+# format below is really a ZIP container, so the same magic applies.
+_ZIP_SIGS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 # Magic-byte signatures for the containers worth sniffing (DECISIONS.md
 # 2026-06-25). A spoofed extension (e.g. a ``.exe`` renamed ``.pdf``) fails here.
 # STEP is plain text with a known leading token. Keyed by extension so a ``.png``
-# carrying PDF magic isn't checked against the PDF signature.
+# carrying PDF magic isn't checked against the PDF signature. The ZIP-backed allowed
+# formats are sniffed too, so a renamed binary can't slip through (CodeRabbit PR #8).
 _SNIFFED_EXTENSIONS: dict[str, tuple[bytes, ...]] = {
     "pdf": (b"%PDF",),
-    "zip": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
     "step": (b"ISO-10303-21",),
     "stp": (b"ISO-10303-21",),
+    "zip": _ZIP_SIGS,
+    "xlsx": _ZIP_SIGS,
+    "pptx": _ZIP_SIGS,
+    "ods": _ZIP_SIGS,
+    "odp": _ZIP_SIGS,
+    "3mf": _ZIP_SIGS,
+    "dwfx": _ZIP_SIGS,
+    "stpz": _ZIP_SIGS,
 }
 #: How many leading bytes a caller must read for :func:`sniff_matches_extension`.
 MAGIC_SNIFF_BYTES = 16

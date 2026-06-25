@@ -74,18 +74,20 @@ export async function apiFetch<T>(
   req: ApiRequest = {},
 ): Promise<T> {
   assertRelativePath(path);
-  const headers = await bearerHeader(getToken);
-  if (req.body !== undefined) headers['Content-Type'] = 'application/json';
   let res: Response;
   try {
+    // Inside the try so a rejected token fetch (expired session / Clerk refresh
+    // failure) is normalised to the ApiError contract, not thrown raw.
+    const headers = await bearerHeader(getToken);
+    if (req.body !== undefined) headers['Content-Type'] = 'application/json';
     res = await fetch(`${API_BASE}${path}`, {
       method: req.method ?? 'GET',
       headers,
       body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
     });
   } catch (cause) {
-    // Offline / DNS / CORS reject with a native TypeError — normalise to the
-    // ApiError contract so every caller handles failures the same way.
+    // Offline / DNS / CORS / token-fetch rejection — normalise to the ApiError
+    // contract so every caller handles failures the same way.
     throw new ApiError(0, 'network_error', 'Network request failed', cause);
   }
   if (!res.ok) await rejectFromResponse(res);
@@ -103,9 +105,9 @@ export async function apiUpload<T>(
   formData: FormData,
 ): Promise<T> {
   assertRelativePath(path);
-  const headers = await bearerHeader(getToken);
   let res: Response;
   try {
+    const headers = await bearerHeader(getToken);
     res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: formData });
   } catch (cause) {
     throw new ApiError(0, 'network_error', 'Network request failed', cause);
@@ -118,9 +120,9 @@ export async function apiUpload<T>(
 /** Fetch a binary response (file download, M1.2) as a `Blob`, with auth. */
 export async function apiDownload(path: string, getToken: TokenGetter): Promise<Blob> {
   assertRelativePath(path);
-  const headers = await bearerHeader(getToken);
   let res: Response;
   try {
+    const headers = await bearerHeader(getToken);
     res = await fetch(`${API_BASE}${path}`, { headers });
   } catch (cause) {
     throw new ApiError(0, 'network_error', 'Network request failed', cause);
