@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,9 +72,13 @@ class UserSpec(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def _valid_email(cls, value: str) -> str:
+    def _normalize_email(cls, value: str) -> str:
+        # Canonicalise so the email natural key is stable regardless of casing /
+        # surrounding whitespace (the column is CITEXT, but normalise anyway).
+        value = value.strip().lower()
         if not _EMAIL_RE.match(value):
-            raise ValueError(f"not a valid email address: {value!r}")
+            # Never echo the address back — it is customer PII (CLAUDE.md §5).
+            raise ValueError("not a valid email address")
         return value
 
 
@@ -189,13 +193,19 @@ class OrgService:
 
     async def _upsert_user(self, user: UserSpec) -> tuple[uuid.UUID, bool]:
         existing = await self._session.scalar(select(AppUser.id).where(AppUser.email == user.email))
-        values = {"first_name": user.first_name, "last_name": user.last_name}
-        stmt = (
-            pg_insert(AppUser)
-            .values(email=user.email, **values)
-            .on_conflict_do_update(index_elements=[AppUser.email], set_=values)
-            .returning(AppUser.id)
+        insert_stmt = pg_insert(AppUser).values(
+            email=user.email, first_name=user.first_name, last_name=user.last_name
         )
+        # AppUser is global: the same user may be seeded again via another org
+        # (E4-a). COALESCE so a later seed that omits a name can't blank out a
+        # name an earlier seed set — only a supplied (non-null) value overwrites.
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[AppUser.email],
+            set_={
+                "first_name": func.coalesce(insert_stmt.excluded.first_name, AppUser.first_name),
+                "last_name": func.coalesce(insert_stmt.excluded.last_name, AppUser.last_name),
+            },
+        ).returning(AppUser.id)
         user_id: uuid.UUID = (await self._session.execute(stmt)).scalar_one()
         return user_id, existing is None
 
