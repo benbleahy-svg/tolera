@@ -25,11 +25,43 @@ export class ApiError extends Error {
   }
 }
 
-async function getJson<T>(path: string, getToken: TokenGetter): Promise<T> {
+export interface ApiRequest {
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  /** JSON request body; serialised + sent with a JSON content-type. */
+  body?: unknown;
+}
+
+/**
+ * Make an API call, injecting the bearer token and surfacing the backend's
+ * `{code, message, details}` envelope as an `ApiError`. A 204/empty body
+ * resolves to `undefined`. This is the single fetch seam every feature reuses.
+ */
+export async function apiFetch<T>(
+  path: string,
+  getToken: TokenGetter,
+  req: ApiRequest = {},
+): Promise<T> {
+  // Only same-origin relative paths: we attach a bearer token, so an absolute or
+  // protocol-relative URL could exfiltrate it to another host.
+  if (!path.startsWith('/') || path.startsWith('//') || /^[a-z]+:/i.test(path)) {
+    throw new ApiError(0, 'invalid_path', 'API path must be a relative "/..." path');
+  }
   const token = await getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (req.body !== undefined) headers['Content-Type'] = 'application/json';
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: req.method ?? 'GET',
+      headers,
+      body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
+    });
+  } catch (cause) {
+    // Offline / DNS / CORS reject with a native TypeError — normalise to the
+    // ApiError contract so every caller handles failures the same way.
+    throw new ApiError(0, 'network_error', 'Network request failed', cause);
+  }
   if (!res.ok) {
     let code = 'error';
     let message = `Request failed (${res.status})`;
@@ -47,10 +79,11 @@ async function getJson<T>(path: string, getToken: TokenGetter): Promise<T> {
     }
     throw new ApiError(res.status, code, message, details);
   }
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
 /** Fetch the session bootstrap (`GET /api/me`). */
 export function fetchMe(getToken: TokenGetter): Promise<Me> {
-  return getJson<Me>('/api/me', getToken);
+  return apiFetch<Me>('/api/me', getToken);
 }

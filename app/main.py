@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from .accounts import accounts_router, contacts_router
 from .config import Settings, get_settings
 from .db import make_engine, make_sessionmaker
 from .errors import register_exception_handlers
@@ -48,6 +49,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(notes_router)
     app.include_router(me_router)
+    app.include_router(accounts_router)
+    app.include_router(contacts_router)
 
     return app
 

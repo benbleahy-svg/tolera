@@ -15,6 +15,7 @@ import asyncio
 import logging
 
 from app.config import get_settings
+from app.crm_seed import FECHNER_SLUG, CrmSeedResult, seed_pilot_crm
 from app.db import make_engine, make_sessionmaker
 from app.logging import configure_logging
 from app.seed import DEFAULT_SEEDS_DIR, apply_seeds, load_seeds
@@ -23,10 +24,21 @@ from app.services.org_service import OrgResult, OrgSpec
 logger = logging.getLogger("scripts.seed_demo")
 
 
-async def _run(database_url: str, specs: list[OrgSpec]) -> list[OrgResult]:
+async def _run(
+    database_url: str, specs: list[OrgSpec]
+) -> tuple[list[OrgResult], CrmSeedResult | None]:
     engine = make_engine(database_url)
     try:
-        return await apply_seeds(make_sessionmaker(engine), specs)
+        sessionmaker = make_sessionmaker(engine)
+        results = await apply_seeds(sessionmaker, specs)
+        # Seed the golden-thread CRM (Fechner account + contact) once the pilot org
+        # exists — its own transaction so a CRM hiccup can't undo provisioning.
+        crm: CrmSeedResult | None = None
+        fechner = next((r for r in results if r.slug == FECHNER_SLUG), None)
+        if fechner is not None:
+            async with sessionmaker() as session, session.begin():
+                crm = await seed_pilot_crm(session, org_id=fechner.org_id)
+        return results, crm
     finally:
         await engine.dispose()
 
@@ -42,7 +54,7 @@ def main() -> None:
         )
         return
 
-    results = asyncio.run(_run(settings.database_url, specs))
+    results, crm = asyncio.run(_run(settings.database_url, specs))
 
     # Log slugs + counts only — never the seeded emails (PII; CLAUDE.md §5).
     for result in results:
@@ -55,6 +67,15 @@ def main() -> None:
                 "users_total": len(result.users),
                 "users_created": sum(member.user_created for member in result.users),
                 "memberships_created": sum(member.membership_created for member in result.users),
+            },
+        )
+    if crm is not None:
+        logger.info(
+            "seeded pilot CRM",
+            extra={
+                "slug": FECHNER_SLUG,
+                "account_created": crm.account_created,
+                "contact_created": crm.contact_created,
             },
         )
     logger.info("seed complete", extra={"orgs": len(results)})

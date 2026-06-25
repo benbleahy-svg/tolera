@@ -42,13 +42,19 @@ def error_envelope(code: str, message: str, details: Any = None) -> dict[str, An
     return {"code": code, "message": message, "details": details}
 
 
-def _redact_validation_errors(errors: Sequence[Any]) -> list[dict[str, Any]]:
-    """Drop the echoed ``input`` value from each error (it may carry a secret/PII).
+_REDACTED_ERROR_KEYS = frozenset({"input", "ctx"})
 
-    The client still gets the field location, type, and message — enough to fix
-    the request — without us reflecting submitted credentials back (CLAUDE.md §5).
+
+def _redact_validation_errors(errors: Sequence[Any]) -> list[dict[str, Any]]:
+    """Drop the echoed ``input`` and ``ctx`` from each error.
+
+    ``input`` may carry a secret/PII (CLAUDE.md §5). ``ctx`` is dropped both for the
+    same reason and because, when a custom validator raises ``ValueError``, Pydantic
+    stuffs the raw exception object into ``ctx`` — which is not JSON-serializable and
+    would 500 the envelope. The client still gets the field location, type, and
+    message — enough to fix the request.
     """
-    return [{k: v for k, v in err.items() if k != "input"} for err in errors]
+    return [{k: v for k, v in err.items() if k not in _REDACTED_ERROR_KEYS} for err in errors]
 
 
 def register_exception_handlers(app: FastAPI) -> None:

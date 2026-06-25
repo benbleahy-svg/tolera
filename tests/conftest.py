@@ -37,7 +37,10 @@ from alembic import command
 from app.auth import Principal, get_principal
 from app.main import create_app
 from app.models import (
+    Account,
+    AccountType,
     AppUser,
+    Contact,
     MembershipRole,
     MembershipStatus,
     Note,
@@ -185,6 +188,21 @@ class Seeder:
     def note(self, org_id: uuid.UUID, body: str) -> uuid.UUID:
         return self._loop.run_until_complete(self._note(org_id, body))
 
+    def account(
+        self,
+        org_id: uuid.UUID,
+        name: str = "Acme GmbH",
+        *,
+        salesperson_id: uuid.UUID | None = None,
+        type: AccountType = AccountType.customer,
+    ) -> uuid.UUID:
+        return self._loop.run_until_complete(
+            self._account(org_id, name, salesperson_id=salesperson_id, type=type)
+        )
+
+    def contact(self, org_id: uuid.UUID, account_id: uuid.UUID | None, email: str) -> uuid.UUID:
+        return self._loop.run_until_complete(self._contact(org_id, account_id, email))
+
     async def _org(
         self, slug: str, name: str | None, *, country: str, currency: str, locale: str
     ) -> uuid.UUID:
@@ -227,11 +245,37 @@ class Seeder:
             await session.flush()
             return row.id
 
+    async def _account(
+        self,
+        org_id: uuid.UUID,
+        name: str,
+        *,
+        salesperson_id: uuid.UUID | None,
+        type: AccountType,
+    ) -> uuid.UUID:
+        async with AsyncSession(self._engine) as session, session.begin():
+            row = Account(org_id=org_id, name=name, salesperson_id=salesperson_id, type=type)
+            session.add(row)
+            await session.flush()
+            return row.id
+
+    async def _contact(
+        self, org_id: uuid.UUID, account_id: uuid.UUID | None, email: str
+    ) -> uuid.UUID:
+        async with AsyncSession(self._engine) as session, session.begin():
+            row = Contact(org_id=org_id, account_id=account_id, email=email)
+            session.add(row)
+            await session.flush()
+            return row.id
+
 
 async def _truncate(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
         await conn.execute(
-            text("TRUNCATE note, user_org_membership, app_user, organization CASCADE")
+            text(
+                "TRUNCATE account, contact, note, user_org_membership, app_user, "
+                "organization CASCADE"
+            )
         )
         await conn.commit()
 
