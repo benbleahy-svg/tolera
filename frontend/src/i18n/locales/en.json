@@ -34,6 +34,37 @@
     "loading": "Loading session …",
     "error": "Could not load your session."
   },
+  "parts": {
+    "create": "New part",
+    "empty": "No parts yet.",
+    "has_primary": "Primary file",
+    "no_primary": "No primary file",
+    "files": {
+      "title": "Files",
+      "upload": "Upload files",
+      "empty": "No files yet.",
+      "primary": "PRIMARY",
+      "supporting": "Supporting",
+      "download": "Download",
+      "make_primary": "Make primary",
+      "delete": "Delete",
+      "col": {
+        "name": "Name",
+        "type": "Type",
+        "size": "Size",
+        "role": "Role",
+        "actions": "Actions"
+      },
+      "type": {
+        "brep_cad": "CAD model",
+        "mesh": "Mesh",
+        "vector_2d": "2D vector",
+        "document": "Document",
+        "email": "Email",
+        "archive": "Archive"
+      }
+    }
+  },
   "contacts": {
     "create_account": "Create account",
     "create_account_title": "New account",

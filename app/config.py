@@ -91,6 +91,43 @@ class Settings(BaseSettings):
             raise ValueError("CLERK_AUTHORIZED_PARTIES must be set outside development/test.")
         return parties
 
+    # --- Object storage (M1.2 — DECISIONS.md 2026-06-25) ---
+    # ``memory`` is the default so the app boots and round-trips a file with no
+    # external dependency (used by tests + a bare local run). docker-compose sets
+    # ``s3`` against MinIO; production sets ``s3`` against an EU-resident bucket
+    # (provider still OPEN — EU data residency).
+    storage_backend: str = "memory"  # "memory" | "s3"
+    s3_endpoint: str = ""  # e.g. http://minio:9000 (blank = AWS default endpoint)
+    # No default bucket — an S3 deploy that forgets S3_BUCKET must fail closed
+    # (validate_storage), not silently write customer files to a fallback bucket.
+    s3_bucket: str = ""
+    s3_region: str = "eu-central-1"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    # Max upload size — spec ``#viewer3d-limits`` reconciles PP's 150/250 MB
+    # conflict to 200 (DECISIONS.md 2026-06-25).
+    max_upload_mb: int = 200
+
+    @property
+    def max_upload_bytes(self) -> int:
+        """The upload size cap in bytes."""
+        return self.max_upload_mb * 1024 * 1024
+
+    def validate_storage(self) -> None:
+        """Fail closed: the S3 backend must be configured outside dev/test, so a
+        misconfigured prod deploy can't silently fall back / lose customer files."""
+        if self.storage_backend not in {"memory", "s3"}:
+            raise ValueError(
+                f"STORAGE_BACKEND must be 'memory' or 's3', got {self.storage_backend!r}"
+            )
+        if self.max_upload_mb <= 0:
+            raise ValueError(f"MAX_UPLOAD_MB must be positive, got {self.max_upload_mb}.")
+        is_dev = self.environment.lower() in {"development", "test"}
+        if self.storage_backend == "memory" and not is_dev:
+            raise ValueError("STORAGE_BACKEND=memory is not allowed outside development/test.")
+        if self.storage_backend == "s3" and not self.s3_bucket:
+            raise ValueError("S3_BUCKET must be set when STORAGE_BACKEND=s3.")
+
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"
     default_locale: str = "de-DE"

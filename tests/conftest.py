@@ -41,11 +41,14 @@ from app.models import (
     AccountType,
     AppUser,
     Contact,
+    FileRole,
     MembershipRole,
     MembershipStatus,
     Note,
     Organization,
     OrgCountry,
+    Part,
+    PartFile,
     UserOrgMembership,
 )
 from tests.support import build_settings
@@ -203,6 +206,22 @@ class Seeder:
     def contact(self, org_id: uuid.UUID, account_id: uuid.UUID | None, email: str) -> uuid.UUID:
         return self._loop.run_until_complete(self._contact(org_id, account_id, email))
 
+    def part(self, org_id: uuid.UUID) -> uuid.UUID:
+        return self._loop.run_until_complete(self._part(org_id))
+
+    def part_file(
+        self,
+        org_id: uuid.UUID,
+        part_id: uuid.UUID,
+        filename: str = "bracket.step",
+        *,
+        role: FileRole = FileRole.supporting,
+        file_type: str = "brep_cad",
+    ) -> uuid.UUID:
+        return self._loop.run_until_complete(
+            self._part_file(org_id, part_id, filename, role=role, file_type=file_type)
+        )
+
     async def _org(
         self, slug: str, name: str | None, *, country: str, currency: str, locale: str
     ) -> uuid.UUID:
@@ -268,13 +287,47 @@ class Seeder:
             await session.flush()
             return row.id
 
+    async def _part(self, org_id: uuid.UUID) -> uuid.UUID:
+        async with AsyncSession(self._engine) as session, session.begin():
+            row = Part(org_id=org_id)
+            session.add(row)
+            await session.flush()
+            return row.id
+
+    async def _part_file(
+        self,
+        org_id: uuid.UUID,
+        part_id: uuid.UUID,
+        filename: str,
+        *,
+        role: FileRole,
+        file_type: str,
+    ) -> uuid.UUID:
+        async with AsyncSession(self._engine) as session, session.begin():
+            row = PartFile(
+                org_id=org_id,
+                part_id=part_id,
+                storage_key=f"seed/{org_id}/{part_id}/{filename}",
+                filename=filename,
+                file_type=file_type,
+                size_bytes=0,
+                role=role,
+            )
+            session.add(row)
+            await session.flush()
+            if role == FileRole.primary:
+                part = await session.get(Part, part_id)
+                if part is not None:
+                    part.primary_file_id = row.id
+            return row.id
+
 
 async def _truncate(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
         await conn.execute(
             text(
-                "TRUNCATE account, contact, note, user_org_membership, app_user, "
-                "organization CASCADE"
+                "TRUNCATE part_file, part, account, contact, note, user_org_membership, "
+                "app_user, organization CASCADE"
             )
         )
         await conn.commit()

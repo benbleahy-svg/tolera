@@ -20,14 +20,17 @@ from .health import router as health_router
 from .logging import configure_logging
 from .me import router as me_router
 from .metrics import register_metrics
-from .middleware import RequestContextMiddleware
+from .middleware import MaxBodySizeMiddleware, RequestContextMiddleware
 from .notes import router as notes_router
+from .parts import parts_router
+from .storage import make_storage
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI app. Pass ``settings`` to override config in tests."""
     settings = settings or get_settings()
     configure_logging(settings.log_level)
+    settings.validate_storage()  # fail closed on a misconfigured object store
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -35,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # migrations run separately as the owner role.
         app.state.engine = make_engine(settings.effective_app_database_url)
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
+        app.state.storage = make_storage(settings)  # object store for part files (M1.2)
         try:
             yield
         finally:
@@ -43,6 +47,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Tolera API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
 
+    # Order matters: RequestContextMiddleware is added last so it stays the
+    # outermost wrapper (it logs/meters every response, including the 413 below).
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_upload_bytes)
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     register_metrics(app)
@@ -51,6 +58,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(me_router)
     app.include_router(accounts_router)
     app.include_router(contacts_router)
+    app.include_router(parts_router)
 
     return app
 

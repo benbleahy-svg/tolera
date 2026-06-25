@@ -6,18 +6,63 @@ context variable set here is visible inside route handlers and their log lines.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from uuid import uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .errors import error_envelope
 from .logging import request_id_var
 from .metrics import http_request_duration_seconds, http_requests_total
 
 logger = logging.getLogger("app.access")
 
 _REQUEST_ID_HEADER = b"x-request-id"
+_CONTENT_LENGTH_HEADER = b"content-length"
+
+
+class MaxBodySizeMiddleware:
+    """Reject a request whose declared ``Content-Length`` exceeds the upload cap,
+    **before** the multipart parser spools the body to disk/memory (CodeRabbit
+    PR #8 — defence against disk/memory exhaustion).
+
+    This is a cheap in-app guard for honest clients; the primary control against a
+    spoofed/absent Content-Length or chunked upload is the reverse proxy's body-size
+    limit (e.g. nginx ``client_max_body_size``) in front of the app."""
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            raw = dict(scope.get("headers", [])).get(_CONTENT_LENGTH_HEADER)
+            if raw is not None:
+                try:
+                    declared = int(raw)
+                except ValueError:
+                    declared = -1
+                if declared > self.max_bytes:
+                    body = json.dumps(
+                        error_envelope(
+                            "file_too_large", "Request body exceeds the upload size limit."
+                        )
+                    ).encode()
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": 413,
+                            "headers": [
+                                (b"content-type", b"application/json"),
+                                (b"content-length", str(len(body)).encode()),
+                            ],
+                        }
+                    )
+                    await send({"type": "http.response.body", "body": body})
+                    return
+        await self.app(scope, receive, send)
 
 
 class RequestContextMiddleware:

@@ -34,6 +34,37 @@
     "loading": "Sitzung wird geladen …",
     "error": "Sitzung konnte nicht geladen werden."
   },
+  "parts": {
+    "create": "Teil anlegen",
+    "empty": "Noch keine Teile.",
+    "has_primary": "Primärdatei",
+    "no_primary": "Keine Primärdatei",
+    "files": {
+      "title": "Dateien",
+      "upload": "Dateien hochladen",
+      "empty": "Noch keine Dateien.",
+      "primary": "PRIMÄR",
+      "supporting": "Ergänzend",
+      "download": "Herunterladen",
+      "make_primary": "Als Primär festlegen",
+      "delete": "Löschen",
+      "col": {
+        "name": "Name",
+        "type": "Typ",
+        "size": "Größe",
+        "role": "Rolle",
+        "actions": "Aktionen"
+      },
+      "type": {
+        "brep_cad": "CAD-Modell",
+        "mesh": "Netz",
+        "vector_2d": "2D-Vektor",
+        "document": "Dokument",
+        "email": "E-Mail",
+        "archive": "Archiv"
+      }
+    }
+  },
   "contacts": {
     "create_account": "Konto anlegen",
     "create_account_title": "Neues Konto",

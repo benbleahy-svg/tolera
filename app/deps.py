@@ -15,7 +15,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .auth import Principal, get_principal
+from .config import Settings
 from .db import USER_ID_GUC, org_scoped_session
+from .storage import ObjectStorage
 
 
 async def get_session(
@@ -34,3 +36,18 @@ async def get_session(
             {"uid": str(principal.user_id)},
         )
         yield session
+
+
+def get_storage(request: Request) -> ObjectStorage:
+    """The configured object-storage backend, built once at app startup (M1.2)."""
+    storage: ObjectStorage = request.app.state.storage
+    return storage
+
+
+def get_app_settings(request: Request) -> Settings:
+    """The active :class:`Settings` for this app instance (test-injected or global).
+
+    Read from ``app.state`` — never ``get_settings()`` — so a test that overrides
+    config (e.g. a smaller ``max_upload_mb``) is honoured."""
+    settings: Settings = request.app.state.settings
+    return settings
