@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
@@ -101,6 +101,26 @@ class OrgSpec(BaseModel):
         if value not in _VALID_CURRENCIES:
             raise ValueError(f"currency must be one of {sorted(_VALID_CURRENCIES)}, got {value!r}")
         return value
+
+    @model_validator(mode="after")
+    def _currency_matches_country(self) -> Self:
+        # DACH money: CH bills in CHF, DE/AT in EUR (DACH-DELTA §1, CLAUDE.md §5).
+        # ``currency`` defaults to EUR, so guard against a CH org silently keeping it.
+        expected = "CHF" if self.country is OrgCountry.CH else "EUR"
+        if self.currency != expected:
+            raise ValueError(f"country {self.country.value} requires currency {expected}")
+        return self
+
+    @model_validator(mode="after")
+    def _unique_user_emails(self) -> Self:
+        # Emails are already normalised; a dup would upsert one membership twice
+        # (later roles clobber earlier) while still being reported as two members.
+        seen: set[str] = set()
+        for user in self.users:
+            if user.email in seen:
+                raise ValueError("users must not contain duplicate email addresses")
+            seen.add(user.email)
+        return self
 
     @property
     def rfq_ingest(self) -> str:
@@ -197,13 +217,14 @@ class OrgService:
             email=user.email, first_name=user.first_name, last_name=user.last_name
         )
         # AppUser is global: the same user may be seeded again via another org
-        # (E4-a). COALESCE so a later seed that omits a name can't blank out a
-        # name an earlier seed set — only a supplied (non-null) value overwrites.
+        # (E4-a). The seed is not an identity-admin flow, so it must not rewrite a
+        # reused user's profile — COALESCE keeps the EXISTING name and only fills a
+        # gap from the incoming seed (first-writer-wins; order-independent).
         stmt = insert_stmt.on_conflict_do_update(
             index_elements=[AppUser.email],
             set_={
-                "first_name": func.coalesce(insert_stmt.excluded.first_name, AppUser.first_name),
-                "last_name": func.coalesce(insert_stmt.excluded.last_name, AppUser.last_name),
+                "first_name": func.coalesce(AppUser.first_name, insert_stmt.excluded.first_name),
+                "last_name": func.coalesce(AppUser.last_name, insert_stmt.excluded.last_name),
             },
         ).returning(AppUser.id)
         user_id: uuid.UUID = (await self._session.execute(stmt)).scalar_one()

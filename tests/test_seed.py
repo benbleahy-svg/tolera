@@ -198,8 +198,12 @@ def test_seed_reuses_one_global_user_across_orgs(clean_db: str) -> None:
     assert counts["memberships"] == 2  # one membership per org
 
 
-def test_reseeding_a_shared_user_preserves_existing_name(clean_db: str) -> None:
-    """A later org seed that omits names must not blank a name an earlier seed set."""
+def test_reseeding_a_shared_user_does_not_rewrite_profile(clean_db: str) -> None:
+    """A second org seed must not rewrite a reused user's name (first-writer-wins).
+
+    Covers both the omit case (NULL can't blank an existing name) and the
+    supplied-but-different case (the seed is not an identity-admin flow).
+    """
     email = "named.user@example.com"
     asyncio.run(
         _apply(
@@ -228,14 +232,21 @@ def test_reseeding_a_shared_user_preserves_existing_name(clean_db: str) -> None:
                     slug="org-other",
                     name="Other Org",
                     locale="en",
-                    users=[UserSpec(email=email, roles=[MembershipRole.estimator])],
+                    users=[
+                        UserSpec(
+                            email=email,
+                            roles=[MembershipRole.estimator],
+                            first_name="Hans",  # a conflicting name from a later org
+                            last_name="Schmidt",
+                        )
+                    ],
                 )
             ],
         )
     )
 
     user = asyncio.run(_fetch_user(clean_db, email))
-    assert user["first_name"] == "Greta"  # not overwritten with NULL by the 2nd seed
+    assert user["first_name"] == "Greta"  # the first writer's profile is preserved
     assert user["last_name"] == "Müller"
 
 
@@ -295,6 +306,46 @@ def test_orgspec_rejects_unsupported_currency() -> None:
             name="Acme",
             currency="USD",
             users=[UserSpec(email="a@b.co", roles=[MembershipRole.admin])],
+        )
+
+
+def test_orgspec_rejects_a_country_currency_mismatch() -> None:
+    """A CH org must bill in CHF, not the EUR default (DACH-DELTA §1)."""
+    with pytest.raises(ValidationError):
+        OrgSpec.model_validate(
+            {
+                "slug": "swiss-co",
+                "name": "Swiss Co",
+                "country": "CH",  # currency omitted → defaults to EUR → must be rejected
+                "users": [{"email": "a@b.co", "roles": ["admin"]}],
+            }
+        )
+
+
+def test_orgspec_accepts_ch_with_chf() -> None:
+    spec = OrgSpec.model_validate(
+        {
+            "slug": "swiss-co",
+            "name": "Swiss Co",
+            "country": "CH",
+            "currency": "CHF",
+            "locale": "de-CH",
+            "users": [{"email": "a@b.co", "roles": ["admin"]}],
+        }
+    )
+    assert spec.currency == "CHF"
+
+
+def test_orgspec_rejects_duplicate_user_emails() -> None:
+    """Two members with the same (normalised) email would double-upsert one membership."""
+    with pytest.raises(ValidationError):
+        OrgSpec(
+            slug="acme",
+            name="Acme",
+            users=[
+                UserSpec(email="Dup@b.co", roles=[MembershipRole.admin]),
+                UserSpec(email="dup@b.co", roles=[MembershipRole.estimator]),
+            ],
         )
 
 
