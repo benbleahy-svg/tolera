@@ -22,6 +22,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     String,
     Text,
@@ -117,10 +118,22 @@ def _org_fk() -> Mapped[uuid.UUID]:
 
 
 def _salesperson_fk() -> Mapped[uuid.UUID | None]:
-    """Optional assigned salesperson — a global ``app_user`` ref. RLS cannot guard
-    this (``app_user`` is org-less), so writes validate active-org membership in
-    the app layer (DECISIONS.md 2026-06-25)."""
-    return mapped_column(UUID(as_uuid=True), ForeignKey("app_user.id"))
+    """Optional assigned salesperson. The single-column FK to ``app_user`` is
+    deliberately *not* used: a composite ``(salesperson_id, org_id)`` FK to
+    ``user_org_membership`` (declared per-table in ``__table_args__``) pins the
+    reference to a member of the row's own org — a DB-level tenancy invariant RLS
+    alone can't give for the org-less ``app_user`` (DECISIONS.md 2026-06-25). The
+    app layer adds the *active*-membership check + clean 422."""
+    return mapped_column(UUID(as_uuid=True))
+
+
+def _salesperson_membership_fk(table: str) -> ForeignKeyConstraint:
+    """Composite FK pinning ``(salesperson_id, org_id)`` to an org membership."""
+    return ForeignKeyConstraint(
+        ["salesperson_id", "org_id"],
+        ["user_org_membership.user_id", "user_org_membership.org_id"],
+        name=f"fk_{table}_salesperson_membership",
+    )
 
 
 def _deleted_at() -> Mapped[datetime | None]:
@@ -216,6 +229,11 @@ class Account(Base):
     2026-06-24 "M0.5 seed scope")."""
 
     __tablename__ = "account"
+    __table_args__ = (
+        # Composite-FK target so contact.account_id can be scoped same-org.
+        UniqueConstraint("org_id", "id", name="uq_account_org_id_id"),
+        _salesperson_membership_fk("account"),
+    )
     # Fetch server-generated values (created_at/updated_at) via RETURNING on the
     # write itself, so building the response after flush() doesn't trigger an
     # implicit refresh — which would raise MissingGreenlet on the async session.
@@ -252,6 +270,15 @@ class Contact(Base):
     # building doesn't trip the async MissingGreenlet refresh.
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
     __table_args__ = (
+        # A contact's account must be in the SAME org (composite FK to the account's
+        # (org_id, id)). NULL account_id skips the check (MATCH SIMPLE) so account-
+        # less RFQ-origin contacts are allowed (DECISIONS.md 2026-06-25).
+        ForeignKeyConstraint(
+            ["org_id", "account_id"],
+            ["account.org_id", "account.id"],
+            name="fk_contact_account_same_org",
+        ),
+        _salesperson_membership_fk("contact"),
         # Unique per org among live rows only; an archived email frees up for reuse
         # (DECISIONS.md 2026-06-25). Postgres needs the predicate spelled out here.
         Index(
@@ -267,9 +294,7 @@ class Contact(Base):
 
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = _org_fk()
-    account_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("account.id")
-    )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     email: Mapped[str] = mapped_column(CITEXT, nullable=False)
     first_name: Mapped[str | None] = mapped_column(String)
     last_name: Mapped[str | None] = mapped_column(String)

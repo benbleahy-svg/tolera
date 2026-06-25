@@ -62,15 +62,15 @@ async def seed_pilot_crm(session: AsyncSession, *, org_id: uuid.UUID) -> CrmSeed
         await session.flush()
         account_id = account.id
 
-    contact_id = await session.scalar(
-        select(Contact.id).where(
+    contact = await session.scalar(
+        select(Contact).where(
             Contact.org_id == org_id,
             Contact.email == FECHNER_CONTACT_EMAIL,
             Contact.deleted_at.is_(None),
         )
     )
-    contact_created = contact_id is None
-    if contact_id is None:
+    contact_created = contact is None
+    if contact is None:
         contact = Contact(
             org_id=org_id,
             account_id=account_id,
@@ -80,12 +80,18 @@ async def seed_pilot_crm(session: AsyncSession, *, org_id: uuid.UUID) -> CrmSeed
             role=FECHNER_CONTACT_ROLE,
         )
         session.add(contact)
-        await session.flush()
-        contact_id = contact.id
+    else:
+        # Reconcile a pre-existing contact back onto the golden account + seed
+        # profile, so a re-run can't leave the thread's contact attached elsewhere.
+        contact.account_id = account_id
+        contact.first_name = FECHNER_CONTACT_FIRST_NAME
+        contact.last_name = FECHNER_CONTACT_LAST_NAME
+        contact.role = FECHNER_CONTACT_ROLE
+    await session.flush()
 
     return CrmSeedResult(
         account_id=account_id,
-        contact_id=contact_id,
+        contact_id=contact.id,
         account_created=account_created,
         contact_created=contact_created,
     )

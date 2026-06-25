@@ -41,6 +41,11 @@ export async function apiFetch<T>(
   getToken: TokenGetter,
   req: ApiRequest = {},
 ): Promise<T> {
+  // Only same-origin relative paths: we attach a bearer token, so an absolute or
+  // protocol-relative URL could exfiltrate it to another host.
+  if (!path.startsWith('/') || path.startsWith('//') || /^[a-z]+:/i.test(path)) {
+    throw new ApiError(0, 'invalid_path', 'API path must be a relative "/..." path');
+  }
   const token = await getToken();
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;

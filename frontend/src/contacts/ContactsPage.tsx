@@ -5,7 +5,7 @@
  * quotes/orders in later milestones; M1.1 shows the identity columns only.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -24,13 +24,22 @@ export function ContactsPage() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const requestSeq = useRef(0);
 
   const load = useCallback(() => {
+    const seq = ++requestSeq.current;
     setError(null);
     api
       .listAccounts({ q: q.trim() || undefined, includeArchived })
-      .then(setAccounts)
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
+      .then((next) => {
+        // Ignore a slow earlier request that resolves after a newer one.
+        if (seq === requestSeq.current) setAccounts(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === requestSeq.current) {
+          setError(e instanceof ApiError ? e.message : String(e));
+        }
+      });
   }, [api, q, includeArchived]);
 
   useEffect(() => {

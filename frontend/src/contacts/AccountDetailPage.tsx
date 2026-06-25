@@ -176,10 +176,12 @@ function AddContactForm({ accountId, onAdded }: { accountId: string; onAdded: ()
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    setSubmitting(true);
     api
       .createContact(accountId, {
         email: email.trim(),
@@ -192,7 +194,8 @@ function AddContactForm({ accountId, onAdded }: { accountId: string; onAdded: ()
         setLastName('');
         onAdded();
       })
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
+      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)))
+      .finally(() => setSubmitting(false));
   };
 
   return (
@@ -217,7 +220,7 @@ function AddContactForm({ accountId, onAdded }: { accountId: string; onAdded: ()
         aria-label={t('contacts.field.last_name')}
         onChange={(e) => setLastName(e.target.value)}
       />
-      <button type="submit" className="btn btn-primary" disabled={!email.trim()}>
+      <button type="submit" className="btn btn-primary" disabled={submitting || !email.trim()}>
         {t('contacts.add_contact')}
       </button>
       {error && (

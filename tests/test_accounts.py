@@ -259,6 +259,47 @@ def test_account_rls_enforced_at_the_database(tenancy_db: str, seeder: Seeder) -
     assert owner_count == 1
 
 
+def test_contact_cross_org_isolation(app_client: TestClient, seeder: Seeder) -> None:
+    """Contacts are isolated like accounts — org A can't list or fetch org B's."""
+    org_a, admin_a = _org_with_admin(seeder, "org-a")
+    org_b, _admin_b = _org_with_admin(seeder, "org-b")
+    acct_a = seeder.account(org_a, "A GmbH")
+    seeder.contact(org_a, acct_a, "a@org-a.example")
+    acct_b = seeder.account(org_b, "B GmbH")
+    contact_b = seeder.contact(org_b, acct_b, "b@org-b.example")
+
+    with authed(app_client, user_id=admin_a, org_id=org_a, roles=ADMIN):
+        a_emails = [c["email"] for c in app_client.get("/api/contacts").json()]
+        a_sees_b = app_client.get(f"/api/contacts/{contact_b}")
+
+    assert a_emails == ["a@org-a.example"]
+    assert a_sees_b.status_code == 404  # RLS → 404, not 403
+
+
+def test_contact_rls_enforced_at_the_database(tenancy_db: str, seeder: Seeder) -> None:
+    """The restricted role sees ZERO contacts with no org GUC set (DB guarantee)."""
+    org = seeder.org("org-a")
+    acct = seeder.account(org, "Secret GmbH")
+    seeder.contact(org, acct, "secret@org-a.example")
+
+    async def _counts() -> tuple[int, int]:
+        app_engine = create_async_engine(app_role_url(tenancy_db))
+        owner_engine = create_async_engine(tenancy_db)
+        try:
+            async with app_engine.connect() as conn:  # no set_config → GUC unset
+                restricted = (await conn.execute(text("SELECT count(*) FROM contact"))).scalar_one()
+            async with owner_engine.connect() as conn:
+                owner = (await conn.execute(text("SELECT count(*) FROM contact"))).scalar_one()
+        finally:
+            await app_engine.dispose()
+            await owner_engine.dispose()
+        return restricted, owner
+
+    restricted_count, owner_count = asyncio.run(_counts())
+    assert restricted_count == 0
+    assert owner_count == 1
+
+
 # --------------------------------------------------------------------------- #
 # Salesperson must be an active member of the active org (DECISIONS.md 2026-06-25)
 # --------------------------------------------------------------------------- #

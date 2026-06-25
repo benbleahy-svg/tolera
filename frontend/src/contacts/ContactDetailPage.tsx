@@ -16,7 +16,7 @@ import { type Contact, useCrmApi } from './api';
 export function ContactDetailPage() {
   const { t } = useTranslation();
   const api = useCrmApi();
-  const { accountId = '', contactId = '' } = useParams();
+  const { accountId: routeAccountId = '', contactId = '' } = useParams();
   const canEdit = useHasPermission('quote_edit');
   const canArchive = useHasPermission('quote_delete');
 
@@ -85,7 +85,8 @@ export function ContactDetailPage() {
 
   return (
     <section className="page">
-      <Link className="crm-back" to={`/contacts/${accountId}`}>
+      {/* Trust the contact's own account over a possibly-stale route param. */}
+      <Link className="crm-back" to={`/contacts/${contact.account_id ?? routeAccountId}`}>
         ← {t('contacts.back_to_account')}
       </Link>
       <div className="crm-header">

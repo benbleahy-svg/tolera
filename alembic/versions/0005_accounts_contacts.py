@@ -7,8 +7,14 @@ the M0.2 tenancy pattern verbatim — ENABLE + FORCE row-level security with the
 GUC — plus the restricted ``tolera_app`` GRANTs. Both are archived by soft-delete
 (``deleted_at``); see DECISIONS.md 2026-06-25 for the four resolved M1.1 decisions
 this encodes (nullable ``contact.account_id``, the live-only partial unique email
-index, archive=soft-delete, and the app-layer salesperson-membership guard — the
-last is enforced in ``app.accounts``, not here, since RLS can't see ``app_user``).
+index, archive=soft-delete, and the salesperson-membership guard).
+
+Cross-org references are made impossible at the DB, not merely RLS-scoped: the
+``salesperson_id`` columns FK to ``user_org_membership(user_id, org_id)`` and
+``contact.account_id`` FKs to ``account(org_id, id)`` — composite keys that pin
+each reference to the row's own org. The app-layer check in ``app.accounts`` still
+runs (it additionally requires *active* membership and returns a clean 422); these
+FKs are the belt to its braces.
 
 The column set is deliberately **lean** (DECISIONS.md 2026-06-24 "M0.5 seed
 scope"): the VAT/tax/ERP/billing-address fields the canonical ``account`` carries
@@ -56,10 +62,19 @@ def upgrade() -> None:
             phone_ext text,
             website text,
             notes text,
-            salesperson_id uuid REFERENCES app_user(id),
+            salesperson_id uuid,
             created_at timestamptz NOT NULL DEFAULT now(),
             updated_at timestamptz NOT NULL DEFAULT now(),
-            deleted_at timestamptz
+            deleted_at timestamptz,
+            -- Composite-FK target so contact.account_id can be scoped same-org.
+            CONSTRAINT uq_account_org_id_id UNIQUE (org_id, id),
+            -- Defense-in-depth for the salesperson tenancy guard (DECISIONS.md
+            -- 2026-06-25): a non-null salesperson must be a MEMBER of THIS org.
+            -- The app-layer check (app.accounts) additionally requires *active*
+            -- status and yields a clean 422; this FK makes same-org a DB invariant.
+            CONSTRAINT fk_account_salesperson_membership
+                FOREIGN KEY (salesperson_id, org_id)
+                REFERENCES user_org_membership(user_id, org_id)
         )
         """
     )
@@ -68,7 +83,7 @@ def upgrade() -> None:
         CREATE TABLE contact (
             id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             org_id uuid NOT NULL REFERENCES organization(id),
-            account_id uuid REFERENCES account(id),
+            account_id uuid,
             email citext NOT NULL,
             first_name text,
             last_name text,
@@ -76,10 +91,20 @@ def upgrade() -> None:
             phone text,
             phone_ext text,
             notes text,
-            salesperson_id uuid REFERENCES app_user(id),
+            salesperson_id uuid,
             created_at timestamptz NOT NULL DEFAULT now(),
             updated_at timestamptz NOT NULL DEFAULT now(),
-            deleted_at timestamptz
+            deleted_at timestamptz,
+            -- A contact's account must be in the SAME org. account_id stays
+            -- nullable (RFQ-origin contacts, DECISIONS.md 2026-06-25); a NULL skips
+            -- this composite FK (MATCH SIMPLE), so account-less contacts are allowed.
+            CONSTRAINT fk_contact_account_same_org
+                FOREIGN KEY (org_id, account_id)
+                REFERENCES account(org_id, id),
+            -- Same-org salesperson membership guard (see account).
+            CONSTRAINT fk_contact_salesperson_membership
+                FOREIGN KEY (salesperson_id, org_id)
+                REFERENCES user_org_membership(user_id, org_id)
         )
         """
     )

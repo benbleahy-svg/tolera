@@ -210,6 +210,7 @@
   justify-content: center;
   padding: 24px;
   z-index: 100;
+  overflow: auto; /* let the dialog scroll into reach on short viewports */
 }
 .crm-modal {
   background: var(--surface);
@@ -218,6 +219,8 @@
   padding: 24px;
   width: 100%;
   max-width: 440px;
+  max-height: calc(100vh - 48px);
+  overflow: auto; /* keep the footer (Cancel/Create) reachable when zoomed/short */
 }
 .crm-modal-title {
   font-size: 17px;

@@ -46,6 +46,11 @@ contacts_router = APIRouter(prefix="/api/contacts", tags=["contacts"])
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# List endpoints are bounded so a large org can't turn a list into unbounded
+# DB/API work. Cursor pagination can layer on later; offset is enough for v1.
+_LIST_LIMIT_DEFAULT = 100
+_LIST_LIMIT_MAX = 500
+
 
 def _normalize_email(value: str) -> str:
     """Canonicalise + light-validate an email (CITEXT column, but normalise anyway).
@@ -263,11 +268,14 @@ async def list_accounts(
     include_archived: Annotated[bool, Query()] = False,
     salesperson_id: Annotated[uuid.UUID | None, Query()] = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
+    limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[AccountOut]:
     """List the active org's accounts (org isolation enforced at the DB by RLS).
 
     Archived rows are excluded unless ``include_archived``; ``salesperson_id`` and
-    a name/email search (``q``) narrow the list."""
+    a name/email search (``q``) narrow the list; results are paginated
+    (``limit``/``offset``, hard cap ``_LIST_LIMIT_MAX``)."""
     stmt = select(Account)
     if not include_archived:
         stmt = stmt.where(Account.deleted_at.is_(None))
@@ -276,7 +284,7 @@ async def list_accounts(
     if q:
         pattern = f"%{q}%"
         stmt = stmt.where(or_(Account.name.ilike(pattern), Account.email.ilike(pattern)))
-    stmt = stmt.order_by(Account.name)
+    stmt = stmt.order_by(Account.name).limit(limit).offset(offset)
     result = await session.execute(stmt)
     return [_account_out(account) for account in result.scalars()]
 
@@ -370,13 +378,19 @@ async def list_account_contacts(
     account_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     include_archived: Annotated[bool, Query()] = False,
+    limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ContactOut]:
     """List one account's contacts (used by the account-detail Contacts tab)."""
     await _get_account_or_404(session, account_id)
     stmt = select(Contact).where(Contact.account_id == account_id)
     if not include_archived:
         stmt = stmt.where(Contact.deleted_at.is_(None))
-    stmt = stmt.order_by(Contact.last_name, Contact.first_name, Contact.email)
+    stmt = (
+        stmt.order_by(Contact.last_name, Contact.first_name, Contact.email)
+        .limit(limit)
+        .offset(offset)
+    )
     result = await session.execute(stmt)
     return [_contact_out(contact) for contact in result.scalars()]
 
@@ -401,6 +415,8 @@ async def create_account_contact(
 async def list_contacts(
     session: Annotated[AsyncSession, Depends(get_session)],
     include_archived: Annotated[bool, Query()] = False,
+    limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ContactOut]:
     """List the active org's contacts. By default this excludes archived contacts
     **and** contacts whose parent account is archived (DECISIONS.md 2026-06-25);
@@ -411,7 +427,11 @@ async def list_contacts(
             Contact.deleted_at.is_(None),
             or_(Account.id.is_(None), Account.deleted_at.is_(None)),
         )
-    stmt = stmt.order_by(Contact.last_name, Contact.first_name, Contact.email)
+    stmt = (
+        stmt.order_by(Contact.last_name, Contact.first_name, Contact.email)
+        .limit(limit)
+        .offset(offset)
+    )
     result = await session.execute(stmt)
     return [_contact_out(contact) for contact in result.scalars()]
 
@@ -435,6 +455,14 @@ async def update_contact(
     """Edit a contact. Only the fields present in the body change."""
     contact = await _get_contact_or_404(session, contact_id)
     changes = payload.model_dump(exclude_unset=True)
+    # email is NOT NULL; an explicit null would otherwise reach the DB as an
+    # IntegrityError (500) — reject it at the edge with the standard envelope.
+    if "email" in changes and changes["email"] is None:
+        raise AppError(
+            "invalid_email",
+            "Contact email cannot be null.",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
     if "salesperson_id" in changes:
         await _validate_salesperson(session, changes["salesperson_id"])
     if changes.get("account_id") is not None:
