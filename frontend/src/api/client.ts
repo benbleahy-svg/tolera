@@ -25,10 +25,30 @@ export class ApiError extends Error {
   }
 }
 
-async function getJson<T>(path: string, getToken: TokenGetter): Promise<T> {
+export interface ApiRequest {
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  /** JSON request body; serialised + sent with a JSON content-type. */
+  body?: unknown;
+}
+
+/**
+ * Make an API call, injecting the bearer token and surfacing the backend's
+ * `{code, message, details}` envelope as an `ApiError`. A 204/empty body
+ * resolves to `undefined`. This is the single fetch seam every feature reuses.
+ */
+export async function apiFetch<T>(
+  path: string,
+  getToken: TokenGetter,
+  req: ApiRequest = {},
+): Promise<T> {
   const token = await getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (req.body !== undefined) headers['Content-Type'] = 'application/json';
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    method: req.method ?? 'GET',
+    headers,
+    body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
   });
   if (!res.ok) {
     let code = 'error';
@@ -47,10 +67,11 @@ async function getJson<T>(path: string, getToken: TokenGetter): Promise<T> {
     }
     throw new ApiError(res.status, code, message, details);
   }
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
 /** Fetch the session bootstrap (`GET /api/me`). */
 export function fetchMe(getToken: TokenGetter): Promise<Me> {
-  return getJson<Me>('/api/me', getToken);
+  return apiFetch<Me>('/api/me', getToken);
 }

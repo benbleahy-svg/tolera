@@ -1,0 +1,243 @@
+/*
+ * CRM (Accounts & Contacts) UI — M1.1. Consumes the design tokens from index.css
+ * (never raw hex). Intentionally lightweight; richer list/detail chrome (revenue
+ * KPIs, CRM-sync chips, saved views) arrives with later milestones.
+ */
+
+.crm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.crm-back {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--t2);
+  text-decoration: none;
+  font-size: 12px;
+}
+.crm-back:hover {
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- buttons */
+.btn {
+  font: inherit;
+  border-radius: 7px;
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--p);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--p-h);
+}
+.btn-ghost {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--s2);
+}
+
+/* ---------------------------------------------------------------- toolbar */
+.crm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.crm-search {
+  font: inherit;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  min-width: 280px;
+}
+.crm-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t2);
+}
+
+/* ------------------------------------------------------------------ table */
+.crm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.crm-table th,
+.crm-table td {
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.crm-table th {
+  color: var(--t2);
+  font-weight: 600;
+}
+.crm-table a {
+  color: var(--p-t);
+  text-decoration: none;
+}
+.crm-table a:hover {
+  text-decoration: underline;
+}
+
+.crm-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--s3);
+  color: var(--t2);
+}
+.crm-chip-archived {
+  margin-left: 10px;
+  background: var(--p-bg);
+  color: var(--p-t);
+}
+
+/* ------------------------------------------------------------------- form */
+.crm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+}
+.crm-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.crm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.crm-field > span {
+  font-size: 11px;
+  color: var(--t2);
+}
+.crm-field-wide {
+  grid-column: 1 / -1;
+}
+.crm-field input,
+.crm-field textarea,
+.crm-add-contact input {
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+}
+.crm-field input:disabled,
+.crm-field textarea:disabled {
+  background: var(--s2);
+  color: var(--t2);
+}
+.crm-field textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+.crm-form-actions {
+  grid-column: 1 / -1;
+}
+
+/* ---------------------------------------------------------------- section */
+.crm-section {
+  margin-top: 32px;
+}
+.crm-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.crm-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  max-width: 720px;
+}
+.crm-list-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.crm-list-row a {
+  color: var(--p-t);
+  text-decoration: none;
+}
+.crm-list-row a:hover {
+  text-decoration: underline;
+}
+.crm-list-meta {
+  color: var(--t2);
+}
+.crm-add-contact {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ------------------------------------------------------------------ modal */
+.crm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 100;
+}
+.crm-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  max-width: 440px;
+}
+.crm-modal-title {
+  font-size: 17px;
+  font-weight: 650;
+  margin: 0 0 16px;
+}
+.crm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.crm-error {
+  color: #b4231f;
+  margin: 4px 0;
+}
+
+@media (max-width: 640px) {
+  .crm-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -33,5 +33,49 @@
   "session": {
     "loading": "Loading session …",
     "error": "Could not load your session."
+  },
+  "contacts": {
+    "create_account": "Create account",
+    "create_account_title": "New account",
+    "search_placeholder": "Search accounts by name or email",
+    "show_archived": "Show archived",
+    "empty": "No accounts yet.",
+    "loading": "Loading …",
+    "contacts_title": "Contacts",
+    "no_contacts": "No contacts yet.",
+    "add_contact": "Add contact",
+    "back_to_account": "Back to account",
+    "col": {
+      "name": "Name",
+      "type": "Type",
+      "email": "Email",
+      "status": "Status"
+    },
+    "type": {
+      "customer": "Customer",
+      "vendor": "Vendor"
+    },
+    "status": {
+      "active": "Active",
+      "archived": "Archived"
+    },
+    "field": {
+      "company_name": "Company name",
+      "email": "Email",
+      "contact_email": "Contact email",
+      "first_name": "First name",
+      "last_name": "Last name",
+      "role": "Role",
+      "phone": "Phone",
+      "website": "Website",
+      "notes": "Notes"
+    },
+    "actions": {
+      "save": "Save",
+      "cancel": "Cancel",
+      "create": "Create",
+      "archive": "Archive",
+      "restore": "Restore"
+    }
   }
 }

@@ -292,6 +292,34 @@
 **Resolved:** 2026-06-24 (M0.5 grill)
 **Affects:** M0.5 (seed), M0.4 (org-switcher test fixture).
 
+## [2026-06-25] Contact↔Account cardinality — `contact.account_id` nullable (M1.1)
+**Status:** RESOLVED
+**Question:** `DB-SCHEMA.sql` declares `contact.account_id` **nullable** (`REFERENCES account(id)`), but `DOMAIN-MODEL.md` §3 says a Contact "belongs to **exactly one** Account." Which governs the column M1.1 creates? (Schema/FK — expensive to reverse, block-and-log §6.)
+**Decision:** **Nullable** — the canonical DDL wins on the column. The domain "exactly one account" is the *happy path* the CRUD UI always follows (a contact is created under an account), but the column stays nullable because RFQ intake (M3) will create account-less contacts before an account exists, and **loosening** a NOT NULL later would need a data backfill while **tightening** is cheap. The list/detail UI treats an account-less contact as an edge state, not the norm.
+**Resolved:** 2026-06-25 (M1.1 grill)
+**Affects:** M1.1 (contact model/migration), M3 (RFQ-origin contacts), any quote↔contact wiring (M1.4: "every quote requires a contact").
+
+## [2026-06-25] Soft-delete × unique email — partial unique index on `contact` (M1.1)
+**Status:** RESOLVED
+**Question:** `DB-SCHEMA.sql` puts `UNIQUE (org_id, email)` on `contact`, but contacts are soft-deleted (`deleted_at`). A plain unique constraint would let an **archived** contact's email permanently block re-creating a contact with that address. Is that intended? (Schema/constraint — cheap now, painful after data lands.)
+**Decision:** Replace the table-level unique with a **partial unique index** `UNIQUE (org_id, email) WHERE deleted_at IS NULL`, so email is unique only among *live* contacts and an archived email frees up for reuse. This is the general soft-delete + natural-key pattern; later org-scoped tables with a soft-deletable natural key reuse it. (Account name is intentionally **not** unique — multiple sites/legal entities may share a name — so it needs no such index.)
+**Resolved:** 2026-06-25 (M1.1 grill)
+**Affects:** M1.1 (contact migration), the soft-delete convention for later natural-key tables.
+
+## [2026-06-25] Archive semantics + cascade for Account/Contact (M1.1)
+**Status:** RESOLVED
+**Question:** The M1.1 slice says "archive an Account and its Contacts." What does *archive* mean concretely, what happens to an archived account's contacts, and is hard delete in scope? (Data-lifecycle — defines what "archive" means for every downstream reader.)
+**Decision:** **Archive = soft-delete** (set `deleted_at`); it is **reversible via Restore** (clear `deleted_at`). Default list endpoints exclude archived rows; a direct `GET /{id}` still returns an archived row (so the detail/restore UI works); `?include_archived=true` opts a list back in. **Archiving an account does *not* mutate its contacts' `deleted_at`** — instead the contact-list endpoints exclude contacts **whose account is archived** (an account's contacts disappear from default views with it, but a Restore brings them back intact, and no child rows are silently rewritten). **No hard delete in v1** (no `DELETE` route). Archive/restore are gated on `quote_delete` (the only role granted destructive-ish actions in the M0.3 matrix); create/edit on `quote_edit`.
+**Resolved:** 2026-06-25 (M1.1 grill)
+**Affects:** M1.1 (account/contact archive+restore endpoints, list filters), all later list/detail surfaces that read accounts/contacts, M6 CRM-sync (archive ≠ delete on the CRM side).
+
+## [2026-06-25] Salesperson assignment must be an active member of the active org (M1.1)
+**Status:** RESOLVED
+**Question:** `account.salesperson_id` / `contact.salesperson_id` reference **`app_user`**, which is **global, not org-scoped** (no `org_id`, no RLS). So org RLS *cannot* stop assigning a salesperson who belongs to a different org (or to no org at all) — a cross-tenant identity leak. How is the assignment constrained? (Security/tenancy — never guessed, block-and-log §6.)
+**Decision:** Validate at **write time** (create/edit of an account or contact) that a non-null `salesperson_id` resolves to an **active `user_org_membership` in the caller's active org**; otherwise reject with a `422 validation_error` (`invalid_salesperson`). The check runs through the same org-pinned session, so it reads only the active org's memberships. We deliberately **do not** require the assignee to hold the `salesperson` *role* — any active member is assignable (matches PP). The FK to `app_user` stays (it is a real identity ref); the org-membership check is the tenancy guard the FK alone can't provide.
+**Resolved:** 2026-06-25 (M1.1 grill)
+**Affects:** M1.1 (account/contact write validation + test), any later entity that references a `User` across the global `app_user` table (reuse this active-member check).
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*

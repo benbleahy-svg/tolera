@@ -33,5 +33,49 @@
   "session": {
     "loading": "Sitzung wird geladen …",
     "error": "Sitzung konnte nicht geladen werden."
+  },
+  "contacts": {
+    "create_account": "Konto anlegen",
+    "create_account_title": "Neues Konto",
+    "search_placeholder": "Konten nach Name oder E-Mail suchen",
+    "show_archived": "Archivierte anzeigen",
+    "empty": "Noch keine Konten.",
+    "loading": "Wird geladen …",
+    "contacts_title": "Kontakte",
+    "no_contacts": "Noch keine Kontakte.",
+    "add_contact": "Kontakt hinzufügen",
+    "back_to_account": "Zurück zum Konto",
+    "col": {
+      "name": "Name",
+      "type": "Typ",
+      "email": "E-Mail",
+      "status": "Status"
+    },
+    "type": {
+      "customer": "Kunde",
+      "vendor": "Lieferant"
+    },
+    "status": {
+      "active": "Aktiv",
+      "archived": "Archiviert"
+    },
+    "field": {
+      "company_name": "Firmenname",
+      "email": "E-Mail",
+      "contact_email": "Kontakt-E-Mail",
+      "first_name": "Vorname",
+      "last_name": "Nachname",
+      "role": "Funktion",
+      "phone": "Telefon",
+      "website": "Website",
+      "notes": "Notizen"
+    },
+    "actions": {
+      "save": "Speichern",
+      "cancel": "Abbrechen",
+      "create": "Anlegen",
+      "archive": "Archivieren",
+      "restore": "Wiederherstellen"
+    }
   }
 }

@@ -22,9 +22,12 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     String,
+    Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -69,10 +72,21 @@ class OrgCountry(enum.StrEnum):
     CH = "CH"
 
 
+class AccountType(enum.StrEnum):
+    """A CRM account's kind (canonical ``account_type`` enum, DB-SCHEMA.sql).
+
+    A ``vendor`` cannot be assigned to a quote; that rule is enforced when the
+    quote↔account link lands (M1.4). ``customer`` is the default."""
+
+    customer = "customer"
+    vendor = "vendor"
+
+
 # Native Postgres enums — created by the migration, referenced (not re-created) here.
 _role_enum = Enum(MembershipRole, name="membership_role", create_type=False)
 _status_enum = Enum(MembershipStatus, name="membership_status", create_type=False)
 _country_enum = Enum(OrgCountry, name="org_country", create_type=False)
+_account_type_enum = Enum(AccountType, name="account_type", create_type=False)
 
 
 def _pk() -> Mapped[uuid.UUID]:
@@ -100,6 +114,19 @@ def _updated_ts() -> Mapped[datetime]:
 def _org_fk() -> Mapped[uuid.UUID]:
     """The ``org_id`` foreign key every tenant-scoped row carries (RLS keys on it)."""
     return mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
+
+
+def _salesperson_fk() -> Mapped[uuid.UUID | None]:
+    """Optional assigned salesperson — a global ``app_user`` ref. RLS cannot guard
+    this (``app_user`` is org-less), so writes validate active-org membership in
+    the app layer (DECISIONS.md 2026-06-25)."""
+    return mapped_column(UUID(as_uuid=True), ForeignKey("app_user.id"))
+
+
+def _deleted_at() -> Mapped[datetime | None]:
+    """Soft-delete marker (archive). NULL = live; set = archived but retained
+    (DECISIONS.md 2026-06-25). No default — only an explicit archive sets it."""
+    return mapped_column(DateTime(timezone=True))
 
 
 class Organization(Base):
@@ -175,3 +202,82 @@ class Note(Base):
     org_id: Mapped[uuid.UUID] = _org_fk()
     body: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = _ts()
+
+
+class Account(Base):
+    """A CRM company — the customer (or vendor) a quote is raised for (spec
+    ``#contacts``; DOMAIN-MODEL §3). Org-scoped (RLS keys on ``org_id``);
+    archived via soft-delete (``deleted_at``).
+
+    **Lean M1.1 column set** by design: the VAT/tax/ERP/billing-address fields the
+    canonical ``account`` carries in DB-SCHEMA.sql are deferred to their consuming
+    blocks (VAT → M1.11, DATEV/ERP → M5/M6), each added by its own reversible
+    migration — mirroring how M0 built ``organization`` lean (DECISIONS.md
+    2026-06-24 "M0.5 seed scope")."""
+
+    __tablename__ = "account"
+    # Fetch server-generated values (created_at/updated_at) via RETURNING on the
+    # write itself, so building the response after flush() doesn't trigger an
+    # implicit refresh — which would raise MissingGreenlet on the async session.
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[AccountType] = mapped_column(
+        _account_type_enum, nullable=False, server_default=AccountType.customer.value
+    )
+    email: Mapped[str | None] = mapped_column(CITEXT)
+    phone: Mapped[str | None] = mapped_column(String)
+    phone_ext: Mapped[str | None] = mapped_column(String)
+    website: Mapped[str | None] = mapped_column(String)
+    notes: Mapped[str | None] = mapped_column(Text)
+    salesperson_id: Mapped[uuid.UUID | None] = _salesperson_fk()
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+
+
+class Contact(Base):
+    """A person at an Account — the human a quote is emailed to (spec ``#contacts``;
+    DOMAIN-MODEL §3). Org-scoped; archived via soft-delete.
+
+    ``account_id`` is **nullable**: the CRUD happy path always creates a contact
+    under an account, but RFQ intake (M3) may produce account-less contacts
+    (DECISIONS.md 2026-06-25). ``email`` is unique per org among **live** rows only
+    — the partial unique index — so an archived contact's email can be reused."""
+
+    __tablename__ = "contact"
+    # See Account: fetch server defaults via RETURNING so post-flush response
+    # building doesn't trip the async MissingGreenlet refresh.
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        # Unique per org among live rows only; an archived email frees up for reuse
+        # (DECISIONS.md 2026-06-25). Postgres needs the predicate spelled out here.
+        Index(
+            "uq_contact_org_email_live",
+            "org_id",
+            "email",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        # Contacts are listed by their parent account; index the FK we filter on.
+        Index("ix_contact_account_id", "account_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("account.id")
+    )
+    email: Mapped[str] = mapped_column(CITEXT, nullable=False)
+    first_name: Mapped[str | None] = mapped_column(String)
+    last_name: Mapped[str | None] = mapped_column(String)
+    role: Mapped[str | None] = mapped_column(String)  # free text, e.g. "Purchasing Agent"
+    phone: Mapped[str | None] = mapped_column(String)
+    phone_ext: Mapped[str | None] = mapped_column(String)
+    notes: Mapped[str | None] = mapped_column(Text)
+    salesperson_id: Mapped[uuid.UUID | None] = _salesperson_fk()
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+    deleted_at: Mapped[datetime | None] = _deleted_at()
