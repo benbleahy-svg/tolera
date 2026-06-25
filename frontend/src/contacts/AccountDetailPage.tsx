@@ -80,6 +80,9 @@ export function AccountDetailPage() {
   const saveAccount = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    // Pin to the current load: if the user navigates away mid-save, the stale
+    // response must not seed account A's data into account B's view.
+    const seq = loadSeq.current;
     api
       .updateAccount(accountId, {
         name: name.trim(),
@@ -88,15 +91,26 @@ export function AccountDetailPage() {
         website: website.trim() || null,
         notes: notes.trim() || null,
       })
-      .then(seed)
-      .catch(reportError);
+      .then((next) => {
+        if (seq === loadSeq.current) seed(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === loadSeq.current) reportError(e);
+      });
   };
 
   const toggleArchive = () => {
     if (!account) return;
     setError(null);
+    const seq = loadSeq.current;
     const action = account.archived ? api.restoreAccount : api.archiveAccount;
-    action(accountId).then(seed).catch(reportError);
+    action(accountId)
+      .then((next) => {
+        if (seq === loadSeq.current) seed(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === loadSeq.current) reportError(e);
+      });
   };
 
   if (!account) {

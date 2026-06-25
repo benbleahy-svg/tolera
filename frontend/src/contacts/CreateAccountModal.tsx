@@ -4,7 +4,7 @@
  * the backend envelope message (e.g. a duplicate-email 409) inline.
  */
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
@@ -24,6 +24,33 @@ export function CreateAccountModal({
   const [contactFirstName, setContactFirstName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Close on Escape and keep Tab focus inside the dialog (a11y for a modal).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -48,6 +75,7 @@ export function CreateAccountModal({
   return (
     <div className="crm-modal-backdrop" role="presentation" onClick={onClose}>
       <div
+        ref={dialogRef}
         className="crm-modal"
         role="dialog"
         aria-modal="true"

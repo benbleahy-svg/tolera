@@ -62,6 +62,9 @@ export function ContactDetailPage() {
   const save = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    // Pin to the current load so a save that resolves after navigating to another
+    // contact can't seed this contact's data into the new view.
+    const seq = loadSeq.current;
     api
       .updateContact(contactId, {
         email: email.trim(),
@@ -70,15 +73,26 @@ export function ContactDetailPage() {
         role: role.trim() || null,
         phone: phone.trim() || null,
       })
-      .then(seed)
-      .catch(reportError);
+      .then((next) => {
+        if (seq === loadSeq.current) seed(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === loadSeq.current) reportError(e);
+      });
   };
 
   const toggleArchive = () => {
     if (!contact) return;
     setError(null);
+    const seq = loadSeq.current;
     const action = contact.archived ? api.restoreContact : api.archiveContact;
-    action(contactId).then(seed).catch(reportError);
+    action(contactId)
+      .then((next) => {
+        if (seq === loadSeq.current) seed(next);
+      })
+      .catch((e: unknown) => {
+        if (seq === loadSeq.current) reportError(e);
+      });
   };
 
   if (!contact) {

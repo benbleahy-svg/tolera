@@ -382,7 +382,12 @@ async def list_account_contacts(
     limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ContactOut]:
-    """List one account's contacts (used by the account-detail Contacts tab)."""
+    """List one account's contacts (the account-detail Contacts tab).
+
+    Unlike the cross-account list, this shows the contacts even when the account
+    itself is archived: you've navigated into that specific account (e.g. to review
+    or restore it), so its contacts are wanted context, not general browsing
+    (DECISIONS.md 2026-06-25 — the cascade-hide applies to the cross-account list)."""
     await _get_account_or_404(session, account_id)
     stmt = select(Contact).where(Contact.account_id == account_id)
     if not include_archived:

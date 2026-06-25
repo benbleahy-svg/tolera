@@ -122,9 +122,13 @@ def upgrade() -> None:
     )
     # Contacts are listed by their parent account; index the FK we filter on.
     op.execute("CREATE INDEX ix_contact_account_id ON contact (account_id)")
+    # The cross-account contact list filters org_id (RLS) + deleted_at, like account.
+    op.execute("CREATE INDEX ix_contact_org_deleted_at ON contact (org_id, deleted_at)")
 
     # --- restricted app-role grants (role itself provisioned in 0002 / infra) ---
-    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON account, contact TO {APP_ROLE}")
+    # No DELETE: archive/restore are UPDATEs and v1 has no hard-delete route
+    # (DECISIONS.md 2026-06-25) — withholding DELETE keeps the blast radius minimal.
+    op.execute(f"GRANT SELECT, INSERT, UPDATE ON account, contact TO {APP_ROLE}")
 
     # --- row-level security (identical pattern to note, M0.2) ---
     for table in _ORG_SCOPED_TABLES:

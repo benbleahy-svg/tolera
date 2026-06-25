@@ -23,6 +23,8 @@
   --text: #2e2c29;
   --t2: #6b6862; /* muted */
   --t3: #b3b0a9; /* disabled / placeholder */
+  --danger: #b4231f; /* error / destructive text */
+  --on-primary: #fff; /* text/icon on a --p fill */
 
   /* Sidebar is invariant — always dark. Do not theme it. */
   --sidebar-bg: #1c1916; /* warm charcoal (light mode) */
@@ -50,6 +52,8 @@
   --text: #e4e2dd;
   --t2: #8c8a85;
   --t3: #555350;
+  --danger: #f08a85; /* error — lightened for the dark canvas */
+  --on-primary: #fff; /* white reads on terracotta in both modes */
 
   --sidebar-bg: #0e0c0a; /* deepest warm near-black (dark mode) */
 

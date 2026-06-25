@@ -38,7 +38,7 @@
 }
 .btn-primary {
   background: var(--p);
-  color: #fff;
+  color: var(--on-primary);
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--p-h);
@@ -235,7 +235,7 @@
 }
 
 .crm-error {
-  color: #b4231f;
+  color: var(--danger);
   margin: 4px 0;
 }
 

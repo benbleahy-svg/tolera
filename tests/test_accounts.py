@@ -186,6 +186,28 @@ def test_no_hard_delete_route(app_client: TestClient, seeder: Seeder) -> None:
         assert app_client.delete(f"/api/accounts/{account_id}").status_code == 405
 
 
+def test_restricted_role_cannot_delete_crm_rows(tenancy_db: str, seeder: Seeder) -> None:
+    """The app role is granted SELECT/INSERT/UPDATE only — no DELETE — so even raw
+    SQL can't hard-delete a CRM row (least-privilege backing the no-hard-delete
+    decision, 2026-06-25)."""
+    org = seeder.org("org-a")
+    seeder.account(org, "A GmbH")
+
+    async def _attempt_delete() -> str:
+        engine = create_async_engine(app_role_url(tenancy_db))
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text("DELETE FROM account"))
+            return ""  # empty == DELETE was (wrongly) permitted
+        except Exception as exc:  # SQLAlchemy wraps asyncpg InsufficientPrivilegeError
+            return str(exc)
+        finally:
+            await engine.dispose()
+
+    message = asyncio.run(_attempt_delete())
+    assert "permission denied" in message.lower()
+
+
 # --------------------------------------------------------------------------- #
 # Live-only unique email (DECISIONS.md 2026-06-25)
 # --------------------------------------------------------------------------- #

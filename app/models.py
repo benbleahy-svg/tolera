@@ -292,6 +292,8 @@ class Contact(Base):
         ),
         # Contacts are listed by their parent account; index the FK we filter on.
         Index("ix_contact_account_id", "account_id"),
+        # The cross-account list filters org_id (RLS) + deleted_at, like account.
+        Index("ix_contact_org_deleted_at", "org_id", "deleted_at"),
     )
 
     id: Mapped[uuid.UUID] = _pk()
