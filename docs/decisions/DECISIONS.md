@@ -19,6 +19,43 @@
 
 ---
 
+## [2026-06-26] Quote status enum — final value set (M1.4)
+**Status:** RESOLVED
+**Question:** The 2026-06-25 entry "7 folders vs 5 enum" deferred to M1.4 *which* of the spec `#quotelifecycle` statuses (Draft, On-Hold, Sent, Won, Lost, Expired, Cancelled, No-Quote, + Superseded/Trash) become real `quote_status` enum values vs. modelled otherwise. The tier-2 spec ("decided") outranks the folded 5-value `DB-SCHEMA.sql` enum (CLAUDE.md §2), so the enum must grow — but how far in M1.4?
+**Decision:** Extend `quote_status` to **8 values**: add `cancelled`, `no_quote`, `on_hold` to the canonical `draft, sent, won, lost, expired`. **`no_quote`** is the *quote-level* decline of the whole RFQ (terminal) — distinct from the existing line-item `qi_workflow_status.no_quote`. **Trash = soft-delete** via a new `quote.deleted_at` (NOT an enum value) — the M1.1/M1.2 convention. **`superseded` is NOT added** in M1.4: it only arises from the revision flow, which is deferred to M5 (see below). Enum values are append-only (ADD VALUE), so M5 can add `superseded` with no rebuild. M1.3's dynamic `QuoteStatus(value)` filter parse picks the new values up for free.
+**Resolved:** 2026-06-26 (/block M1.4 grill — supersedes the deferred 2026-06-25 ruling)
+**Affects:** M1.4 (enum migration + state machine), M1.3 (filterable values, no change needed), M5 (`superseded` + revisions).
+
+## [2026-06-26] Quote number generation — per-org atomic counter (M1.4)
+**Status:** RESOLVED
+**Question:** `quote.number` is `text` + `UNIQUE (org_id, number)` but nothing generates it. The spec requires sequential, backend-only, **configurable starting number**, **gaps allowed** ("even a trashed quote increments the counter"), revisions/Copy get new numbers. How to generate it safely under concurrency?
+**Decision:** A dedicated org-scoped `quote_counter(org_id PK, last_number bigint NOT NULL DEFAULT 0)` table (RLS, app role gets SELECT/INSERT/UPDATE). Allocation is a single atomic upsert inside the create txn: `INSERT … VALUES (:org, 1) ON CONFLICT (org_id) DO UPDATE SET last_number = quote_counter.last_number + 1 RETURNING last_number` — row-locked, so concurrent creates serialise and never collide; the `UNIQUE (org_id, number)` constraint is the backstop. `last_number` = "last assigned"; **configurable start** = the seed pre-inserts the counter row with `last_number = start − 1` (else numbering begins at 1). **Format = bare integer string** (spec screenshots "15217", "1510") — no prefix/padding. A rolled-back create does **not** consume a number (no gaps from failures); a *committed-then-trashed* quote keeps its number (trash is post-commit) — satisfying "trashed still increments". Revision/Copy numbering arrives with those flows (M5).
+**Resolved:** 2026-06-26 (/block M1.4 grill)
+**Affects:** M1.4 (counter table + create flow), seed (per-org start), M5 (revision/copy numbering).
+
+## [2026-06-26] QuoteItem anchoring — minimal `component` stub (M1.4)
+**Status:** RESOLVED
+**Question:** Canonical `quote_item.root_component_id → component(id) → part(id)`, but the full 4-layer Part→Node→Component model is M1.5's scope and `component` doesn't exist yet. How does M1.4 create a quote item without owning M1.5's model?
+**Decision:** Follow the proven stub precedent (M1.2 `part`, M1.3 `quote`): M1.4 creates a **minimal `component` stub** — `{id, org_id, part_id → part(stub), is_root_component, created_at, updated_at}` + `UNIQUE (org_id, id)` (the composite-FK target for `quote_item`). The add-line-item flow creates `part(stub) → component(root) → quote_item`. **M1.5 extends `component`** (process, material, `obtain_method`, `is_assembly`, child nodes, BOM) by forward ALTER — no reshaping. Verified against the KB (`assemblies-data-types-and-terminology`: *"the root component is essentially equivalent to a quote item; a quote item simply links a root component to a quote with a position"*), the folded DOMAIN-MODEL, and DemoD/DemoE (line items are parts/components in the tree).
+**Resolved:** 2026-06-26 (/block M1.4 grill — KB + domain-model + demo verification requested by Benjamin)
+**Affects:** M1.4 (`component` stub + `quote_item`), M1.5 (extends `component`).
+
+## [2026-06-26] On-Hold prior-status memory + status-transition audit (M1.4)
+**Status:** RESOLVED
+**Question:** Spec: On-Hold is reversible and "returns to the prior status" (Draft or Sent) — so it needs prior-status memory. And win/loss analysis + the optional Lost reason note + reopen imply a transition trail. How to model both?
+**Decision:** (1) Add `quote.status_before_hold quote_status NULL`: on entering `on_hold` it records the current status; the un-hold transition's only legal target is that stored status, after which it is cleared. (2) Add an append-only **`quote_status_event(id, org_id, quote_id, from_status NULL, to_status, actor_id NULL, note, created_at)`** (RLS; app role gets SELECT/INSERT only — no UPDATE/DELETE) written on every transition *and* on create (`from_status = NULL → draft`); it carries the Lost reason note and is the audit trail for win/loss + reopen. The state machine is one `transition(session, quote, to, actor_id, note?)` service: validates server-side (rejects illegal transitions with `409 invalid_transition`), enforces the **Draft→Sent contact precondition** (`422 missing_contact` when `contact_id` is null), stamps timestamps (`sent_at`/`expired_at`), and writes the event.
+**Resolved:** 2026-06-26 (/block M1.4 grill)
+**Affects:** M1.4 (state machine, audit table), M5 (auto-expire sweep + reopen reuse the same service).
+
+## [2026-06-26] M1.4 quote ALTER — composite-FK hardening + scope boundary (M1.4)
+**Status:** RESOLVED
+**Question:** The M1.3 stub's `account_id`/`salesperson_id`/`estimator_id` are *plain* global FKs (RLS scopes the row but not the FK target's org — a known cross-tenant leak, cf. the M1.1 salesperson ruling), and the stub lacks the canonical quote columns. What does M1.4 add, and where is the scope line vs. M5/M3?
+**Decision:** **Harden** by ALTER (not reshape): drop the plain FKs and re-add **composite same-org FKs** — `(org_id, account_id) → account(org_id, id)`, `(org_id, contact_id) → contact(org_id, id)` (adding `uq_contact_org_id_id` first), `(salesperson_id, org_id)`/`(estimator_id, org_id) → user_org_membership(user_id, org_id)`; app layer additionally rejects a non-active member, a `vendor`-type or archived account. **Add** the canonical columns M1.4 needs: `contact_id`, `status_before_hold`, `revision int DEFAULT 0`, `currency char(3) DEFAULT 'EUR'`, `expiration_date`, `expired_at`, `rfq_received_date`, `started_at`, `sent_at`, `estimator_assigned_at`, `salesperson_assigned_at`, `config_frozen_at` (column only — freeze/Refresh-Pricing mechanics are pricing-engine work, E4-d), `private_notes`, `deleted_at` (Trash). **Deferred (not added speculatively):** `send_from_facility_id` (no facility table yet), `digital_last_viewed_at`/`lead_time_display_units`/`mark_sent_or_finalized`/`email_thread_id` → **M5** (send/digital quote); the **revision/reopen/superseded** flows → **M5**; the **`request_for_quote` table** → **M3** (its owner; quote keeps free-text `rfq_number` for direct-create); the **Celery auto-expire sweep** → **M5** (soft-expiry makes it non-urgent; the sweep will reuse the `transition()` service). 4-stage tracker timestamps: `rfq_received_date` set at create, `started_at` set when the first line item is added (the chosen "estimator begins work" heuristic — reversible), `sent_at` on →sent. Permissions: create/edit/ordinary transitions → `quote_edit`; →sent → `quote_finalize`; cancel + trash/restore → `quote_delete` (admin/manager only, per the M0.3 under-grant).
+**Resolved:** 2026-06-26 (/block M1.4 grill — Tier-3 defaults accepted by Benjamin)
+**Affects:** M1.4 (migration + endpoints), M3 (`request_for_quote`), M5 (send/revision/expire columns + flows), pricing blocks (`config_frozen_at` freeze logic).
+
+---
+
 ## [2026-06-25] M1.3 build path — SavedView engine vs. quotes list (M1.4 not yet built)
 **Status:** RESOLVED
 **Question:** M1.3 ("Saved-view engine + quotes list") hard-depends on M1.4 (`Quote`/`QuoteItem`), which is not built. How to deliver M1.3 without owning M1.4's `quote` table?

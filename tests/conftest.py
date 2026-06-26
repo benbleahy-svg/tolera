@@ -235,10 +235,12 @@ class Seeder:
         *,
         status: QuoteStatus = QuoteStatus.draft,
         account_id: uuid.UUID | None = None,
+        contact_id: uuid.UUID | None = None,
         salesperson_id: uuid.UUID | None = None,
         estimator_id: uuid.UUID | None = None,
         rfq_number: str | None = None,
         due_date: datetime | None = None,
+        status_before_hold: QuoteStatus | None = None,
     ) -> uuid.UUID:
         return self._loop.run_until_complete(
             self._quote(
@@ -246,10 +248,12 @@ class Seeder:
                 number,
                 status=status,
                 account_id=account_id,
+                contact_id=contact_id,
                 salesperson_id=salesperson_id,
                 estimator_id=estimator_id,
                 rfq_number=rfq_number,
                 due_date=due_date,
+                status_before_hold=status_before_hold,
             )
         )
 
@@ -275,6 +279,10 @@ class Seeder:
                 visibility=visibility,
             )
         )
+
+    def status_events(self, quote_id: uuid.UUID) -> list[tuple[str | None, str, str | None]]:
+        """Read a quote's append-only status-transition audit (from, to, note)."""
+        return self._loop.run_until_complete(self._status_events(quote_id))
 
     async def _org(
         self, slug: str, name: str | None, *, country: str, currency: str, locale: str
@@ -382,10 +390,12 @@ class Seeder:
         *,
         status: QuoteStatus,
         account_id: uuid.UUID | None,
+        contact_id: uuid.UUID | None,
         salesperson_id: uuid.UUID | None,
         estimator_id: uuid.UUID | None,
         rfq_number: str | None,
         due_date: datetime | None,
+        status_before_hold: QuoteStatus | None,
     ) -> uuid.UUID:
         async with AsyncSession(self._engine) as session, session.begin():
             row = Quote(
@@ -393,10 +403,12 @@ class Seeder:
                 number=number,
                 status=status,
                 account_id=account_id,
+                contact_id=contact_id,
                 salesperson_id=salesperson_id,
                 estimator_id=estimator_id,
                 rfq_number=rfq_number,
                 due_date=due_date,
+                status_before_hold=status_before_hold,
             )
             session.add(row)
             await session.flush()
@@ -427,12 +439,24 @@ class Seeder:
             await session.flush()
             return row.id
 
+    async def _status_events(self, quote_id: uuid.UUID) -> list[tuple[str | None, str, str | None]]:
+        async with AsyncSession(self._engine) as session:
+            result = await session.execute(
+                text(
+                    "SELECT from_status, to_status, note FROM quote_status_event "
+                    "WHERE quote_id = :q ORDER BY created_at"
+                ),
+                {"q": str(quote_id)},
+            )
+            return [(r[0], r[1], r[2]) for r in result.all()]
+
 
 async def _truncate(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
         await conn.execute(
             text(
-                "TRUNCATE saved_view, quote, part_file, part, account, contact, note, "
+                "TRUNCATE quote_status_event, quote_item, component, quote_counter, "
+                "saved_view, quote, part_file, part, account, contact, note, "
                 "user_org_membership, app_user, organization CASCADE"
             )
         )

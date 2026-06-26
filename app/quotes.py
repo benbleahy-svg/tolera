@@ -16,19 +16,32 @@ ad-hoc ``filters``/``sort`` set — never both.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import Principal
-from .authz import Permission, require
+from .auth import Principal, get_principal
+from .authz import Permission, has_permission, require
 from .deps import get_session
 from .errors import AppError
-from .models import Quote, QuoteStatus
+from .models import (
+    Account,
+    AccountType,
+    Component,
+    Contact,
+    MembershipStatus,
+    Part,
+    QiWorkflowStatus,
+    Quote,
+    QuoteItem,
+    QuoteStatus,
+    QuoteStatusEvent,
+    UserOrgMembership,
+)
 from .quote_filters import (
     FilterClause,
     SortClause,
@@ -37,6 +50,11 @@ from .quote_filters import (
     apply_system_view,
     is_system_view,
 )
+from .quote_lifecycle import INITIAL_STATUS, allowed_targets, required_permission, transition
+
+# Line-item workflow_status values that count as "done" for the quote's outstanding-
+# work rollup (spec: a no-quoted item counts as complete but is unselectable).
+_DONE_LINE_ITEM_STATUSES = (QiWorkflowStatus.completed, QiWorkflowStatus.no_quote)
 
 quotes_router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 
@@ -105,7 +123,9 @@ async def search_quotes(
     principal: Annotated[Principal, Depends(require(Permission.view_all))],
 ) -> QuoteSearchResponse:
     """Filter/sort/paginate the active org's quotes (RLS-scoped)."""
-    stmt = select(Quote)
+    # Trashed quotes (M1.4 soft-delete) never surface in the list; a dedicated Trash
+    # view can opt them back in later (spec ``#quoteslist``).
+    stmt = select(Quote).where(Quote.deleted_at.is_(None))
     if req.system_view is not None:
         if not is_system_view(req.system_view):
             raise AppError(
@@ -129,3 +149,425 @@ async def search_quotes(
         limit=req.limit,
         offset=req.offset,
     )
+
+
+# --------------------------------------------------------------------------- #
+# M1.4 — create, detail, lifecycle transitions, line items, trash
+# --------------------------------------------------------------------------- #
+class QuoteCreate(BaseModel):
+    """Open a Draft quote by direct-create (email ingest is M3). Every reference is
+    optional at create — a contact is only mandatory at the Draft→Sent step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+    salesperson_id: uuid.UUID | None = None
+    estimator_id: uuid.UUID | None = None
+    rfq_number: str | None = Field(default=None, max_length=200)
+    due_date: datetime | None = None
+    expiration_date: datetime | None = None
+
+
+class QuoteUpdate(BaseModel):
+    """Partial edit of a Draft quote's General/People fields. Only fields present in
+    the body change. Editing is locked once a quote is Sent (Create Revision is M5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+    salesperson_id: uuid.UUID | None = None
+    estimator_id: uuid.UUID | None = None
+    rfq_number: str | None = Field(default=None, max_length=200)
+    due_date: datetime | None = None
+    expiration_date: datetime | None = None
+    private_notes: str | None = None
+
+
+class QuoteTransitionRequest(BaseModel):
+    """Request a lifecycle status change. ``note`` carries e.g. the Lost reason."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    to_status: QuoteStatus
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class QuoteItemOut(BaseModel):
+    """A line item (root component) on a quote."""
+
+    id: uuid.UUID
+    position: int
+    root_component_id: uuid.UUID
+    part_id: uuid.UUID
+    workflow_status: QiWorkflowStatus
+    was_won: bool
+    export_controlled: bool
+
+
+class WorkflowTracker(BaseModel):
+    """The 4-stage Draft-phase progress tracker — derived from the quote's timestamps
+    + the live count of incomplete line items (spec ``#quotelifecycle``), not stored."""
+
+    rfq_received_at: datetime | None
+    quote_started_at: datetime | None
+    incomplete_item_count: int
+    quote_sent_at: datetime | None
+
+
+class QuoteDetail(BaseModel):
+    """The quote-detail skeleton: header + lifecycle + the workflow tracker + items.
+    ``allowed_transitions`` is what the ACTIONS menu may legally offer next."""
+
+    id: uuid.UUID
+    number: str
+    revision: int
+    status: QuoteStatus
+    currency: str
+    account_id: uuid.UUID | None
+    contact_id: uuid.UUID | None
+    salesperson_id: uuid.UUID | None
+    estimator_id: uuid.UUID | None
+    rfq_number: str | None
+    private_notes: str | None
+    due_date: datetime | None
+    expiration_date: datetime | None
+    expired_at: datetime | None
+    sent_at: datetime | None
+    config_frozen_at: datetime | None
+    trashed: bool
+    allowed_transitions: list[QuoteStatus]
+    workflow: WorkflowTracker
+    items: list[QuoteItemOut]
+    created_at: datetime
+    updated_at: datetime
+
+
+def _is_editable(quote: Quote) -> bool:
+    """A quote is editable in its Draft phase only: while ``draft``, or while
+    ``on_hold`` *from* a draft (spec: On-Hold is editable only if it came from Draft).
+    Sent and closed quotes are read-only — changes go through a revision (M5)."""
+    if quote.status is QuoteStatus.draft:
+        return True
+    return quote.status is QuoteStatus.on_hold and quote.status_before_hold is QuoteStatus.draft
+
+
+async def _next_quote_number(session: AsyncSession, org_id: uuid.UUID) -> str:
+    """Atomically allocate this org's next sequential quote number (DECISIONS.md
+    2026-06-26). The upsert row-locks the counter, so concurrent creates serialise;
+    ``last_number`` is the last assigned value (0 ⇒ first quote is 1)."""
+    result = await session.execute(
+        text(
+            "INSERT INTO quote_counter AS qc (org_id, last_number) VALUES (:org, 1) "
+            "ON CONFLICT (org_id) DO UPDATE SET last_number = qc.last_number + 1 "
+            "RETURNING last_number"
+        ),
+        {"org": str(org_id)},
+    )
+    return str(result.scalar_one())
+
+
+async def _validate_account(session: AsyncSession, account_id: uuid.UUID | None) -> None:
+    """A quote's account must be a live, non-``vendor`` account in this org (the same-org
+    part is also a DB invariant via the composite FK; this adds the vendor/archived rule
+    + a clean 422 instead of a 500)."""
+    if account_id is None:
+        return
+    account = await session.get(Account, account_id)
+    if account is None or account.deleted_at is not None:
+        raise AppError(
+            "invalid_account", "Account not found in this organization.", status_code=422
+        )
+    if account.type is AccountType.vendor:
+        raise AppError(
+            "invalid_account",
+            "A vendor account cannot be assigned to a quote.",
+            status_code=422,
+        )
+
+
+async def _validate_contact(session: AsyncSession, contact_id: uuid.UUID | None) -> None:
+    if contact_id is None:
+        return
+    contact = await session.get(Contact, contact_id)
+    if contact is None or contact.deleted_at is not None:
+        raise AppError(
+            "invalid_contact", "Contact not found in this organization.", status_code=422
+        )
+
+
+async def _validate_member(session: AsyncSession, user_id: uuid.UUID | None, *, field: str) -> None:
+    """Reject a salesperson/estimator who isn't an **active member of the active org**
+    (the M1.1 salesperson guard; the org-scoped session makes the lookup org-local)."""
+    if user_id is None:
+        return
+    member = await session.scalar(
+        select(UserOrgMembership.id).where(
+            UserOrgMembership.user_id == user_id,
+            UserOrgMembership.status == MembershipStatus.active,
+        )
+    )
+    if member is None:
+        raise AppError(
+            f"invalid_{field}",
+            f"{field.capitalize()} must be an active member of this organization.",
+            status_code=422,
+        )
+
+
+async def _get_quote_or_404(session: AsyncSession, quote_id: uuid.UUID) -> Quote:
+    """Fetch a quote in the active org (trashed included, so detail/restore work)."""
+    quote = await session.get(Quote, quote_id)
+    if quote is None:
+        raise AppError("not_found", "Quote not found.", status_code=status.HTTP_404_NOT_FOUND)
+    return quote
+
+
+async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
+    """Assemble the detail response: items (joined to their part) + the derived tracker."""
+    rows = (
+        await session.execute(
+            select(QuoteItem, Component.part_id)
+            .join(
+                Component,
+                (Component.id == QuoteItem.root_component_id)
+                & (Component.org_id == QuoteItem.org_id),
+            )
+            .where(QuoteItem.quote_id == quote.id)
+            .order_by(QuoteItem.position)
+        )
+    ).all()
+    items = [
+        QuoteItemOut(
+            id=qi.id,
+            position=qi.position,
+            root_component_id=qi.root_component_id,
+            part_id=part_id,
+            workflow_status=qi.workflow_status,
+            was_won=qi.was_won,
+            export_controlled=qi.export_controlled,
+        )
+        for qi, part_id in rows
+    ]
+    incomplete = sum(1 for qi, _ in rows if qi.workflow_status not in _DONE_LINE_ITEM_STATUSES)
+    tracker = WorkflowTracker(
+        rfq_received_at=quote.rfq_received_date,
+        quote_started_at=quote.started_at,
+        incomplete_item_count=incomplete,
+        quote_sent_at=quote.sent_at,
+    )
+    return QuoteDetail(
+        id=quote.id,
+        number=quote.number,
+        revision=quote.revision,
+        status=quote.status,
+        currency=quote.currency,
+        account_id=quote.account_id,
+        contact_id=quote.contact_id,
+        salesperson_id=quote.salesperson_id,
+        estimator_id=quote.estimator_id,
+        rfq_number=quote.rfq_number,
+        private_notes=quote.private_notes,
+        due_date=quote.due_date,
+        expiration_date=quote.expiration_date,
+        expired_at=quote.expired_at,
+        sent_at=quote.sent_at,
+        config_frozen_at=quote.config_frozen_at,
+        trashed=quote.deleted_at is not None,
+        allowed_transitions=sorted(allowed_targets(quote.status, quote.status_before_hold)),
+        workflow=tracker,
+        items=items,
+        created_at=quote.created_at,
+        updated_at=quote.updated_at,
+    )
+
+
+@quotes_router.post("", status_code=status.HTTP_201_CREATED)
+async def create_quote(
+    payload: QuoteCreate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> QuoteDetail:
+    """Create a Draft quote against an account, with an auto-allocated number. The
+    quote opens the golden thread; line items are added via ``POST /{id}/items``."""
+    await _validate_account(session, payload.account_id)
+    await _validate_contact(session, payload.contact_id)
+    await _validate_member(session, payload.salesperson_id, field="salesperson")
+    await _validate_member(session, payload.estimator_id, field="estimator")
+
+    now = datetime.now(UTC)
+    number = await _next_quote_number(session, principal.active_org_id)
+    quote = Quote(
+        org_id=principal.active_org_id,
+        number=number,
+        status=INITIAL_STATUS,
+        account_id=payload.account_id,
+        contact_id=payload.contact_id,
+        salesperson_id=payload.salesperson_id,
+        estimator_id=payload.estimator_id,
+        rfq_number=payload.rfq_number,
+        due_date=payload.due_date,
+        expiration_date=payload.expiration_date,
+        rfq_received_date=now,  # tracker stage 1 — set when the quote is created
+        salesperson_assigned_at=now if payload.salesperson_id is not None else None,
+        estimator_assigned_at=now if payload.estimator_id is not None else None,
+    )
+    session.add(quote)
+    await session.flush()
+    # Open the audit trail (no prior status → draft).
+    session.add(
+        QuoteStatusEvent(
+            org_id=quote.org_id,
+            quote_id=quote.id,
+            from_status=None,
+            to_status=INITIAL_STATUS,
+            actor_id=principal.user_id,
+        )
+    )
+    await session.flush()
+    return await _load_detail(session, quote)
+
+
+@quotes_router.get("/{quote_id}")
+async def get_quote(
+    quote_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.view_all))],
+) -> QuoteDetail:
+    """Fetch the quote-detail skeleton (trashed quotes included, for the restore UI)."""
+    return await _load_detail(session, await _get_quote_or_404(session, quote_id))
+
+
+@quotes_router.patch("/{quote_id}")
+async def update_quote(
+    quote_id: uuid.UUID,
+    payload: QuoteUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> QuoteDetail:
+    """Edit a Draft quote's General/People fields. Rejected once the quote is locked."""
+    quote = await _get_quote_or_404(session, quote_id)
+    if not _is_editable(quote):
+        raise AppError(
+            "quote_locked",
+            "This quote is no longer a draft; changes require a revision.",
+            status_code=409,
+        )
+    changes = payload.model_dump(exclude_unset=True)
+    if "account_id" in changes:
+        await _validate_account(session, changes["account_id"])
+    if "contact_id" in changes:
+        await _validate_contact(session, changes["contact_id"])
+    if "salesperson_id" in changes:
+        await _validate_member(session, changes["salesperson_id"], field="salesperson")
+    if "estimator_id" in changes:
+        await _validate_member(session, changes["estimator_id"], field="estimator")
+    now = datetime.now(UTC)
+    if changes.get("salesperson_id") is not None and quote.salesperson_id is None:
+        quote.salesperson_assigned_at = now
+    if changes.get("estimator_id") is not None and quote.estimator_id is None:
+        quote.estimator_assigned_at = now
+    for field_name, value in changes.items():
+        setattr(quote, field_name, value)
+    await session.flush()
+    return await _load_detail(session, quote)
+
+
+@quotes_router.post("/{quote_id}/items", status_code=status.HTTP_201_CREATED)
+async def add_quote_item(
+    quote_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> QuoteDetail:
+    """Add a root line item: a fresh Part → root Component → QuoteItem at the next
+    position (the 4-layer model; M1.5 fills in the part/component detail). Setting the
+    first item marks the quote's ``started_at`` (estimator work has begun)."""
+    quote = await _get_quote_or_404(session, quote_id)
+    if not _is_editable(quote):
+        raise AppError(
+            "quote_locked",
+            "Line items can only be added while the quote is a draft.",
+            status_code=409,
+        )
+    part = Part(org_id=quote.org_id)
+    session.add(part)
+    await session.flush()
+    component = Component(org_id=quote.org_id, part_id=part.id, is_root_component=True)
+    session.add(component)
+    await session.flush()
+    max_position = await session.scalar(
+        select(func.max(QuoteItem.position)).where(QuoteItem.quote_id == quote.id)
+    )
+    next_position = (max_position or 0) + 1
+    session.add(
+        QuoteItem(
+            org_id=quote.org_id,
+            quote_id=quote.id,
+            root_component_id=component.id,
+            position=next_position,
+        )
+    )
+    if quote.started_at is None:
+        quote.started_at = datetime.now(UTC)
+    await session.flush()
+    return await _load_detail(session, quote)
+
+
+@quotes_router.post("/{quote_id}/transition")
+async def transition_quote(
+    quote_id: uuid.UUID,
+    payload: QuoteTransitionRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> QuoteDetail:
+    """Move a quote through its lifecycle. The required capability is target-aware
+    (finalize→``quote_finalize``, cancel→``quote_delete``, else ``quote_edit``); the
+    state machine rejects illegal transitions server-side."""
+    quote = await _get_quote_or_404(session, quote_id)
+    if quote.deleted_at is not None:
+        raise AppError(
+            "quote_trashed",
+            "A trashed quote cannot change status; restore it first.",
+            status_code=409,
+        )
+    needed = required_permission(quote.status, payload.to_status)
+    if not has_permission(principal.roles, needed):
+        raise AppError(
+            "forbidden",
+            "You do not have permission to perform this transition",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+    await transition(
+        session, quote, payload.to_status, actor_id=principal.user_id, note=payload.note
+    )
+    return await _load_detail(session, quote)
+
+
+@quotes_router.post("/{quote_id}/trash")
+async def trash_quote(
+    quote_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_delete))],
+) -> QuoteDetail:
+    """Soft-delete (Trash) a quote from any status. Recoverable via restore. Idempotent."""
+    quote = await _get_quote_or_404(session, quote_id)
+    if quote.deleted_at is None:
+        quote.deleted_at = datetime.now(UTC)
+        await session.flush()
+    return await _load_detail(session, quote)
+
+
+@quotes_router.post("/{quote_id}/restore")
+async def restore_quote(
+    quote_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_delete))],
+) -> QuoteDetail:
+    """Un-trash a quote (clear ``deleted_at``); its lifecycle status is unchanged.
+    Idempotent."""
+    quote = await _get_quote_or_404(session, quote_id)
+    if quote.deleted_at is not None:
+        quote.deleted_at = None
+        await session.flush()
+    return await _load_detail(session, quote)
