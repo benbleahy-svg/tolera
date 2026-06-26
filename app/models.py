@@ -16,6 +16,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -32,7 +33,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -407,3 +408,131 @@ class PartFile(Base):
     role: Mapped[str] = mapped_column(String, nullable=False, server_default=FileRole.supporting)
     is_redacted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = _ts()
+
+
+# --------------------------------------------------------------------------- #
+# M1.3 — quotes (stub) + saved views
+# --------------------------------------------------------------------------- #
+class QuoteStatus(enum.StrEnum):
+    """A quote's lifecycle status — the canonical 5-value ``quote_status`` enum
+    (DB-SCHEMA.sql). The spec's 7 UI "folders" map onto these (Drafts→draft,
+    Outstanding→sent, Accepted→won, Expired→expired, Lost→lost); Cancelled/Trash are
+    M1.4 lifecycle rulings (DECISIONS.md 2026-06-25). M1.3 only reads/filters this;
+    M1.4 owns the **enforced** transitions."""
+
+    draft = "draft"
+    sent = "sent"
+    won = "won"
+    lost = "lost"
+    expired = "expired"
+
+
+class SavedViewScope(enum.StrEnum):
+    """Which list a saved view targets. M1.3 implements ``quotes`` only; the
+    ``line_items`` scope exists in the type for forward-compat (M1.6) and is rejected
+    at the API for now (DECISIONS.md 2026-06-25)."""
+
+    quotes = "quotes"
+    line_items = "line_items"
+
+
+class SavedViewVisibility(enum.StrEnum):
+    """Who can see a saved view. **Reserved**: only ``private`` is honored in v1;
+    ``org`` (org-wide sharing) is deferred (DECISIONS.md 2026-06-25)."""
+
+    private = "private"
+    org = "org"
+
+
+# Native Postgres enums — created by migration 0007, referenced (not re-created) here.
+_quote_status_enum = Enum(QuoteStatus, name="quote_status", create_type=False)
+_saved_view_scope_enum = Enum(SavedViewScope, name="saved_view_scope", create_type=False)
+_saved_view_visibility_enum = Enum(
+    SavedViewVisibility, name="saved_view_visibility", create_type=False
+)
+
+
+class Quote(Base):
+    """A quote — the **minimal M1.3 stub** the quotes list renders/filters.
+
+    Only the list/filter columns land here (number, status, account/salesperson/
+    estimator, rfq_number, due_date). This mirrors the M1.2 ``part`` stub: **M1.4
+    extends** this table with the lifecycle state machine, ``quote_item``, the
+    Trash/soft-delete + ``cancelled`` rulings, and same-org composite-FK hardening —
+    by forward ALTER, never reshaping (DECISIONS.md 2026-06-25 "M1.3 build path").
+    The app role has **SELECT only** (no create endpoint in M1.3); rows are planted by
+    the seeder/owner for the list, and by M1.4's create flow thereafter."""
+
+    __tablename__ = "quote"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        UniqueConstraint("org_id", "number", name="uq_quote_org_number"),
+        # Composite-FK target so M1.4's quote_item.(org_id, quote_id) is pinned same-org.
+        UniqueConstraint("org_id", "id", name="uq_quote_org_id_id"),
+        Index("ix_quote_org_status", "org_id", "status"),
+        Index("ix_quote_org_created_at", "org_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    number: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[QuoteStatus] = mapped_column(
+        _quote_status_enum, nullable=False, server_default=QuoteStatus.draft.value
+    )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("account.id")
+    )
+    salesperson_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
+    )
+    estimator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
+    )
+    rfq_number: Mapped[str | None] = mapped_column(String)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class SavedView(Base):
+    """A user-owned filter/sort preset for a list (spec ``#quoteslist``).
+
+    Org-scoped (RLS) + ``owner_id`` (the creating user); the composite FK
+    ``(owner_id, org_id) → user_org_membership`` pins the owner to a member of this
+    org. ``filters``/``sort`` are JSONB whose shape is **identical** to the
+    ``/api/quotes/search`` request body, so applying a view replays its stored clauses
+    with no translation. ``visibility`` is reserved (only ``private`` honored in v1).
+    System/derived views are computed in code, never stored (DECISIONS.md 2026-06-25)."""
+
+    __tablename__ = "saved_view"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["owner_id", "org_id"],
+            ["user_org_membership.user_id", "user_org_membership.org_id"],
+            name="fk_saved_view_owner_membership",
+        ),
+        UniqueConstraint(
+            "org_id", "owner_id", "view_scope", "name", name="uq_saved_view_owner_scope_name"
+        ),
+        Index("ix_saved_view_org_owner_scope", "org_id", "owner_id", "view_scope"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    view_scope: Mapped[SavedViewScope] = mapped_column(_saved_view_scope_enum, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    filters: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    sort: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    visibility: Mapped[SavedViewVisibility] = mapped_column(
+        _saved_view_visibility_enum,
+        nullable=False,
+        server_default=SavedViewVisibility.private.value,
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()

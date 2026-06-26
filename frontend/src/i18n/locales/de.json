@@ -108,5 +108,53 @@
       "archive": "Archivieren",
       "restore": "Wiederherstellen"
     }
+  },
+  "quotes": {
+    "sidebar_title": "Angebote & Positionen",
+    "create_quote": "Angebot erstellen",
+    "create_disabled_hint": "Angebote werden in einem späteren Schritt erstellt.",
+    "empty": "Keine Angebote gefunden.",
+    "save_view": "Ansicht speichern",
+    "save_view_placeholder": "Name der Ansicht",
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "remove_filter": "Filter entfernen",
+    "delete_view": "Ansicht „{{name}}“ löschen",
+    "prev": "Zurück",
+    "next": "Weiter",
+    "footer": "{{from}}–{{to}} von {{total}} Angeboten",
+    "section": {
+      "quotes": "Angebote",
+      "line_items": "Positionen",
+      "line_items_hint": "folgt"
+    },
+    "views": {
+      "all": "Alle Angebote",
+      "mine": "Meine Angebote",
+      "drafts": "Entwürfe",
+      "outstanding": "Versendet",
+      "overdue": "Überfällig",
+      "filtered": "Gefiltert"
+    },
+    "filter": {
+      "status_label": "Status",
+      "all_statuses": "Alle Status"
+    },
+    "col": {
+      "number": "Angebot",
+      "rfq": "Anfrage-Nr.",
+      "status": "Status",
+      "priority": "Priorität",
+      "account": "Konto",
+      "salesperson": "Vertrieb",
+      "created": "Erstellt"
+    },
+    "status": {
+      "draft": "Entwurf",
+      "sent": "Versendet",
+      "won": "Gewonnen",
+      "lost": "Verloren",
+      "expired": "Abgelaufen"
+    }
   }
 }
