@@ -495,6 +495,8 @@ class Quote(Base):
     __tablename__ = "quote"
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
     __table_args__ = (
+        # DACH money convention: a quote's currency is EUR (DE/AT) or CHF (CH) only.
+        CheckConstraint("currency IN ('EUR', 'CHF')", name="ck_quote_currency_dach"),
         UniqueConstraint("org_id", "number", name="uq_quote_org_number"),
         # Composite-FK target so quote_item.(org_id, quote_id) is pinned same-org.
         UniqueConstraint("org_id", "id", name="uq_quote_org_id_id"),
@@ -602,7 +604,9 @@ class QuoteItem(Base):
             ["component.org_id", "component.id"],
             name="fk_quote_item_component_org",
         ),
-        Index("ix_quote_item_quote_position", "quote_id", "position"),
+        # Positions are unique within a quote — the DB backstop against a
+        # concurrent add-item race (the API also serialises via a row lock).
+        UniqueConstraint("quote_id", "position", name="uq_quote_item_quote_position"),
     )
 
     id: Mapped[uuid.UUID] = _pk()

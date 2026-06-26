@@ -99,7 +99,8 @@ def upgrade() -> None:
                 REFERENCES user_org_membership(user_id, org_id),
             ADD CONSTRAINT fk_quote_estimator_membership
                 FOREIGN KEY (estimator_id, org_id)
-                REFERENCES user_org_membership(user_id, org_id)
+                REFERENCES user_org_membership(user_id, org_id),
+            ADD CONSTRAINT ck_quote_currency_dach CHECK (currency IN ('EUR', 'CHF'))
         """
     )
     # Quotes can no longer be deleted by app role? No — Trash is UPDATE (deleted_at).
@@ -140,11 +141,13 @@ def upgrade() -> None:
             CONSTRAINT fk_quote_item_quote_org
                 FOREIGN KEY (org_id, quote_id) REFERENCES quote(org_id, id),
             CONSTRAINT fk_quote_item_component_org
-                FOREIGN KEY (org_id, root_component_id) REFERENCES component(org_id, id)
+                FOREIGN KEY (org_id, root_component_id) REFERENCES component(org_id, id),
+            -- Positions are unique within a quote (the index too): the DB backstop
+            -- against a concurrent add-item race; the API serialises with a row lock.
+            CONSTRAINT uq_quote_item_quote_position UNIQUE (quote_id, position)
         )
         """
     )
-    op.execute("CREATE INDEX ix_quote_item_quote_position ON quote_item (quote_id, position)")
 
     # --- quote_status_event (append-only audit) ------------------------------
     op.execute(
@@ -208,9 +211,9 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS component")
     op.execute("DROP TYPE IF EXISTS qi_workflow_status")
 
-    # Revert the quote hardening: drop composite FKs + added columns, restore the
-    # stub's plain FKs. NOTE: the three quote_status enum VALUES added above are
-    # *not* removed — PostgreSQL cannot drop enum values; they are harmless if unused.
+    # Revert the quote hardening: drop composite FKs + added columns (the
+    # ``ck_quote_currency_dach`` CHECK drops with the ``currency`` column), restore the
+    # stub's plain FKs, then rebuild ``quote_status`` back to its original five values.
     op.execute("REVOKE INSERT, UPDATE ON quote FROM " + APP_ROLE)
     for fk in (
         "fk_quote_account_org",
@@ -251,3 +254,18 @@ def downgrade() -> None:
         "ALTER TABLE quote ADD CONSTRAINT quote_estimator_id_fkey "
         "FOREIGN KEY (estimator_id) REFERENCES app_user(id)"
     )
+
+    # Rebuild quote_status with only the original five values (the 0003_authz_roles
+    # rename/recreate/cast/drop pattern), so the ADD VALUEs are fully reversed. The
+    # text cast raises if any quote still holds an M1.4-only status — intended: block
+    # the rollback rather than silently drop a status the old enum can't represent
+    # (CodeRabbit 2026-06-26). ``status_before_hold`` + ``quote_status_event`` (the
+    # other quote_status users) are already dropped above, so only quote.status remains.
+    op.execute("ALTER TABLE quote ALTER COLUMN status DROP DEFAULT")
+    op.execute("ALTER TYPE quote_status RENAME TO quote_status_old")
+    op.execute("CREATE TYPE quote_status AS ENUM ('draft', 'sent', 'won', 'lost', 'expired')")
+    op.execute(
+        "ALTER TABLE quote ALTER COLUMN status TYPE quote_status USING status::text::quote_status"
+    )
+    op.execute("ALTER TABLE quote ALTER COLUMN status SET DEFAULT 'draft'")
+    op.execute("DROP TYPE quote_status_old")

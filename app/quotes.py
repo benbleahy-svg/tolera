@@ -34,6 +34,7 @@ from .models import (
     Component,
     Contact,
     MembershipStatus,
+    Organization,
     Part,
     QiWorkflowStatus,
     Quote,
@@ -247,7 +248,11 @@ class QuoteDetail(BaseModel):
 def _is_editable(quote: Quote) -> bool:
     """A quote is editable in its Draft phase only: while ``draft``, or while
     ``on_hold`` *from* a draft (spec: On-Hold is editable only if it came from Draft).
-    Sent and closed quotes are read-only — changes go through a revision (M5)."""
+    Sent and closed quotes are read-only — changes go through a revision (M5). A
+    **trashed** quote is never editable (it must be restored first), mirroring the
+    transition/list paths (CodeRabbit 2026-06-26)."""
+    if quote.deleted_at is not None:
+        return False
     if quote.status is QuoteStatus.draft:
         return True
     return quote.status is QuoteStatus.on_hold and quote.status_before_hold is QuoteStatus.draft
@@ -398,10 +403,16 @@ async def create_quote(
 
     now = datetime.now(UTC)
     number = await _next_quote_number(session, principal.active_org_id)
+    # The quote inherits the org's currency (EUR for DE/AT, CHF for CH) — never the
+    # bare model default, so a CHF org's monetary context is correct from creation
+    # (DACH money convention; CodeRabbit 2026-06-26).
+    org = await session.get(Organization, principal.active_org_id)
+    currency = org.currency if org is not None else "EUR"
     quote = Quote(
         org_id=principal.active_org_id,
         number=number,
         status=INITIAL_STATUS,
+        currency=currency,
         account_id=payload.account_id,
         contact_id=payload.contact_id,
         salesperson_id=payload.salesperson_id,
@@ -463,11 +474,15 @@ async def update_quote(
         await _validate_member(session, changes["salesperson_id"], field="salesperson")
     if "estimator_id" in changes:
         await _validate_member(session, changes["estimator_id"], field="estimator")
+    # Keep ``*_assigned_at`` coherent with its FK: stamp when the assignee changes,
+    # and clear it on unassign so a NULL assignee never carries a stale timestamp
+    # (CodeRabbit 2026-06-26). Evaluated before the setattr loop, while the old
+    # value is still on the row.
     now = datetime.now(UTC)
-    if changes.get("salesperson_id") is not None and quote.salesperson_id is None:
-        quote.salesperson_assigned_at = now
-    if changes.get("estimator_id") is not None and quote.estimator_id is None:
-        quote.estimator_assigned_at = now
+    if "salesperson_id" in changes and changes["salesperson_id"] != quote.salesperson_id:
+        quote.salesperson_assigned_at = now if changes["salesperson_id"] is not None else None
+    if "estimator_id" in changes and changes["estimator_id"] != quote.estimator_id:
+        quote.estimator_assigned_at = now if changes["estimator_id"] is not None else None
     for field_name, value in changes.items():
         setattr(quote, field_name, value)
     await session.flush()
@@ -490,6 +505,10 @@ async def add_quote_item(
             "Line items can only be added while the quote is a draft.",
             status_code=409,
         )
+    # Serialise concurrent add-item requests on this quote so the max(position)+1
+    # allocation can't race; the UNIQUE (quote_id, position) constraint is the DB
+    # backstop (CodeRabbit 2026-06-26).
+    await session.execute(select(Quote.id).where(Quote.id == quote.id).with_for_update())
     part = Part(org_id=quote.org_id)
     session.add(part)
     await session.flush()

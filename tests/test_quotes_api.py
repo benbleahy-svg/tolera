@@ -391,3 +391,29 @@ def test_patch_rejects_non_member_salesperson(app_client: TestClient, seeder: Se
         res = app_client.patch(f"/api/quotes/{qid}", json={"salesperson_id": str(outsider)})
     assert res.status_code == 422
     assert res.json()["code"] == "invalid_salesperson"
+
+
+def test_trashed_quote_is_not_editable(app_client: TestClient, seeder: Seeder) -> None:
+    """A trashed quote rejects edits and line-item adds — it must be restored first
+    (CodeRabbit 2026-06-26; matches the transition/list paths)."""
+    org, admin = _org_admin(seeder)
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        qid = _create(app_client).json()["id"]
+        app_client.post(f"/api/quotes/{qid}/trash")
+        patched = app_client.patch(f"/api/quotes/{qid}", json={"rfq_number": "X"})
+        added = app_client.post(f"/api/quotes/{qid}/items")
+    assert patched.status_code == 409
+    assert patched.json()["code"] == "quote_locked"
+    assert added.status_code == 409
+    assert added.json()["code"] == "quote_locked"
+
+
+def test_quote_inherits_org_currency(app_client: TestClient, seeder: Seeder) -> None:
+    """A new quote carries its org's currency — CHF for a Swiss org, not the bare
+    EUR default (DACH money convention; CodeRabbit 2026-06-26)."""
+    org = seeder.org("helvetia", currency="CHF", country="CH")
+    admin = seeder.user("admin@helvetia.example")
+    seeder.membership(admin, org, ADMIN)
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        body = _create(app_client).json()
+    assert body["currency"] == "CHF"
