@@ -407,7 +407,16 @@ async def create_quote(
     # bare model default, so a CHF org's monetary context is correct from creation
     # (DACH money convention; CodeRabbit 2026-06-26).
     org = await session.get(Organization, principal.active_org_id)
-    currency = org.currency if org is not None else "EUR"
+    if org is None:
+        # A valid principal always has its active org visible under RLS; a miss means
+        # tenancy/RLS breakage — fail loud rather than invent a currency (CodeRabbit
+        # 2026-06-26: never invent a value that wasn't on the source).
+        raise AppError(
+            "invalid_org",
+            "Active organization is not available.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    currency = org.currency
     quote = Quote(
         org_id=principal.active_org_id,
         number=number,
@@ -498,17 +507,25 @@ async def add_quote_item(
     """Add a root line item: a fresh Part → root Component → QuoteItem at the next
     position (the 4-layer model; M1.5 fills in the part/component detail). Setting the
     first item marks the quote's ``started_at`` (estimator work has begun)."""
-    quote = await _get_quote_or_404(session, quote_id)
+    # Lock the quote row FIRST (refreshing its in-session state), then gate on
+    # editability — so a concurrent transition/trash can't change status/deleted_at
+    # in a TOCTOU window between the check and the lock. The lock also serialises the
+    # max(position)+1 allocation; UNIQUE (quote_id, position) is the DB backstop
+    # (CodeRabbit 2026-06-26).
+    quote = await session.scalar(
+        select(Quote)
+        .where(Quote.id == quote_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if quote is None:
+        raise AppError("not_found", "Quote not found.", status_code=status.HTTP_404_NOT_FOUND)
     if not _is_editable(quote):
         raise AppError(
             "quote_locked",
             "Line items can only be added while the quote is a draft.",
             status_code=409,
         )
-    # Serialise concurrent add-item requests on this quote so the max(position)+1
-    # allocation can't race; the UNIQUE (quote_id, position) constraint is the DB
-    # backstop (CodeRabbit 2026-06-26).
-    await session.execute(select(Quote.id).where(Quote.id == quote.id).with_for_update())
     part = Part(org_id=quote.org_id)
     session.add(part)
     await session.flush()
