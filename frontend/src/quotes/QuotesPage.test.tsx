@@ -110,7 +110,7 @@ describe('QuotesPage', () => {
     await userEvent.type(screen.getByLabelText('Name der Ansicht'), 'My drafts');
     await userEvent.click(screen.getByRole('button', { name: 'Speichern' }));
 
-    expect(createSavedView).toHaveBeenCalledWith({ name: 'My drafts', filters: [] });
+    expect(createSavedView).toHaveBeenCalledWith({ name: 'My drafts', filters: [], sort: [] });
     // Reload (listSavedViews refetch) surfaces the new view in the sidebar.
     expect(await screen.findByRole('button', { name: 'My drafts' })).toBeInTheDocument();
   });

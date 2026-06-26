@@ -29,6 +29,7 @@ import type {
   QuoteStatus,
   SavedView,
   SavedViewList,
+  SortClause,
 } from './types';
 
 const PAGE_SIZE = 20;
@@ -50,6 +51,7 @@ export function QuotesPage() {
   const [views, setViews] = useState<SavedViewList>({ system: [], custom: [] });
   const [active, setActive] = useState<Active>({ kind: 'system', key: 'all-quotes' });
   const [filters, setFilters] = useState<FilterClause[]>([]);
+  const [sort, setSort] = useState<SortClause[]>([]);
   const [data, setData] = useState<QuoteSearchResponse | null>(null);
   const [page, setPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -76,26 +78,31 @@ export function QuotesPage() {
     [api],
   );
 
-  /** Build the request for the active selection at a given page offset. */
+  /** Build the request from the explicit selection + clauses (never re-looks-up a
+   * saved view — so a just-created view searches correctly before its row lands in
+   * `views` state). A system view is server-computed; everything else replays its
+   * stored/edited filters + sort. */
   const requestFor = useCallback(
-    (next: Active, nextFilters: FilterClause[], nextPage: number): QuoteSearchRequest => {
+    (
+      next: Active,
+      nextFilters: FilterClause[],
+      nextSort: SortClause[],
+      nextPage: number,
+    ): QuoteSearchRequest => {
       const offset = nextPage * PAGE_SIZE;
       if (next.kind === 'system') return { system_view: next.key, offset };
-      if (next.kind === 'custom') {
-        const view = views.custom.find((v) => v.id === next.id);
-        return { filters: view?.filters ?? [], sort: view?.sort ?? [], offset };
-      }
-      return { filters: nextFilters, offset };
+      return { filters: nextFilters, sort: nextSort, offset };
     },
-    [views.custom],
+    [],
   );
 
   const apply = useCallback(
-    (next: Active, nextFilters: FilterClause[], nextPage: number) => {
+    (next: Active, nextFilters: FilterClause[], nextSort: SortClause[], nextPage: number) => {
       setActive(next);
       setFilters(nextFilters);
+      setSort(nextSort);
       setPage(nextPage);
-      runSearch(requestFor(next, nextFilters, nextPage));
+      runSearch(requestFor(next, nextFilters, nextSort, nextPage));
     },
     [runSearch, requestFor],
   );
@@ -108,34 +115,35 @@ export function QuotesPage() {
 
   useEffect(() => {
     void loadViews();
-    runSearch(requestFor({ kind: 'system', key: 'all-quotes' }, [], 0));
+    runSearch(requestFor({ kind: 'system', key: 'all-quotes' }, [], [], 0));
     // Run once on mount; subsequent loads go through the handlers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selectSystem = (key: string) => apply({ kind: 'system', key }, [], 0);
-  const selectCustom = (view: SavedView) => apply({ kind: 'custom', id: view.id }, view.filters, 0);
+  const selectSystem = (key: string) => apply({ kind: 'system', key }, [], [], 0);
+  const selectCustom = (view: SavedView) =>
+    apply({ kind: 'custom', id: view.id }, view.filters, view.sort, 0);
 
   const setStatusFilter = (status: string) => {
     const next: FilterClause[] = status ? [{ field: 'status', op: 'eq', value: status }] : [];
-    apply({ kind: 'adhoc' }, next, 0);
+    apply({ kind: 'adhoc' }, next, sort, 0);
   };
 
   const removeFilter = (index: number) =>
-    apply({ kind: 'adhoc' }, filters.filter((_, i) => i !== index), 0);
+    apply({ kind: 'adhoc' }, filters.filter((_, i) => i !== index), sort, 0);
 
-  const goToPage = (nextPage: number) => apply(active, filters, nextPage);
+  const goToPage = (nextPage: number) => apply(active, filters, sort, nextPage);
 
   const saveView = () => {
     const name = newViewName.trim();
     if (!name) return;
     api
-      .createSavedView({ name, filters })
+      .createSavedView({ name, filters, sort })
       .then(async (created) => {
         setSavingView(false);
         setNewViewName('');
         await loadViews();
-        apply({ kind: 'custom', id: created.id }, created.filters, 0);
+        apply({ kind: 'custom', id: created.id }, created.filters, created.sort, 0);
       })
       .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
   };
