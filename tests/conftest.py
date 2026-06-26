@@ -280,9 +280,13 @@ class Seeder:
             )
         )
 
-    def status_events(self, quote_id: uuid.UUID) -> list[tuple[str | None, str, str | None]]:
-        """Read a quote's append-only status-transition audit (from, to, note)."""
-        return self._loop.run_until_complete(self._status_events(quote_id))
+    def status_events(
+        self, org_id: uuid.UUID, quote_id: uuid.UUID
+    ) -> list[tuple[str | None, str, str | None]]:
+        """Read a quote's append-only status-transition audit (from, to, note). The
+        owner connection bypasses RLS, so the read is scoped to ``org_id`` explicitly
+        (join through ``quote.org_id``) to match the org-scoped convention."""
+        return self._loop.run_until_complete(self._status_events(org_id, quote_id))
 
     async def _org(
         self, slug: str, name: str | None, *, country: str, currency: str, locale: str
@@ -439,14 +443,17 @@ class Seeder:
             await session.flush()
             return row.id
 
-    async def _status_events(self, quote_id: uuid.UUID) -> list[tuple[str | None, str, str | None]]:
+    async def _status_events(
+        self, org_id: uuid.UUID, quote_id: uuid.UUID
+    ) -> list[tuple[str | None, str, str | None]]:
         async with AsyncSession(self._engine) as session:
             result = await session.execute(
                 text(
-                    "SELECT from_status, to_status, note FROM quote_status_event "
-                    "WHERE quote_id = :q ORDER BY created_at"
+                    "SELECT e.from_status, e.to_status, e.note FROM quote_status_event e "
+                    "JOIN quote q ON q.id = e.quote_id "
+                    "WHERE e.quote_id = :q AND q.org_id = :org ORDER BY e.created_at"
                 ),
-                {"q": str(quote_id)},
+                {"q": str(quote_id), "org": str(org_id)},
             )
             return [(r[0], r[1], r[2]) for r in result.all()]
 

@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from app.models import AccountType, MembershipRole
+from app.models import AccountType, MembershipRole, QuoteStatus
 from tests.conftest import Seeder, authed
 
 ADMIN = [MembershipRole.admin]
@@ -199,11 +199,47 @@ def test_status_events_record_each_transition(app_client: TestClient, seeder: Se
         qid = _create(app_client, account_id=str(acct), contact_id=str(contact)).json()["id"]
         _transition(app_client, qid, "sent")
         _transition(app_client, qid, "lost", note="Lost to incumbent")
-    assert seeder.status_events(uuid.UUID(qid)) == [
+    assert seeder.status_events(org, uuid.UUID(qid)) == [
         (None, "draft", None),
         ("draft", "sent", None),
         ("sent", "lost", "Lost to incumbent"),
     ]
+
+
+def test_unhold_from_sent_preserves_original_sent_at(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """Un-holding a Sent→On-Hold quote restores Sent without **re-stamping** the
+    original ``sent_at`` (CodeRabbit 2026-06-26 — un-hold is a restore, not a re-send)."""
+    org, admin = _org_admin(seeder)
+    acct = seeder.account(org, "Acme")
+    contact = seeder.contact(org, acct, "buyer@acme.example")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        qid = _create(app_client, account_id=str(acct), contact_id=str(contact)).json()["id"]
+        original_sent_at = _transition(app_client, qid, "sent").json()["sent_at"]
+        _transition(app_client, qid, "on_hold")
+        restored = _transition(app_client, qid, "sent")
+    assert restored.status_code == 200
+    assert restored.json()["status"] == "sent"
+    assert restored.json()["sent_at"] == original_sent_at  # not re-stamped
+
+
+def test_unhold_to_sent_skips_contact_precondition(app_client: TestClient, seeder: Seeder) -> None:
+    """Restoring On-Hold→Sent must not re-run the send contact-precondition: a quote
+    that was validly sent and is now on hold (even without a current contact) can be
+    un-held back to Sent (CodeRabbit 2026-06-26)."""
+    org, admin = _org_admin(seeder)
+    qid = seeder.quote(
+        org,
+        "1",
+        status=QuoteStatus.on_hold,
+        status_before_hold=QuoteStatus.sent,  # came from sent
+        contact_id=None,  # no current contact — must NOT block the restore
+    )
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        restored = _transition(app_client, str(qid), "sent")
+    assert restored.status_code == 200
+    assert restored.json()["status"] == "sent"
 
 
 # --------------------------------------------------------------------------- #

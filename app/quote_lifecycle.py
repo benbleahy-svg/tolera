@@ -117,8 +117,14 @@ async def transition(
             f"A quote cannot move from '{from_status.value}' to '{to_status.value}'.",
             status_code=409,
         )
-    # Send precondition (spec: a contact must be assigned to finalize/send).
-    if to_status is QuoteStatus.sent and quote.contact_id is None:
+    # Leaving on_hold restores the *prior* status — it is not a fresh forward move,
+    # so the entry preconditions/timestamps of that status must NOT re-fire (else
+    # un-holding a Sent quote would re-check the contact and clobber the original
+    # ``sent_at`` that drives overdue/expiry). CodeRabbit 2026-06-26.
+    is_restore = from_status is QuoteStatus.on_hold
+
+    # Send precondition (spec: a contact must be assigned to finalize/send) — forward only.
+    if to_status is QuoteStatus.sent and not is_restore and quote.contact_id is None:
         raise AppError(
             "missing_contact",
             "A quote must have an assigned contact before it can be sent.",
@@ -128,13 +134,16 @@ async def transition(
     now = datetime.now(UTC)
     if to_status is QuoteStatus.on_hold:
         quote.status_before_hold = from_status  # remember where to return
-    elif from_status is QuoteStatus.on_hold:
+    elif is_restore:
         quote.status_before_hold = None  # restored — clear the memory
 
-    if to_status is QuoteStatus.sent:
-        quote.sent_at = now
-    elif to_status is QuoteStatus.expired:
-        quote.expired_at = now
+    # Stamp lifecycle timestamps only on a genuine forward transition, and never
+    # overwrite an existing one (idempotent across a hold/un-hold round-trip).
+    if not is_restore:
+        if to_status is QuoteStatus.sent and quote.sent_at is None:
+            quote.sent_at = now
+        elif to_status is QuoteStatus.expired and quote.expired_at is None:
+            quote.expired_at = now
 
     quote.status = to_status
     session.add(
