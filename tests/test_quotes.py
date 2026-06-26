@@ -73,6 +73,9 @@ def test_filter_in_operator(app_client: TestClient, seeder: Seeder) -> None:
 def test_system_view_my_quotes(app_client: TestClient, seeder: Seeder) -> None:
     org, me = _org_user(seeder, "org-a")
     other = seeder.user("other@org-a.example")
+    # M1.4 hardened quote.estimator_id to a same-org membership FK, so the assignee
+    # must be a member of this org (the salesperson/estimator tenancy guard).
+    seeder.membership(other, org, [MembershipRole.estimator])
     seeder.quote(org, "MINE-E", estimator_id=me)
     seeder.quote(org, "MINE-S", salesperson_id=me)
     seeder.quote(org, "THEIRS", estimator_id=other)

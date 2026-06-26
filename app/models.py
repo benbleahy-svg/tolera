@@ -414,17 +414,40 @@ class PartFile(Base):
 # M1.3 — quotes (stub) + saved views
 # --------------------------------------------------------------------------- #
 class QuoteStatus(enum.StrEnum):
-    """A quote's lifecycle status — the canonical 5-value ``quote_status`` enum
-    (DB-SCHEMA.sql). The spec's 7 UI "folders" map onto these (Drafts→draft,
-    Outstanding→sent, Accepted→won, Expired→expired, Lost→lost); Cancelled/Trash are
-    M1.4 lifecycle rulings (DECISIONS.md 2026-06-25). M1.3 only reads/filters this;
-    M1.4 owns the **enforced** transitions."""
+    """A quote's lifecycle status (spec ``#quotelifecycle``, "decided").
+
+    The canonical 5 (``draft, sent, won, lost, expired``) plus the three M1.4
+    rulings (DECISIONS.md 2026-06-26 "Quote status enum"): ``cancelled`` (abandoned
+    by the shop, kept for audit), ``no_quote`` (formally declining the **whole** RFQ
+    — terminal, distinct from the line-item :class:`QiWorkflowStatus.no_quote`), and
+    ``on_hold`` (a reversible manual pause that returns to the prior status — see
+    ``quote.status_before_hold``). **Trash** is soft-delete (``quote.deleted_at``),
+    not a status. **Superseded** + the revision/reopen flows are M5, so no
+    ``superseded`` value yet — values are append-only (ADD VALUE), so M5 adds it with
+    no rebuild. M1.4 owns the **enforced** transitions (``app.quote_lifecycle``)."""
 
     draft = "draft"
     sent = "sent"
     won = "won"
     lost = "lost"
     expired = "expired"
+    cancelled = "cancelled"
+    no_quote = "no_quote"
+    on_hold = "on_hold"
+
+
+class QiWorkflowStatus(enum.StrEnum):
+    """A quote item's (line-item's) own progress status — the canonical
+    ``qi_workflow_status`` enum (DB-SCHEMA.sql). Independent of the parent quote's
+    status: a line item runs Not Started → In Progress → Complete, may be paused
+    (``on_hold``) or declined (``no_quote``, which counts as complete for the
+    quote's incomplete-items rollup but is unselectable on the digital quote)."""
+
+    not_started = "not_started"
+    in_progress = "in_progress"
+    on_hold = "on_hold"
+    completed = "completed"
+    no_quote = "no_quote"
 
 
 class SavedViewScope(enum.StrEnum):
@@ -445,7 +468,10 @@ class SavedViewVisibility(enum.StrEnum):
 
 
 # Native Postgres enums — created by migration 0007, referenced (not re-created) here.
+# ``quote_status`` gains its three M1.4 values via ALTER TYPE in migration 0008;
+# ``qi_workflow_status`` is created there too.
 _quote_status_enum = Enum(QuoteStatus, name="quote_status", create_type=False)
+_qi_workflow_status_enum = Enum(QiWorkflowStatus, name="qi_workflow_status", create_type=False)
 _saved_view_scope_enum = Enum(SavedViewScope, name="saved_view_scope", create_type=False)
 _saved_view_visibility_enum = Enum(
     SavedViewVisibility, name="saved_view_visibility", create_type=False
@@ -453,22 +479,49 @@ _saved_view_visibility_enum = Enum(
 
 
 class Quote(Base):
-    """A quote — the **minimal M1.3 stub** the quotes list renders/filters.
+    """A quote — created in M1.3 as a list/filter stub, **extended by M1.4** with the
+    lifecycle state machine, ``quote_item``, and same-org composite-FK hardening.
 
-    Only the list/filter columns land here (number, status, account/salesperson/
-    estimator, rfq_number, due_date). This mirrors the M1.2 ``part`` stub: **M1.4
-    extends** this table with the lifecycle state machine, ``quote_item``, the
-    Trash/soft-delete + ``cancelled`` rulings, and same-org composite-FK hardening —
-    by forward ALTER, never reshaping (DECISIONS.md 2026-06-25 "M1.3 build path").
-    The app role has **SELECT only** (no create endpoint in M1.3); rows are planted by
-    the seeder/owner for the list, and by M1.4's create flow thereafter."""
+    M1.4 (DECISIONS.md 2026-06-26) drops the stub's plain global FKs and re-adds
+    **composite same-org FKs** — ``(org_id, account_id) → account``, ``(org_id,
+    contact_id) → contact``, and ``(salesperson_id|estimator_id, org_id) →
+    user_org_membership`` — so a cross-org reference is a DB impossibility, not merely
+    an RLS/app check (the M1.1 salesperson rationale). It adds the canonical columns it
+    needs (contact, the workflow-tracker timestamps, ``status_before_hold`` for un-hold,
+    ``deleted_at`` for Trash, ``config_frozen_at`` column-only per E4-d) but **defers**
+    the send/digital-quote columns and the revision flow to M5 (no reshaping). The app
+    role gains INSERT/UPDATE here (it was SELECT-only in M1.3)."""
 
     __tablename__ = "quote"
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
     __table_args__ = (
+        # DACH money convention: a quote's currency is EUR (DE/AT) or CHF (CH) only.
+        CheckConstraint("currency IN ('EUR', 'CHF')", name="ck_quote_currency_dach"),
         UniqueConstraint("org_id", "number", name="uq_quote_org_number"),
-        # Composite-FK target so M1.4's quote_item.(org_id, quote_id) is pinned same-org.
+        # Composite-FK target so quote_item.(org_id, quote_id) is pinned same-org.
         UniqueConstraint("org_id", "id", name="uq_quote_org_id_id"),
+        # Same-org FK hardening (M1.4): each reference must live in THIS org. The
+        # columns are nullable; MATCH SIMPLE skips the check when the ref is NULL.
+        ForeignKeyConstraint(
+            ["org_id", "account_id"],
+            ["account.org_id", "account.id"],
+            name="fk_quote_account_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "contact_id"],
+            ["contact.org_id", "contact.id"],
+            name="fk_quote_contact_org",
+        ),
+        ForeignKeyConstraint(
+            ["salesperson_id", "org_id"],
+            ["user_org_membership.user_id", "user_org_membership.org_id"],
+            name="fk_quote_salesperson_membership",
+        ),
+        ForeignKeyConstraint(
+            ["estimator_id", "org_id"],
+            ["user_org_membership.user_id", "user_org_membership.org_id"],
+            name="fk_quote_estimator_membership",
+        ),
         Index("ix_quote_org_status", "org_id", "status"),
         Index("ix_quote_org_created_at", "org_id", "created_at"),
     )
@@ -476,22 +529,124 @@ class Quote(Base):
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = _org_fk()
     number: Mapped[str] = mapped_column(String, nullable=False)
+    revision: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     status: Mapped[QuoteStatus] = mapped_column(
         _quote_status_enum, nullable=False, server_default=QuoteStatus.draft.value
     )
-    account_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("account.id")
-    )
-    salesperson_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("app_user.id")
-    )
-    estimator_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("app_user.id")
-    )
+    # Set when the quote enters ``on_hold``; the un-hold transition's only legal
+    # target is this stored status, then it is cleared (DECISIONS.md 2026-06-26).
+    status_before_hold: Mapped[QuoteStatus | None] = mapped_column(_quote_status_enum)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
+    # FK columns (constraints declared compositely above — no inline ForeignKey).
+    account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    salesperson_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    estimator_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     rfq_number: Mapped[str | None] = mapped_column(String)
+    private_notes: Mapped[str | None] = mapped_column(Text)
+    # E4-d freeze marker — column only in M1.4; freeze/Refresh-Pricing is pricing-engine work.
+    config_frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Workflow-tracker + lifecycle timestamps.
+    rfq_received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expiration_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    estimator_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    salesperson_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Trash = recoverable soft-delete (any status), distinct from the ``cancelled`` status.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+class Component(Base):
+    """A Part **with pricing** — the quoting layer over a Part (KB
+    ``assemblies-data-types-and-terminology``). M1.4 lands a **minimal stub**: just
+    enough to anchor a :class:`QuoteItem`'s root component to a Part. **M1.5 extends**
+    it with process/material/``obtain_method``/``is_assembly`` + the BOM tree, by
+    forward ALTER (DECISIONS.md 2026-06-26 "QuoteItem anchoring"). ``UNIQUE (org_id,
+    id)`` is the composite-FK target for ``quote_item.(org_id, root_component_id)``."""
+
+    __tablename__ = "component"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_component_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "part_id"], ["part.org_id", "part.id"], name="fk_component_part_org"
+        ),
+        Index("ix_component_org_part", "org_id", "part_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    is_root_component: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class QuoteItem(Base):
+    """A line item: the **root component** tied to a Quote at a position (DOMAIN-MODEL).
+    Carries its own ``workflow_status`` (Not Started → … → Complete), independent of
+    the parent quote's status. Composite FKs pin both the quote and the root component
+    to the **same org** as the item."""
+
+    __tablename__ = "quote_item"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"], ["quote.org_id", "quote.id"], name="fk_quote_item_quote_org"
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "root_component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_quote_item_component_org",
+        ),
+        # Positions are unique within a quote — the DB backstop against a
+        # concurrent add-item race (the API also serialises via a row lock).
+        UniqueConstraint("quote_id", "position", name="uq_quote_item_quote_position"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    root_component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    position: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    workflow_status: Mapped[QiWorkflowStatus] = mapped_column(
+        _qi_workflow_status_enum, nullable=False, server_default=QiWorkflowStatus.not_started.value
+    )
+    was_won: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    export_controlled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class QuoteStatusEvent(Base):
+    """Append-only audit of quote status changes (DECISIONS.md 2026-06-26). One row per
+    transition — and one for creation (``from_status = NULL → draft``). Home of the
+    optional Lost reason ``note``; the trail behind win/loss analysis + reopen. The app
+    role gets SELECT/INSERT only (never UPDATE/DELETE) so history can't be rewritten."""
+
+    __tablename__ = "quote_status_event"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"], ["quote.org_id", "quote.id"], name="fk_qse_quote_org"
+        ),
+        Index("ix_qse_org_quote_created", "org_id", "quote_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    from_status: Mapped[QuoteStatus | None] = mapped_column(_quote_status_enum)
+    to_status: Mapped[QuoteStatus] = mapped_column(_quote_status_enum, nullable=False)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
 
 
 class SavedView(Base):
