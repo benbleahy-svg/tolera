@@ -508,6 +508,14 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Recommended default:** **Defer to a later hardening block** (not M1.2) but logged now: async ClamAV scan on store with a quarantine flag, blocking download/forward until clean. Revisit before email-ingest (M3) opens an untrusted upload path.
 **Affects:** M3 (email ingest = untrusted uploads), M6 (hardening), `part_file` (possible future `scan_status` column).
 
+## [2026-06-27] OPEN: Money representation — integer minor units vs `numeric(14,4)` (M1.6 grill; blocks M1.7)
+**Status:** OPEN
+**Question:** CLAUDE.md §5 mandates money as **integer minor units + explicit currency** ("never a float"). The folded `DB-SCHEMA.sql` models every `component_quantity` money column (`unit_cost`, `calc_unit_price`, `manual_unit_price`, the cost split, `total_profit`, …) — and `purchased_component.piece_price`, `quote_cell.*` — as **`numeric(14,4)`**. These conflict: integer **cents** (2dp) cannot hold the 4-decimal precision the schema/pricing relies on (unit/piece prices are 4dp; M1.10 must reproduce `$2,160.84`-class figures exactly without rounding drift). `numeric` is exact (not a float), so it satisfies "never a float" but **not** "integer minor units."
+**Why it surfaced in M1.6 but does not block it:** M1.6 adds **no money columns** — `component_quantity` lands with only `quantity` / `make_quantity` / `deliver_quantity` (all `int`). The first money column arrives in **M1.7** (per-qty op-cost cells), so the representation must be settled before then.
+**Options considered:** (a) **integer minor units everywhere** — uniform with §5, but loses the 4th decimal the unit-price math needs (rounding risk on the golden figures); (b) **`numeric(14,4)` for per-unit / intermediate calc columns, round to integer minor units only at the persisted/displayed quote-total boundary** — keeps calc precision, keeps stored/printed totals in §5's representation; (c) integer in a finer denomination (e.g. tenths-of-cent / micros) to stay integer while preserving 4dp.
+**Recommended default:** **(b)** — `numeric(14,4)` for unit-level/intermediate cost & price columns (as the folded schema specifies), with money **rounded to integer minor units + `currency` at the quote/total boundary** (display + any persisted total). This honors the schema's precision where the math needs it and §5's representation where money is stored/shown. Confirm at the M1.7 grill before the first money column ships.
+**Affects:** M1.7 (`component_quantity` cost cells, `quote_cell`), M1.10 (roll-up + pricing items + golden figures), M1.11 (VAT/add-ons), `purchased_component.piece_price`, and the §5 money invariant's exact reading.
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*

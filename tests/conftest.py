@@ -462,9 +462,9 @@ async def _truncate(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
         await conn.execute(
             text(
-                "TRUNCATE quote_status_event, quote_item, component, quote_counter, "
-                "saved_view, quote, node, part_geometry, part_file, part, account, "
-                "contact, note, user_org_membership, app_user, organization CASCADE"
+                "TRUNCATE quote_status_event, quote_item, component_quantity, component, "
+                "quote_counter, saved_view, quote, node, part_geometry, part_file, part, "
+                "account, contact, note, user_org_membership, app_user, organization CASCADE"
             )
         )
         await conn.commit()
