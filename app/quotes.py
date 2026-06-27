@@ -35,7 +35,6 @@ from .models import (
     Contact,
     MembershipStatus,
     Organization,
-    Part,
     QiWorkflowStatus,
     Quote,
     QuoteItem,
@@ -43,6 +42,7 @@ from .models import (
     QuoteStatusEvent,
     UserOrgMembership,
 )
+from .parts import create_root_part
 from .quote_filters import (
     FilterClause,
     SortClause,
@@ -526,9 +526,8 @@ async def add_quote_item(
             "Line items can only be added while the quote is a draft.",
             status_code=409,
         )
-    part = Part(org_id=quote.org_id)
-    session.add(part)
-    await session.flush()
+    # The 4-layer model: a fresh Part (with its root Node) → root Component → QuoteItem.
+    part = await create_root_part(session, quote.org_id)
     component = Component(org_id=quote.org_id, part_id=part.id, is_root_component=True)
     session.add(component)
     await session.flush()

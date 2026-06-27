@@ -32,7 +32,9 @@ import os
 import urllib.parse
 import uuid
 from datetime import datetime
-from typing import Annotated
+from decimal import Decimal
+from functools import partial
+from typing import Annotated, Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -45,7 +47,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +56,13 @@ from .auth import Principal
 from .authz import Permission, require
 from .config import Settings
 from .deps import get_app_settings, get_session, get_storage
+from .dimensions import (
+    DimensionError,
+    evaluate_area,
+    evaluate_length,
+    evaluate_mass,
+    evaluate_volume,
+)
 from .errors import AppError
 from .file_types import (
     MAGIC_SNIFF_BYTES,
@@ -62,7 +71,7 @@ from .file_types import (
     primary_rank,
     sniff_matches_extension,
 )
-from .models import FileRole, Part, PartFile
+from .models import FileRole, Node, ObtainMethod, Part, PartFile, PartGeometry
 from .storage import ObjectStorage, object_key
 
 parts_router = APIRouter(prefix="/api/parts", tags=["parts", "files"])
@@ -76,13 +85,97 @@ _FILENAME_MAX = 255
 # Schemas
 # --------------------------------------------------------------------------- #
 class PartOut(BaseModel):
-    """A part as returned to clients (M1.2 stub shape)."""
+    """A part as returned to clients (M1.5 4-layer shape: identity + flags)."""
 
     id: uuid.UUID
     primary_file_id: uuid.UUID | None
+    name: str | None
+    part_number: str | None
+    revision: str | None
+    description: str | None
+    is_assembly: bool
+    obtain_method: ObtainMethod
+    export_controlled: bool
     archived: bool
     created_at: datetime
     updated_at: datetime
+
+
+class PartUpdate(BaseModel):
+    """Patch a part's identity + flags. Only provided fields change (``exclude_unset``);
+    an explicit ``null`` clears an identity field. Identity is free-text, not unique
+    (matching is M2; DECISIONS.md 2026-06-26)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    part_number: str | None = None
+    revision: str | None = None
+    description: str | None = None
+    is_assembly: bool | None = None
+    obtain_method: ObtainMethod | None = None
+    export_controlled: bool | None = None
+
+
+# The IN/MM toggle CLAUDE.md §5 explicitly permits ("a toggle may exist, default never
+# imperial"): it only sets the *default* unit for a bare number (a typed unit like
+# ``1 meter`` overrides it), the default is ``mm``, and the stored value is ALWAYS metric
+# (mm) — so downstream Kalk/DFM never see imperial. This is presentation, not a stored
+# imperial path (DECISIONS.md 2026-06-26 "PartGeometry manual-dims storage model").
+DimUnit = Literal["mm", "in"]
+# Dim fields that take a linear value (mm); area/volume/weight are handled separately.
+_LENGTH_DIMS = ("size_x", "size_y", "size_z", "max_dim", "med_dim", "min_dim")
+# A raw dim input: a number, or a string carrying math + an optional unit.
+DimInput = str | float | int | None
+
+
+class PartGeometryUpdate(BaseModel):
+    """Set manual geometry dims. Each field auto-evaluates math (``2.27 + .359``) and
+    typed units (``1 meter``) via the safe parser; values store as metric. Partial:
+    only provided fields change, ``null`` clears one (DECISIONS.md 2026-06-26)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit: DimUnit = "mm"
+    size_x: DimInput = None
+    size_y: DimInput = None
+    size_z: DimInput = None
+    max_dim: DimInput = None
+    med_dim: DimInput = None
+    min_dim: DimInput = None
+    area: DimInput = None
+    volume: DimInput = None
+    weight: DimInput = None
+
+
+class PartGeometryOut(BaseModel):
+    """A part's manual geometry (effective metric values + which dims a human set)."""
+
+    part_id: uuid.UUID
+    size_x: float | None
+    size_y: float | None
+    size_z: float | None
+    max_dim: float | None
+    med_dim: float | None
+    min_dim: float | None
+    area: float | None
+    volume: float | None
+    weight: float | None
+    overrides: dict[str, Any]
+
+
+class BomNodeOut(BaseModel):
+    """One node of a part's BOM tree. M1.5 returns a single root node; M4 fills depth."""
+
+    node_id: uuid.UUID
+    part_id: uuid.UUID
+    qty_relative_to_parent: int
+    is_root: bool
+    children: list[BomNodeOut]
+
+
+# Resolve the self-reference (``from __future__ import annotations`` makes it a string).
+BomNodeOut.model_rebuild()
 
 
 class PartFileOut(BaseModel):
@@ -103,9 +196,52 @@ def _part_out(part: Part) -> PartOut:
     return PartOut(
         id=part.id,
         primary_file_id=part.primary_file_id,
+        name=part.name,
+        part_number=part.part_number,
+        revision=part.revision,
+        description=part.description,
+        is_assembly=part.is_assembly,
+        obtain_method=part.obtain_method,
+        export_controlled=part.export_controlled,
         archived=part.deleted_at is not None,
         created_at=part.created_at,
         updated_at=part.updated_at,
+    )
+
+
+def _f(value: Decimal | None) -> float | None:
+    """Numeric (Decimal from the DB) → float for the JSON contract; metric throughout."""
+    return float(value) if value is not None else None
+
+
+def _geometry_out(part_id: uuid.UUID, geom: PartGeometry | None) -> PartGeometryOut:
+    """Shape a part's geometry for clients; an unset geometry reads as all-null."""
+    if geom is None:
+        return PartGeometryOut(
+            part_id=part_id,
+            size_x=None,
+            size_y=None,
+            size_z=None,
+            max_dim=None,
+            med_dim=None,
+            min_dim=None,
+            area=None,
+            volume=None,
+            weight=None,
+            overrides={},
+        )
+    return PartGeometryOut(
+        part_id=geom.part_id,
+        size_x=_f(geom.size_x),
+        size_y=_f(geom.size_y),
+        size_z=_f(geom.size_z),
+        max_dim=_f(geom.max_dim),
+        med_dim=_f(geom.med_dim),
+        min_dim=_f(geom.min_dim),
+        area=_f(geom.area),
+        volume=_f(geom.volume),
+        weight=_f(geom.weight),
+        overrides=dict(geom.overrides or {}),
     )
 
 
@@ -193,17 +329,75 @@ def _content_disposition(filename: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Parts (minimal stub — M1.5 fleshes this out)
+# Parts — the 4-layer model (M1.5)
 # --------------------------------------------------------------------------- #
+async def create_root_part(session: AsyncSession, org_id: uuid.UUID) -> Part:
+    """Create a Part **and its root Node** (the 4-layer model; M1.5).
+
+    Every part is the root of a (currently single-node) BOM tree: the root node has no
+    parent and quantity 1, linked back to the part as the tree root. M4 grows child
+    nodes; the contract is established here. Shared by the standalone Part-Library create
+    and the quote add-line-item flow so both paths build the same structure."""
+    part = Part(org_id=org_id)
+    session.add(part)
+    await session.flush()
+    session.add(
+        Node(
+            org_id=org_id,
+            part_id=part.id,
+            parent_node_id=None,
+            qty_relative_to_parent=1,
+            root_part_id=part.id,
+        )
+    )
+    await session.flush()
+    return part
+
+
+async def _get_or_create_geometry(session: AsyncSession, part: Part) -> PartGeometry:
+    """The part's 1:1 geometry row, created empty on first manual edit."""
+    geom = await session.scalar(select(PartGeometry).where(PartGeometry.part_id == part.id))
+    if geom is None:
+        geom = PartGeometry(org_id=part.org_id, part_id=part.id, overrides={})
+        session.add(geom)
+        await session.flush()
+    return geom
+
+
+async def _node_subtree(session: AsyncSession, node: Node) -> BomNodeOut:
+    """Build a node and its descendants (M1.5: leaves only — no children yet)."""
+    child_rows = (
+        await session.scalars(
+            select(Node).where(Node.parent_node_id == node.id).order_by(Node.created_at)
+        )
+    ).all()
+    children = [await _node_subtree(session, child) for child in child_rows]
+    return BomNodeOut(
+        node_id=node.id,
+        part_id=node.part_id,
+        qty_relative_to_parent=node.qty_relative_to_parent,
+        is_root=node.parent_node_id is None,
+        children=children,
+    )
+
+
+async def build_bom_tree(session: AsyncSession, part_id: uuid.UUID) -> BomNodeOut | None:
+    """The BOM tree rooted at a part's root node, or ``None`` if it has no node."""
+    root = await session.scalar(
+        select(Node).where(Node.part_id == part_id, Node.parent_node_id.is_(None))
+    )
+    if root is None:
+        return None
+    return await _node_subtree(session, root)
+
+
 @parts_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_part(
     session: Annotated[AsyncSession, Depends(get_session)],
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> PartOut:
-    """Create an empty part to attach files to (the M1.2 owner for uploads)."""
-    part = Part(org_id=principal.active_org_id)
-    session.add(part)
-    await session.flush()
+    """Create a part (the M1.2 file owner; now also the root of a BOM tree, M1.5)."""
+    part = await create_root_part(session, principal.active_org_id)
     return _part_out(part)
 
 
@@ -230,6 +424,111 @@ async def get_part(
 ) -> PartOut:
     """Fetch one part."""
     return _part_out(await _get_part_or_404(session, part_id))
+
+
+@parts_router.patch("/{part_id}")
+async def update_part(
+    part_id: uuid.UUID,
+    payload: PartUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> PartOut:
+    """Update a part's identity + flags (incl. the EU dual-use export flag)."""
+    part = await _get_part_or_404(session, part_id, for_update=True)
+    changes = payload.model_dump(exclude_unset=True)
+    # Identity fields are nullable (an explicit null clears them); the flag/enum columns
+    # are NOT NULL, so reject an explicit null with a clean 422 rather than a leaked 500.
+    for field in ("is_assembly", "obtain_method", "export_controlled"):
+        if field in changes and changes[field] is None:
+            raise AppError("invalid_value", f"{field} cannot be null.", status_code=422)
+    for field, value in changes.items():
+        setattr(part, field, value)
+    await session.flush()
+    return _part_out(part)
+
+
+# --------------------------------------------------------------------------- #
+# Geometry (manual dims — the geometry↔Kalk contract; M1.5)
+# --------------------------------------------------------------------------- #
+@parts_router.get("/{part_id}/geometry")
+async def get_part_geometry(
+    part_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PartGeometryOut:
+    """Read a part's geometry (all-null until dims are set)."""
+    await _get_part_or_404(session, part_id)
+    geom = await session.scalar(select(PartGeometry).where(PartGeometry.part_id == part_id))
+    return _geometry_out(part_id, geom)
+
+
+def _apply_dim(
+    geom: PartGeometry,
+    overrides: dict[str, Any],
+    field: str,
+    raw: DimInput,
+    evaluator: Any,
+    unit: str,
+) -> None:
+    """Evaluate one manual dim and store it (metric) + record its override provenance;
+    ``None`` clears the dim. Raises :class:`DimensionError` on bad math / a negative."""
+    if raw is None:
+        setattr(geom, field, None)
+        overrides.pop(field, None)
+        return
+    value = evaluator(raw)
+    if value < 0:
+        raise DimensionError("A dimension must not be negative.")
+    setattr(geom, field, Decimal(str(value)))
+    overrides[field] = {"input": str(raw), "unit": unit}
+
+
+@parts_router.patch("/{part_id}/geometry")
+async def update_part_geometry(
+    part_id: uuid.UUID,
+    payload: PartGeometryUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> PartGeometryOut:
+    """Set manual geometry dims (math/unit auto-evaluated server-side, stored metric).
+
+    Partial: only provided fields change; ``null`` clears one. Each value is parsed by
+    the safe evaluator (never ``eval()``) — bad math or a negative is a clean 422."""
+    part = await _get_part_or_404(session, part_id, for_update=True)
+    geom = await _get_or_create_geometry(session, part)
+    overrides = dict(geom.overrides or {})
+    unit = payload.unit
+    # Length/area/volume follow the IN/MM toggle; weight is mass (grams).
+    evaluators: dict[str, tuple[Any, str]] = {
+        **{f: (partial(evaluate_length, default_unit=unit), unit) for f in _LENGTH_DIMS},
+        "area": (partial(evaluate_area, default_unit=unit), unit),
+        "volume": (partial(evaluate_volume, default_unit=unit), unit),
+        "weight": (partial(evaluate_mass, default_unit="g"), "g"),
+    }
+    try:
+        for field, (evaluator, unit_label) in evaluators.items():
+            if field in payload.model_fields_set:
+                _apply_dim(geom, overrides, field, getattr(payload, field), evaluator, unit_label)
+    except DimensionError as exc:
+        raise AppError("invalid_dimension", str(exc), status_code=422) from exc
+    geom.overrides = overrides
+    await session.flush()
+    return _geometry_out(part_id, geom)
+
+
+# --------------------------------------------------------------------------- #
+# BOM tree (M1.5: single root node; M4 grows depth)
+# --------------------------------------------------------------------------- #
+@parts_router.get("/{part_id}/bom")
+async def get_part_bom(
+    part_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> BomNodeOut:
+    """Return a part's BOM tree (the hierarchy rooted at its root node)."""
+    await _get_part_or_404(session, part_id)
+    tree = await build_bom_tree(session, part_id)
+    if tree is None:
+        raise AppError("not_found", "No BOM tree for this part.", status_code=404)
+    return tree
 
 
 # --------------------------------------------------------------------------- #

@@ -16,6 +16,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -27,6 +28,8 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -86,11 +89,28 @@ class AccountType(enum.StrEnum):
     vendor = "vendor"
 
 
+class ObtainMethod(enum.StrEnum):
+    """How a part/component is sourced — the make-vs-buy axis (canonical ``obtain_method``
+    enum, DB-SCHEMA.sql; M1.5). Values are **UPPERCASE** to match the DDL. ``MANUFACTURED``
+    is the default; ``PURCHASED`` drives purchased-component costing (linked at M4)."""
+
+    manufactured = "MANUFACTURED"
+    purchased = "PURCHASED"
+
+
 # Native Postgres enums — created by the migration, referenced (not re-created) here.
 _role_enum = Enum(MembershipRole, name="membership_role", create_type=False)
 _status_enum = Enum(MembershipStatus, name="membership_status", create_type=False)
 _country_enum = Enum(OrgCountry, name="org_country", create_type=False)
 _account_type_enum = Enum(AccountType, name="account_type", create_type=False)
+# UPPERCASE DB values ('MANUFACTURED'/'PURCHASED') differ from the lowercase member
+# names, so map by ``.value`` (the other enums have name == value and need no callable).
+_obtain_method_enum = Enum(
+    ObtainMethod,
+    name="obtain_method",
+    create_type=False,
+    values_callable=lambda enum_cls: [member.value for member in enum_cls],
+)
 
 
 def _pk() -> Mapped[uuid.UUID]:
@@ -348,11 +368,33 @@ class Part(Base):
         UniqueConstraint("org_id", "id", name="uq_part_org_id_id"),
         # List/archive paths filter org_id (RLS) + deleted_at; lead with org_id.
         Index("ix_part_org_deleted_at", "org_id", "deleted_at"),
+        # Part-library historical match by geometry signature (populated at M4).
+        Index("ix_part_org_geom_hash", "org_id", "geom_hash"),
     )
 
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = _org_fk()
     primary_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Identity (M1.5) — free-text, nullable, NOT unique (matching/dedup is M2;
+    # DECISIONS.md 2026-06-26 "Part identity uniqueness").
+    name: Mapped[str | None] = mapped_column(String)
+    part_number: Mapped[str | None] = mapped_column(String)
+    revision: Mapped[str | None] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_assembly: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    obtain_method: Mapped[ObtainMethod] = mapped_column(
+        _obtain_method_enum, nullable=False, server_default=ObtainMethod.manufactured.value
+    )
+    custom_attributes: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # Interrogation signature for part-library match — NULL until M4.
+    geom_hash: Mapped[str | None] = mapped_column(Text)
+    # EU dual-use export flag (DACH delta; primary home is the Part — it travels across
+    # quotes). Stored only in M1.5; runtime enforcement → M6 (DECISIONS.md 2026-06-26).
+    export_controlled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
     deleted_at: Mapped[datetime | None] = _deleted_at()
@@ -407,6 +449,92 @@ class PartFile(Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False, server_default=FileRole.supporting)
     is_redacted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = _ts()
+
+
+class PartGeometry(Base):
+    """A part's geometry — the **geometry↔Kalk contract** (PartGeometry-Attribute-Catalog;
+    M1.5). 1:1 with :class:`Part`. Stores effective **metric** dims (mm/mm²/mm³/g) that
+    Kalk reads as ``part.size_x`` etc.
+
+    Calc-vs-override (DECISIONS.md 2026-06-26): the numeric columns hold the *effective*
+    value = ``COALESCE(override, raw)``. ``raw`` is the interrogation extraction (NULL
+    until M4); ``overrides`` records which dims a human set (its keys are the column names).
+    In M1.5 (manual-only) a typed dim writes both the numeric column and its ``overrides``
+    key, so M4 interrogation fills ``raw`` without clobbering a manual value. The IN/MM
+    toggle is presentation-only — storage is always metric (DACH units invariant)."""
+
+    __tablename__ = "part_geometry"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        UniqueConstraint("part_id", name="uq_part_geometry_part"),
+        ForeignKeyConstraint(
+            ["org_id", "part_id"],
+            ["part.org_id", "part.id"],
+            name="fk_part_geometry_part_org",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    size_x: Mapped[Decimal | None] = mapped_column(Numeric)
+    size_y: Mapped[Decimal | None] = mapped_column(Numeric)
+    size_z: Mapped[Decimal | None] = mapped_column(Numeric)
+    max_dim: Mapped[Decimal | None] = mapped_column(Numeric)
+    med_dim: Mapped[Decimal | None] = mapped_column(Numeric)
+    min_dim: Mapped[Decimal | None] = mapped_column(Numeric)
+    area: Mapped[Decimal | None] = mapped_column(Numeric)
+    volume: Mapped[Decimal | None] = mapped_column(Numeric)
+    weight: Mapped[Decimal | None] = mapped_column(Numeric)
+    raw: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    overrides: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class Node(Base):
+    """An occurrence of a :class:`Part` in a BOM tree (DOMAIN-MODEL; M1.5). One Part may
+    have many Nodes; a repeated part is quoted once. ``parent_node_id`` NULL = the **root**
+    node (qty 1, linked to the root part). M1.5 populates only the root node; child nodes /
+    the BOM Builder are M4. ``root_part_id`` denormalizes the tree root for fast scoping.
+
+    Composite FKs pin both the part and the parent node to the **same org** (the parent FK
+    is MATCH SIMPLE, so a NULL ``parent_node_id`` skips the check)."""
+
+    __tablename__ = "node"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_node_org_id_id"),
+        CheckConstraint("qty_relative_to_parent > 0", name="ck_node_qty_positive"),
+        ForeignKeyConstraint(
+            ["org_id", "part_id"], ["part.org_id", "part.id"], name="fk_node_part_org"
+        ),
+        # The denormalized tree root must be a same-org part too (NOT NULL) — else a
+        # tree lookup keyed on (org_id, root_part_id) could read a rootless/cross-org node.
+        ForeignKeyConstraint(
+            ["org_id", "root_part_id"], ["part.org_id", "part.id"], name="fk_node_root_part_org"
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "parent_node_id"],
+            ["node.org_id", "node.id"],
+            name="fk_node_parent_org",
+        ),
+        Index("ix_node_parent", "parent_node_id"),
+        Index("ix_node_org_part", "org_id", "part_id"),
+        Index("ix_node_org_root_part", "org_id", "root_part_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    parent_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    qty_relative_to_parent: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    root_part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = _ts()
 
 
@@ -584,6 +712,12 @@ class Component(Base):
     is_root_component: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # M1.5 structural extensions. ``process_id``/``material_id``/``purchased_component_id``
+    # are deferred to M1.7/M4 (their tables don't exist yet).
+    obtain_method: Mapped[ObtainMethod] = mapped_column(
+        _obtain_method_enum, nullable=False, server_default=ObtainMethod.manufactured.value
+    )
+    is_assembly: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
