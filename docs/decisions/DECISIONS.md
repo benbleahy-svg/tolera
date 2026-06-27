@@ -19,6 +19,48 @@
 
 ---
 
+## [2026-06-26] PartGeometry manual-dims storage model (M1.5)
+
+**Status:** RESOLVED
+**Question:** How are M1.5's **manual** geometry dims stored, given Kalk reads `part.size_x` etc. (M1.9/M1.10) and M4 interrogation must not clobber a human's manual value (the tier-1 calc-vs-override invariant)?
+**Options considered:** (a) effective numeric columns + `overrides` jsonb + `raw` jsonb (null until M4); (b) numeric columns only now, add raw/overrides at M4; (c) pure `overrides` jsonb, no numeric columns.
+**Decision:** **(a).** Follow `DB-SCHEMA.sql` as written: a 1:1 `part_geometry` table with numeric `size_x/y/z`, `max_dim/med_dim/min_dim`, `area`, `volume`, `weight` (the **effective** metric value Kalk reads), plus `raw jsonb` (NULL until M4 interrogation) and `overrides jsonb` (records which fields a human set). In M1.5 a manual dim writes the numeric column **and** the corresponding `overrides` key. Effective = `COALESCE(override, raw)`; the materialised numeric column is that result. Preserves the calc-vs-override invariant now so M4 only fills `raw` — no reshape, no backfill after Kalk/golden tests depend on the columns. `weight` and `geom_hash` are inert in M1.5 (no density until M1.7; no interrogation until M4). Storage is always metric (mm/mm²/mm³/g); the IN/MM toggle is **presentation-only** (DACH units invariant — never persists imperial).
+**Resolved:** 2026-06-26 (/block M1.5 grill — Tier-2 schema + tier-1 calc-vs-override invariant)
+**Affects:** M1.5 (schema), M1.9/M1.10 (Kalk part object), M4 (interrogation fills `raw`).
+
+## [2026-06-26] PartGeometry storage units — grams + mm, not the general kg (M1.5)
+**Status:** RESOLVED
+**Question:** CLAUDE.md §5 states the metric convention as **mm / kg / deg**, but the `PartGeometry-Attribute-Catalog` (the geometry↔Kalk contract) specifies `part.weight` in **g** and `part.density` in **g/cm³**. Which unit does `part_geometry.weight` store? (Units/data-integrity — flagged in M1.5 ship review; block-and-log §6, never guess on units.)
+**Decision:** **Store grams** (and density g/cm³, dims mm/mm²/mm³) per the **PartGeometry catalog** — the more-specific subsystem contract wins for its own internals (CLAUDE.md §2), and it *is* the Kalk `part` object surface (M1.9). Rationale: (1) internal consistency — `weight(g) = density(g/cm³) × volume(cm³)`, all gram/mm-based; storing weight in kg while density stays g/cm³ would inject a 1000× bridge into every Kalk/DFM formula; (2) PP `part.weight` parity — Kalk formulas ported from P3L expect grams, so kg would make them silently 1000× off. CLAUDE.md §5's "kg" is the **human-display** convention (a part weight shown to a user may render in kg); storage stays canonical-metric per the catalog, displayed per locale later — the same store-canonical / present-converted split as the mm/IN dimension toggle. Weight is inert in M1.5 (no density until M1.7, no Kalk until M1.9), so this is settled before any consumer depends on it.
+**Resolved:** 2026-06-26 (/ship M1.5 — CodeRabbit raised the kg-vs-g conflict; resolved to the catalog with rationale)
+**Affects:** M1.5 (`part_geometry.weight`), M1.7 (density g/cm³), M1.9 (Kalk `part.weight`/`part.density`), later UI (kg display).
+
+## [2026-06-26] Safe evaluation of dimension math/unit inputs (M1.5)
+
+**Status:** RESOLVED
+**Question:** The spec requires dim fields to auto-evaluate math (`2.27 + .359`) and typed units (`1 meter`). This evaluates **user input** — how, safely, and where is it authoritative?
+**Options considered:** (a) server-authoritative restricted-AST arithmetic + hand-rolled unit allow-list; (b) same but `pint` for units; (c) client-side preview, server stores a plain number only.
+**Decision:** **(a).** A server-authoritative restricted-AST evaluator: numbers and `+ - * / ( )` only — **no** names, calls, attributes, subscripts, or dunders — plus a small unit allow-list (`mm/cm/m/in/ft` → mm) with hand-rolled factors. Reject anything outside the grammar with a clean 422. **Never `eval()`.** The client may mirror it for a live preview, but the server validates and stores; the acceptance criterion is met at the API layer (where golden/fixture tests live). Hand-rolled over `pint` because the unit surface is tiny (5 length units) and a small factor table is trivially auditable for a security-sensitive parser. This is deliberately **not** Kalk (M1.8) — strictly arithmetic, no variable/function references.
+**Resolved:** 2026-06-26 (/block M1.5 grill — security-sensitive: no arbitrary code execution on dim input)
+**Affects:** M1.5 (dimension input parser + tests), M1.8 (Kalk is the separate, sandboxed DSL).
+
+## [2026-06-26] Export-controlled flag home (M1.5)
+
+**Status:** RESOLVED
+**Question:** Where does the export-controlled flag live? `quote_item.export_controlled` already exists (M1.4); DACH delta reframes ITAR → EU dual-use.
+**Options considered:** (a) add `part.export_controlled`, keep `quote_item.export_controlled` as a line-level echo, defer org-level `export_regime` to M6; (b) part-level only; (c) add org-level `export_regime` enum now too.
+**Decision:** **(a).** Add `part.export_controlled` as the primary home (the flag travels with the part across quotes); keep the existing `quote_item.export_controlled` as the line-level echo/override. Both are booleans, stored, **no runtime enforcement** in M1.5; UI checkbox labeled for DACH (EU dual-use, not ITAR). The org-level `export_regime` enum (`none|eu_dual_use|itar`) is deferred to **M6** (export-control connectors) — consistent with the 2026-06-24 "M0.5 seed scope" deferral. Both columns are already in the canonical `DB-SCHEMA.sql`, so this is not pulling scope forward.
+**Resolved:** 2026-06-26 (/block M1.5 grill)
+**Affects:** M1.5 (schema/UI), M6 (export-control connectors + org `export_regime`).
+
+## [2026-06-26] Part identity uniqueness (M1.5)
+
+**Status:** RESOLVED
+**Question:** Should `part_number`/`revision` be uniquely constrained in M1.5?
+**Decision:** **No.** `name`, `part_number`, `revision`, `description` are nullable free-text with **no** unique constraint in M1.5. Part-library matching/dedup is explicitly M1.5 scope-out (→ M2); RFQ intake (M3) also produces number-less parts. Adding uniqueness later is a clean forward migration; M2 owns identity/matching semantics.
+**Resolved:** 2026-06-26 (/block M1.5 grill)
+**Affects:** M1.5 (schema), M2 (part-library matching).
+
 ## [2026-06-26] Quote status enum — final value set (M1.4)
 
 **Status:** RESOLVED
