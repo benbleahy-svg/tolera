@@ -759,6 +759,58 @@ class QuoteItem(Base):
     updated_at: Mapped[datetime] = _updated_ts()
 
 
+class ComponentQuantity(Base):
+    """One **quantity break** of a component — the per-break cell every downstream
+    cost/price renders into (DOMAIN-MODEL "the richest entity"; M1.6). M1.6 lands only
+    the **quantity** triple; the cost/price/discount/profit/lead-time columns from
+    ``DB-SCHEMA.sql`` are added by their owning milestones (M1.7/M1.10/M1.11) via
+    forward ALTER — and the money representation they use is the open question logged
+    in DECISIONS.md 2026-06-27 (so no money column lands here yet).
+
+    The three quantities are the geometry↔Kalk contract's ``part.qty`` / ``part.bom_qty``
+    list backing (`#partview` Pricing & Quantities):
+
+    * ``quantity`` — the **customer-requested** break value (1, 5, 20 …).
+    * ``make_quantity`` — qty to **make** (``part.qty``); = requested qty propagated
+      through tree position, plus scrap. **M1.6 root-only identity:** equals ``quantity``
+      (no children, no scrap yet — real tree/scrap math is M4).
+    * ``deliver_quantity`` — qty to **deliver** (``part.bom_qty``); also = ``quantity``
+      for the root in M1.6. ``part.innate_quantity`` (deliver per one top-level part = 1
+      for the root) is **derived**, not stored.
+
+    Breaks live on the **root component** only in M1.6 (child-component cells arrive with
+    the BOM Builder at M4). ``UNIQUE (component_id, quantity)`` forbids duplicate breaks
+    (a deliberate divergence from PP's KB, which allows them — the schema, a higher tier,
+    governs; DECISIONS.md/M1.6 grill). Composite same-org FK pins the cell to its
+    component's org."""
+
+    __tablename__ = "component_quantity"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_component_quantity_component_org",
+            ondelete="CASCADE",
+        ),
+        # No duplicate breaks for one component (the index-aligned lists key on the
+        # quantity value); also the M1.7+ cost-cell tables FK onto (component, quantity).
+        UniqueConstraint("component_id", "quantity", name="uq_component_quantity_comp_qty"),
+        CheckConstraint("quantity > 0", name="ck_component_quantity_positive"),
+        Index("ix_component_quantity_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Nullable per DB-SCHEMA (M4 may leave them unresolved mid-interrogation); the M1.6
+    # service always populates them (= quantity) so the iterators never align a NULL.
+    make_quantity: Mapped[int | None] = mapped_column(Integer)
+    deliver_quantity: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
 class QuoteStatusEvent(Base):
     """Append-only audit of quote status changes (DECISIONS.md 2026-06-26). One row per
     transition — and one for creation (``from_status = NULL → draft``). Home of the

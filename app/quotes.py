@@ -43,6 +43,13 @@ from .models import (
     UserOrgMembership,
 )
 from .parts import create_root_part
+from .quantities import (
+    ChangeQuantitiesRequest,
+    QuantityCellOut,
+    create_default_break,
+    load_grids,
+    set_quantity_breaks,
+)
 from .quote_filters import (
     FilterClause,
     SortClause,
@@ -196,7 +203,8 @@ class QuoteTransitionRequest(BaseModel):
 
 
 class QuoteItemOut(BaseModel):
-    """A line item (root component) on a quote."""
+    """A line item (root component) on a quote, with its per-quantity-break grid (M1.6 —
+    the columns every downstream cost/price renders into; ascending by quantity)."""
 
     id: uuid.UUID
     position: int
@@ -205,6 +213,7 @@ class QuoteItemOut(BaseModel):
     workflow_status: QiWorkflowStatus
     was_won: bool
     export_controlled: bool
+    quantities: list[QuantityCellOut]
 
 
 class WorkflowTracker(BaseModel):
@@ -343,6 +352,8 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
             .order_by(QuoteItem.position)
         )
     ).all()
+    # One query for every line item's quantity-break grid (avoids an N+1 over items).
+    grids = await load_grids(session, quote.org_id, [qi.root_component_id for qi, _ in rows])
     items = [
         QuoteItemOut(
             id=qi.id,
@@ -352,6 +363,7 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
             workflow_status=qi.workflow_status,
             was_won=qi.was_won,
             export_controlled=qi.export_controlled,
+            quantities=grids.get(qi.root_component_id, []),
         )
         for qi, part_id in rows
     ]
@@ -531,6 +543,8 @@ async def add_quote_item(
     component = Component(org_id=quote.org_id, part_id=part.id, is_root_component=True)
     session.add(component)
     await session.flush()
+    # Every line item opens with a single qty=1 break — the grid the rest of M1 fills.
+    await create_default_break(session, quote.org_id, component.id)
     max_position = await session.scalar(
         select(func.max(QuoteItem.position)).where(QuoteItem.quote_id == quote.id)
     )
@@ -546,6 +560,46 @@ async def add_quote_item(
     if quote.started_at is None:
         quote.started_at = datetime.now(UTC)
     await session.flush()
+    return await _load_detail(session, quote)
+
+
+@quotes_router.put("/{quote_id}/items/{item_id}/quantities")
+async def change_quantities(
+    quote_id: uuid.UUID,
+    item_id: uuid.UUID,
+    payload: ChangeQuantitiesRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> QuoteDetail:
+    """ "Change quantities" — reshape a line item's quantity breaks to the requested set
+    (spec ``#partview`` Pricing & Quantities). Draft-only; the response carries the
+    reshaped per-qty grid. The break set must be non-empty, positive, and unique (M1.6)."""
+    # Lock the quote first (same TOCTOU reasoning as add-item): gate editability against a
+    # concurrent transition/trash, and serialise concurrent quantity edits on this quote.
+    quote = await session.scalar(
+        select(Quote)
+        .where(Quote.id == quote_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if quote is None:
+        raise AppError("not_found", "Quote not found.", status_code=status.HTTP_404_NOT_FOUND)
+    if not _is_editable(quote):
+        raise AppError(
+            "quote_locked",
+            "Quantities can only be changed while the quote is a draft.",
+            status_code=409,
+        )
+    # RLS scopes the lookup to the active org; the quote_id check rejects an item that
+    # belongs to a different (same-org) quote.
+    item = await session.get(QuoteItem, item_id)
+    if item is None or item.quote_id != quote_id:
+        raise AppError(
+            "not_found",
+            "Line item not found on this quote.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    await set_quantity_breaks(session, quote.org_id, item.root_component_id, payload.quantities)
     return await _load_detail(session, quote)
 
 
