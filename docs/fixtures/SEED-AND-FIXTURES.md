@@ -15,7 +15,7 @@ A new org is provisioned from a single idempotent **`seed.json`** (one per org; 
 - `users` + `user_org_memberships` (admin + estimators/salespeople); ingest address `fechner@rfq.tolera.eu`.
 
 ### 2. Materials tree (DACH DIN/EN)
-- **Classes:** Metal, Polymer, Composite, Sand, Wax, Additive.
+- **Classes:** Metal, Polymer, Composite, Sand, Wax, Additive, **Holz** (wood — quotable via outside-process/Buy-mode, no internal machining rates seeded), **Sonstige** (Fremdmaterial catch-all for detected-but-unclassifiable bodies; target of Lens pipeline-5 fallback suggestions). *(Holz + Sonstige added per `DECISIONS.md` 2026-07-07 — Foreign materials.)*
 - **Families/materials** keyed on **Werkstoffnummer** + EN name + AISI alias, e.g.:
   - `1.4301` / X5CrNi18-10 / 304 (stainless); `1.4404` / X2CrNiMo17-12-2 / 316L.
   - `1.0038` / S235JR / A36 (structural steel); `1.0570` / S355J2.
@@ -66,6 +66,7 @@ One `custom_interrogation` per Core-4 family seeded with the **default threshold
     <fixture>.extraction.json      # expected Lens findings
     <fixture>.pricing.json         # expected unit/total price per quantity
     <fixture>.bom.json             # expected BomNode tree (assemblies)
+    <fixture>.inclusion.json       # expected per-component material + quote_inclusion (multi-material assemblies)
 ```
 
 **Golden schemas (bind to the engine specs):**
@@ -73,6 +74,7 @@ One `custom_interrogation` per Core-4 family seeded with the **default threshold
 - **Extraction** (`AI-LENS-ENGINE-SPEC §8`): print → `{part_number, revision, material(DIN), units:mm, holes[…], control_frames[…], tolerances[…]}`; assert value + confidence; **never-hallucinate** check.
 - **Pricing** (`PRICING-ENGINE-SPEC §3/§7`): part + router + qty breaks → `{unit_price, total_price}` per quantity; assert exact (the verified demo numbers + Fechner cases); margin/markup unit tests.
 - **BOM:** assembly PDF/CAD → expected multi-level tree (parts, nodes, quantities); repeat-part → single shared component + correct make-qty.
+- **Quote inclusion** (`#quote-inclusion`, M4.9b/M4.10b): one **multi-material assembly STEP** (wood frame + stainless components + hardware, material hints in occurrence names/metadata) → `.inclusion.json` asserting per-component material family + `quote_inclusion` after accepting the whitelist suggestion, plus a stainless-only `.pricing.json` (excluded bodies contribute €0.00 in every cost category; excluded components absent from customer-facing DTOs).
 
 **Harness behavior:**
 - A test runner seeds a clean `fechner`-like org from `seed.json`, ingests each fixture, runs interrogation + extraction + pricing, and diffs outputs against `/golden`.

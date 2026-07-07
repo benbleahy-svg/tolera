@@ -136,12 +136,12 @@ M0 Foundations ──┬─> M1 Quote core + Pricing ──┬─> M2 Files & Vi
 | [M1-quote-core-pricing.md](M1-quote-core-pricing.md) | Quote core + full pricing engine | 14 | Full | Low–Med |
 | [M2-files-viewers.md](M2-files-viewers.md) | PDF/3D viewers, Part Library | 12 | Full | Med |
 | [M3-intelligence.md](M3-intelligence.md) | Lens, Rules, email ingest/threading | 11 | Full | Med |
-| [M4-geometry-manufacturing.md](M4-geometry-manufacturing.md) | GeometryService, sheet metal, nesting, BOM | 14 | Spike-gated | **High** |
+| [M4-geometry-manufacturing.md](M4-geometry-manufacturing.md) | GeometryService, sheet metal, nesting, BOM, quote-inclusion filter | 16 | Spike-gated | **High** |
 | [M5-outputs-orders.md](M5-outputs-orders.md) | Digital quote, checkout, PDF, orders | 12 | Full | Med |
-| [M6-differentiators-hardening.md](M6-differentiators-hardening.md) | Dashboard, Vendor RFQ, adapters, pilot | 10 | Full | Med |
+| [M6-differentiators-hardening.md](M6-differentiators-hardening.md) | Dashboard, Vendor RFQ, adapters (Würth · thyssenkrupp · part quick-quote), pilot | 12 | Full | Med |
 | ↳ M7 (appendix in M6 file) | **Analytics query-builder** — deferred, post-pilot | ~6 | Outline | — |
 
-≈ **78 blocks** (+ deferred post-pilot work: a self-serve onboarding wizard and the M7 analytics milestone). At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
+≈ **82 blocks** (+ deferred post-pilot work: a self-serve onboarding wizard and the M7 analytics milestone). *(2026-07-07: +4 — M4.9b/M4.10b material-scoped quoting; M6.7b thyssenkrupp materials4me; M6.7c CNC part quick-quote.)* At one block per focused session, that is the order of the pilot effort the spec scopes at 3–6 months solo + Claude Code. **M7 (Analytics)** is a resolved-scope but sizeable build (`DECISIONS.md` E4-k) that the spec's M0–M6 table doesn't slot; it is **not on the pilot critical path** and shares no golden-thread segment — sequence it during or after the pilot at your discretion.
 
 The 14 demos that define *done* are mapped to their implementing blocks, screenshots, and replay fixtures in **[DEMOS-TRACEABILITY.md](DEMOS-TRACEABILITY.md)** — the acceptance oracle.
 
