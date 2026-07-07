@@ -34,6 +34,7 @@
   - [BOM Builder](Bid-Factory-Build-Spec.html#bombuilder) — `#bombuilder`
   - [Assembly Data Model](Bid-Factory-Build-Spec.html#assemblies-model) — `#assemblies-model`  →  **governs:** folded-subspecs/DOMAIN-MODEL.md
   - [Assembly & Bulk Edit](Bid-Factory-Build-Spec.html#assembly) — `#assembly`
+  - [Material-Scoped Quoting (Angebotsumfang) ✦](Bid-Factory-Build-Spec.html#quote-inclusion) — `#quote-inclusion`
   - [Sheet-Metal Engine](Bid-Factory-Build-Spec.html#sheetmetal) — `#sheetmetal`  →  **governs:** folded-subspecs/INTERROGATION-ENGINE-SPEC.md
   - [Nesting Module](Bid-Factory-Build-Spec.html#nesting) — `#nesting`  →  **governs:** folded-subspecs/INTERROGATION-ENGINE-SPEC.md
   - [Costing & Pricing](Bid-Factory-Build-Spec.html#costing) — `#costing`  →  **governs:** folded-subspecs/PRICING-ENGINE-SPEC.md + folded-subspecs/KALK-REFERENCE.md
@@ -45,6 +46,7 @@
   - [Contacts & Accounts](Bid-Factory-Build-Spec.html#contacts) — `#contacts`
   - [Collaboration & Sourcing](Bid-Factory-Build-Spec.html#collab) — `#collab`
   - [Vendor RFQ Portal ✦](Bid-Factory-Build-Spec.html#vendor-rfq) — `#vendor-rfq`  →  **governs:** folded-subspecs/INTEGRATION-API-CONTRACT.md
+  - [Live Sourcing Adapters ✦ (MaterialPricingFeed · PartQuotingAdapter)](Bid-Factory-Build-Spec.html#sourcing-adapters) — `#sourcing-adapters` · `#material-pricing-feed` · `#part-quoting`
 
 ## Intelligence
 

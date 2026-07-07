@@ -899,6 +899,7 @@ CREATE TYPE membership_role     AS ENUM (&#x27;admin&#x27;,&#x27;estimator&#x27;
 CREATE TYPE account_type        AS ENUM (&#x27;customer&#x27;,&#x27;vendor&#x27;);
 CREATE TYPE vat_profile         AS ENUM (&#x27;domestic&#x27;,&#x27;eu_b2b_reverse_charge&#x27;,&#x27;non_eu&#x27;,&#x27;kleinunternehmer&#x27;,&#x27;tax_exempt&#x27;);
 CREATE TYPE obtain_method       AS ENUM (&#x27;MANUFACTURED&#x27;,&#x27;PURCHASED&#x27;);
+CREATE TYPE quote_inclusion     AS ENUM (&#x27;quoted&#x27;,&#x27;excluded&#x27;,&#x27;customer_supplied&#x27;);  -- Angebotsumfang (2026-07-07; forward migration in M4.10b)
 CREATE TYPE quote_status        AS ENUM (&#x27;draft&#x27;,&#x27;sent&#x27;,&#x27;won&#x27;,&#x27;lost&#x27;,&#x27;expired&#x27;);
 CREATE TYPE qi_workflow_status  AS ENUM (&#x27;not_started&#x27;,&#x27;in_progress&#x27;,&#x27;on_hold&#x27;,&#x27;completed&#x27;,&#x27;no_quote&#x27;);
 CREATE TYPE order_status        AS ENUM (&#x27;confirmed&#x27;,&#x27;in_production&#x27;,&#x27;shipped&#x27;,&#x27;delivered&#x27;,&#x27;cancelled&#x27;);
@@ -1133,7 +1134,8 @@ CREATE TABLE node (                            -- occurrence of a part in a tree
   part_id uuid NOT NULL REFERENCES part(id),
   parent_node_id uuid REFERENCES node(id),     -- null = root node (qty 1)
   qty_relative_to_parent int NOT NULL DEFAULT 1,
-  root_part_id uuid                            -- denormalized tree root for fast scoping
+  root_part_id uuid,                           -- denormalized tree root for fast scoping
+  cad_metadata jsonb                           -- raw STEP product-structure metadata (occurrence name, material/density properties) captured by decompose_bom (M4.9b) — input to Lens pipeline 5 (#quote-inclusion)
 );
 CREATE INDEX ON node (parent_node_id);
 
@@ -1170,6 +1172,7 @@ CREATE TABLE component (
   process_id uuid REFERENCES process(id),
   material_id uuid REFERENCES material(id),
   obtain_method obtain_method NOT NULL DEFAULT &#x27;MANUFACTURED&#x27;,
+  quote_inclusion quote_inclusion NOT NULL DEFAULT &#x27;quoted&#x27;,  -- Angebotsumfang: &#x27;excluded&#x27; rolls up zero + never serialized to customer-facing outputs (#quote-inclusion)
   is_root_component boolean NOT NULL DEFAULT false,
   is_assembly boolean NOT NULL DEFAULT false,
   purchased_component_id uuid                   -- FK below
@@ -2136,6 +2139,36 @@ Review item: Open ─▶ Resolved</pre>
   <div class="note"><strong>DB model implications:</strong> <code>Part</code> (geometry, files), <code>Node</code> (part_id, parent_node_id, quantity, flat_qty), <code>Component</code> (node_id, quote_scope_id, materials[], operations[], customer_qty), <code>QuoteItem</code> (quote_id, root_component_id). Flat qty must be recomputed on any node move. Pricing is applied only at the root component level and displayed on the digital quote; child component costs roll up automatically.</div>
 </section>
 
+<section id="quote-inclusion">
+  <h2>Material-Scoped Quoting — Quote Inclusion (Angebotsumfang)</h2>
+  <p class="crumbs"><span class="scr">Net-new ✦ (no PP equivalent) — product design session 2026-07-07; see DECISIONS.md → Component quote inclusion</span></p>
+  <p><strong>Motivating case:</strong> a customer sends <em>one</em> STEP file of a whole construction in mixed materials — a wooden frame, stainless-steel components, purchased hardware — but the shop quotes <strong>only the stainless components</strong>. The assembly must stay visible and navigable as the customer sent it, while everything outside the shop's scope contributes nothing to cost and never appears on the customer-facing quote.</p>
+
+  <h3>Data model — <code>component.quote_inclusion</code></h3>
+  <p>A per-<strong>Component</strong> enum (pricing lives on the Component), <strong>orthogonal</strong> to <code>obtain_method</code>. Deliberately named <code>quote_inclusion</code>, not "quote scope" — PP terminology already uses <em>quote scope</em> for the component→quote link (<a href="#assemblies-model">Assembly Data Model</a>).</p>
+  <table>
+    <tr><th>Value</th><th>Meaning</th><th>Cost roll-up</th><th>Customer-facing outputs</th></tr>
+    <tr><td><code>quoted</code> (default)</td><td>In scope — the shop makes or buys it</td><td>Normal contribution per <code>obtain_method</code></td><td>Shown</td></tr>
+    <tr><td><code>excluded</code></td><td>Out of scope — not the shop's material/work (e.g. the wooden frame)</td><td><strong>Zero to every cost category</strong>; skipped by interrogation-driven costing and nesting</td><td><strong>Vanishes entirely</strong> — never serialized into the digital quote, quote PDF, buyer-portal or e-mail DTOs (decided: no "nicht angeboten" placeholder)</td></tr>
+    <tr><td><code>customer_supplied</code></td><td><em>Beistellung</em> — present in the build, provided by the customer</td><td>Zero material/purchase cost; <strong>may carry assembly/handling operations</strong>, which roll up normally</td><td>Shown (as customer-supplied), since its handling is billed</td></tr>
+  </table>
+  <div class="warn"><strong>Invariants:</strong> an <code>excluded</code> component stays fully visible <em>internally</em> — greyed/ghosted in the BOM tree and 3D viewer (reuse the viewer's body-hide/box affordance), restorable with one click; flipping <code>quote_inclusion</code> is always reversible and re-runs the roll-up; suppression from customer outputs is enforced <strong>server-side at the DTO layer</strong> (not CSS). Root components: a root with <code>quote_inclusion='excluded'</code> is invalid — declining a whole line item remains <code>qi_workflow_status='no_quote'</code>.</div>
+
+  <h3>Detection — GeometryService extracts, Lens suggests, human accepts</h3>
+  <p><code>decompose_bom()</code> (<a href="#geometryservice">GeometryService</a>) additionally returns per-body <strong>raw CAD metadata</strong> — product-structure/occurrence names and, where the STEP (AP214/AP242) carries them, material/density properties — persisted as <code>node.cad_metadata</code>. <strong>Lens pipeline 5</strong> (<a href="#lens-engine">Lens engine</a>) classifies each node from that metadata (e.g. <code>Platte_Eiche_18mm</code> → Holz; <code>1.4301</code>/<code>VA</code>/<code>Edelstahl</code> → stainless family) and emits per-component <code>ExtractionFinding</code>s of type <code>material</code> and <code>quote_inclusion</code> — <strong>suggestions only</strong> (AI-Governor, purple, explicit Accept; never-hallucinate: a Werkstoffnummer not present in name/metadata is never invented; unclassifiable bodies suggest the <em>Sonstige (Fremdmaterial)</em> catch-all class). The boundary holds: geometry reads facts, Lens infers, the human confirms.</p>
+
+  <h3>Scope-selection UX — the Angebotsumfang panel</h3>
+  <ul>
+    <li><strong>Group-by-material panel</strong> on the assembly line item (beside the Assembly Components section): components bucketed by detected/assigned <strong>material family</strong>, each bucket showing count + thumbnail strip + roll-up cost.</li>
+    <li><strong>One-click family filter:</strong> "Nur anbieten: ⟨family⟩" (e.g. <em>nichtrostender Stahl 1.4xxx</em>) flips every component outside the selection to <code>excluded</code> in one action. Granularity is <strong>material family</strong> (decided — a job may contain stainless <em>and</em> mild steel with only stainless wanted), with class-level convenience ("alle Metalle") as a secondary action.</li>
+    <li><strong>Individual toggles:</strong> every component row (bucket rows and the BOM tree ⋮ menu) carries its own <code>quote_inclusion</code> control — the family filter is a bulk edit, never a lock; per-part corrections are first-class.</li>
+    <li><strong>Org default:</strong> an org-level <strong>processed-material-families whitelist</strong> ("Bearbeitete Werkstoffe", Configure → Materials). When set, Lens pre-suggests the entire scope (whitelisted families → <code>quoted</code>, others → <code>excluded</code>) so the estimator's job collapses to <strong>one Accept</strong> — with the buckets/toggles available for corrections before or after.</li>
+    <li>The viewer ghosts excluded bodies; the roll-up header shows "N von M Komponenten im Angebotsumfang".</li>
+  </ul>
+  <div class="note"><strong>Build implications:</strong> <code>quote_inclusion</code> enum + column ship as a <strong>forward reversible migration in M4.10b</strong> (M1.5/M1.6 already shipped — stub-then-extend precedent); roll-up math needs no new mechanism (an excluded child simply contributes zero, like the existing rollup-to-root); customer-facing DTO suppression asserted in M5 output tests; seed adds the <strong>Holz</strong> class (wood parts <em>are</em> quotable — outsourced/Buy-mode, externally processed) and the <strong>Sonstige (Fremdmaterial)</strong> catch-all (DECISIONS.md 2026-07-07); golden fixture: a multi-material assembly STEP with a goldens file asserting per-component material + inclusion + the root price excluding the foreign bodies.</div>
+  <div class="dach"><b>DACH:</b> UI labels German-first — <em>Angebotsumfang</em> (quote scope), <em>Beistellung / vom Kunden beigestellt</em> (customer-supplied), <em>Fremdmaterial</em> (foreign material). Material families keyed on Werkstoffnummer ranges (nichtrostende Stähle = 1.4xxx).</div>
+</section>
+
 <section id="assembly">
   <h2>Assembly Components &amp; Bulk Edit</h2>
   <p class="crumbs"><span class="scr">SS 07/13 + 9e29bca8 / d6928e11</span> <a class="kb" href="https://help.paperlessparts.com/s/article/quoting-children-of-assemblies-as-separate-parts" target="_blank">KB: quoting-children-of-assemblies-as-separate-parts</a> <a class="kb" href="https://help.paperlessparts.com/s/article/add-an-existing-part-in-your-library-to-an-assembly-bom" target="_blank">KB: add-an-existing-part-in-your-library-to-an-assembly-bom</a></p>
@@ -2149,7 +2182,7 @@ Review item: Open ─▶ Resolved</pre>
   <p>Each level shows "Showing rollup cost to parent" (or "Showing cost without rollup") and a Node Qty column; a <strong>Flat Qty</strong> column shows the flattened per-assembly quantity. Per-qty cost columns appear to the right. Actions: ADD COMPONENTS TO TOP LEVEL ▾, EDIT BOM, BUILD BOM STRUCTURE, ADD PURCHASED COMPONENTS. Component Summary rolls up qty + cost across the quantity columns.</p>
 
   <h3>Component context menu (⋮)</h3>
-  <p>Each component row's ⋮ menu: <span class="tag">Update process / material / finish</span> <span class="tag">Update workflow status</span> <span class="tag">Copy pricing</span> — and for a manufactured component <span class="tag">Convert to purchased component</span> <span class="tag" style="color:#fca5a5">Delete component</span>. <span class="scr">SS DemoL 02</span></p>
+  <p>Each component row's ⋮ menu: <span class="tag">Update process / material / finish</span> <span class="tag">Update workflow status</span> <span class="tag">Set quote inclusion (Angebotsumfang)</span> <span class="tag">Copy pricing</span> — and for a manufactured component <span class="tag">Convert to purchased component</span> <span class="tag" style="color:#fca5a5">Delete component</span>. <span class="scr">SS DemoL 02</span> Quote-inclusion semantics: <a href="#quote-inclusion">Material-Scoped Quoting</a>.</p>
 
   <h3>Convert to Purchased Component (Smart Match)</h3>
   <p>"Convert to purchased component" opens a modal that matches the component against the OEM catalog + previously-used purchased components, rather than inline editing. <span class="scr">SS DemoL 03</span></p>
@@ -2994,6 +3027,32 @@ COST = runtime * rate * part.qty</pre>
     </ul>
   </div>
 </section>
+
+<section id="sourcing-adapters">
+  <h2>Live Sourcing Adapters — Material Pricing Feed &amp; Part Quick-Quote</h2>
+  <p class="crumbs"><span class="scr">Net-new ✦ — product design session 2026-07-07; extends the <a href="#collab">Collaboration &amp; Sourcing</a> <code>SupplierIntegration</code> abstraction and the Würth adapter pattern (DECISIONS.md)</span></p>
+  <p>Two further capabilities behind the shared, <strong>mock-first</strong> <code>SupplierAdapter</code> interface (fixture JSON is the contract; real credentials slot in with no code change). Both are pilot-scoped adapters (M6.7b / M6.7c), not the full post-pilot live-pricing grid.</p>
+
+  <h3 id="material-pricing-feed">MaterialPricingFeed — thyssenkrupp materials4me (raw steel)</h3>
+  <p>The raw-material counterpart to Würth's fastener/C-parts lane — implements the <code>MaterialPricingFeed</code> concept (the reference product's "Vendor RFQs [Beta]" nav = live material prices from Online Metals + TK; see the note under <a href="#integrations">Integrations</a>). Surface decision: <strong>materials4me</strong> (thyssenkrupp Materials Services' shop — public prices), <em>not</em> thyssenkrupp Steel Europe contract-mill (no public API); access channel is OPEN in DECISIONS.md.</p>
+  <ul>
+    <li><strong>Request:</strong> keyed on <strong>Werkstoffnummer + product form</strong> (sheet/plate/bar/tube) <strong>+ dimensions + quantity</strong>; adapter capability <code>availability_pricing</code>, qty-break aware.</li>
+    <li><strong>Response → material cost:</strong> feeds <code>material.cost_per_volume</code> / <code>cost_per_area</code> as <strong>calc_</strong> values with a "Pricing updated ⟨timestamp⟩" stamp — the calc-vs-override invariant holds (a manual price is never clobbered).</li>
+    <li><strong>Freeze semantics unchanged (E4-d):</strong> a live price update never silently reprices an existing draft/revision — it lands on <em>new</em> quotes and via explicit <strong>Refresh Pricing / Bulk Refresh</strong>; a material left unpriced by the feed falls into the missing-rates warning (M1.14).</li>
+    <li><strong>Degradation:</strong> timeout/error → last-known price + stale badge; never blocks costing.</li>
+  </ul>
+
+  <h3 id="part-quoting">PartQuotingAdapter — CNC-milling quick quotes (instant outside pricing)</h3>
+  <p>Instant quotes for parts the shop outsources (or wants benchmarked) — an <strong>automated vendor inside the Vendor RFQ funnel</strong>, not a new pricing pathway.</p>
+  <ul>
+    <li><strong>Request:</strong> STEP file + material + qty breaks + tolerance/finish class. <strong>Response:</strong> price per break + lead time (+ optional "cannot quote").</li>
+    <li><strong>Lands in the <a href="#vendor-rfq">Vendor Quotes panel</a></strong> beside human vendor replies, tagged Source = <code>instant</code>; applied via the same one-click <strong>Apply → Outside-Services cost / Buy mode</strong> path — one price-application code path, one audit trail, one RFQ History.</li>
+    <li><strong>Counterparty-agnostic contract:</strong> the fixture models both the shop's own vendor network (recommended first target) and marketplace endpoints — OPEN in DECISIONS.md.</li>
+  </ul>
+  <div class="warn"><strong>Mandatory external-send gate (decided 2026-07-07):</strong> customer CAD leaving the tenant is an outward disclosure. Every instant-quote send requires (1) <strong>explicit per-send confirmation</strong> by the estimator, (2) the choice of the <strong>redacted</strong> file variant (M2.4), and (3) <strong>export-control screening first</strong> — a dual-use/export-flagged part is <em>never</em> auto-sent, enforced in the adapter layer (not the UI) and audit-logged (M6.9). Same posture as the vendor-RFQ per-vendor file toggles.</div>
+  <div class="dach"><b>DACH:</b> prices EUR (CHF via region service); DPA/AVV + sub-processor listing for any live counterparty; GDPR: part files under the shop's supplier agreements, marketplace targets need their own assessment before go-live.</div>
+</section>
+
 <hr>
 <h2 style="font-size:30px;border:none">Intelligence Layer</h2>
 
@@ -3061,7 +3120,7 @@ COST = runtime * rate * part.qty</pre>
 
   <h3 id="lens-engine">Lens engine internals</h3>
   <div class="kbnote"><span class="kb">folded from AI-LENS-ENGINE-SPEC.md</span> The third hard subsystem (alongside GeometryService + Kalk). Lens reads <strong>2D prints, PDFs, emails, file metadata</strong> (text + vision AI); the <a href="#geometryservice">GeometryService</a> reads <strong>3D solid bodies</strong> (and MBD/PMI). Lens does NOT parse DXF/DWG GD&amp;T or MBD/PMI. Lens outputs are <strong>suggestions</strong> (AI-Governor, purple 55% opacity, explicit Accept) — <strong>never fed directly into Kalk costing</strong>; they inform the human + <a href="#rules">Rules</a>.</div>
-  <p>Four pipelines: (1) file processing (every upload); (2) email/RFQ ingest (§1 above); (3) document extraction ("Found in Files", §2); (4) BOM detection &amp; assembly building (§4).</p>
+  <p>Five pipelines: (1) file processing (every upload); (2) email/RFQ ingest (§1 above); (3) document extraction ("Found in Files", §2); (4) BOM detection &amp; assembly building (§4); (5) CAD-metadata material &amp; quote-inclusion classification (assemblies — below).</p>
   <h4 id="lens-pipeline">File-processing pipeline (ordered, with failure handling)</h4>
   <ol>
     <li><strong>Upload</strong> ≤ platform <code>MAX_UPLOAD_MB</code> (200) — drag-drop / click / API. Fail → stop.</li>
@@ -3096,6 +3155,8 @@ COST = runtime * rate * part.qty</pre>
   gdt?: { symbol(ISO GPS), datum_refs[], material_condition }
 }</pre>
   <p>Consumers: part-field suggestions, Found-in-Files panel, <strong>Rules/Review signals</strong> (<a href="#rules-integration">integration map</a>), viewer overlay. <strong>Not Kalk.</strong></p>
+  <h4 id="lens-cad-classify">Pipeline 5 — CAD-metadata material &amp; quote-inclusion classification (assemblies)</h4>
+  <p>Runs after <code>decompose_bom()</code> commits an assembly tree. Input: <code>node.cad_metadata</code> (occurrence names + STEP material/density properties — raw facts from the <a href="#geometryservice">GeometryService</a>, no geometry parsed by Lens). Per node, a text-LLM + Werkstoffnummer/keyword matcher classifies to the org material tree at <strong>family level</strong> (<code>1.4301</code>/<code>VA</code>/<code>Edelstahl</code> → nichtrostender Stahl; <code>Platte_Eiche_18mm</code> → Holz; unclassifiable → <em>Sonstige/Fremdmaterial</em>) and — when the org's processed-material-families whitelist is set — derives a <code>quote_inclusion</code> suggestion (whitelisted → <code>quoted</code>, else <code>excluded</code>). Output: per-component <code>ExtractionFinding</code>s (<code>type: 'material' | 'quote_inclusion'</code>, with <code>confidence</code> + the source metadata as <code>raw_text</code>), surfaced in the <a href="#quote-inclusion">Angebotsumfang panel</a> via AI-Governor — <strong>explicit Accept, never auto-applied, never fed to Kalk</strong>; never-hallucinate holds (no Werkstoffnummer invented that isn't in the metadata). Deterministic-first: an exact Werkstoffnummer/DIN token match short-circuits the LLM.</p>
   <h4 id="lens-models">Models, providers &amp; routing</h4>
   <p>v1 = a <strong>vision-LLM pipeline</strong>, not a trained custom model. Per-task: print-classification (vision LLM); part-field extraction (vision LLM + text search); table/BOM detection (layout model + LLM); GD&amp;T/callout OCR (vision LLM, ISO-GPS-aware); email body parse (text LLM).</p>
   <div class="warn"><strong>Never hallucinate.</strong> The model may pick a <em>wrong existing string</em> but must never invent a value not on the print. Per-finding confidence; below threshold → suggestion only (55% opacity, explicit Accept); never auto-applied to costing. v1 targets (calibrate vs Fechner): print-classification ≈ 95%; field recall ≈ 65%; field precision ≈ 85%.</div>
@@ -3359,7 +3420,8 @@ Resolution { "type": "NO_QUOTE"|"RESOLVE"|"ADD_OPERATION"|"SET_PROCESS"|"ASSIGN_
   inputs: InterrogationInputs?   <span style="color:#6b7280"># per-family task inputs / thresholds (DFM catalogue below)</span>
 ) -> AnalysisResult
 
-decompose_bom(file) -> {parts[], nodes[]}     <span style="color:#6b7280"># unpack an assembly CAD into Parts + Nodes</span>
+decompose_bom(file) -> {parts[], nodes[],     <span style="color:#6b7280"># unpack an assembly CAD into Parts + Nodes</span>
+                        cad_metadata[]}       <span style="color:#6b7280"># per-body raw metadata: occurrence names + STEP material/density props (AP214/AP242) → node.cad_metadata; input to Lens pipeline 5 (#quote-inclusion)</span>
 compute_signature(body) -> GeomHash           <span style="color:#6b7280"># Part-Library historical match + PC memory</span>
 render_thumbnail(body|drawing) -> image       <span style="color:#6b7280"># server-side 2D/3D thumbnails</span>
 vectorize_pdf(page) -> DXF                     <span style="color:#6b7280"># flat-pattern PDF → DXF primary (sheet metal; E4-j)</span>
@@ -3685,7 +3747,7 @@ Materialkosten + FEK              = Herstellkosten
     <tr><td>QuickBooks (accounting)</td><td><strong>DATEV</strong> (DATEVconnect / DATEV-Format); SMEs Lexware / sevDesk</td></tr>
     <tr><td>JobBOSS / Global Shop (ERP)</td><td>SAP Business One, abas, proALPHA, Sage, ams.erp, work»plan (first target TBD with pilot)</td></tr>
     <tr><td>UPS rating</td><td>DHL / DPD / GLS / Swiss Post</td></tr>
-    <tr><td>Online Metals / MSC</td><td>EU metal suppliers; <strong>Würth</strong> ("Tolera Source")</td></tr>
+    <tr><td>Online Metals / MSC</td><td><strong>thyssenkrupp materials4me</strong> (raw steel — <a href="#material-pricing-feed">MaterialPricingFeed</a>, M6.7b); <strong>Würth</strong> ("Tolera Source", fasteners/C-parts)</td></tr>
     <tr><td>HubSpot / Salesforce</td><td>HubSpot (EU data center)</td></tr>
     <tr><td>Stripe-style PSP</td><td>Paddle (SaaS billing); shop-side SEPA / invoice / CH QR-bill</td></tr>
   </table>
@@ -4165,7 +4227,7 @@ material_cost = material_quantity_ordered × unit_material_price</pre>
     <li>RFQ Notification Sender (Company Settings → Email Notification Settings): the email address that confirmation emails appear to come from (must be verified)</li>
     <li>RFQ Received Recipient: the team member who gets notified each time an RFQ is submitted</li>
   </ul>
-  <div class="note"><strong>Vendor RFQs [Beta] — clarification:</strong> "Vendor RFQs" in the reference product's sidebar nav is <em>not</em> a vendor outsourcing portal — it is <strong>real-time material pricing</strong> data from Online Metals + TK (Thyssen Krupp or similar). It surfaces current material prices from these suppliers for use during estimating. In BF, this should be modeled as a <code>MaterialPricingFeed</code> / supplier pricing integration (not <code>VendorRFQ</code> — that entity name is already used by the new <a href="#vendor-rfq">Vendor RFQ Portal</a> for outside-process outsourcing). This material pricing integration maps to the Würth adapter in <a href="#decisions">§ Integration Adapters</a>.</div>
+  <div class="note"><strong>Vendor RFQs [Beta] — clarification:</strong> "Vendor RFQs" in the reference product's sidebar nav is <em>not</em> a vendor outsourcing portal — it is <strong>real-time material pricing</strong> data from Online Metals + TK (Thyssen Krupp or similar). It surfaces current material prices from these suppliers for use during estimating. In BF, this should be modeled as a <code>MaterialPricingFeed</code> / supplier pricing integration (not <code>VendorRFQ</code> — that entity name is already used by the new <a href="#vendor-rfq">Vendor RFQ Portal</a> for outside-process outsourcing). <strong>Decided 2026-07-07:</strong> the <code>MaterialPricingFeed</code> is implemented by the <strong>thyssenkrupp materials4me adapter</strong> (<a href="#material-pricing-feed">spec</a>, M6.7b) for raw steel, alongside the Würth adapter (fasteners/C-parts) in <a href="#decisions">§ Integration Adapters</a>.</div>
 
   <h3 id="company-settings-detail">Company Settings — detailed fields</h3>
   <p>Beyond what is already documented in the Settings tree, the key configurable areas are: <a class="kb" href="https://help.paperlessparts.com/s/article/company-settings" target="_blank">KB: company-settings</a> <a class="kb" href="https://help.paperlessparts.com/s/article/creating-email-templates" target="_blank">KB: creating-email-templates</a> <a class="kb" href="https://help.paperlessparts.com/s/article/email-notifications" target="_blank">KB: email-notifications</a></p>
@@ -4543,6 +4605,8 @@ material_cost = material_quantity_ordered × unit_material_price</pre>
   <table>
     <tr><th>Adapter</th><th>v1</th><th>Notes</th></tr>
     <tr><td>Supplier pricing/availability</td><td><strong>Würth (DACH fasteners/C-parts) — real, target</strong></td><td>Build against <code>SupplierAdapter</code>; integrate Würth's e-procurement surface (OCI/electronic catalog or API per what the partnership yields). Until API access is signed, the Würth adapter runs on mock data — zero build-time blocker. PEM/DB Roberts naming from the demos becomes seed/mock data.</td></tr>
+    <tr><td>Raw-material live pricing (<a href="#material-pricing-feed">MaterialPricingFeed</a>)</td><td><strong>thyssenkrupp materials4me (raw steel) — mock-first, target</strong></td><td>Same <code>SupplierAdapter</code> interface, capability <code>availability_pricing</code>; keyed Werkstoffnummer + form + dims + qty → <code>material.cost_per_volume/cost_per_area</code> (calc_ values, "Pricing updated" stamp). Access channel OPEN (DECISIONS.md — partner API / OCI / price-list import); fixture JSON is the contract. M6.7b.</td></tr>
+    <tr><td>Part quick-quote (<a href="#part-quoting">PartQuotingAdapter</a>)</td><td><strong>CNC-milling instant quotes — mock-first; first counterparty OPEN</strong></td><td>STEP + material + qty breaks + tolerance/finish → price/break + lead time, landing in the Vendor Quotes panel (Source = instant) and applied via the M6.6 Apply path. Mandatory external-send gate: per-send confirmation + redacted variant + export-control screening before any CAD leaves the tenant. M6.7c.</td></tr>
     <tr><td>CRM</td><td><strong>HubSpot — first real</strong></td><td>Two-way sync per § CRM integration. Salesforce/SAP/generic German-CRM adapters stay mocked until demand.</td></tr>
     <tr><td>ERP</td><td>Stub push with a <strong>defined payload schema</strong></td><td>JSON order/quote payload (documented in <code>ERP_PAYLOAD.md</code>) + webhook/export; real ERP adapters (e.g. a DACH ERP) post-pilot.</td></tr>
     <tr><td>Advisory chat (Tolera Advisor-style)</td><td>Mock</td><td>Generic advisory-chat adapter; no MSC partnership assumed.</td></tr>

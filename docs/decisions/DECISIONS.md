@@ -19,6 +19,55 @@
 
 ---
 
+## [2026-07-07] Component quote inclusion — material-scoped quoting (Angebotsumfang)
+
+**Status:** RESOLVED
+**Question:** A customer sends one STEP of a whole construction in mixed materials (e.g. wood frame + stainless components) but the shop quotes **only the stainless parts**. The model has no child-component exclusion primitive: `qi_workflow_status='no_quote'` declines a whole *root* line item only, and `obtain_method` is just `MANUFACTURED|PURCHASED`. Where does per-component "not ours / not quoted" live? (Schema — expensive to reverse, block-and-log §6.)
+**Options considered:** (a) extend `obtain_method` with a third value; (b) a new orthogonal per-component enum; (c) force each material group into its own root quote item and use `no_quote`.
+**Decision:** **(b).** New **`component.quote_inclusion ENUM('quoted','excluded','customer_supplied') NOT NULL DEFAULT 'quoted'`**, orthogonal to `obtain_method` (a customer-supplied part can still carry assembly ops; no enum surgery on a shipped type). Named `quote_inclusion`, **not** `quote_scope` — PP terminology already uses "quote scope" for the component→quote link (`#assemblies-model`: *"tied to one part + one quote scope"*). Semantics: **`excluded`** = out of scope — contributes **zero to every cost category**, is skipped by interrogation-driven costing, and **vanishes entirely from all customer-facing outputs** (digital quote, quote PDF, portal DTOs — Benjamin 2026-07-07: "vanish entirely"); stays visible *internally*, greyed/ghosted in the BOM tree and 3D viewer. **`customer_supplied`** (*Beistellung*) = present in the build, zero material/purchase cost, may carry assembly/handling operations. **Filter granularity = material family** (e.g. "quote only 1.4xxx stainless", not "all metals" — Benjamin 2026-07-07). UX = one-click family filter **plus** per-component individual toggles (both, confirmed). An org-level **processed-material-families whitelist** lets Lens pre-suggest the whole scope so the estimator's job collapses to a single Accept — via AI-Governor, explicit accept, never auto-applied. **Migration timing:** M1.5/M1.6 have shipped, so the enum + column land as a **forward reversible migration in M4.10b** (the first consumer), per the stub-then-extend precedent — no reshaping.
+**Resolved:** 2026-07-07 (feature-design session with Benjamin)
+**Affects:** M4.9b/M4.10b (schema + detection + UX), M3 (Lens pipeline 5), M5 (customer-facing suppression), spec `#quote-inclusion` + `#db-schema`.
+
+## [2026-07-07] Foreign materials — real Holz class + Sonstige catch-all
+
+**Status:** RESOLVED
+**Question:** Mixed constructions contain non-metal bodies, but `material_class` seeds only Metal/Polymer/Composite/Sand/Wax/Additive. Exclude-only, or priceable?
+**Decision:** **Both a real class and a catch-all.** Seed a **Holz (Wood)** `material_class` — shops *do* quote wood parts (outsourced / externally processed, still on the customer quote — Benjamin 2026-07-07), priced via the outside-process / Buy-mode path (no internal wood machining rates are seeded). Additionally seed a **Sonstige (Fremdmaterial)** catch-all class so Lens material suggestions for detected-but-unclassifiable bodies always have a target without polluting the metals hierarchy.
+**Resolved:** 2026-07-07
+**Affects:** M1.12 seed / `SEED-AND-FIXTURES.md` §2, M4.10b, spec `#quote-inclusion`.
+
+## [2026-07-07] thyssenkrupp live steel pricing — surface = materials4me (M6.7b)
+
+**Status:** RESOLVED
+**Question:** Which thyssenkrupp surface backs a live raw-material pricing feed? thyssenkrupp Steel Europe proper is contract-mill business with no public API.
+**Decision:** **materials4me** (thyssenkrupp Materials Services' online shop — public prices, small/mid quantities) is the integration surface (Benjamin 2026-07-07). A **`ThyssenkruppMaterialPricingAdapter`** behind the same `SupplierAdapter` interface as Würth, **mock-first** against a documented fixture JSON (same posture as the 2026-06-14 Würth decision). It implements the spec's **`MaterialPricingFeed`** concept (the reference product's "Vendor RFQs [Beta]" nav = live material pricing from Online Metals + TK — see the note at `#integrations`). Request keyed on **Werkstoffnummer + product form (sheet/plate/bar/tube) + dimensions + quantity**; response feeds `material.cost_per_volume`/`cost_per_area` as **calc_** values with a "Pricing updated ⟨timestamp⟩" stamp. E4-d freeze + Refresh/Bulk-Refresh Pricing semantics unchanged — a live price never silently reprices an existing draft.
+**Resolved:** 2026-07-07
+**Affects:** M6.7b, spec `#material-pricing-feed` + `#dach-connectors-tbl`.
+
+## [2026-07-07] materials4me API access channel
+
+**Status:** OPEN
+**Question:** materials4me has no documented public API. Channel options: (a) tk Materials Services partner/API agreement (procurement lead time); (b) OCI/electronic-catalog surface; (c) recurring price-list import (CSV) as interim.
+**Recommended default:** start the tk partner/API conversation now; the adapter ships mock-first regardless (fixture JSON is the contract), with the price-list import (c) as the interim fallback if the pilot needs live numbers before an API lands. Do **not** block M6.7b on procurement.
+**Affects:** M6.7b.
+
+## [2026-07-07] CNC part quick-quote adapter (M6.7c) + mandatory external-send gate
+
+**Status:** RESOLVED
+**Question:** How do quick quotes for outsourced CNC-milled parts (instant supplier pricing, not the manual vendor-RFQ email loop) enter costing — and under what data-protection constraints, given customer CAD leaves the tenant?
+**Decision:** A **`PartQuotingAdapter`** capability on the `SupplierAdapter` family: request = STEP + material + qty breaks + tolerance/finish class; response = price per break + lead time. Responses land in the **M6.6 Vendor Quotes panel** beside human vendor replies and use the **same Apply → Outside-Services cost / Buy-mode path** — an "automated vendor" inside the Vendor RFQ funnel, so there is exactly one price-application code path and one audit trail. Mock-first fixture JSON. **Hard gate (Benjamin 2026-07-07, confirmed):** sending customer CAD to any external quoting counterparty requires **explicit per-send confirmation**, offers the **redacted** file variant, and runs **export-control screening first** — a dual-use-flagged part is never auto-sent (same posture as the vendor-RFQ per-vendor file toggles; enforced in the adapter layer, audited under M6.9).
+**Resolved:** 2026-07-07
+**Affects:** M6.7c, spec `#part-quoting`, M6.6 (apply path), M6.9 (export-control audit covers the gate).
+
+## [2026-07-07] CNC quick-quote first counterparty
+
+**Status:** OPEN
+**Question:** Who answers the instant-quote request first: (a) the shop's **own vendor network** behind a structured instant-quote API, or (b) a **marketplace** (Xometry/Fractory-style)? The adapter contract is counterparty-agnostic; the fixture can model both.
+**Recommended default:** (a) own vendor network first — vendors are already under the shop's supplier agreements (no new data-sharing exposure), and it composes with the M6.2–M6.6 vendor entities; a marketplace adapter is post-pilot behind the same interface and raises the external-send gate stakes (GDPR + dual-use).
+**Affects:** M6.7c.
+
+---
+
 ## [2026-06-26] PartGeometry manual-dims storage model (M1.5)
 
 **Status:** RESOLVED
