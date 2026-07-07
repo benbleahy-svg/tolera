@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { ApiError } from '../api/client';
+import { errorMessage } from '../api/errors';
 import { useHasPermission } from '../session/session';
 import { CreateAccountModal } from './CreateAccountModal';
 import { type Account, useCrmApi } from './api';
@@ -37,13 +37,21 @@ export function ContactsPage() {
       })
       .catch((e: unknown) => {
         if (seq === requestSeq.current) {
-          setError(e instanceof ApiError ? e.message : String(e));
+          setError(errorMessage(e, t));
         }
       });
-  }, [api, q, includeArchived]);
+  }, [api, q, includeArchived, t]);
 
+  const firstLoad = useRef(true);
   useEffect(() => {
-    const handle = setTimeout(load, 200); // debounce search keystrokes
+    // Debounce keystrokes, but fire the mount load immediately — the initial
+    // list shouldn't wait 200 ms for a debounce it doesn't need.
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      load();
+      return;
+    }
+    const handle = setTimeout(load, 200);
     return () => clearTimeout(handle);
   }, [load]);
 

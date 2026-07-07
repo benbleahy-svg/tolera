@@ -108,12 +108,14 @@ class S3Storage:
         return self._session.client("s3", **self._client_kwargs)
 
     async def put(self, key: str, fileobj: IO[bytes], *, content_type: str | None = None) -> int:
+        # Measure the spooled body locally instead of a head_object round trip
+        # after the upload — one less network call per file on multi-file uploads.
+        fileobj.seek(0, os.SEEK_END)
+        size = fileobj.tell()
         fileobj.seek(0)
         extra = {"ContentType": content_type} if content_type else {}
         async with self._client() as s3:
             await s3.upload_fileobj(fileobj, self._bucket, key, ExtraArgs=extra)
-            head = await s3.head_object(Bucket=self._bucket, Key=key)
-        size: int = head["ContentLength"]
         return size
 
     async def stream(self, key: str) -> AsyncIterator[bytes]:

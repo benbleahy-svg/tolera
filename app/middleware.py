@@ -20,6 +20,7 @@ from .metrics import http_request_duration_seconds, http_requests_total
 logger = logging.getLogger("app.access")
 
 _REQUEST_ID_HEADER = b"x-request-id"
+_REQUEST_ID_MAX_LEN = 128
 _CONTENT_LENGTH_HEADER = b"content-length"
 
 
@@ -78,8 +79,13 @@ class RequestContextMiddleware:
 
         headers = dict(scope.get("headers", []))
         incoming = headers.get(_REQUEST_ID_HEADER)
-        # Tolerate a malformed header rather than 500 on bad UTF-8.
+        # Tolerate a malformed header rather than 500 on bad UTF-8, and don't
+        # trust the client with unbounded input: an oversized value would be
+        # echoed into the response header and stamped on every log line for the
+        # request (log inflation / junk trace ids).
         request_id = incoming.decode("utf-8", errors="replace") if incoming else uuid4().hex
+        if len(request_id) > _REQUEST_ID_MAX_LEN:
+            request_id = uuid4().hex
         token = request_id_var.set(request_id)
 
         status_code = 500

@@ -16,12 +16,13 @@ preference, not auditable domain data.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +35,8 @@ from .models import SavedView, SavedViewScope, SavedViewVisibility
 from .quote_filters import SYSTEM_QUOTE_VIEWS, FilterClause, SortClause, SystemView
 
 saved_views_router = APIRouter(prefix="/api/saved-views", tags=["saved-views"])
+
+logger = logging.getLogger("app.saved_views")
 
 _NAME_MAX = 120
 
@@ -126,7 +129,16 @@ async def list_saved_views(
     )
     rows = (await session.execute(stmt)).scalars().all()
     system = list(SYSTEM_QUOTE_VIEWS) if scope == SavedViewScope.quotes else []
-    return SavedViewListResponse(system=system, custom=[_saved_view_out(r) for r in rows])
+    custom: list[SavedViewOut] = []
+    for row in rows:
+        try:
+            custom.append(_saved_view_out(row))
+        except ValidationError:
+            # The filter grammar evolves per milestone; a stored view that no
+            # longer satisfies it must not 500 the whole sidebar. Skip it and
+            # leave a trace (no filter *values* — they can contain PII).
+            logger.warning("saved_view_invalid_skipped", extra={"saved_view_id": str(row.id)})
+    return SavedViewListResponse(system=system, custom=custom)
 
 
 @saved_views_router.post("", status_code=status.HTTP_201_CREATED)

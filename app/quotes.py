@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -162,6 +162,17 @@ async def search_quotes(
 # --------------------------------------------------------------------------- #
 # M1.4 — create, detail, lifecycle transitions, line items, trash
 # --------------------------------------------------------------------------- #
+def _assume_utc(value: datetime | None) -> datetime | None:
+    """Pin an offset-less datetime to UTC at the edge (ISO-8601-UTC convention) —
+    otherwise the driver decides, and a Berlin-local wall time silently shifts."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
+
+
+_UtcDatetime = Annotated[datetime | None, AfterValidator(_assume_utc)]
+
+
 class QuoteCreate(BaseModel):
     """Open a Draft quote by direct-create (email ingest is M3). Every reference is
     optional at create — a contact is only mandatory at the Draft→Sent step."""
@@ -173,8 +184,8 @@ class QuoteCreate(BaseModel):
     salesperson_id: uuid.UUID | None = None
     estimator_id: uuid.UUID | None = None
     rfq_number: str | None = Field(default=None, max_length=200)
-    due_date: datetime | None = None
-    expiration_date: datetime | None = None
+    due_date: _UtcDatetime = None
+    expiration_date: _UtcDatetime = None
 
 
 class QuoteUpdate(BaseModel):
@@ -188,8 +199,8 @@ class QuoteUpdate(BaseModel):
     salesperson_id: uuid.UUID | None = None
     estimator_id: uuid.UUID | None = None
     rfq_number: str | None = Field(default=None, max_length=200)
-    due_date: datetime | None = None
-    expiration_date: datetime | None = None
+    due_date: _UtcDatetime = None
+    expiration_date: _UtcDatetime = None
     private_notes: str | None = None
 
 
@@ -330,9 +341,24 @@ async def _validate_member(session: AsyncSession, user_id: uuid.UUID | None, *, 
         )
 
 
-async def _get_quote_or_404(session: AsyncSession, quote_id: uuid.UUID) -> Quote:
-    """Fetch a quote in the active org (trashed included, so detail/restore work)."""
-    quote = await session.get(Quote, quote_id)
+async def _get_quote_or_404(
+    session: AsyncSession, quote_id: uuid.UUID, *, for_update: bool = False
+) -> Quote:
+    """Fetch a quote in the active org (trashed included, so detail/restore work).
+
+    ``for_update=True`` locks the row (refreshing its in-session state) so a
+    check-then-write handler can't race a concurrent transition/trash in the
+    window between reading ``status``/``deleted_at`` and committing — every
+    mutation on the quote aggregate must take the lock before gating."""
+    if for_update:
+        quote = await session.scalar(
+            select(Quote)
+            .where(Quote.id == quote_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    else:
+        quote = await session.get(Quote, quote_id)
     if quote is None:
         raise AppError("not_found", "Quote not found.", status_code=status.HTTP_404_NOT_FOUND)
     return quote
@@ -479,7 +505,9 @@ async def update_quote(
     _: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> QuoteDetail:
     """Edit a Draft quote's General/People fields. Rejected once the quote is locked."""
-    quote = await _get_quote_or_404(session, quote_id)
+    # Locked so a concurrent transition can't move the quote out of Draft between
+    # the editability check and this patch landing (bypassing ``quote_locked``).
+    quote = await _get_quote_or_404(session, quote_id, for_update=True)
     if not _is_editable(quote):
         raise AppError(
             "quote_locked",
@@ -519,19 +547,11 @@ async def add_quote_item(
     """Add a root line item: a fresh Part → root Component → QuoteItem at the next
     position (the 4-layer model; M1.5 fills in the part/component detail). Setting the
     first item marks the quote's ``started_at`` (estimator work has begun)."""
-    # Lock the quote row FIRST (refreshing its in-session state), then gate on
-    # editability — so a concurrent transition/trash can't change status/deleted_at
-    # in a TOCTOU window between the check and the lock. The lock also serialises the
-    # max(position)+1 allocation; UNIQUE (quote_id, position) is the DB backstop
+    # Lock the quote row FIRST, then gate on editability (TOCTOU — see
+    # ``_get_quote_or_404``). The lock also serialises the max(position)+1
+    # allocation; UNIQUE (quote_id, position) is the DB backstop
     # (CodeRabbit 2026-06-26).
-    quote = await session.scalar(
-        select(Quote)
-        .where(Quote.id == quote_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if quote is None:
-        raise AppError("not_found", "Quote not found.", status_code=status.HTTP_404_NOT_FOUND)
+    quote = await _get_quote_or_404(session, quote_id, for_update=True)
     if not _is_editable(quote):
         raise AppError(
             "quote_locked",
@@ -576,14 +596,7 @@ async def change_quantities(
     reshaped per-qty grid. The break set must be non-empty, positive, and unique (M1.6)."""
     # Lock the quote first (same TOCTOU reasoning as add-item): gate editability against a
     # concurrent transition/trash, and serialise concurrent quantity edits on this quote.
-    quote = await session.scalar(
-        select(Quote)
-        .where(Quote.id == quote_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if quote is None:
-        raise AppError("not_found", "Quote not found.", status_code=status.HTTP_404_NOT_FOUND)
+    quote = await _get_quote_or_404(session, quote_id, for_update=True)
     if not _is_editable(quote):
         raise AppError(
             "quote_locked",
@@ -613,7 +626,9 @@ async def transition_quote(
     """Move a quote through its lifecycle. The required capability is target-aware
     (finalize→``quote_finalize``, cancel→``quote_delete``, else ``quote_edit``); the
     state machine rejects illegal transitions server-side."""
-    quote = await _get_quote_or_404(session, quote_id)
+    # Locked so two concurrent transitions can't both read the same source status,
+    # both pass ``is_legal_transition``, and record contradictory audit events.
+    quote = await _get_quote_or_404(session, quote_id, for_update=True)
     if quote.deleted_at is not None:
         raise AppError(
             "quote_trashed",
@@ -640,7 +655,7 @@ async def trash_quote(
     _: Annotated[Principal, Depends(require(Permission.quote_delete))],
 ) -> QuoteDetail:
     """Soft-delete (Trash) a quote from any status. Recoverable via restore. Idempotent."""
-    quote = await _get_quote_or_404(session, quote_id)
+    quote = await _get_quote_or_404(session, quote_id, for_update=True)
     if quote.deleted_at is None:
         quote.deleted_at = datetime.now(UTC)
         await session.flush()
@@ -655,7 +670,7 @@ async def restore_quote(
 ) -> QuoteDetail:
     """Un-trash a quote (clear ``deleted_at``); its lifecycle status is unchanged.
     Idempotent."""
-    quote = await _get_quote_or_404(session, quote_id)
+    quote = await _get_quote_or_404(session, quote_id, for_update=True)
     if quote.deleted_at is not None:
         quote.deleted_at = None
         await session.flush()

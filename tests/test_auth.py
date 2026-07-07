@@ -16,6 +16,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from app import auth
 from app.auth import CLAIM_ORG_ID, CLAIM_ROLES, CLAIM_USER_ID, get_principal
 from app.config import Settings
 from app.errors import AppError
@@ -53,6 +54,10 @@ def _patch_jwks(monkeypatch: pytest.MonkeyPatch, public_key: Any) -> None:
 
     # auth.py does ``import jwt``; patching the module reaches its call site.
     monkeypatch.setattr(jwt, "PyJWKClient", _FakeClient)
+    # auth caches one client per JWKS URL; every test uses the same URL but a
+    # fresh RSA key, so the cache must be emptied or a previous test's fake
+    # client (wrong key) would be reused.
+    monkeypatch.setattr(auth, "_jwks_clients", {})
 
 
 @pytest.fixture

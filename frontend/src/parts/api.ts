@@ -7,10 +7,8 @@
  * then a browser save). Tests mock this module wholesale (no Clerk/network).
  */
 
-import { useMemo } from 'react';
-import { useAuth } from '@clerk/clerk-react';
-
 import { apiDownload, apiFetch, apiUpload, type TokenGetter } from '../api/client';
+import { useApiClient } from '../api/hooks';
 
 export type FileRole = 'primary' | 'supporting';
 
@@ -57,31 +55,31 @@ function saveBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+function makePartsApi(token: TokenGetter): PartsApi {
+  return {
+    listParts: () => apiFetch('/api/parts', token),
+    createPart: () => apiFetch('/api/parts', token, { method: 'POST' }),
+    getPart: (id) => apiFetch(`/api/parts/${id}`, token),
+    listFiles: (partId) => apiFetch(`/api/parts/${partId}/files`, token),
+    uploadFiles: (partId, files) => {
+      const form = new FormData();
+      for (const file of files) form.append('files', file, file.name);
+      return apiUpload(`/api/parts/${partId}/files`, token, form);
+    },
+    setPrimary: (partId, fileId) =>
+      apiFetch(`/api/parts/${partId}/files/${fileId}/primary`, token, { method: 'POST' }),
+    deleteFile: (partId, fileId) =>
+      apiFetch(`/api/parts/${partId}/files/${fileId}`, token, { method: 'DELETE' }),
+    downloadFile: async (partId, fileId, filename) => {
+      const blob = await apiDownload(`/api/parts/${partId}/files/${fileId}/download`, token);
+      saveBlob(blob, filename);
+    },
+  };
+}
+
 /** Build a parts API client bound to the current Clerk session token. */
 export function usePartsApi(): PartsApi {
-  const { getToken } = useAuth();
-  return useMemo<PartsApi>(() => {
-    const token: TokenGetter = () => getToken();
-    return {
-      listParts: () => apiFetch('/api/parts', token),
-      createPart: () => apiFetch('/api/parts', token, { method: 'POST' }),
-      getPart: (id) => apiFetch(`/api/parts/${id}`, token),
-      listFiles: (partId) => apiFetch(`/api/parts/${partId}/files`, token),
-      uploadFiles: (partId, files) => {
-        const form = new FormData();
-        for (const file of files) form.append('files', file, file.name);
-        return apiUpload(`/api/parts/${partId}/files`, token, form);
-      },
-      setPrimary: (partId, fileId) =>
-        apiFetch(`/api/parts/${partId}/files/${fileId}/primary`, token, { method: 'POST' }),
-      deleteFile: (partId, fileId) =>
-        apiFetch(`/api/parts/${partId}/files/${fileId}`, token, { method: 'DELETE' }),
-      downloadFile: async (partId, fileId, filename) => {
-        const blob = await apiDownload(`/api/parts/${partId}/files/${fileId}/download`, token);
-        saveBlob(blob, filename);
-      },
-    };
-  }, [getToken]);
+  return useApiClient(makePartsApi);
 }
 
 /** Format a byte count for display, localized (German-first: `1,2 MB`, not `1.2 MB`). */

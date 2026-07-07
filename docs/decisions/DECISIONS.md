@@ -19,6 +19,24 @@
 
 ---
 
+## [2026-07-07] Commit-after-response window in the session dependency
+
+**Status:** OPEN
+**Question:** `get_session` (app/deps.py) is a yield dependency whose commit runs in teardown — on FastAPI ≥ 0.106 that is **after** the response has been sent. A commit-time failure (connection drop, Postgres failover) therefore yields a 2xx the client trusts while nothing was persisted. Handlers `flush()` so constraint violations still surface as clean errors; only the commit itself is in the window.
+**Options considered:** (a) accept and document — the window is tiny and Postgres commit failures are rare; (b) `await session.commit()` explicitly at the end of every write handler (boilerplate ×~30 endpoints, easy to forget); (c) a middleware/route-wrapper that commits before the response body is sent (structural, touches the tenancy seam — needs care with the org-GUC transaction scoping).
+**Recommended default:** (c) investigated when M1.7+ money writes land; (a) until then.
+**Affects:** Every write endpoint; the tenancy/session spine (app/db.py, app/deps.py).
+
+## [2026-07-07] Naive-datetime acceptance at the API edge
+
+**Status:** OPEN
+**Question:** The API accepts offset-less ISO-8601 datetimes (`"2026-06-30"`, `"2026-07-07T17:00:00"`) on quote filters and due/expiration dates, and the filter contract deliberately allows date-only values (tests/test_quote_filters.py). A Berlin-local wall time sent naive is interpreted as UTC — a 1–2 h shift. Interim (2026-07-07 review): naive values are now **explicitly pinned to UTC at the edge** (app/quote_filters.py `_coerce_scalar`, app/quotes.py `_UtcDatetime`) instead of relying on driver behaviour, so at least the interpretation is deterministic and documented.
+**Options considered:** (a) keep naive-as-UTC (current, explicit); (b) reject offset-less datetimes with 422 (`AwareDatetime`) and require the client to send offsets — breaks date-only filter values, needs frontend cooperation; (c) interpret naive values in the org's local timezone (needs an org tz setting; matches user intent for due dates but complicates determinism).
+**Recommended default:** (a) until date pickers exist in the frontend, then revisit (b) with the date-only case special-cased.
+**Affects:** `/api/quotes/search` filters, QuoteCreate/QuoteUpdate `due_date`/`expiration_date`; later any date input (M1.7+).
+
+---
+
 ## [2026-06-26] PartGeometry manual-dims storage model (M1.5)
 
 **Status:** RESOLVED

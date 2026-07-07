@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ApiError } from '../api/client';
+import { errorMessage } from '../api/errors';
 import { useHasPermission } from '../session/session';
 import { type PartFile, formatBytes, usePartsApi } from './api';
 
@@ -43,9 +43,9 @@ export function FilesPanel({
         if (seq === requestSeq.current) setFiles(next);
       })
       .catch((e: unknown) => {
-        if (seq === requestSeq.current) setError(e instanceof ApiError ? e.message : String(e));
+        if (seq === requestSeq.current) setError(errorMessage(e, t));
       });
-  }, [api, partId]);
+  }, [api, partId, t]);
 
   useEffect(load, [load]);
 
@@ -58,12 +58,12 @@ export function FilesPanel({
         load();
         onMutate?.(); // let the parent refresh derived state (e.g. the parts list)
       } catch (e: unknown) {
-        setError(e instanceof ApiError ? e.message : String(e));
+        setError(errorMessage(e, t));
       } finally {
         setBusy(false);
       }
     },
-    [load, onMutate],
+    [load, onMutate, t],
   );
 
   const onPick = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -76,7 +76,7 @@ export function FilesPanel({
     // Surface download failures (403/404/network) instead of dropping the promise.
     api
       .downloadFile(partId, fileId, filename)
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
+      .catch((e: unknown) => setError(errorMessage(e, t)));
   };
 
   return (

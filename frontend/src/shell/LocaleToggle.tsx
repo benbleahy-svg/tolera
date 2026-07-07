@@ -4,7 +4,6 @@
  * translated string in the app live.
  */
 
-import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { LOCALE_STORAGE_KEY, SUPPORTED_LANGUAGES, type Language } from '../i18n';
@@ -12,11 +11,8 @@ import { LOCALE_STORAGE_KEY, SUPPORTED_LANGUAGES, type Language } from '../i18n'
 export function LocaleToggle() {
   const { i18n, t } = useTranslation();
   const current = (i18n.resolvedLanguage ?? i18n.language ?? 'de').split('-')[0];
-
-  // Keep <html lang> in sync so screen readers / spellcheck match the UI language.
-  useEffect(() => {
-    document.documentElement.lang = current;
-  }, [current]);
+  // <html lang> sync lives in i18n/index.ts (languageChanged listener), so it
+  // holds even when this toggle is unmounted (the account menu is closed).
 
   function choose(lang: Language) {
     void i18n.changeLanguage(lang);

@@ -112,7 +112,16 @@ The Paperless Parts knowledge base (186 articles, Markdown) is the upstream refe
 - **Errors & validation:** one API **error envelope** (`{code, message, details}`); validate input at the edge with **Pydantic v2**; never leak a stack trace to a client or external recipient.
 - **Async jobs:** all long work (extraction, geometry, nesting, email sync) runs on **Celery** — tasks **idempotent** (safe to re-run), **retried with backoff**, **timeout-bounded**, **dead-lettered** on final failure; never block a request on it.
 - **Observability:** a health/readiness endpoint + baseline metrics (request latency, job success/failure, queue depth); instrument the usage funnels the spec calls out (e.g. Vendor-RFQ open/submit/apply) from day one.
-- **Migrations:** every schema change is a **reversible Alembic migration** (autogenerate + human review); **no manual DDL**; migrations run in CI and on deploy.
+- **Migrations:** every schema change is a **reversible Alembic migration** (autogenerate + human review); **no manual DDL**; migrations run in CI and on deploy — including an **up → down → up round-trip** (ci.yml), so a downgrade that doesn't reverse its upgrade turns CI red.
+
+**Recurring-issue rules (2026-07-07 codebase review — each was found violated in more than one place; follow them in every new block):**
+- **Lock before you gate.** Any handler that reads state and then writes (status checks, editability gates, soft-delete toggles, counters) must `SELECT … FOR UPDATE` the aggregate root **first** — use the router's `_get_X_or_404(..., for_update=True)` helper. Found missing on 4 of 6 quote mutations while the other 2 had it; the fix is the shared helper, not a per-endpoint decision.
+- **Index checklist per migration.** A soft-deleted table gets `(org_id, deleted_at)`; every FK/enum column a shipped list endpoint filters on gets `(org_id, <col>)` — decide this **in the migration that adds the column/filter**, not later (`quote` shipped 4 hot filters and soft-delete with no index; fixed in 0011).
+- **No silent-skip test gates.** A fixture that skips when its dependency is missing (`TEST_DATABASE_URL`, `TEST_S3_ENDPOINT`, …) must `pytest.fail` when `CI` is set — otherwise the regression it guards ships green (pattern: `tenancy_db`/`db_client` in tests/conftest.py). Anything this file calls an invariant needs a CI step that can turn red.
+- **DB test fixtures truncate before AND after.** Cleanup must not depend on test execution order (the `clean_db`-vs-`seeder` asymmetry caused order-dependent unique violations).
+- **Blocking work stays off the event loop, and per-request clients get cached.** Sync network/disk calls inside `async def` go through `anyio.to_thread.run_sync` with short socket timeouts (`/metrics` Redis); expensive clients with internal caches (JWKS) are built once per process, never per request.
+- **Frontend seams, not copies.** API errors → `errorMessage(e, t)` (`src/api/errors.ts`) — never `String(e)` or hard-coded English; API hooks → `useApiClient(makeXxxApi)` (`src/api/hooks.ts`); every fetch-then-`setState` gets a request-sequence guard (the one page that skipped it had the race). New user-facing strings land in **both** `en.json` and `de.json` in the same commit.
+- **Log context is set at every entry point.** `request_id_var` (middleware) and `org_id_var` (`get_session`) make per-tenant tracing work; a new entry point (Celery task, cron, CLI) must set both before its first log line.
 
 ---
 

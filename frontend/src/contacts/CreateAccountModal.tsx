@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ApiError } from '../api/client';
+import { errorMessage } from '../api/errors';
 import { type AccountCreate, useCrmApi } from './api';
 
 export function CreateAccountModal({
@@ -34,8 +34,12 @@ export function CreateAccountModal({
         return;
       }
       if (event.key !== 'Tab') return;
+      // Exclude disabled controls: the submit button is disabled until the name
+      // is filled, and a disabled `last` can never be activeElement, so the
+      // Tab-on-last wrap check would never fire and focus would escape.
       const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"])',
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), ' +
+          'select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
       );
       if (!focusable || focusable.length === 0) return;
       const first = focusable[0];
@@ -67,7 +71,7 @@ export function CreateAccountModal({
       .createAccount(body)
       .then(onCreated)
       .catch((e: unknown) => {
-        setError(e instanceof ApiError ? e.message : String(e));
+        setError(errorMessage(e, t));
         setSubmitting(false);
       });
   };

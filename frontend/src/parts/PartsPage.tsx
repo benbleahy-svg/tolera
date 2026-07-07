@@ -6,10 +6,10 @@
  * View (part numbers, BOM, geometry); the FilesPanel is the lasting artifact.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ApiError } from '../api/client';
+import { errorMessage } from '../api/errors';
 import { useHasPermission } from '../session/session';
 import { FilesPanel } from './FilesPanel';
 import { type Part, usePartsApi } from './api';
@@ -23,12 +23,18 @@ export function PartsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const requestSeq = useRef(0);
 
   const load = useCallback(() => {
+    const seq = ++requestSeq.current;
     setError(null);
     api
       .listParts()
       .then((nextParts) => {
+        // Ignore a slow earlier request resolving after a newer one — otherwise
+        // the mount load can overwrite a create's reload and move the selection
+        // off the just-created part.
+        if (seq !== requestSeq.current) return;
         setParts(nextParts);
         // Open the first part by default (keep a still-valid selection if there is one)
         // so the files pane isn't blank when parts already exist.
@@ -38,8 +44,10 @@ export function PartsPage() {
             : (nextParts[0]?.id ?? null),
         );
       })
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
-  }, [api]);
+      .catch((e: unknown) => {
+        if (seq === requestSeq.current) setError(errorMessage(e, t));
+      });
+  }, [api, t]);
 
   useEffect(load, [load]);
 
@@ -53,7 +61,7 @@ export function PartsPage() {
         setSelected(part.id);
         load();
       })
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)))
+      .catch((e: unknown) => setError(errorMessage(e, t)))
       .finally(() => setCreating(false));
   };
 

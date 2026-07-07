@@ -50,7 +50,14 @@ def test_formatter_includes_exception() -> None:
 
 
 def test_configure_logging_installs_json_handler() -> None:
-    configure_logging("DEBUG")
     root = logging.getLogger()
-    assert root.level == logging.DEBUG
-    assert any(isinstance(handler.formatter, JsonFormatter) for handler in root.handlers)
+    saved_level, saved_handlers = root.level, root.handlers[:]
+    try:
+        configure_logging("DEBUG")
+        assert root.level == logging.DEBUG
+        assert any(isinstance(handler.formatter, JsonFormatter) for handler in root.handlers)
+    finally:
+        # Restore the process-wide root logger — leaving it at DEBUG changes
+        # the log output of every test that runs after this one.
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)

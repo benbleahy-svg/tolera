@@ -258,6 +258,9 @@ class Account(Base):
         _salesperson_membership_fk("account"),
         # List/archive paths filter org_id (RLS) + deleted_at; lead with org_id.
         Index("ix_account_org_deleted_at", "org_id", "deleted_at"),
+        # Shipped list filter (`GET /api/accounts?salesperson_id=`) + FK-enforcement
+        # scans when a membership row changes (migration 0011).
+        Index("ix_account_org_salesperson", "org_id", "salesperson_id"),
     )
     # Fetch server-generated values (created_at/updated_at) via RETURNING on the
     # write itself, so building the response after flush() doesn't trigger an
@@ -652,6 +655,14 @@ class Quote(Base):
         ),
         Index("ix_quote_org_status", "org_id", "status"),
         Index("ix_quote_org_created_at", "org_id", "created_at"),
+        # Every /api/quotes/search starts with `deleted_at IS NULL` — same
+        # (org_id, deleted_at) convention as account/contact/part (migration 0011).
+        Index("ix_quote_org_deleted_at", "org_id", "deleted_at"),
+        # The filter grammar's allow-listed FK fields (account/salesperson/estimator)
+        # — the hottest list in the product must not seq-scan per filter.
+        Index("ix_quote_org_account", "org_id", "account_id"),
+        Index("ix_quote_org_salesperson", "org_id", "salesperson_id"),
+        Index("ix_quote_org_estimator", "org_id", "estimator_id"),
     )
 
     id: Mapped[uuid.UUID] = _pk()

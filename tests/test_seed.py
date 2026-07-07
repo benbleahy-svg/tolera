@@ -17,7 +17,7 @@ input-contract tests need no database.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import pytest
@@ -106,10 +106,15 @@ async def _truncate(owner_url: str) -> None:
 
 
 @pytest.fixture
-def clean_db(tenancy_db: str) -> str:
-    """Owner DSN whose tenant tables are emptied before the test runs."""
+def clean_db(tenancy_db: str) -> Iterator[str]:
+    """Owner DSN whose tenant tables are emptied before AND after the test.
+
+    The teardown truncate keeps seeded orgs (fechner/acme) from leaking into a
+    later test that seeds the same slugs (unique-violation) — cleanup must not
+    depend on which test happens to run last (see ``seeder`` in conftest)."""
     asyncio.run(_truncate(tenancy_db))
-    return tenancy_db
+    yield tenancy_db
+    asyncio.run(_truncate(tenancy_db))
 
 
 def _first_admin(result: OrgResult) -> Any:

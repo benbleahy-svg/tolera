@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { ApiError } from '../api/client';
+import { errorMessage } from '../api/errors';
 import { useHasPermission } from '../session/session';
 import { contactDisplayName } from './format';
 import { type Account, type Contact, useCrmApi } from './api';
@@ -42,10 +42,7 @@ export function AccountDetailPage() {
     setNotes(acc.notes ?? '');
   }, []);
 
-  const reportError = useCallback(
-    (e: unknown) => setError(e instanceof ApiError ? e.message : String(e)),
-    [],
-  );
+  const reportError = useCallback((e: unknown) => setError(errorMessage(e, t)), [t]);
 
   // Reload after a contact is added (a user action — no race concern).
   const loadContacts = useCallback(() => {
@@ -92,7 +89,10 @@ export function AccountDetailPage() {
         notes: notes.trim() || null,
       })
       .then((next) => {
-        if (seq === loadSeq.current) seed(next);
+        // Update the record (title, archived chip) but do NOT re-seed the form:
+        // re-seeding would silently revert anything typed while the save was
+        // in flight.
+        if (seq === loadSeq.current) setAccount(next);
       })
       .catch((e: unknown) => {
         if (seq === loadSeq.current) reportError(e);
@@ -106,7 +106,8 @@ export function AccountDetailPage() {
     const action = account.archived ? api.restoreAccount : api.archiveAccount;
     action(accountId)
       .then((next) => {
-        if (seq === loadSeq.current) seed(next);
+        // Same as save: update the record, keep unsaved form edits intact.
+        if (seq === loadSeq.current) setAccount(next);
       })
       .catch((e: unknown) => {
         if (seq === loadSeq.current) reportError(e);
@@ -229,7 +230,7 @@ function AddContactForm({ accountId, onAdded }: { accountId: string; onAdded: ()
         setLastName('');
         onAdded();
       })
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)))
+      .catch((e: unknown) => setError(errorMessage(e, t)))
       .finally(() => setSubmitting(false));
   };
 

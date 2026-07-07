@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+import anyio
 from fastapi import FastAPI, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
@@ -36,11 +37,15 @@ celery_queue_depth = Gauge(
 
 
 def observe_queue_depth(redis_url: str, queue: str = "celery") -> None:
-    """Best-effort: set the queue-depth gauge from Redis. Never raises."""
+    """Best-effort: set the queue-depth gauge from Redis. Never raises.
+
+    Sync by design (callers run it off the event loop); the short socket
+    timeouts bound how long an unreachable Redis can stall a scrape.
+    """
     try:
         import redis
 
-        client = redis.Redis.from_url(redis_url)
+        client = redis.Redis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1)
         try:
             celery_queue_depth.set(client.llen(queue))
         finally:
@@ -56,5 +61,7 @@ def register_metrics(app: FastAPI) -> None:
     @app.get("/metrics", include_in_schema=False)
     async def metrics() -> Response:
         settings = app.state.settings
-        observe_queue_depth(settings.redis_url)
+        # Off the event loop: a blocking Redis connect here would stall every
+        # in-flight request on the worker for the duration of the timeout.
+        await anyio.to_thread.run_sync(observe_queue_depth, settings.redis_url)
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

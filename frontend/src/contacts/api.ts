@@ -6,10 +6,8 @@
  * without threading auth through — and tests mock this module wholesale (no Clerk).
  */
 
-import { useMemo } from 'react';
-import { useAuth } from '@clerk/clerk-react';
-
 import { apiFetch, type TokenGetter } from '../api/client';
+import { useApiClient } from '../api/hooks';
 
 export type AccountType = 'customer' | 'vendor';
 
@@ -91,25 +89,25 @@ function accountsQuery(params?: AccountListParams): string {
   return qs ? `?${qs}` : '';
 }
 
+function makeCrmApi(token: TokenGetter): CrmApi {
+  return {
+    listAccounts: (params) => apiFetch(`/api/accounts${accountsQuery(params)}`, token),
+    createAccount: (body) => apiFetch('/api/accounts', token, { method: 'POST', body }),
+    getAccount: (id) => apiFetch(`/api/accounts/${id}`, token),
+    updateAccount: (id, body) => apiFetch(`/api/accounts/${id}`, token, { method: 'PATCH', body }),
+    archiveAccount: (id) => apiFetch(`/api/accounts/${id}/archive`, token, { method: 'POST' }),
+    restoreAccount: (id) => apiFetch(`/api/accounts/${id}/restore`, token, { method: 'POST' }),
+    listAccountContacts: (accountId) => apiFetch(`/api/accounts/${accountId}/contacts`, token),
+    createContact: (accountId, body) =>
+      apiFetch(`/api/accounts/${accountId}/contacts`, token, { method: 'POST', body }),
+    getContact: (id) => apiFetch(`/api/contacts/${id}`, token),
+    updateContact: (id, body) => apiFetch(`/api/contacts/${id}`, token, { method: 'PATCH', body }),
+    archiveContact: (id) => apiFetch(`/api/contacts/${id}/archive`, token, { method: 'POST' }),
+    restoreContact: (id) => apiFetch(`/api/contacts/${id}/restore`, token, { method: 'POST' }),
+  };
+}
+
 /** Build a CRM API client bound to the current Clerk session token. */
 export function useCrmApi(): CrmApi {
-  const { getToken } = useAuth();
-  return useMemo<CrmApi>(() => {
-    const token: TokenGetter = () => getToken();
-    return {
-      listAccounts: (params) => apiFetch(`/api/accounts${accountsQuery(params)}`, token),
-      createAccount: (body) => apiFetch('/api/accounts', token, { method: 'POST', body }),
-      getAccount: (id) => apiFetch(`/api/accounts/${id}`, token),
-      updateAccount: (id, body) => apiFetch(`/api/accounts/${id}`, token, { method: 'PATCH', body }),
-      archiveAccount: (id) => apiFetch(`/api/accounts/${id}/archive`, token, { method: 'POST' }),
-      restoreAccount: (id) => apiFetch(`/api/accounts/${id}/restore`, token, { method: 'POST' }),
-      listAccountContacts: (accountId) => apiFetch(`/api/accounts/${accountId}/contacts`, token),
-      createContact: (accountId, body) =>
-        apiFetch(`/api/accounts/${accountId}/contacts`, token, { method: 'POST', body }),
-      getContact: (id) => apiFetch(`/api/contacts/${id}`, token),
-      updateContact: (id, body) => apiFetch(`/api/contacts/${id}`, token, { method: 'PATCH', body }),
-      archiveContact: (id) => apiFetch(`/api/contacts/${id}/archive`, token, { method: 'POST' }),
-      restoreContact: (id) => apiFetch(`/api/contacts/${id}/restore`, token, { method: 'POST' }),
-    };
-  }, [getToken]);
+  return useApiClient(makeCrmApi);
 }

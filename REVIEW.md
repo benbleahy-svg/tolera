@@ -22,6 +22,11 @@ Style, naming, and refactor suggestions are 🟡 Nit at most.
 - A new table/column has a migration and appears in the domain model.
 - A new money field stores integer minor units + currency.
 - Units are metric only (mm / kg / deg); no imperial defaults (the DACH delta wins).
+- A handler that checks state then writes (status gate, editability, soft-delete, counter) locks the aggregate root first (`_get_X_or_404(..., for_update=True)` / `SELECT … FOR UPDATE`).
+- A new list filter or soft-delete column ships its supporting index (`(org_id, <col>)` / `(org_id, deleted_at)`) in the same migration.
+- A test fixture that skips when a dependency is missing fails closed when `CI` is set.
+- New frontend user-facing strings exist in **both** `en.json` and `de.json`; caught errors go through `errorMessage(e, t)`, never `String(e)`.
+- No sync network/disk call inside an `async def` without `anyio.to_thread.run_sync` + a bounded timeout.
 
 ## Cap the noise
 

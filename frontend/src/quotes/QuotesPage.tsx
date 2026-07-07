@@ -18,7 +18,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 
-import { ApiError } from '../api/client';
+import { errorMessage } from '../api/errors';
 import { useHasPermission } from '../session/session';
 import { useQuotesApi } from './api';
 import type {
@@ -71,11 +71,14 @@ export function QuotesPage() {
         })
         .catch((e: unknown) => {
           if (seq === requestSeq.current) {
-            setError(e instanceof ApiError ? e.message : String(e));
+            setError(errorMessage(e, t));
+            // Drop the previous response — stale rows under an error banner
+            // would misrepresent the active view/filters.
+            setData(null);
           }
         });
     },
-    [api],
+    [api, t],
   );
 
   /** Build the request from the explicit selection + clauses (never re-looks-up a
@@ -109,8 +112,13 @@ export function QuotesPage() {
 
   // ----------------------------------------------------------- saved views
   const loadViews = useCallback(
-    () => api.listSavedViews().then(setViews).catch(() => undefined),
-    [api],
+    () =>
+      api
+        .listSavedViews()
+        .then(setViews)
+        // Surface the failure — a silently empty sidebar looks like "no views".
+        .catch((e: unknown) => setError(errorMessage(e, t))),
+    [api, t],
   );
 
   useEffect(() => {
@@ -125,7 +133,12 @@ export function QuotesPage() {
     apply({ kind: 'custom', id: view.id }, view.filters, view.sort, 0);
 
   const setStatusFilter = (status: string) => {
-    const next: FilterClause[] = status ? [{ field: 'status', op: 'eq', value: status }] : [];
+    // Replace only the status clause — a saved view's other filters (account,
+    // salesperson, …) must survive a status change, not be silently dropped.
+    const rest = filters.filter((f) => !(f.field === 'status' && f.op === 'eq'));
+    const next: FilterClause[] = status
+      ? [...rest, { field: 'status', op: 'eq', value: status }]
+      : rest;
     apply({ kind: 'adhoc' }, next, sort, 0);
   };
 
@@ -145,7 +158,7 @@ export function QuotesPage() {
         await loadViews();
         apply({ kind: 'custom', id: created.id }, created.filters, created.sort, 0);
       })
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
+      .catch((e: unknown) => setError(errorMessage(e, t)));
   };
 
   const deleteView = (view: SavedView) => {
@@ -155,7 +168,7 @@ export function QuotesPage() {
         await loadViews();
         if (active.kind === 'custom' && active.id === view.id) selectSystem('all-quotes');
       })
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
+      .catch((e: unknown) => setError(errorMessage(e, t)));
   };
 
   // -------------------------------------------------------------- the grid
@@ -195,10 +208,11 @@ export function QuotesPage() {
 
   const total = data?.total ?? 0;
   const offset = page * PAGE_SIZE;
-  const activeStatus =
-    active.kind === 'adhoc'
-      ? (filters.find((f) => f.field === 'status' && f.op === 'eq')?.value as string | undefined)
-      : undefined;
+  // Derived from the live filters (not just ad-hoc ones) so the dropdown also
+  // reflects a custom saved view's status clause; system views carry no filters.
+  const activeStatus = filters.find((f) => f.field === 'status' && f.op === 'eq')?.value as
+    | string
+    | undefined;
 
   const title =
     active.kind === 'system'
@@ -289,7 +303,8 @@ export function QuotesPage() {
 
           {filters.map((f, i) => (
             <span key={`${f.field}-${i}`} className="quotes-chip">
-              {t(`quotes.col.${f.field === 'status' ? 'status' : f.field}`)}: {String(f.value)}
+              {t(`quotes.field.${f.field}`, f.field)}:{' '}
+              {f.field === 'status' ? t(`quotes.status.${String(f.value)}`) : String(f.value)}
               <button
                 type="button"
                 className="quotes-chip-remove"
