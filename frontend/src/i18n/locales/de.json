@@ -34,6 +34,11 @@
     "loading": "Sitzung wird geladen …",
     "error": "Sitzung konnte nicht geladen werden."
   },
+  "errors": {
+    "network": "Netzwerkfehler – bitte Verbindung prüfen.",
+    "request_failed": "Anfrage fehlgeschlagen (Status {{status}}).",
+    "unexpected": "Es ist ein Fehler aufgetreten. Bitte erneut versuchen."
+  },
   "parts": {
     "create": "Teil anlegen",
     "empty": "Noch keine Teile.",
@@ -148,6 +153,14 @@
       "account": "Konto",
       "salesperson": "Vertrieb",
       "created": "Erstellt"
+    },
+    "field": {
+      "status": "Status",
+      "account_id": "Konto",
+      "salesperson_id": "Vertrieb",
+      "estimator_id": "Kalkulation",
+      "created_at": "Erstellt",
+      "due_date": "Fällig am"
     },
     "status": {
       "draft": "Entwurf",

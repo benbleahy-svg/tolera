@@ -44,6 +44,19 @@ async function bearerHeader(getToken: TokenGetter): Promise<Record<string, strin
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** Parse a success body, keeping the ApiError contract: 204/empty resolves to
+ * `undefined`; a non-JSON body throws an `ApiError`, never a raw SyntaxError. */
+async function parseJsonBody<T>(res: Response): Promise<T> {
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(res.status, 'invalid_response', `Invalid JSON response (${res.status})`);
+  }
+}
+
 /** Map a non-OK response onto the backend's `{code, message, details}` envelope. */
 async function rejectFromResponse(res: Response): Promise<never> {
   let code = 'error';
@@ -91,8 +104,7 @@ export async function apiFetch<T>(
     throw new ApiError(0, 'network_error', 'Network request failed', cause);
   }
   if (!res.ok) await rejectFromResponse(res);
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return parseJsonBody<T>(res);
 }
 
 /**
@@ -113,8 +125,7 @@ export async function apiUpload<T>(
     throw new ApiError(0, 'network_error', 'Network request failed', cause);
   }
   if (!res.ok) await rejectFromResponse(res);
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return parseJsonBody<T>(res);
 }
 
 /** Fetch a binary response (file download, M1.2) as a `Blob`, with auth. */

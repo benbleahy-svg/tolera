@@ -34,6 +34,11 @@
     "loading": "Loading session …",
     "error": "Could not load your session."
   },
+  "errors": {
+    "network": "Network error — please check your connection.",
+    "request_failed": "Request failed (status {{status}}).",
+    "unexpected": "Something went wrong. Please try again."
+  },
   "parts": {
     "create": "New part",
     "empty": "No parts yet.",
@@ -148,6 +153,14 @@
       "account": "Account",
       "salesperson": "Salesperson",
       "created": "Created"
+    },
+    "field": {
+      "status": "Status",
+      "account_id": "Account",
+      "salesperson_id": "Salesperson",
+      "estimator_id": "Estimator",
+      "created_at": "Created",
+      "due_date": "Due date"
     },
     "status": {
       "draft": "Draft",

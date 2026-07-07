@@ -44,6 +44,23 @@ def _unauthorized(message: str = "Authentication required") -> AppError:
     return AppError("unauthorized", message, status_code=status.HTTP_401_UNAUTHORIZED)
 
 
+# One PyJWKClient per JWKS URL, so its built-in key cache is actually used.
+# A fresh client per request would refetch the JWKS over HTTPS on every call —
+# adding latency, making Clerk availability a hard dependency of every request,
+# and letting unauthenticated garbage tokens trigger outbound fetches.
+_jwks_clients: dict[str, jwt.PyJWKClient] = {}
+
+
+def _jwks_client(url: str) -> jwt.PyJWKClient:
+    client = _jwks_clients.get(url)
+    if client is None:
+        # Benign race: two threads may build a client; the dict write is atomic
+        # and either instance is valid.
+        client = jwt.PyJWKClient(url, timeout=5)
+        _jwks_clients[url] = client
+    return client
+
+
 def _bearer_token(request: Request) -> str:
     """Extract the bearer token, or raise 401."""
     header = request.headers.get("authorization", "")
@@ -65,7 +82,7 @@ def _verify_clerk_jwt(token: str, settings: Settings) -> dict[str, object]:
         # No IdP configured: there is no way to authenticate a real request.
         raise _unauthorized("Authentication is not configured")
     try:
-        client = jwt.PyJWKClient(settings.clerk_jwks_url, timeout=5)
+        client = _jwks_client(settings.clerk_jwks_url)
         signing_key = client.get_signing_key_from_jwt(token)
         claims = jwt.decode(
             token,

@@ -45,7 +45,30 @@ jobs:
         run: uv run ruff format --check .
       - name: Types (mypy)
         run: uv run mypy .
+      # "Reversible migrations only" is a tier-1 invariant (CLAUDE.md §5) — prove
+      # it: every downgrade must actually reverse its upgrade, on every PR.
+      - name: Migrations reversible (alembic up → down → up)
+        env:
+          DATABASE_URL: postgresql+asyncpg://tolera:tolera@localhost:5432/tolera_test
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+      # The real aioboto3 upload→stream→delete path must be proven in CI, not
+      # only on a dev box with MinIO running — otherwise an aioboto3 upgrade or
+      # a chunking bug ships green and first fails in dev/prod.
+      - name: Start MinIO (S3 round-trip)
+        run: |
+          docker run -d --name minio -p 9100:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:9100/minio/health/live && break
+            sleep 1
+          done
       - name: Tests + coverage (pytest)
+        env:
+          TEST_S3_ENDPOINT: http://localhost:9100
         run: uv run pytest --cov --cov-report=term-missing --cov-fail-under=80
 
   frontend:

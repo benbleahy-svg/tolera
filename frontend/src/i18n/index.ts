@@ -36,11 +36,21 @@ function initialLanguage(): Language {
   return DEFAULT_LANGUAGE;
 }
 
+/** Keep `<html lang>` in sync so screen readers / spellcheck match the UI
+ * language from first paint — index.html hard-codes `lang="de"`. */
+function syncHtmlLang(language: string): void {
+  document.documentElement.lang = language.split('-')[0];
+}
+
+i18n.on('languageChanged', syncHtmlLang);
+
 void i18n.use(initReactI18next).init({
   resources: { de: { translation: de }, en: { translation: en } },
   lng: initialLanguage(),
   fallbackLng: DEFAULT_LANGUAGE,
   interpolation: { escapeValue: false },
 });
+
+syncHtmlLang(i18n.resolvedLanguage ?? i18n.language ?? DEFAULT_LANGUAGE);
 
 export default i18n;

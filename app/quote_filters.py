@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -116,7 +116,14 @@ def _coerce_scalar(kind: _Kind, value: Any) -> Any:
         # datetime
         if not isinstance(value, str):
             raise ValueError("expected an ISO-8601 datetime string")
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            # Date-only / offset-less values are part of the contract (a date
+            # picker sends "2026-06-30"); pin them to UTC explicitly rather than
+            # leaving the interpretation to the driver (ISO-8601-UTC convention;
+            # stricter rejection is an OPEN item in DECISIONS.md).
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid value for {kind} field: {value!r}") from exc
 

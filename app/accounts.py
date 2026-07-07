@@ -252,6 +252,21 @@ async def _get_account_or_404(session: AsyncSession, account_id: uuid.UUID) -> A
     return account
 
 
+async def _require_live_account(session: AsyncSession, account_id: uuid.UUID) -> Account:
+    """An account a contact is created under / moved onto must not be archived —
+    the contact would silently vanish from the default cross-account list (the
+    archived-parent hide, DECISIONS.md 2026-06-25). Mirrors quotes'
+    ``_validate_account`` archived rule."""
+    account = await _get_account_or_404(session, account_id)
+    if account.deleted_at is not None:
+        raise AppError(
+            "account_archived",
+            "Cannot attach a contact to an archived account; restore it first.",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+    return account
+
+
 async def _get_contact_or_404(session: AsyncSession, contact_id: uuid.UUID) -> Contact:
     """Fetch a contact in the active org (archived included), or raise 404."""
     contact = await session.get(Contact, contact_id)
@@ -283,8 +298,17 @@ async def list_accounts(
     if salesperson_id is not None:
         stmt = stmt.where(Account.salesperson_id == salesperson_id)
     if q:
-        pattern = f"%{q}%"
-        stmt = stmt.where(or_(Account.name.ilike(pattern), Account.email.ilike(pattern)))
+        # Escape LIKE metacharacters so a literal "%"/"_" in the query matches
+        # itself instead of acting as a wildcard (e.g. q="50%" must not match
+        # every row). Parameterisation already rules out SQL injection.
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        stmt = stmt.where(
+            or_(
+                Account.name.ilike(pattern, escape="\\"),
+                Account.email.ilike(pattern, escape="\\"),
+            )
+        )
     stmt = stmt.order_by(Account.name).limit(limit).offset(offset)
     result = await session.execute(stmt)
     return [_account_out(account) for account in result.scalars()]
@@ -409,7 +433,7 @@ async def create_account_contact(
     _: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> ContactOut:
     """Create a contact under an account."""
-    await _get_account_or_404(session, account_id)
+    await _require_live_account(session, account_id)
     contact = await _create_contact(session, _.active_org_id, account_id, payload)
     return _contact_out(contact)
 
@@ -472,7 +496,7 @@ async def update_contact(
     if "salesperson_id" in changes:
         await _validate_salesperson(session, changes["salesperson_id"])
     if changes.get("account_id") is not None:
-        await _get_account_or_404(session, changes["account_id"])
+        await _require_live_account(session, changes["account_id"])
     for field, value in changes.items():
         setattr(contact, field, value)
     await _flush_unique_email(session)

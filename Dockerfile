@@ -23,5 +23,8 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY scripts ./scripts
+# The app parses untrusted uploads (STEP/PDF sniffing) — never run it as root.
+RUN useradd --system --no-create-home --uid 1001 app
+USER app
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

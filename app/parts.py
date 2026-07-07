@@ -365,7 +365,12 @@ async def _get_or_create_geometry(session: AsyncSession, part: Part) -> PartGeom
 
 
 async def _node_subtree(session: AsyncSession, node: Node) -> BomNodeOut:
-    """Build a node and its descendants (M1.5: leaves only — no children yet)."""
+    """Build a node and its descendants (M1.5: leaves only — no children yet).
+
+    One query per node is fine while every tree is a single root; before M4's
+    BOM Builder creates real trees this must become one recursive CTE (a
+    100-node assembly would otherwise issue 100 sequential queries per render).
+    """
     child_rows = (
         await session.scalars(
             select(Node).where(Node.parent_node_id == node.id).order_by(Node.created_at)

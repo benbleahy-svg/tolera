@@ -77,18 +77,24 @@ def db_client() -> Iterator[TestClient]:
     """A TestClient wired to a real Postgres via ``TEST_DATABASE_URL``.
 
     Skips when the variable is unset or the database is unreachable, so the
-    suite stays green locally without a database while still exercising the
-    round-trip in CI (where a Postgres service is provided).
+    suite stays green locally without a database. In CI (where a Postgres
+    service is provided) it FAILS closed instead — otherwise a readiness-probe
+    regression (or a startup crash) would skip the very test that exists to
+    catch it, and CI would stay green. The fixture only guards *reachability*;
+    asserting ``db == "ok"`` is the test's job (``test_health``).
     """
+    in_ci = bool(os.environ.get("CI"))
     url = os.environ.get("TEST_DATABASE_URL")
     if not url:
+        if in_ci:
+            pytest.fail("TEST_DATABASE_URL not set — DB round-trip cannot be skipped in CI")
         pytest.skip("TEST_DATABASE_URL not set — Postgres round-trip skipped")
     try:
         with TestClient(create_app(build_settings(database_url=url))) as test_client:
-            if test_client.get("/readyz").json().get("db") != "ok":
-                pytest.skip("TEST_DATABASE_URL not reachable")
             yield test_client
-    except Exception:
+    except Exception as exc:
+        if in_ci:
+            pytest.fail(f"TEST_DATABASE_URL unreachable in CI — cannot skip: {exc!r}")
         pytest.skip("TEST_DATABASE_URL not reachable")
 
 
@@ -472,10 +478,15 @@ async def _truncate(engine: AsyncEngine) -> None:
 
 @pytest.fixture
 def seeder(tenancy_db: str) -> Iterator[Seeder]:
-    """Owner-connection seeding; truncates tenant tables after each test."""
+    """Owner-connection seeding; truncates tenant tables before AND after each test.
+
+    Truncating on both sides keeps test correctness independent of execution
+    order: a prior test that seeded rows without this fixture (e.g. via
+    ``clean_db``) can't leak state in, and this test can't leak state out."""
     loop = asyncio.new_event_loop()
     engine = create_async_engine(tenancy_db)
     try:
+        loop.run_until_complete(_truncate(engine))
         yield Seeder(loop, engine)
     finally:
         loop.run_until_complete(_truncate(engine))

@@ -32,7 +32,9 @@ services:
   # MinIO — S3-compatible object store for part files (M1.2). Prod swaps in an
   # EU-resident bucket behind the same S3 API (DECISIONS.md 2026-06-25).
   minio:
-    image: minio/minio:latest
+    # Pinned like db/redis — a floating `latest` can break every dev's
+    # `compose up` on the same day, unrelated to any commit.
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -52,7 +54,7 @@ services:
 
   # One-shot: create the bucket the app expects, then exit.
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
         condition: service_healthy

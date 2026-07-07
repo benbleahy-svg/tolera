@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from .auth import Principal, get_principal
 from .config import Settings
 from .db import USER_ID_GUC, org_scoped_session
+from .logging import org_id_var
 from .storage import ObjectStorage
 
 
@@ -29,13 +30,19 @@ async def get_session(
     Also stamps the authenticated user into a transaction-local GUC so the
     ``app_current_identity()`` SECURITY DEFINER read is bound to *this* caller by
     the database, not by a trusted function argument (migration 0004)."""
-    sessionmaker: async_sessionmaker[AsyncSession] = request.app.state.sessionmaker
-    async with org_scoped_session(sessionmaker, principal.active_org_id) as session:
-        await session.execute(
-            text(f"SELECT set_config('{USER_ID_GUC}', :uid, true)"),
-            {"uid": str(principal.user_id)},
-        )
-        yield session
+    # Stamp the org into the logging context so every JSON log line emitted
+    # while serving this request is traceable per tenant (CLAUDE.md §5).
+    org_token = org_id_var.set(str(principal.active_org_id))
+    try:
+        sessionmaker: async_sessionmaker[AsyncSession] = request.app.state.sessionmaker
+        async with org_scoped_session(sessionmaker, principal.active_org_id) as session:
+            await session.execute(
+                text(f"SELECT set_config('{USER_ID_GUC}', :uid, true)"),
+                {"uid": str(principal.user_id)},
+            )
+            yield session
+    finally:
+        org_id_var.reset(org_token)
 
 
 def get_storage(request: Request) -> ObjectStorage:

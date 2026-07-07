@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { ApiError } from '../api/client';
+import { errorMessage } from '../api/errors';
 import { useHasPermission } from '../session/session';
 import { contactDisplayName } from './format';
 import { type Contact, useCrmApi } from './api';
@@ -38,10 +38,7 @@ export function ContactDetailPage() {
     setPhone(c.phone ?? '');
   }, []);
 
-  const reportError = useCallback(
-    (e: unknown) => setError(e instanceof ApiError ? e.message : String(e)),
-    [],
-  );
+  const reportError = useCallback((e: unknown) => setError(errorMessage(e, t)), [t]);
 
   useEffect(() => {
     // Clear the old contact and ignore an out-of-order response, so navigating
@@ -74,7 +71,10 @@ export function ContactDetailPage() {
         phone: phone.trim() || null,
       })
       .then((next) => {
-        if (seq === loadSeq.current) seed(next);
+        // Update the record (title, archived chip) but do NOT re-seed the form:
+        // re-seeding would silently revert anything typed while the save was
+        // in flight.
+        if (seq === loadSeq.current) setContact(next);
       })
       .catch((e: unknown) => {
         if (seq === loadSeq.current) reportError(e);
@@ -88,7 +88,8 @@ export function ContactDetailPage() {
     const action = contact.archived ? api.restoreContact : api.archiveContact;
     action(contactId)
       .then((next) => {
-        if (seq === loadSeq.current) seed(next);
+        // Same as save: update the record, keep unsaved form edits intact.
+        if (seq === loadSeq.current) setContact(next);
       })
       .catch((e: unknown) => {
         if (seq === loadSeq.current) reportError(e);

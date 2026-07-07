@@ -17,7 +17,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Keep in lockstep with ci.yml's frontend job — the browser tests
+          # drive the same frontend and must not build under a different Node.
+          node-version: 24
       # Use `npm ci` once package-lock.json is committed (more reproducible).
       - run: npm install
       - run: npx playwright install --with-deps chromium

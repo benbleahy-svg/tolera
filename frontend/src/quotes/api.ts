@@ -4,10 +4,8 @@
  * threading auth, and tests mock this module wholesale (no Clerk).
  */
 
-import { useMemo } from 'react';
-import { useAuth } from '@clerk/clerk-react';
-
 import { apiFetch, type TokenGetter } from '../api/client';
+import { useApiClient } from '../api/hooks';
 import type {
   QuoteSearchRequest,
   QuoteSearchResponse,
@@ -24,20 +22,18 @@ export interface QuotesApi {
   deleteSavedView: (id: string) => Promise<void>;
 }
 
+function makeQuotesApi(token: TokenGetter): QuotesApi {
+  return {
+    searchQuotes: (req) => apiFetch('/api/quotes/search', token, { method: 'POST', body: req }),
+    listSavedViews: () => apiFetch('/api/saved-views?scope=quotes', token),
+    createSavedView: (body) => apiFetch('/api/saved-views', token, { method: 'POST', body }),
+    updateSavedView: (id, body) =>
+      apiFetch(`/api/saved-views/${id}`, token, { method: 'PATCH', body }),
+    deleteSavedView: (id) => apiFetch(`/api/saved-views/${id}`, token, { method: 'DELETE' }),
+  };
+}
+
 /** Build a quotes API client bound to the current Clerk session token. */
 export function useQuotesApi(): QuotesApi {
-  const { getToken } = useAuth();
-  return useMemo<QuotesApi>(() => {
-    const token: TokenGetter = () => getToken();
-    return {
-      searchQuotes: (req) =>
-        apiFetch('/api/quotes/search', token, { method: 'POST', body: req }),
-      listSavedViews: () => apiFetch('/api/saved-views?scope=quotes', token),
-      createSavedView: (body) => apiFetch('/api/saved-views', token, { method: 'POST', body }),
-      updateSavedView: (id, body) =>
-        apiFetch(`/api/saved-views/${id}`, token, { method: 'PATCH', body }),
-      deleteSavedView: (id) =>
-        apiFetch(`/api/saved-views/${id}`, token, { method: 'DELETE' }),
-    };
-  }, [getToken]);
+  return useApiClient(makeQuotesApi);
 }
