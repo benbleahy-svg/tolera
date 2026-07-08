@@ -153,23 +153,31 @@ class OperationCreate(BaseModel):
 
 class OperationUpdate(BaseModel):
     """The drawer edit: overrides (``manual_*``; ``None`` clears back to
-    Calculated), per-quote config, and notes. ``calc_*`` fields are engine-owned."""
+    Calculated), per-quote config, and notes. ``calc_*`` fields are engine-owned.
+
+    Nullability mirrors the columns: the nullable fields accept an explicit
+    ``null`` to clear, but ``surcharge_pct``/``yield_factor``/``name`` are NOT
+    NULL in the DB, so their types exclude ``None`` — an explicit ``null`` is a
+    clean 422, never a 500 (Greptile M1.7 review). The handler applies
+    ``exclude_unset``, so their defaults here are inert placeholders: an absent
+    field always means "leave unchanged", to reset send the DB default
+    (surcharge ``0``, yield ``1``)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
-    calculation_mode: CalculationMode | None = None
+    name: Annotated[str, Field(min_length=1, max_length=200)] = "unset"
+    calculation_mode: CalculationMode = CalculationMode.machine_plus_operator
     run_rate: Annotated[Decimal | None, Field(ge=0)] = None
     labour_rate: Annotated[Decimal | None, Field(ge=0)] = None
-    setup_basis: SetupBasis | None = None
+    setup_basis: SetupBasis = SetupBasis.flat
     setup_cost: Annotated[Decimal | None, Field(ge=0)] = None
     manual_setup_mins: Annotated[Decimal | None, Field(ge=0)] = None
     manual_runtime_mins: Annotated[Decimal | None, Field(ge=0)] = None
     manual_attend_mins: Annotated[Decimal | None, Field(ge=0)] = None
-    surcharge_pct: Annotated[Decimal | None, Field(ge=0, le=100)] = None
-    yield_factor: Annotated[Decimal | None, Field(gt=0, le=1)] = None
-    is_outside_service: bool | None = None
-    is_finish: bool | None = None
+    surcharge_pct: Annotated[Decimal, Field(ge=0, le=100)] = Decimal(0)
+    yield_factor: Annotated[Decimal, Field(gt=0, le=1)] = Decimal(1)
+    is_outside_service: bool = False
+    is_finish: bool = False
     notes: Annotated[str | None, Field(max_length=10_000)] = None
 
 

@@ -209,6 +209,21 @@ describe('EstimatingPage', () => {
     );
   });
 
+  it('clearing the surcharge input saves the default 0, not an empty string', async () => {
+    // surcharge_pct is NOT NULL server-side: a cleared input must reset to '0'
+    // (""/null would be a 422 the estimator can't act on) — Greptile M1.7 review.
+    getCosting.mockResolvedValue(
+      costing([op('Drehen', [cell(1, '25.0000'), cell(10, '160.0000')], { surcharge_pct: '10' })]),
+    );
+    updateOperation.mockResolvedValue(costing([]));
+    await renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: 'Drehen' }));
+    await userEvent.clear(screen.getByLabelText('Zuschlag (%)'));
+    await userEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    await waitFor(() => expect(updateOperation).toHaveBeenCalled());
+    expect(updateOperation.mock.calls[0][1]).toMatchObject({ surcharge_pct: '0' });
+  });
+
   it('change process offers UPDATE (destructive) and KEEP OPS commits', async () => {
     getCosting.mockResolvedValue(costing([op('Drehen', [cell(1, '25.0000'), cell(10, null)])]));
     setComponentProcess.mockResolvedValue(costing([]));

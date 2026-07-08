@@ -495,6 +495,28 @@ def test_duplicate_and_remove_and_reorder(app_client: TestClient, seeder: Seeder
         assert len(app_client.get("/api/operation-defs", params={"q": "schleifen"}).json()) == 1
 
 
+def test_explicit_null_on_not_null_fields_is_422_not_500(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    # surcharge_pct / yield_factor / name are NOT NULL columns: an external client
+    # sending an explicit null must get the clean validation envelope, never a DB
+    # IntegrityError 500 (Greptile M1.7 review). Reset = send the default value.
+    org, admin = _org_admin(seeder)
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        component_id = _new_component(app_client)
+        costing = _add_op(app_client, component_id, name="Fräsen", calculation_mode="labour_only")
+        op = _op_row(costing, "Fräsen")
+        for field in ("surcharge_pct", "yield_factor", "name"):
+            res = app_client.patch(f"/api/operations/{op['id']}", json={field: None})
+            assert res.status_code == 422, f"{field}: {res.status_code} {res.text}"
+            assert res.json()["code"] == "validation_error"
+        # Reset semantics: the DB defaults are accepted values.
+        ok = app_client.patch(
+            f"/api/operations/{op['id']}", json={"surcharge_pct": "0", "yield_factor": "1"}
+        )
+        assert ok.status_code == 200, ok.text
+
+
 # --------------------------------------------------------------------------- #
 # Gates: permissions, draft-only lock, org isolation
 # --------------------------------------------------------------------------- #

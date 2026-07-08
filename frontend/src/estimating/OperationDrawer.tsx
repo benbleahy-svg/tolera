@@ -80,14 +80,17 @@ export function OperationDrawer({
       manual_runtime_mins: blankToNull(runtimeMins),
       run_rate: blankToNull(runRate),
       setup_cost: blankToNull(setupCost),
-      surcharge_pct: surcharge,
+      // NOT NULL in the DB: a cleared input resets to the default (no surcharge)
+      // rather than sending ""/null, which the API would reject with a 422.
+      surcharge_pct: blankToNull(surcharge) ?? '0',
       notes: blankToNull(notes),
     };
     if (operation.calculation_mode === 'machine_plus_operator') {
       body.manual_attend_mins = blankToNull(attendMins);
       body.labour_rate = blankToNull(labourRate);
     }
-    if (operation.category === 'material') body.yield_factor = yieldFactor;
+    // Same NOT NULL rule: cleared yield factor resets to 1.0 (no scrap gross-up).
+    if (operation.category === 'material') body.yield_factor = blankToNull(yieldFactor) ?? '1';
     onSave(body);
   };
 
