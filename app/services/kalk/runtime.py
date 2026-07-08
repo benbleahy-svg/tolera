@@ -8,6 +8,7 @@ here may raise anything else for in-formula misuse.
 
 from __future__ import annotations
 
+import math
 import re
 import statistics
 import string as string_module
@@ -413,35 +414,31 @@ class Runtime:
         if isinstance(number, bool) or not isinstance(number, int | float):
             raise _abort("runtime_error", "round() takes a number")
         if ndigits is None:
-            return round(number)
+            return self._check_number(round(number))
         if isinstance(ndigits, bool) or not isinstance(ndigits, int):
             raise _abort("runtime_error", "round() ndigits must be an integer")
-        return round(number, ndigits)
+        return self._check_number(round(number, ndigits))
 
     def b_abs(self, number: object) -> object:
         self.tick()
         number = self.unwrap(number)
         if isinstance(number, bool) or not isinstance(number, int | float):
             raise _abort("runtime_error", "abs() takes a number")
-        return abs(number)
+        return self._check_number(abs(number))
 
-    def b_floor(self, number: object) -> int:
+    def b_floor(self, number: object) -> object:
         self.tick()
         number = self.unwrap(number)
         if isinstance(number, bool) or not isinstance(number, int | float):
             raise _abort("runtime_error", "floor() takes a number")
-        import math
+        return self._check_number(math.floor(number))
 
-        return math.floor(number)
-
-    def b_ceil(self, number: object) -> int:
+    def b_ceil(self, number: object) -> object:
         self.tick()
         number = self.unwrap(number)
         if isinstance(number, bool) or not isinstance(number, int | float):
             raise _abort("runtime_error", "ceil() takes a number")
-        import math
-
-        return math.ceil(number)
+        return self._check_number(math.ceil(number))
 
     def b_str(self, value: object = "") -> str:
         self.tick()
