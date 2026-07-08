@@ -219,7 +219,7 @@ export function EstimatingPage() {
               setError(null);
               api
                 .removeOperation(id)
-                .then(() => componentId && api.getCosting(componentId).then(setCosting))
+                .then(() => (componentId ? api.getCosting(componentId).then(setCosting) : null))
                 .catch(fail);
             }}
             onMove={moveOperation}
@@ -245,7 +245,7 @@ export function EstimatingPage() {
               setError(null);
               api
                 .removeOperation(id)
-                .then(() => componentId && api.getCosting(componentId).then(setCosting))
+                .then(() => (componentId ? api.getCosting(componentId).then(setCosting) : null))
                 .catch(fail);
             }}
             onMove={moveOperation}
