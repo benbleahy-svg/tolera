@@ -703,6 +703,18 @@ class Component(Base):
         ForeignKeyConstraint(
             ["org_id", "part_id"], ["part.org_id", "part.id"], name="fk_component_part_org"
         ),
+        # M1.7 same-org pins for the estimating assignments (the material picker /
+        # Change Process); ``purchased_component_id`` stays deferred to M4.
+        ForeignKeyConstraint(
+            ["org_id", "material_id"],
+            ["material.org_id", "material.id"],
+            name="fk_component_material_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "process_id"],
+            ["process.org_id", "process.id"],
+            name="fk_component_process_org",
+        ),
         Index("ix_component_org_part", "org_id", "part_id"),
     )
 
@@ -712,8 +724,9 @@ class Component(Base):
     is_root_component: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    # M1.5 structural extensions. ``process_id``/``material_id``/``purchased_component_id``
-    # are deferred to M1.7/M4 (their tables don't exist yet).
+    # M1.5 structural extensions; material/process assignment landed with M1.7.
+    material_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    process_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     obtain_method: Mapped[ObtainMethod] = mapped_column(
         _obtain_method_enum, nullable=False, server_default=ObtainMethod.manufactured.value
     )
@@ -875,5 +888,343 @@ class SavedView(Base):
         nullable=False,
         server_default=SavedViewVisibility.private.value,
     )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+# --------------------------------------------------------------------------- #
+# M1.7 — Materials catalog, processes, operation library, per-qty cost cells
+# --------------------------------------------------------------------------- #
+class OpCategory(enum.StrEnum):
+    """An operation row's kind (canonical ``op_category`` enum, DB-SCHEMA.sql /
+    SEED §3). ``material`` rows are the stock/material lines ("ADD MATERIAL
+    OPERATION" — spec ``#partview`` Materials section); ``operation`` rows are
+    the router work steps."""
+
+    operation = "operation"
+    material = "material"
+
+
+class CalculationMode(enum.StrEnum):
+    """How an operation's cost is computed (spec ``#oplibrary`` operation data
+    model). Controls which rate fields apply:
+
+    * ``machine_plus_operator`` — MSS machine rate (``run_rate``) on Hauptzeit
+      plus operator rate (``labour_rate``) on Nebenzeit.
+    * ``labour_only`` — one labour rate (``run_rate``) on Arbeitszeit.
+    * ``outside_process`` — routed to the Vendor-RFQ portal (M6); **no internal
+      calc** — cost cells are manual until then.
+    """
+
+    machine_plus_operator = "machine_plus_operator"
+    labour_only = "labour_only"
+    outside_process = "outside_process"
+
+
+class SetupBasis(enum.StrEnum):
+    """How setup is charged (spec ``#oplibrary``): a **flat €** amount per lot
+    (default) or **time-based** (Advanced toggle — setup minutes x rate; rate =
+    ``run_rate`` per the DECISIONS.md 2026-07-07 OPEN default). The two are
+    mutually exclusive by construction: the basis picks which field applies."""
+
+    flat = "flat"
+    time = "time"
+
+
+_op_category_enum = Enum(OpCategory, name="op_category", create_type=False)
+_calculation_mode_enum = Enum(CalculationMode, name="calculation_mode", create_type=False)
+_setup_basis_enum = Enum(SetupBasis, name="setup_basis", create_type=False)
+
+
+class MaterialClass(Base):
+    """Top level of the 3-level materials hierarchy (Class → Family → Material;
+    DB-SCHEMA "materials"). Seeded per org (Metall in M1.7; the full class set —
+    Polymer, Holz, Sonstige, … — arrives with M1.12). ``UNIQUE (org_id, name)``
+    keys the idempotent seed; ``UNIQUE (org_id, id)`` is the composite-FK target."""
+
+    __tablename__ = "material_class"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_material_class_org_id_id"),
+        UniqueConstraint("org_id", "name", name="uq_material_class_org_name"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class MaterialFamily(Base):
+    """Middle level of the materials hierarchy — e.g. Nichtrostender Stahl,
+    Werkzeugstahl (German-first display names; DECISIONS.md 2026-07-07 "M1.7
+    material catalog content"). ``alias`` keeps the English/hubs family name for
+    the type-ahead. Same-org composite FK to the class."""
+
+    __tablename__ = "material_family"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_material_family_org_id_id"),
+        UniqueConstraint("org_id", "class_id", "name", name="uq_material_family_org_class_name"),
+        ForeignKeyConstraint(
+            ["org_id", "class_id"],
+            ["material_class.org_id", "material_class.id"],
+            name="fk_material_family_class_org",
+        ),
+        Index("ix_material_family_org_class", "org_id", "class_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    class_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    alias: Mapped[str | None] = mapped_column(String)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class Material(Base):
+    """A concrete stock material (leaf of the hierarchy), DACH-keyed: DIN EN 10027
+    ``werkstoffnummer`` (e.g. ``1.4301``), EN short name (``X5CrNi18-10``), AISI
+    alias (``304``) — DACH-DELTA §4. ``density`` is g/cm³; ``cost_per_volume`` /
+    ``cost_per_area`` stay NULL until the shop sets rates (the M1.14 missing-rates
+    guard flags this). "Edit Material Properties" (spec ``#partview``) edits this
+    org-library row."""
+
+    __tablename__ = "material"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_material_org_id_id"),
+        UniqueConstraint("org_id", "family_id", "display_name", name="uq_material_org_family_name"),
+        ForeignKeyConstraint(
+            ["org_id", "family_id"],
+            ["material_family.org_id", "material_family.id"],
+            name="fk_material_family_org",
+        ),
+        Index("ix_material_org_family", "org_id", "family_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    werkstoffnummer: Mapped[str | None] = mapped_column(String)
+    en_name: Mapped[str | None] = mapped_column(String)
+    aisi_alias: Mapped[str | None] = mapped_column(String)
+    density: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    cost_per_volume: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    cost_per_area: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    added_lead_time_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class Process(Base):
+    """A manufacturing process a component can be assigned to (spec ``#partview``
+    Change Process). **M1.7 lands the minimal entity** — name + external name;
+    router templates, process↔operation membership and the ``process_family``
+    enum arrive with M1.12/M4 by forward ALTER (the M1.4/M1.5 stub-then-extend
+    precedent). Core-4 names are seeded so Change Process has real targets."""
+
+    __tablename__ = "process"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_process_org_id_id"),
+        UniqueConstraint("org_id", "name", name="uq_process_org_name"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    external_name: Mapped[str | None] = mapped_column(String)
+    default_lead_time_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class OperationDef(Base):
+    """An org-library operation definition (spec ``#oplibrary`` data model — the
+    DACH shape; DECISIONS.md 2026-07-07 "Operation model shape"). Times are
+    **minutes** product-wide. ``setup_basis`` picks flat-€ ``setup_cost`` vs
+    time-based ``setup_time_mins`` (Advanced toggle). Rates are €/hr; NULL until
+    the shop configures them (rates are never pre-seeded). ``is_pre_installed``
+    rows (the 54-op M1.12 seed) can be renamed or hidden (``deleted_at``) but
+    never hard-deleted. The Kalk ``cost_formula`` column lands at M1.9."""
+
+    __tablename__ = "operation_def"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_operation_def_org_id_id"),
+        # Live library names are unique per org (the auto-save dedup key); soft-
+        # deleted rows fall out of the constraint via the partial index in the
+        # migration (uq_operation_def_org_name_live) — not expressible here.
+        CheckConstraint(
+            "surcharge_pct >= 0 AND surcharge_pct <= 100", name="ck_operation_def_surcharge_range"
+        ),
+        Index("ix_operation_def_org_sort", "org_id", "sort_order"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[OpCategory] = mapped_column(
+        _op_category_enum, nullable=False, server_default=OpCategory.operation.value
+    )
+    calculation_mode: Mapped[CalculationMode] = mapped_column(
+        _calculation_mode_enum,
+        nullable=False,
+        server_default=CalculationMode.machine_plus_operator.value,
+    )
+    run_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    labour_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    setup_basis: Mapped[SetupBasis] = mapped_column(
+        _setup_basis_enum, nullable=False, server_default=SetupBasis.flat.value
+    )
+    setup_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    setup_time_mins: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    surcharge_pct: Mapped[Decimal] = mapped_column(
+        Numeric(6, 3), nullable=False, server_default=text("0")
+    )
+    is_outside_service: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    is_finish: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    is_pre_installed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class Operation(Base):
+    """An operation **instance** on a component — a router row (``category =
+    operation``) or a material line (``category = material``), spec ``#partview``
+    Materials · Operations. Mode/rates/setup are **copied from the library def at
+    attach time** so a later library edit never silently reprices an existing
+    quote (E4-d config-freeze posture).
+
+    Time inputs are per-row **calc/manual pairs in minutes** (drawer PRIMARY:
+    Calculated vs Override): ``runtime_mins`` = Hauptzeit (machine mode) or
+    Arbeitszeit (labour mode); ``attend_mins`` = Nebenzeit (machine mode only).
+    In M1.7 the ``calc_*`` times seed from the def and manual overrides sit on
+    top; M1.9 makes the calc side formula-driven. ``yield_factor`` (material
+    lines) grosses up material quantity/cost for scrap once a material calc
+    source exists (``#oplibrary`` Material line — yield factor).
+
+    ``position`` is the router order (drag-reorder); not DB-unique — the full
+    order is reassigned in one transaction and reads sort ``(position, id)``.
+    ``UNIQUE (org_id, id)`` is the same-org composite-FK target for cells."""
+
+    __tablename__ = "operation"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_operation_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_operation_component_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "operation_def_id"],
+            ["operation_def.org_id", "operation_def.id"],
+            name="fk_operation_def_org",
+        ),
+        CheckConstraint(
+            "surcharge_pct >= 0 AND surcharge_pct <= 100", name="ck_operation_surcharge_range"
+        ),
+        CheckConstraint(
+            "yield_factor > 0 AND yield_factor <= 1", name="ck_operation_yield_factor_range"
+        ),
+        Index("ix_operation_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    operation_def_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[OpCategory] = mapped_column(
+        _op_category_enum, nullable=False, server_default=OpCategory.operation.value
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    calculation_mode: Mapped[CalculationMode] = mapped_column(
+        _calculation_mode_enum,
+        nullable=False,
+        server_default=CalculationMode.machine_plus_operator.value,
+    )
+    run_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    labour_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    setup_basis: Mapped[SetupBasis] = mapped_column(
+        _setup_basis_enum, nullable=False, server_default=SetupBasis.flat.value
+    )
+    setup_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    calc_setup_mins: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    manual_setup_mins: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    calc_runtime_mins: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    manual_runtime_mins: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    calc_attend_mins: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    manual_attend_mins: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    surcharge_pct: Mapped[Decimal] = mapped_column(
+        Numeric(6, 3), nullable=False, server_default=text("0")
+    )
+    yield_factor: Mapped[Decimal] = mapped_column(
+        Numeric(6, 4), nullable=False, server_default=text("1.0")
+    )
+    is_outside_service: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    is_finish: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    is_from_factory: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class QuoteCell(Base):
+    """One operation's cost at one quantity break — the per-qty cost cell (spec
+    ``#partview`` per-quantity columns; DB-SCHEMA ``quote_cell``). Carries the
+    **Calculated-vs-Override pair**: ``calc_cost`` (mode arithmetic in M1.7, Kalk
+    from M1.9) and ``manual_cost`` (the estimator's override) — persist both,
+    resolve ``COALESCE(manual_cost, calc_cost)``, recalculation never touches
+    ``manual_cost`` (CLAUDE.md §5). ``numeric(14,4)`` per the resolved money
+    decision (DECISIONS.md 2026-06-27): 4-dp intermediates, minor-unit rounding
+    only at the quote-total boundary.
+
+    The ``(component_id, quantity)`` composite FK onto ``component_quantity``
+    ties every cell to a **real break** — removing a break cascades its cells
+    away; adding one gets cells on the next recalc."""
+
+    __tablename__ = "quote_cell"
+    __table_args__ = (
+        UniqueConstraint("operation_id", "quantity", name="uq_quote_cell_operation_qty"),
+        ForeignKeyConstraint(
+            ["org_id", "operation_id"],
+            ["operation.org_id", "operation.id"],
+            name="fk_quote_cell_operation_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["component_id", "quantity"],
+            ["component_quantity.component_id", "component_quantity.quantity"],
+            name="fk_quote_cell_component_quantity",
+            ondelete="CASCADE",
+        ),
+        Index("ix_quote_cell_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    operation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    calc_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    manual_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()

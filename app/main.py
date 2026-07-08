@@ -18,10 +18,12 @@ from .db import make_engine, make_sessionmaker
 from .errors import register_exception_handlers
 from .health import router as health_router
 from .logging import configure_logging
+from .materials import materials_router
 from .me import router as me_router
 from .metrics import register_metrics
 from .middleware import MaxBodySizeMiddleware, RequestContextMiddleware
 from .notes import router as notes_router
+from .operations import operations_router
 from .parts import parts_router
 from .quotes import quotes_router
 from .saved_views import saved_views_router
@@ -63,6 +65,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(parts_router)
     app.include_router(quotes_router)
     app.include_router(saved_views_router)
+    app.include_router(materials_router)
+    app.include_router(operations_router)
 
     return app
 

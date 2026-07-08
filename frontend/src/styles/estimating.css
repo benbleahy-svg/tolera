@@ -1,0 +1,268 @@
+/* Part-estimating Materials & Operations view (M1.7). Follows the flat, token-
+   based look of quotes.css/parts.css — panels, dense tables, small controls. */
+
+.est-page {
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.est-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+}
+
+.est-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.est-assignments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.est-field-label {
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.est-material-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.est-material-selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.est-picker-pop {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 22rem;
+  max-height: 22rem;
+  overflow: auto;
+  padding: 0.6rem;
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.est-picker-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.est-picker-hits button,
+.est-picker-tree button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.25rem 0.4rem;
+  cursor: pointer;
+}
+
+.est-picker-hits button:hover,
+.est-picker-tree button:hover {
+  background: var(--surface-hover, #eef1f5);
+}
+
+.est-picker-tree summary {
+  cursor: pointer;
+  padding: 0.15rem 0;
+  font-weight: 600;
+}
+
+.est-picker-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 0.9rem;
+}
+
+.est-section {
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.est-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+}
+
+.est-section-header h3,
+.est-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.est-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.est-table th,
+.est-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border, #e3e6ea);
+  text-align: left;
+}
+
+.est-table .est-num {
+  text-align: right;
+}
+
+.est-table tfoot td {
+  font-weight: 600;
+  border-bottom: none;
+}
+
+.est-row-name {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
+.est-chip {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border, #d0d4da);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.est-row-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.est-row-actions button {
+  margin-left: 0.2rem;
+}
+
+.est-overridden {
+  font-weight: 700;
+}
+
+.est-empty {
+  opacity: 0.7;
+  margin: 0.25rem 0;
+}
+
+.est-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(26rem, 90vw);
+  z-index: 40;
+  background: var(--surface, #fff);
+  border-left: 1px solid var(--border, #d0d4da);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
+  padding: 1rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.est-drawer header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.est-drawer h3,
+.est-drawer h4 {
+  margin: 0 0 0.35rem;
+}
+
+.est-override-row,
+.est-cell-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+
+.est-cell-row {
+  grid-template-columns: 2.5rem 1fr 6rem auto;
+}
+
+.est-override-row input,
+.est-cell-row input {
+  width: 6.5rem;
+}
+
+.est-calc-value {
+  opacity: 0.7;
+  font-size: 0.85rem;
+}
+
+.est-cell-qty {
+  font-weight: 600;
+}
+
+.est-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.est-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+}
+
+.est-modal {
+  background: var(--surface, #fff);
+  border-radius: 8px;
+  padding: 1.25rem;
+  min-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.est-warning {
+  color: var(--danger, #b3261e);
+  margin: 0;
+}
+
+.est-danger {
+  color: var(--danger, #b3261e);
+}
+
+.est-error {
+  color: var(--danger, #b3261e);
+}

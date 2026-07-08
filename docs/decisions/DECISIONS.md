@@ -19,6 +19,46 @@
 
 ---
 
+## [2026-07-07] M1.7 material catalog content — hubs.com metal families + variants
+
+**Status:** RESOLVED
+**Question:** The `/block M1.7` note points the material list at `https://www.hubs.com/cnc-machining/metal/`. Which block owns that content (M1.7 entities vs M1.12 seed), how deep (families only vs variants), and in which naming language, given `SEED-AND-FIXTURES.md` §2 specifies a smaller exemplar list?
+**Decision:** **(a) Scope:** M1.7 seeds the catalog so the nested picker is browsable — class **Metall** + the **11 hubs metal families** (Alloy steel, Aluminum, Brass, Bronze, Copper, Inconel, Invar 36, Mild steel, Stainless steel, Titanium, Tool steel); M1.12 inherits this as the canonical materials tree (supersedes the §2 exemplar list, which stays as examples of the keying convention). **(b) Depth:** variants (leaf materials) are pulled in too — hubs' subpage variant sets, keyed by standard DIN EN designations (Werkstoffnummer + EN name + AISI alias); the variants need not come from hubs.com verbatim (Benjamin 2026-07-07). Densities = standard published values; `cost_per_volume`/`cost_per_area` stay **NULL** (rates are shop-specific — the M1.14 missing-rates guard exists for exactly this). **(c) Naming:** German-first display names (Nichtrostender Stahl, Werkzeugstahl, Baustahl, …) with the English/AISI name kept as alias fields. Note: the build environment's network policy blocks hubs.com directly; the family list + variant sets were confirmed via web search and standard DIN/EN references — coverage is the well-known variants per family, not a verbatim page scrape.
+**Resolved:** 2026-07-07 (M1.7 grill)
+**Affects:** M1.7 (catalog seed), M1.12 (`SEED-AND-FIXTURES.md` Part 1 §2 — inherits this list).
+
+## [2026-07-07] Operation model shape — spec `#oplibrary` wins; minutes persisted
+
+**Status:** RESOLVED
+**Question:** `#oplibrary` (tier 2, grilled 2026-06-14) defines the DACH operation model (`calculation_mode ENUM(machine_plus_operator|labour_only|outside_process)`, `run_rate`, `labour_rate`, `setup_cost` flat € XOR `setup_time_mins`, `surcharge_pct`, "all time inputs in minutes, never hours"), while the folded `DB-SCHEMA.sql` shows the older PP shape (`calc_mode text`, `cost_formula`, display units defaulting to hours). Which shape ships in M1.7, and in which unit are times persisted given `#kalk` says runtime/setup are *internally hours*?
+**Decision:** Build the **`#oplibrary` shape** (spec outranks folded provenance). **Times are persisted in minutes** — the product-wide input/display unit; the M1.9 Kalk evaluation context converts to hours at the formula boundary (its internal convention stays hours per `#kalk`). The Kalk `cost_formula` column is added at M1.9, not now. Per-quote time inputs (Setup/Haupt-/Nebenzeit) live on the **operation row** (calc\_/manual\_ pairs), not per quantity cell — the spec's operations grid shows one Setup/Run per row with per-qty *price* columns; per-qty time variables arrive with `quantity_specific` Kalk vars (M1.9). `quote_cell` therefore carries only `(quantity, calc_cost, manual_cost)` + a composite FK onto `component_quantity(component_id, quantity)` so cells reshape with the break set — a deliberate, documented divergence from the folded `quote_cell(runtime, setup_time, days)` columns (`days` arrives with M1.11 lead times).
+**Resolved:** 2026-07-07 (M1.7 grill)
+**Affects:** M1.7 schema, M1.9 (Kalk context + `cost_formula`), M1.11 (`days`), M1.12 (54-op seed uses this shape).
+
+## [2026-07-07] M1.7 "Calculated" source before Kalk = calculation-mode arithmetic
+
+**Status:** RESOLVED
+**Question:** The Calculated-vs-Override drawer needs a `calc_` value before Kalk exists (M1.9). Scope-out excludes *Kalk* formulas — but `#oplibrary`'s calculation-mode math is plain deterministic arithmetic.
+**Decision:** M1.7 implements the mode arithmetic as the `calc_cost` source per quantity break: `machine_plus_operator` = `setup + (Hauptzeit/60 × run_rate + Nebenzeit/60 × labour_rate) × Losgröße`; `labour_only` = `setup + (Arbeitszeit/60 × run_rate) × Losgröße`; `outside_process` = no calc (manual cost only until the Vendor-RFQ path, M6). Losgröße = the break's **make quantity**. `surcharge_pct` applies on the computed op cost (`× (1 + pct/100)`), and the material line's `yield_factor` gross-up ships now (both deterministic, both `#oplibrary`). Material-category lines have **no calc source in M1.7** (real material calc needs geometry + stock pricing → M1.9/M4); their cells are manual, `yield_factor` is persisted and applied once a calc source exists. Kalk formulas take over/augment the calc source at M1.9.
+**Resolved:** 2026-07-07 (M1.7 grill)
+**Affects:** M1.7 costing service, M1.9 (Kalk replaces the calc source), M1.10 (roll-up consumes `COALESCE(manual_cost, calc_cost)`).
+
+## [2026-07-07] Change Process semantics pre-router (M1.7)
+
+**Status:** RESOLVED
+**Question:** The spec's Update Process modal offers UPDATE (regenerate router — deletes existing operations) vs UPDATE AND KEEP EXISTING OPS, but router templates/auto-generation only arrive at M1.12/M4.
+**Decision:** Ship **both commits now** with the specified destructive semantics: UPDATE deletes the component's operations (router *regeneration* is a no-op until M4 — the warning text stays honest), UPDATE AND KEEP EXISTING OPS changes the process and preserves operations. M4 slots router generation into the already-correct UPDATE path.
+**Resolved:** 2026-07-07 (M1.7 grill)
+**Affects:** M1.7 (change-process endpoint + modal), M4 (router generation).
+
+## [2026-07-07] OPEN: rate used for time-based setup (Advanced toggle)
+
+**Status:** OPEN
+**Question:** `#oplibrary` says the Advanced toggle prices setup as "setup time in minutes × setup rate" but never defines *which* rate is the setup rate — the machine rate (`run_rate`/MSS), the operator rate (`labour_rate`), or a dedicated third rate.
+**Options considered:** (a) `run_rate` — during setup the machine is occupied (and the operator is part of MSS-adjacent cost); (b) `labour_rate` — setup is operator work; (c) a dedicated `setup_rate` column.
+**Recommended default (implemented in M1.7):** **(a)** `setup_cost = setup_time_mins/60 × run_rate` for both internal modes — the machine is blocked during Rüsten, and one fewer rate keeps the library simple. Reversible: no stored data depends on it (calc values recompute); flipping to (b)/(c) is a formula/column change. Confirm before M1.12 seeds rate guidance.
+**Affects:** M1.7 costing service, M1.12 (seed/Quick-Setup docs), golden figures if any fixture uses time-based setup.
+
 ## [2026-07-07] Component quote inclusion — material-scoped quoting (Angebotsumfang)
 
 **Status:** RESOLVED
@@ -557,8 +597,8 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Recommended default:** **Defer to a later hardening block** (not M1.2) but logged now: async ClamAV scan on store with a quarantine flag, blocking download/forward until clean. Revisit before email-ingest (M3) opens an untrusted upload path.
 **Affects:** M3 (email ingest = untrusted uploads), M6 (hardening), `part_file` (possible future `scan_status` column).
 
-## [2026-06-27] OPEN: Money representation — integer minor units vs `numeric(14,4)` (M1.6 grill; blocks M1.7)
-**Status:** OPEN
+## [2026-06-27] Money representation — integer minor units vs `numeric(14,4)` (M1.6 grill; blocked M1.7)
+**Status:** RESOLVED — option (b) confirmed at the M1.7 grill (Benjamin 2026-07-07): `numeric(14,4)` for unit-level/intermediate cost & price columns (per the folded schema); money rounds to **integer minor units + `currency`** at the quote/total boundary (display + any persisted total). This is the exact reading of the CLAUDE.md §5 money invariant from M1.7 onward.
 **Question:** CLAUDE.md §5 mandates money as **integer minor units + explicit currency** ("never a float"). The folded `DB-SCHEMA.sql` models every `component_quantity` money column (`unit_cost`, `calc_unit_price`, `manual_unit_price`, the cost split, `total_profit`, …) — and `purchased_component.piece_price`, `quote_cell.*` — as **`numeric(14,4)`**. These conflict: integer **cents** (2dp) cannot hold the 4-decimal precision the schema/pricing relies on (unit/piece prices are 4dp; M1.10 must reproduce `$2,160.84`-class figures exactly without rounding drift). `numeric` is exact (not a float), so it satisfies "never a float" but **not** "integer minor units."
 **Why it surfaced in M1.6 but does not block it:** M1.6 adds **no money columns** — `component_quantity` lands with only `quantity` / `make_quantity` / `deliver_quantity` (all `int`). The first money column arrives in **M1.7** (per-qty op-cost cells), so the representation must be settled before then.
 **Options considered:** (a) **integer minor units everywhere** — uniform with §5, but loses the 4th decimal the unit-price math needs (rounding risk on the golden figures); (b) **`numeric(14,4)` for per-unit / intermediate calc columns, round to integer minor units only at the persisted/displayed quote-total boundary** — keeps calc precision, keeps stored/printed totals in §5's representation; (c) integer in a finer denomination (e.g. tenths-of-cent / micros) to stay integer while preserving 4dp.

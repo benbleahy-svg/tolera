@@ -11,6 +11,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AccountDetailPage } from './contacts/AccountDetailPage';
 import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
+import { EstimatingPage } from './estimating/EstimatingPage';
 import { PartsPage } from './parts/PartsPage';
 import { QuotesPage } from './quotes/QuotesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
@@ -36,6 +37,8 @@ export default function App() {
         <Route path="/contacts/:accountId/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/parts" element={<PartsPage />} />
         <Route path="/quotes" element={<QuotesPage />} />
+        {/* Line-item estimating view — the M1.7 Materials & Operations slice. */}
+        <Route path="/quotes/:quoteId" element={<EstimatingPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />

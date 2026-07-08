@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from alembic import command
 from app.auth import Principal, get_principal
+from app.catalog_seed import CatalogSeedResult, seed_material_catalog
 from app.main import create_app
 from app.models import (
     Account,
@@ -288,6 +289,14 @@ class Seeder:
         (join through ``quote.org_id``) to match the org-scoped convention."""
         return self._loop.run_until_complete(self._status_events(org_id, quote_id))
 
+    def catalog(self, org_id: uuid.UUID) -> CatalogSeedResult:
+        """Run the M1.7 material-catalog + Core-4 process seed for an org."""
+        return self._loop.run_until_complete(self._catalog(org_id))
+
+    async def _catalog(self, org_id: uuid.UUID) -> CatalogSeedResult:
+        async with AsyncSession(self._engine) as session, session.begin():
+            return await seed_material_catalog(session, org_id=org_id)
+
     async def _org(
         self, slug: str, name: str | None, *, country: str, currency: str, locale: str
     ) -> uuid.UUID:
@@ -462,9 +471,11 @@ async def _truncate(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
         await conn.execute(
             text(
-                "TRUNCATE quote_status_event, quote_item, component_quantity, component, "
-                "quote_counter, saved_view, quote, node, part_geometry, part_file, part, "
-                "account, contact, note, user_org_membership, app_user, organization CASCADE"
+                "TRUNCATE quote_cell, operation, operation_def, quote_status_event, "
+                "quote_item, component_quantity, component, quote_counter, saved_view, "
+                "quote, node, part_geometry, part_file, part, material, material_family, "
+                "material_class, process, account, contact, note, user_org_membership, "
+                "app_user, organization CASCADE"
             )
         )
         await conn.commit()

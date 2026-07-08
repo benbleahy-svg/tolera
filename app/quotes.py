@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal, get_principal
 from .authz import Permission, has_permission, require
+from .costing import recalculate_component
 from .deps import get_session
 from .errors import AppError
 from .models import (
@@ -600,6 +601,9 @@ async def change_quantities(
             status_code=status.HTTP_404_NOT_FOUND,
         )
     await set_quantity_breaks(session, quote.org_id, item.root_component_id, payload.quantities)
+    # New breaks need their per-op cost cells materialised (removed breaks cascaded
+    # theirs away); recalc writes calc_cost only — overrides are untouched (M1.7).
+    await recalculate_component(session, quote.org_id, item.root_component_id)
     return await _load_detail(session, quote)
 
 
