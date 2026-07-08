@@ -123,6 +123,36 @@ def test_unsupported_context_rejected() -> None:
     assert "invalid_context" in {e.code for e in result.errors}
 
 
+def test_check_rejects_unsupported_context() -> None:
+    """CHECK must never bless a context evaluate() would refuse to run."""
+    result = check("PRICE = 1", context_type="add_on")
+    assert not result.ok
+    assert "invalid_context" in {e.code for e in result.errors}
+
+
+def test_mean_of_ints_is_float() -> None:
+    result = ok_eval("COST = mean(1, 2)")
+    assert result.output is not None
+    assert result.output["COST"] == 1.5
+
+
+def test_nonfinite_var_default_rejected_as_output() -> None:
+    # inf injected via a var default must not reach the payload / serialization
+    result = evaluate(
+        "c = var('C', 9e999, '', number)\nCOST = c",
+        context_type="operation_cost",
+    )
+    # 9e999 is a non-finite literal — rejected at validation
+    assert result.errors
+    result = evaluate(
+        "c = var('C', 0.0, '', number)\nCOST = c",
+        context_type="operation_cost",
+        overrides={"C": float("inf")},
+    )
+    assert "invalid_output" in {e.code for e in result.errors}
+    assert result.output is None
+
+
 def test_runtime_error_sanitized() -> None:
     result = evaluate("COST = 1 / 0", context_type="operation_cost")
     err = next(e for e in result.errors if e.code == "runtime_error")
@@ -287,7 +317,7 @@ def test_declaration_in_block_rejected(formula: str) -> None:
     assert "declaration_in_block" in {e.code for e in result.errors}
 
 
-def test_declaration_at_top_level_inside_lambda_arg_ok() -> None:
+def test_declaration_top_level_ok_lambda_rejected() -> None:
     # lambdas are admitted grammar (inert until M1.9 P3LList); a declaration
     # *call* inside one must still be rejected.
     result = check("x = var('X', 1, '', number)\nCOST = x")

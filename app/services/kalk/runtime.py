@@ -250,7 +250,19 @@ class Runtime:
             self.tick()
             if len(template) > self.limits.max_format_string_len:
                 raise _abort("resource_limit", "format string is too long")
-            for _, _, spec, _ in string_module.Formatter().parse(template):
+            for _, field_name, spec, _ in string_module.Formatter().parse(template):
+                if field_name and ("." in field_name or "[" in field_name):
+                    # str.format field names can walk object graphs
+                    # ({0.__func__.__globals__}) — a sandbox escape that never
+                    # touches the AST. Allow only plain names / positional refs.
+                    raise _abort(
+                        "forbidden_attribute",
+                        "attribute or index access is not allowed in format fields",
+                    )
+                if spec and "{" in spec:
+                    # nested replacement fields take the width/precision from
+                    # an argument, sidestepping the literal-digit scan below
+                    raise _abort("resource_limit", "dynamic format widths are not allowed")
                 for digits in re.findall(r"\d+", spec or ""):
                     if int(digits) > self.limits.max_format_spec_number:
                         raise _abort("resource_limit", "format specification is too large")
@@ -377,11 +389,12 @@ class Runtime:
 
     def b_mean(self, *args: object) -> object:
         self.tick()
-        return statistics.mean(self._numeric_args("mean", args))
+        # fmean: always a float regardless of Python version/input mix
+        return self._check_number(statistics.fmean(self._numeric_args("mean", args)))
 
     def b_median(self, *args: object) -> object:
         self.tick()
-        return statistics.median(self._numeric_args("median", args))
+        return self._check_number(statistics.median(self._numeric_args("median", args)))
 
     def b_sum(self, iterable: object, start: object = 0) -> object:
         self.tick()

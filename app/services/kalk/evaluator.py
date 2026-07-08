@@ -6,6 +6,7 @@ variable system and remaining contexts arrive in M1.9 on this same core.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import TracebackType
@@ -59,7 +60,18 @@ def check(
 ) -> CheckResult:
     """Static validation only — the editor CHECK button. Never executes."""
     limits = limits or Limits()
-    known = BUILTIN_NAMES | _CONTEXT_NAMES.get(context_type, frozenset()) | set(extra_names)
+    if context_type not in SUPPORTED_CONTEXTS:
+        # mirror evaluate(): CHECK must never bless a context that cannot run
+        return CheckResult(
+            ok=False,
+            errors=[
+                KalkError(
+                    code="invalid_context",
+                    message=f"context {context_type!r} is not available in M1.8",
+                )
+            ],
+        )
+    known = BUILTIN_NAMES | _CONTEXT_NAMES[context_type] | set(extra_names)
     _, errors = parse_and_validate(formula, known, limits)
     return CheckResult(ok=not errors, errors=errors)
 
@@ -135,8 +147,10 @@ def _extract_operation_cost_output(
             return [exc.error]
     if cost is None and "COST" not in namespace:
         errors.append(KalkError(code="missing_output", message="the formula never set COST"))
-    elif isinstance(cost, bool) or not isinstance(cost, int | float):
-        errors.append(KalkError(code="invalid_output", message="COST must be a number"))
+    elif isinstance(cost, bool) or not isinstance(cost, int | float) or not math.isfinite(cost):
+        # var() defaults/overrides can inject inf/nan that skip the arithmetic
+        # guards; catch them before they reach canonical serialization.
+        errors.append(KalkError(code="invalid_output", message="COST must be a finite number"))
 
     days: object = namespace.get("DAYS", 0)
     if isinstance(days, DynamicVar):
@@ -144,7 +158,12 @@ def _extract_operation_cost_output(
             days = days.kalk_value
         except KalkAbort as exc:
             return [exc.error]
-    if isinstance(days, bool) or not isinstance(days, int | float) or days != int(days):
+    if (
+        isinstance(days, bool)
+        or not isinstance(days, int | float)
+        or not math.isfinite(days)
+        or days != int(days)
+    ):
         errors.append(
             KalkError(code="invalid_output", message="DAYS must be a whole number of days")
         )

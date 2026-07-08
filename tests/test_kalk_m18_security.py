@@ -205,6 +205,28 @@ def test_format_padding_bomb_blocked() -> None:
     assert "resource_limit" in error_codes("s = '{:>999999999}'.format('x')\nCOST = 1")
 
 
+def test_format_nested_width_bomb_blocked() -> None:
+    # '{:>{}}' takes the width from an argument — no literal digits in the
+    # spec, so the guard must reject nested replacement fields outright.
+    assert "resource_limit" in error_codes("s = '{:>{}}'.format('x', 999999999)\nCOST = 1")
+
+
+FORMAT_FIELD_TRAVERSAL = [
+    # str.format field names walk object graphs without touching the AST —
+    # the classic sandbox escape reaching module globals via a bound method.
+    "COST = 1\nlabel = '{0.__func__.__globals__}'.format(set_notes)\nset_notes(label)",
+    "COST = 1\nlabel = '{0.__class__}'.format(quantity)\nset_notes(label)",
+    "COST = 1\nlabel = '{q.__class__}'.format(q=quantity)\nset_notes(label)",
+    "COST = 1\nlabel = '{0[0]}'.format(quantity)\nset_notes(label)",
+]
+
+
+@pytest.mark.parametrize("formula", FORMAT_FIELD_TRAVERSAL)
+def test_format_field_traversal_blocked(formula: str) -> None:
+    codes = error_codes(formula, eval_context={})
+    assert codes & {"forbidden_attribute", "unknown_name"}
+
+
 def test_iteration_budget_enforced() -> None:
     formula = "x = 0\nfor i in (0,) * 2000:\n    x = x + 1\nCOST = x"
     codes = error_codes(formula, limits=Limits(op_budget=1000))
