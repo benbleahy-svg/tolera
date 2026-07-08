@@ -207,11 +207,7 @@ class _Validator:
             self._forbidden(node, _EXPR_LABELS.get(type(node), type(node).__name__))
 
     def _call(self, node: ast.Call, in_block: bool, local: set[str]) -> None:
-        if (
-            isinstance(node.func, ast.Name)
-            and node.func.id in DECLARATION_NAMES
-            and in_block
-        ):
+        if isinstance(node.func, ast.Name) and node.func.id in DECLARATION_NAMES and in_block:
             self._add(
                 "declaration_in_block",
                 f"{node.func.id}() must be declared at the top level of the "
@@ -228,9 +224,7 @@ class _Validator:
             if kw.arg is None:
                 self._forbidden(node, "**kwargs")
             elif kw.arg.startswith("_"):
-                self._add(
-                    "forbidden_name", f"keyword argument {kw.arg!r} is not allowed", node
-                )
+                self._add("forbidden_name", f"keyword argument {kw.arg!r} is not allowed", node)
             self._expr(kw.value, in_block, local)
 
     def _attribute(self, node: ast.Attribute, in_block: bool, local: set[str]) -> None:

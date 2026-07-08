@@ -113,9 +113,7 @@ def test_no_quote() -> None:
 
 
 def test_operation_name_and_notes() -> None:
-    result = ok_eval(
-        "set_operation_name('Fräsen 3-Achs')\nset_notes('checked')\nCOST = 1"
-    )
+    result = ok_eval("set_operation_name('Fräsen 3-Achs')\nset_notes('checked')\nCOST = 1")
     assert result.operation_name == "Fräsen 3-Achs"
     assert result.notes == "checked"
 
@@ -261,10 +259,7 @@ def test_dynamic_var_update_after_freeze_is_error() -> None:
 
 def test_cost_may_be_frozen_dynamic_var() -> None:
     result = ok_eval(
-        "c = var('C', 0, '', number, frozen=False)\n"
-        "c.update(12.5)\n"
-        "c.freeze()\n"
-        "COST = c"
+        "c = var('C', 0, '', number, frozen=False)\nc.update(12.5)\nc.freeze()\nCOST = c"
     )
     assert result.output is not None
     assert result.output["COST"] == 12.5

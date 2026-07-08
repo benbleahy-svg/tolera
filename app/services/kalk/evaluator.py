@@ -134,13 +134,9 @@ def _extract_operation_cost_output(
         except KalkAbort as exc:
             return [exc.error]
     if cost is None and "COST" not in namespace:
-        errors.append(
-            KalkError(code="missing_output", message="the formula never set COST")
-        )
+        errors.append(KalkError(code="missing_output", message="the formula never set COST"))
     elif isinstance(cost, bool) or not isinstance(cost, int | float):
-        errors.append(
-            KalkError(code="invalid_output", message="COST must be a number")
-        )
+        errors.append(KalkError(code="invalid_output", message="COST must be a number"))
 
     days: object = namespace.get("DAYS", 0)
     if isinstance(days, DynamicVar):
@@ -150,9 +146,7 @@ def _extract_operation_cost_output(
             return [exc.error]
     if isinstance(days, bool) or not isinstance(days, int | float) or days != int(days):
         errors.append(
-            KalkError(
-                code="invalid_output", message="DAYS must be a whole number of days"
-            )
+            KalkError(code="invalid_output", message="DAYS must be a whole number of days")
         )
 
     if errors:

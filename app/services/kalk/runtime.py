@@ -65,9 +65,7 @@ class DynamicVar:
 
     def update(self, value: object) -> None:
         if self._frozen:
-            raise _abort(
-                "runtime_error", f"variable {self._name!r} was updated after freeze()"
-            )
+            raise _abort("runtime_error", f"variable {self._name!r} was updated after freeze()")
         value = self._runtime.unwrap(value)
         if not _type_ok(self._value_type, value):
             raise _abort(
@@ -255,9 +253,7 @@ class Runtime:
             for _, _, spec, _ in string_module.Formatter().parse(template):
                 for digits in re.findall(r"\d+", spec or ""):
                     if int(digits) > self.limits.max_format_spec_number:
-                        raise _abort(
-                            "resource_limit", "format specification is too large"
-                        )
+                        raise _abort("resource_limit", "format specification is too large")
             clean_args = tuple(self.unwrap(a) for a in args)
             clean_kwargs = {k: self.unwrap(v) for k, v in kwargs.items()}
             try:
@@ -274,9 +270,7 @@ class Runtime:
 
     # -- variables ------------------------------------------------------------
 
-    def apply_override(
-        self, name: str, value_type: ValueType, current: object
-    ) -> object:
+    def apply_override(self, name: str, value_type: ValueType, current: object) -> object:
         if name not in self.overrides:
             return current
         value = self.overrides[name]
@@ -302,16 +296,12 @@ class Runtime:
         if not isinstance(name, str) or not name:
             raise _abort("runtime_error", "var() name must be a non-empty string")
         if not isinstance(value_type, ValueType):
-            raise _abort(
-                "runtime_error", "var() value_type must be number, currency, or string"
-            )
+            raise _abort("runtime_error", "var() value_type must be number, currency, or string")
         if any(d["name"] == name for d in self.declared_variables):
             raise _abort("runtime_error", f"variable {name!r} is declared twice")
         default = self.unwrap(default)
         if not _type_ok(value_type, default):
-            raise _abort(
-                "runtime_error", f"var() default for {name!r} is not a {value_type.name}"
-            )
+            raise _abort("runtime_error", f"var() default for {name!r} is not a {value_type.name}")
         declaration: dict[str, Any] = {
             "name": name,
             "value_type": value_type.name,
@@ -331,9 +321,7 @@ class Runtime:
 
     def _m19_stub(self, fn_name: str) -> Callable[..., object]:
         def stub(*_args: object, **_kwargs: object) -> object:
-            raise _abort(
-                "runtime_error", f"{fn_name}() is not available until M1.9"
-            )
+            raise _abort("runtime_error", f"{fn_name}() is not available until M1.9")
 
         return stub
 
@@ -458,9 +446,7 @@ class Runtime:
 
     # -- namespace -------------------------------------------------------------
 
-    def build_globals(
-        self, eval_context: Mapping[str, object], quantity: int
-    ) -> dict[str, object]:
+    def build_globals(self, eval_context: Mapping[str, object], quantity: int) -> dict[str, object]:
         namespace: dict[str, object] = {
             "__builtins__": {},
             # hooks injected by the transformer
@@ -522,9 +508,7 @@ BUILTIN_NAMES = frozenset(
     }
 )
 
-OPERATION_COST_NAMES = frozenset(
-    {"no_quote", "set_operation_name", "set_notes", "quantity"}
-)
+OPERATION_COST_NAMES = frozenset({"no_quote", "set_operation_name", "set_notes", "quantity"})
 
 
 def _sanitize_exception(exc: Exception) -> str:
