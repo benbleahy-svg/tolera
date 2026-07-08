@@ -19,6 +19,23 @@
 
 ---
 
+## [2026-07-08] M1.8 Kalk sandbox isolation boundary — in-process restricted-AST evaluator (v1) behind an executor seam
+
+**Status:** RESOLVED
+**Question:** `#kalk-determinism` mandates an "AST allowlist of nodes + builtins; resource/time/recursion caps" but doesn't fix the isolation boundary. In-process CPython sandboxing is not a hard security boundary (an interpreter 0-day or an un-interruptible C-level op — e.g. a huge bigint `**` — runs inside the multi-tenant server process); subprocess isolation (rlimits, kill-able) is a hard boundary but costs a warm worker pool for the per-operation × per-quantity evaluation volume.
+**Options considered:** (a) in-process restricted-AST evaluator — AST node/name/attribute allowlist, empty `__builtins__`, instrumented caps (op budget, loop-iteration ticks, wall-clock deadline, guarded binops with string/collection-size and `**`-operand limits) that make the un-interruptible cases unreachable; (b) subprocess/worker-pool isolation with OS rlimits.
+**Decision:** **(a) for v1** — threat model is authenticated org estimators (tenant-scoped misuse + accidents, not anonymous code), and the operand/size guards close the known un-interruptible classes. **The evaluator sits behind an executor interface** so (b) can replace the execution step without any contract change, and the security escape matrix is a permanent pytest regression guard (`tests/test_kalk_m18_security.py`). Cap defaults (timeout 500 ms, ~1M-op budget, 100k iterations/loop, 64 KB strings, `**` exponent ≤ 512, numeric magnitude ≤ 1e300) are reversible constants noted in code, not spec.
+**Resolved:** 2026-07-08 (M1.8 grill, Benjamin)
+**Affects:** M1.8 (`app/services/kalk/`), M1.9+ (all five contexts run on this core), ops/security review before GA.
+
+## [2026-07-08] M1.8 Kalk determinism contract — same-platform canonical bytes; goldens run in the canonical image
+
+**Status:** RESOLVED
+**Question:** M1.8 acceptance says "same inputs → identical bytes". Bit-for-bit across *machines* is stricter than it sounds: float `+ - * /` are IEEE-754-fixed, but float `**` goes through platform libm and may differ across OS/arch.
+**Decision:** Determinism contract = **identical canonical bytes on the same platform/build** (the 1000-run test, plus fresh-interpreter runs under varying `PYTHONHASHSEED` to prove hash-seed independence); **cross-environment equality is delivered by running golden tests in the canonical container image**, not by software-emulating libm. Canonical serialization fixed now: JSON, sorted keys, compact separators, floats via `repr` (shortest round-trip), non-finite values rejected as errors. Non-determinism sources eliminated structurally: no time/random access (no imports, empty builtins), no `set` literals/comprehensions in the grammar (dicts are insertion-ordered and dict/set literals are banned anyway), `round()` keeps Python banker's rounding (P3L parity for golden figures). Kalk outputs stay floats; the float→integer-minor-units quantization rule is decided at M1.9 when Kalk becomes the `calc_cost` source (flagged, not blocking).
+**Resolved:** 2026-07-08 (M1.8 grill, Benjamin)
+**Affects:** M1.8 (serialization + tests), M1.9/M1.10 (quantization OPEN due then), golden fixtures CI.
+
 ## [2026-07-07] M1.7 material catalog content — hubs.com metal families + variants
 
 **Status:** RESOLVED
