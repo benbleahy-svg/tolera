@@ -14,6 +14,7 @@ import './styles/shell.css'
 import './styles/contacts.css'
 import './styles/parts.css'
 import './styles/quotes.css'
+import './styles/estimating.css'
 
 // Apply the persisted colour mode + brand (title + colour token) before first paint.
 applyMode(getInitialMode())

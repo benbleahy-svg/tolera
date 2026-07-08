@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   createColumnHelper,
@@ -161,7 +162,11 @@ export function QuotesPage() {
   // -------------------------------------------------------------- the grid
   const columns = useMemo(
     () => [
-      columnHelper.accessor('number', { header: () => t('quotes.col.number') }),
+      columnHelper.accessor('number', {
+        header: () => t('quotes.col.number'),
+        // The number opens the line-item estimating view (M1.7 Materials & Operations).
+        cell: (info) => <Link to={`/quotes/${info.row.original.id}`}>{info.getValue()}</Link>,
+      }),
       columnHelper.accessor('rfq_number', {
         header: () => t('quotes.col.rfq'),
         cell: (info) => info.getValue() ?? '—',

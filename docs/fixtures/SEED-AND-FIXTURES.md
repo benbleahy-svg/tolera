@@ -16,6 +16,7 @@ A new org is provisioned from a single idempotent **`seed.json`** (one per org; 
 
 ### 2. Materials tree (DACH DIN/EN)
 - **Classes:** Metal, Polymer, Composite, Sand, Wax, Additive, **Holz** (wood — quotable via outside-process/Buy-mode, no internal machining rates seeded), **Sonstige** (Fremdmaterial catch-all for detected-but-unclassifiable bodies; target of Lens pipeline-5 fallback suggestions). *(Holz + Sonstige added per `DECISIONS.md` 2026-07-07 — Foreign materials.)*
+- **Metal families:** the 11 hubs.com-derived CNC metal families (Alloy steel, Aluminum, Brass, Bronze, Copper, Inconel, Invar 36, Mild steel, Stainless steel, Titanium, Tool steel), German-first display names, with their standard DIN/EN variants as leaf materials — seeded from M1.7 (`DECISIONS.md` 2026-07-07 "M1.7 material catalog content"); this seed mirrors that catalog.
 - **Families/materials** keyed on **Werkstoffnummer** + EN name + AISI alias, e.g.:
   - `1.4301` / X5CrNi18-10 / 304 (stainless); `1.4404` / X2CrNiMo17-12-2 / 316L.
   - `1.0038` / S235JR / A36 (structural steel); `1.0570` / S355J2.

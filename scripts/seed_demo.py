@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from app.catalog_seed import CatalogSeedResult, seed_material_catalog
 from app.config import get_settings
 from app.crm_seed import FECHNER_SLUG, CrmSeedResult, seed_pilot_crm
 from app.db import make_engine, make_sessionmaker
@@ -31,6 +32,12 @@ async def _run(
     try:
         sessionmaker = make_sessionmaker(engine)
         results = await apply_seeds(sessionmaker, specs)
+        # Every org gets the material catalog + Core-4 processes (M1.7) — its own
+        # transaction per org so a catalog hiccup can't undo provisioning.
+        for result in results:
+            async with sessionmaker() as session, session.begin():
+                catalog = await seed_material_catalog(session, org_id=result.org_id)
+            _log_catalog(result.slug, catalog)
         # Seed the golden-thread CRM (Fechner account + contact) once the pilot org
         # exists — its own transaction so a CRM hiccup can't undo provisioning.
         crm: CrmSeedResult | None = None
@@ -41,6 +48,19 @@ async def _run(
         return results, crm
     finally:
         await engine.dispose()
+
+
+def _log_catalog(slug: str, catalog: CatalogSeedResult) -> None:
+    logger.info(
+        "seeded material catalog",
+        extra={
+            "slug": slug,
+            "classes_created": catalog.classes_created,
+            "families_created": catalog.families_created,
+            "materials_created": catalog.materials_created,
+            "processes_created": catalog.processes_created,
+        },
+    )
 
 
 def main() -> None:
