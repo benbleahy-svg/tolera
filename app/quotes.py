@@ -546,6 +546,11 @@ async def add_quote_item(
     await session.flush()
     # Every line item opens with a single qty=1 break — the grid the rest of M1 fills.
     await create_default_break(session, quote.org_id, component.id)
+    # M1.10: snapshot the org's pricing-item/discount defs onto the new line
+    # (E4-d attach-time copy; later def edits never touch this draft).
+    from .pricing import attach_default_pricing
+
+    await attach_default_pricing(session, quote.org_id, component.id)
     max_position = await session.scalar(
         select(func.max(QuoteItem.position)).where(QuoteItem.quote_id == quote.id)
     )

@@ -19,6 +19,27 @@
 
 ---
 
+## [2026-07-09] M1.10 grill — Demo E golden reproduction + pricing-layer schema (six rulings)
+
+**Status:** RESOLVED
+**Question:** Six M1.10 grill points: (1) the spec's prose figures don't reproduce $2,160.84 under any single display rounding; (2) custom-cost-category shape (spec build-implication says a `CostCategory` entity, the folded DDL says `pricing_item.is_custom + formula`); (3) target-margin storage + edge semantics; (4) where Purchased-Components / Component-Overrides cost comes from before M4's `purchased_component` entity; (5) roll-up depth given root-only quantity breaks (M1.6); (6) where per-line pricing items/discounts originate (org config) + Refresh Pricing scope.
+**Decision (Benjamin 2026-07-09, "go with your recommendations", DemoE frames supplied and analysed):**
+1. **Rounding model verified from the DemoE frames:** the reference product's internals carry sub-cent precision; its per-row displays **truncate** to cents while summary rows (Total, Total Markup) round **half-up** — its row displays are cent-inconsistent on their face (e.g. Ex5 2,094.50 + 30.00 shown as 2,124.51). Tolera keeps its established model — `numeric(14,4)` internals, **ROUND_HALF_UP at every 2-dp display/total boundary** (kaufmännische Rundung; 2026-06-27/07-08 decisions) — and the golden fixtures use documented **4-dp inputs reverse-engineered to satisfy every displayed row and total simultaneously**, so all six Demo E totals are asserted **exactly** (2,160.84 / 1,837.10 / 2,028.72 / 1,957.74 / 2,124.51 / 928.64 + 857.20). Known cent-level display divergence on some intermediate rows (we show half-up where PP truncates, e.g. 53.94 vs 53.93) — deliberate, DACH-correct.
+2. **No `CostCategory` table.** A custom category lives on its pricing item (folded-DDL shape + the Configure→Pricing frame: category chip per item): `pricing_item.is_custom + custom_category_name + color + formula`; per-break custom cost persisted as `pricing_item_cell.calc_custom_cost` (the colored Costing row + later Excel export read it). The five standard categories stay the `cost_category` enum.
+3. **Target-margin** (`calc_type = 'target_margin'`, v1 differentiator, spec `#newscope`): back-solve `amount = target/(1−target) × TOTAL_COST − Σ other items' amounts`, holding other items fixed, solved against **Total excl. Discounts**. `amount < 0` ⇒ **unreachable**: contribution 0 + `unreachable` flag surfaced in UI. **At most one** target-margin item per stack (validation error). Target pct stored in the cell's `calc_pct`/`manual_pct` like the other types; computed amount in `calc_profit`.
+4. **Purchased / Overrides buckets now, entity later:** `component.piece_price` (per-unit; a PURCHASED child contributes `piece_price × make_qty` to Purchased Components) and `component.manual_override_cost` (per-unit; when set, replaces a child's rolled-up cost and lands in Component Overrides). Full `purchased_component` entity unchanged at M4.
+5. **Tree roll-up on the fly:** child components roll up now with `make_qty(child) = root break qty × Π qty_relative_to_parent` along the node path; child op costs computed per root break (mode arithmetic / Kalk) **without** child `component_quantity` or cell rows (those, plus scrap, stay M4). Manual per-cell cost overrides therefore exist only on root-component cells until M4.
+6. **Org-level `pricing_item_def` + `discount_def`** (name, calc_type, category, custom fields, color, formula, default pct, position) behind Configure → Pricing/Discounts; **snapshot-on-attach** to every new quote item (mirrors the 2026-07-08 M1.9 ruling; E4-d freeze holds). **Refresh Pricing (single quote)** lands in M1.10 — re-snapshots `is_from_factory` rows from current defs, re-evaluates, preserves every `manual_*`; **Bulk Refresh** deferred to the quotes-list block (OPEN below).
+**Resolved:** 2026-07-09 (M1.10 grill; DemoE screenshots supplied by Benjamin — figures encoded in the golden fixtures; `docs/reference/screenshots/` stays gitignored per .gitignore note)
+**Affects:** M1.10 (schema + engine + goldens), M1.11 (VAT on the rounded totals), M1.12 (seeded pricing defaults), M1.13 (harness asserts the same six), M4 (purchased_component entity, child breaks/cells, scrap).
+
+## [2026-07-09] OPEN: Bulk Refresh Pricing placement
+**Status:** OPEN
+**Question:** E4-d names both `Refresh Pricing` (single) and `Bulk Refresh Pricing` (quotes-list multi-select). Single lands in M1.10; the bulk action is a quotes-list concern (selection UI + batch job).
+**Options:** (a) M1.10 loop endpoint without list UI; (b) defer to the quotes-list/M5 block where the multi-select UI lives.
+**Recommended default:** (b) — the engine's re-evaluate-with-preserved-overrides mode ships in M1.10, so bulk is a thin loop over it later.
+**Affects:** quotes list block (M5), E4-d completeness.
+
 ## [2026-07-08] M1.9 Kalk→money quantization — numeric(14,4) half-up at the cell, minor units only at quote totals
 
 **Status:** RESOLVED

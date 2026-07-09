@@ -309,6 +309,8 @@ def test_operation_context_functions_absent_from_pricing() -> None:
 
 
 def test_unsupported_contexts_still_rejected() -> None:
-    for context in ("add_on", "discount", "operation_generation"):
+    # discount graduated to a supported context in M1.10; add_on follows at
+    # M1.11 and operation_generation at M4
+    for context in ("add_on", "operation_generation"):
         result = evaluate("PRICE = 1", context_type=context)
         assert result.errors[0].code == "invalid_context"

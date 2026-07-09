@@ -24,6 +24,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from decimal import Decimal
 from typing import cast
 
 import pytest
@@ -42,11 +43,19 @@ from app.models import (
     Account,
     AccountType,
     AppUser,
+    Component,
     Contact,
     FileRole,
+    Material,
+    MaterialClass,
+    MaterialFamily,
     MembershipRole,
     MembershipStatus,
+    Node,
     Note,
+    ObtainMethod,
+    OpCategory,
+    Operation,
     Organization,
     OrgCountry,
     Part,
@@ -216,6 +225,61 @@ class Seeder:
     def part(self, org_id: uuid.UUID) -> uuid.UUID:
         return self._loop.run_until_complete(self._part(org_id))
 
+    def bom_child(
+        self,
+        org_id: uuid.UUID,
+        root_component_id: uuid.UUID,
+        *,
+        obtain_method: ObtainMethod = ObtainMethod.manufactured,
+        piece_price: Decimal | None = None,
+        manual_override_cost: Decimal | None = None,
+        material_display: str | None = None,
+        qty_relative_to_parent: int = 1,
+    ) -> uuid.UUID:
+        """Plant a BOM child under a root component: Part + Node + Component.
+        The BOM Builder API is M4 — until then the pricing engine's tree
+        roll-up (M1.10) is exercised via directly-seeded children."""
+        return self._loop.run_until_complete(
+            self._bom_child(
+                org_id,
+                root_component_id,
+                obtain_method=obtain_method,
+                piece_price=piece_price,
+                manual_override_cost=manual_override_cost,
+                material_display=material_display,
+                qty_relative_to_parent=qty_relative_to_parent,
+            )
+        )
+
+    def operation(
+        self,
+        org_id: uuid.UUID,
+        component_id: uuid.UUID,
+        name: str,
+        *,
+        category: OpCategory = OpCategory.operation,
+        cost_formula: str | None = None,
+        is_outside_service: bool = False,
+        is_finish: bool = False,
+        variable_overrides: dict | None = None,
+        position: int = 0,
+    ) -> uuid.UUID:
+        """Plant an operation row directly — used for **child** components,
+        whose ops have no API until the M4 BOM Builder."""
+        return self._loop.run_until_complete(
+            self._operation(
+                org_id,
+                component_id,
+                name,
+                category=category,
+                cost_formula=cost_formula,
+                is_outside_service=is_outside_service,
+                is_finish=is_finish,
+                variable_overrides=variable_overrides or {},
+                position=position,
+            )
+        )
+
     def part_file(
         self,
         org_id: uuid.UUID,
@@ -365,6 +429,118 @@ class Seeder:
     async def _part(self, org_id: uuid.UUID) -> uuid.UUID:
         async with AsyncSession(self._engine) as session, session.begin():
             row = Part(org_id=org_id)
+            session.add(row)
+            await session.flush()
+            return row.id
+
+    async def _bom_child(
+        self,
+        org_id: uuid.UUID,
+        root_component_id: uuid.UUID,
+        *,
+        obtain_method: ObtainMethod,
+        piece_price: Decimal | None,
+        manual_override_cost: Decimal | None,
+        material_display: str | None,
+        qty_relative_to_parent: int,
+    ) -> uuid.UUID:
+        from sqlalchemy import select
+
+        async with AsyncSession(self._engine) as session, session.begin():
+            root_component = await session.get(Component, root_component_id)
+            assert root_component is not None
+            root_node = await session.scalar(
+                select(Node).where(
+                    Node.part_id == root_component.part_id, Node.parent_node_id.is_(None)
+                )
+            )
+            assert root_node is not None
+            part = Part(org_id=org_id)
+            session.add(part)
+            await session.flush()
+            session.add(
+                Node(
+                    org_id=org_id,
+                    part_id=part.id,
+                    parent_node_id=root_node.id,
+                    qty_relative_to_parent=qty_relative_to_parent,
+                    root_part_id=root_component.part_id,
+                )
+            )
+            material_id = None
+            if material_display is not None:
+                material_id = await self._material(session, org_id, material_display)
+            child = Component(
+                org_id=org_id,
+                part_id=part.id,
+                is_root_component=False,
+                obtain_method=obtain_method,
+                piece_price=piece_price,
+                manual_override_cost=manual_override_cost,
+                material_id=material_id,
+            )
+            session.add(child)
+            await session.flush()
+            return child.id
+
+    async def _material(
+        self, session: AsyncSession, org_id: uuid.UUID, display_name: str
+    ) -> uuid.UUID:
+        from sqlalchemy import select
+
+        material = await session.scalar(
+            select(Material).where(Material.org_id == org_id, Material.display_name == display_name)
+        )
+        if material is not None:
+            return material.id
+        cls = await session.scalar(
+            select(MaterialClass).where(
+                MaterialClass.org_id == org_id, MaterialClass.name == "Metall"
+            )
+        )
+        if cls is None:
+            cls = MaterialClass(org_id=org_id, name="Metall")
+            session.add(cls)
+            await session.flush()
+        family = await session.scalar(
+            select(MaterialFamily).where(
+                MaterialFamily.org_id == org_id, MaterialFamily.class_id == cls.id
+            )
+        )
+        if family is None:
+            family = MaterialFamily(org_id=org_id, class_id=cls.id, name="Testfamilie")
+            session.add(family)
+            await session.flush()
+        material = Material(org_id=org_id, family_id=family.id, display_name=display_name)
+        session.add(material)
+        await session.flush()
+        return material.id
+
+    async def _operation(
+        self,
+        org_id: uuid.UUID,
+        component_id: uuid.UUID,
+        name: str,
+        *,
+        category: OpCategory,
+        cost_formula: str | None,
+        is_outside_service: bool,
+        is_finish: bool,
+        variable_overrides: dict,
+        position: int,
+    ) -> uuid.UUID:
+        async with AsyncSession(self._engine) as session, session.begin():
+            row = Operation(
+                org_id=org_id,
+                component_id=component_id,
+                name=name,
+                category=category,
+                cost_formula=cost_formula,
+                is_outside_service=is_outside_service,
+                is_finish=is_finish,
+                variable_overrides=variable_overrides,
+                position=position,
+            )
             session.add(row)
             await session.flush()
             return row.id

@@ -134,6 +134,8 @@ class Runtime:
         # pricing-item-context state (KALK-REFERENCE §11.3)
         self.profit_item_name: str | None = None
         self.custom_cost: float | None = None
+        # discount-context state (KALK-REFERENCE §11.5; M1.10)
+        self.discount_name: str | None = None
 
     # -- caps ---------------------------------------------------------------
 
@@ -791,6 +793,14 @@ class Runtime:
             raise _abort("runtime_error", "set_profit_item_name() takes a string")
         self.profit_item_name = name
 
+    # -- discount context functions (KALK-REFERENCE §11.5; M1.10) ----------------
+
+    def set_discount_name(self, name: object) -> None:
+        self.tick()
+        if not isinstance(name, str):
+            raise _abort("runtime_error", "set_discount_name() takes a string")
+        self.discount_name = name
+
     def set_custom_cost(self, cost: object) -> None:
         self.tick()
         cost = self.unwrap(cost)
@@ -1038,6 +1048,21 @@ class Runtime:
                     "is_a_in_b": self.is_a_in_b,
                 }
             )
+        elif context_type == "discount":
+            # KALK-REFERENCE §11.5: PERCENTAGE (positive) output; contact +
+            # REQUESTED_QUANTITY + the variable/list/table/workpiece suite;
+            # deliberately NO part / custom attributes / analyzers.
+            namespace.update(
+                {
+                    "REQUESTED_QUANTITY": self.quantity,
+                    "contact": None,
+                    "set_discount_name": self.set_discount_name,
+                    "set_workpiece_value": self.set_workpiece_value,
+                    "get_workpiece_value": self.get_workpiece_value,
+                    "is_close": self.is_close,
+                    "is_a_in_b": self.is_a_in_b,
+                }
+            )
         namespace.update(eval_context)
         return namespace
 
@@ -1111,6 +1136,18 @@ OPERATION_COST_NAMES = frozenset(
         "op_def",
         "line_item",
         *ANALYZER_NAMES,
+    }
+)
+
+DISCOUNT_NAMES = frozenset(
+    {
+        "REQUESTED_QUANTITY",
+        "contact",
+        "set_discount_name",
+        "set_workpiece_value",
+        "get_workpiece_value",
+        "is_close",
+        "is_a_in_b",
     }
 )
 

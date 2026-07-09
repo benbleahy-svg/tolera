@@ -26,6 +26,7 @@ from .middleware import MaxBodySizeMiddleware, RequestContextMiddleware
 from .notes import router as notes_router
 from .operations import operations_router
 from .parts import parts_router
+from .pricing import pricing_router
 from .quotes import quotes_router
 from .saved_views import saved_views_router
 from .storage import make_storage
@@ -68,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(saved_views_router)
     app.include_router(materials_router)
     app.include_router(operations_router)
+    app.include_router(pricing_router)
     app.include_router(custom_tables_router)
 
     return app
