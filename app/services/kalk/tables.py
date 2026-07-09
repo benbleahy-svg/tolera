@@ -368,8 +368,7 @@ class TableVariable:
             else:
                 raise _abort(
                     "runtime_error",
-                    f"override for {self._name!r} selects row {override}, "
-                    "which no longer matches",
+                    f"override for {self._name!r} selects row {override}, which no longer matches",
                 )
         self._selected = selected
         self._runtime.record_table_var_value(self._name, selected)

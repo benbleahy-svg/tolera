@@ -171,7 +171,7 @@ def test_csv_import_german_locale(app_client: TestClient, seeder: Seeder) -> Non
     org, user = _org_admin(seeder)
     with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
         table_id = _make_table(app_client)
-        csv_body = "material,preis,schwierig\nStahl S235,4,\nTitan Grade 5,\"80,5\",ja\n"
+        csv_body = 'material,preis,schwierig\nStahl S235,4,\nTitan Grade 5,"80,5",ja\n'
         res = app_client.post(
             f"/api/custom-tables/{table_id}/import",
             files={"file": ("preise.csv", csv_body.encode(), "text/csv")},
@@ -200,9 +200,7 @@ def test_custom_tables_org_isolated(app_client: TestClient, seeder: Seeder) -> N
         assert app_client.get("/api/custom-tables").json() == []
         assert app_client.get(f"/api/custom-tables/{table_id}").status_code == 404
         assert (
-            app_client.put(
-                f"/api/custom-tables/{table_id}/rows", json={"rows": []}
-            ).status_code
+            app_client.put(f"/api/custom-tables/{table_id}/rows", json={"rows": []}).status_code
             == 404
         )
 
@@ -258,9 +256,7 @@ def test_saving_invalid_formula_is_422(app_client: TestClient, seeder: Seeder) -
         assert bad_patch.json()["code"] == "invalid_formula"
 
 
-def test_formula_snapshot_on_attach_config_freeze(
-    app_client: TestClient, seeder: Seeder
-) -> None:
+def test_formula_snapshot_on_attach_config_freeze(app_client: TestClient, seeder: Seeder) -> None:
     """E4-d: the operation copies the def's formula at attach; a later def edit
     never reprices the existing draft (DECISIONS.md 2026-07-08)."""
     org, user = _org_admin(seeder)
@@ -293,9 +289,7 @@ def test_formula_snapshot_on_attach_config_freeze(
 # --------------------------------------------------------------------------- #
 # Formula-driven calc cells
 # --------------------------------------------------------------------------- #
-def test_formula_drives_per_break_calc_with_table(
-    app_client: TestClient, seeder: Seeder
-) -> None:
+def test_formula_drives_per_break_calc_with_table(app_client: TestClient, seeder: Seeder) -> None:
     """The acceptance case: a formula reading a table_var + variables produces
     the expected per-qty value, quantized 4-dp half-up into calc_cost."""
     org, user = _org_admin(seeder)
@@ -343,9 +337,7 @@ def test_surcharge_applies_on_kalk_output(app_client: TestClient, seeder: Seeder
     org, user = _org_admin(seeder)
     with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
         component = _new_component(app_client, [1])
-        op = _add_formula_op(
-            app_client, component, "Zuschlag", "COST = 100", surcharge_pct="10"
-        )
+        op = _add_formula_op(app_client, component, "Zuschlag", "COST = 100", surcharge_pct="10")
         assert _cell(op, 1)["calc_cost"] == "110.0000"
 
 
@@ -356,9 +348,7 @@ def test_manual_cost_override_survives_formula_recalc(
     with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
         component = _new_component(app_client, [1])
         op = _add_formula_op(app_client, component, "Fräsen", "COST = 50")
-        res = app_client.patch(
-            f"/api/operations/{op['id']}/cells/1", json={"manual_cost": "42"}
-        )
+        res = app_client.patch(f"/api/operations/{op['id']}/cells/1", json={"manual_cost": "42"})
         cell = _cell(_op_row(res.json(), "Fräsen"), 1)
         # scale varies pre/post DB round-trip ("42" vs "42.0000") — compare numerically
         assert float(cell["manual_cost"]) == 42.0
@@ -432,9 +422,7 @@ COST = runtime * 100
         assert op["calc_runtime_mins"] == "30.0000"
 
         # manual 15 min = 0.25 h → COST 25; the manual pair stays authoritative
-        res = app_client.patch(
-            f"/api/operations/{op['id']}", json={"manual_runtime_mins": "15"}
-        )
+        res = app_client.patch(f"/api/operations/{op['id']}", json={"manual_runtime_mins": "15"})
         row = _op_row(res.json(), "Schleifen")
         assert _cell(row, 1)["calc_cost"] == "25.0000"
 
@@ -467,9 +455,7 @@ def test_workpiece_and_cost_dictionary_thread_in_router_order(
 # --------------------------------------------------------------------------- #
 # Drawer report
 # --------------------------------------------------------------------------- #
-def test_kalk_report_declares_variables_and_groups(
-    app_client: TestClient, seeder: Seeder
-) -> None:
+def test_kalk_report_declares_variables_and_groups(app_client: TestClient, seeder: Seeder) -> None:
     org, user = _org_admin(seeder)
     with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
         component = _new_component(app_client, [1, 5])

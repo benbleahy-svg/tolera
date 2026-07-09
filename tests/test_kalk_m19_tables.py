@@ -27,8 +27,12 @@ def snap(name: str, columns: list[tuple[str, str]], rows: list[dict[str, Any]]) 
 
 MATERIALS = snap(
     "materials",
-    [("material", "string"), ("thickness", "numeric"), ("price", "numeric"),
-     ("difficult", "boolean")],
+    [
+        ("material", "string"),
+        ("thickness", "numeric"),
+        ("price", "numeric"),
+        ("difficult", "boolean"),
+    ],
     [
         {"material": "Aluminum 6061-T6", "thickness": 2.0, "price": 10.0, "difficult": False},
         {"material": "Aluminum 5052", "thickness": 3.0, "price": 12.0, "difficult": False},
@@ -54,7 +58,7 @@ def ok(formula: str, **kwargs: Any) -> EvalResult:
 def cost(formula: str, **kwargs: Any) -> float:
     result = ok(formula, **kwargs)
     assert result.output is not None
-    return result.output["COST"]
+    return float(result.output["COST"])
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +308,5 @@ def test_table_var_caps_options_at_200() -> None:
 
 
 def test_table_formula_is_canonically_deterministic() -> None:
-    outputs = {
-        canonical_bytes(ok(TABLE_VAR, overrides={"Material Row": 2})) for _ in range(200)
-    }
+    outputs = {canonical_bytes(ok(TABLE_VAR, overrides={"Material Row": 2})) for _ in range(200)}
     assert len(outputs) == 1

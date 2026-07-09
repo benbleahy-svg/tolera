@@ -48,7 +48,7 @@ def ok_op(formula: str, **kwargs: Any) -> EvalResult:
 def cost(formula: str, **kwargs: Any) -> float:
     result = ok_op(formula, **kwargs)
     assert result.output is not None
-    return result.output["COST"]
+    return float(result.output["COST"])
 
 
 # ---------------------------------------------------------------------------
@@ -109,9 +109,7 @@ COST = longest
 
 
 def test_quantity_lists_are_index_aligned() -> None:
-    data = ContextData(
-        quantities=[1, 5, 20], make_quantities=[1, 5, 20], bom_quantities=[1, 1, 1]
-    )
+    data = ContextData(quantities=[1, 5, 20], make_quantities=[1, 5, 20], bom_quantities=[1, 1, 1])
     formula = """
 COST = sum(get_quantities()) + sum(get_make_quantities()) * 100 + sum(get_bom_quantities())
 """
@@ -160,12 +158,8 @@ if get_custom_attribute('tolerance_class', '') == 'fine':
 
 
 def test_get_children_filters_by_obtain_method() -> None:
-    child = KalkObject(
-        "child", {"obtain_method": "PURCHASED", "is_assembly": False, "count": 2}
-    )
-    made = KalkObject(
-        "child", {"obtain_method": "MANUFACTURED", "is_assembly": False, "count": 1}
-    )
+    child = KalkObject("child", {"obtain_method": "PURCHASED", "is_assembly": False, "count": 2})
+    made = KalkObject("child", {"obtain_method": "MANUFACTURED", "is_assembly": False, "count": 1})
     data = ContextData(children=[child, made], descendants=[child, made])
     formula = """
 purchased = get_children('PURCHASED')

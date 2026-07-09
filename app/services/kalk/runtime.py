@@ -246,9 +246,7 @@ class Runtime:
         if isinstance(obj, DynamicVar):
             if name in ("update", "freeze"):
                 return getattr(obj, name)
-        elif isinstance(
-            obj, KalkObject | TableRow | TableVariable | DropDownVar | VariableGroup
-        ):
+        elif isinstance(obj, KalkObject | TableRow | TableVariable | DropDownVar | VariableGroup):
             return obj.kalk_getattr(self, name)
         elif isinstance(obj, P3LList):
             return lists.list_attr(self, obj, name)
@@ -337,8 +335,7 @@ class Runtime:
             if not isinstance(raw, Mapping):
                 raise _abort(
                     "runtime_error",
-                    f"override for quantity-specific variable {name!r} must map "
-                    "quantity to value",
+                    f"override for quantity-specific variable {name!r} must map quantity to value",
                 )
             return raw.get(str(self.quantity), _MISSING)
         if isinstance(raw, Mapping):

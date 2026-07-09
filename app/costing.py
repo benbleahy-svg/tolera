@@ -163,9 +163,7 @@ async def recalculate_component(
         )
         for brk in breaks:
             make_qty = brk.make_quantity if brk.make_quantity is not None else brk.quantity
-            deliver_qty = (
-                brk.deliver_quantity if brk.deliver_quantity is not None else brk.quantity
-            )
+            deliver_qty = brk.deliver_quantity if brk.deliver_quantity is not None else brk.quantity
             workpiece: dict[str, object] = {}
             cost_values: dict[str, float] = {
                 "--material--": 0.0,

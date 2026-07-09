@@ -131,9 +131,7 @@ def _value_fits(value: Any, column_type: str) -> bool:
     return isinstance(value, str)
 
 
-def _coerce_rows_to_columns(
-    rows: list[CustomTableRow], columns: list[dict[str, str]]
-) -> None:
+def _coerce_rows_to_columns(rows: list[CustomTableRow], columns: list[dict[str, str]]) -> None:
     """After a column edit: drop removed keys, null new/no-longer-fitting cells."""
     for row in rows:
         data = {
@@ -206,18 +204,14 @@ async def _replace_rows(
     org_id: uuid.UUID,
 ) -> None:
     existing = (
-        await session.scalars(
-            select(CustomTableRow).where(CustomTableRow.table_id == table.id)
-        )
+        await session.scalars(select(CustomTableRow).where(CustomTableRow.table_id == table.id))
     ).all()
     for row in existing:
         await session.delete(row)
     await session.flush()
     for index, data in enumerate(clean_rows):
         session.add(
-            CustomTableRow(
-                org_id=org_id, table_id=table.id, row_number=index + 1, data=data
-            )
+            CustomTableRow(org_id=org_id, table_id=table.id, row_number=index + 1, data=data)
         )
     await session.flush()
 
@@ -250,9 +244,7 @@ async def create_custom_table(
     principal: Annotated[Principal, Depends(require(Permission.config_edit))],
 ) -> CustomTableOut:
     columns = _validate_columns(payload.columns)
-    duplicate = await session.scalar(
-        select(CustomTable.id).where(CustomTable.name == payload.name)
-    )
+    duplicate = await session.scalar(select(CustomTable.id).where(CustomTable.name == payload.name))
     if duplicate is not None:
         raise AppError(
             "duplicate_table",
@@ -311,9 +303,7 @@ async def update_custom_table(
         columns = _validate_columns(payload.columns)
         table.columns = columns
         rows = (
-            await session.scalars(
-                select(CustomTableRow).where(CustomTableRow.table_id == table.id)
-            )
+            await session.scalars(select(CustomTableRow).where(CustomTableRow.table_id == table.id))
         ).all()
         _coerce_rows_to_columns(list(rows), columns)
     await session.flush()

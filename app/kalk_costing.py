@@ -80,9 +80,7 @@ def _f(value: Decimal | None) -> float | None:
 async def load_table_provider(session: AsyncSession) -> MappingTableProvider:
     """Snapshot every org custom table (RLS-scoped session ⇒ org-scoped data)."""
     tables = (await session.scalars(select(CustomTable))).all()
-    rows = (
-        await session.scalars(select(CustomTableRow).order_by(CustomTableRow.row_number))
-    ).all()
+    rows = (await session.scalars(select(CustomTableRow).order_by(CustomTableRow.row_number))).all()
     rows_by_table: dict[uuid.UUID, list[tuple[int, dict[str, Any]]]] = {}
     for row in rows:
         rows_by_table.setdefault(row.table_id, []).append((row.row_number, dict(row.data)))
@@ -121,9 +119,7 @@ async def load_kalk_env(
 ) -> KalkEnv:
     part = await session.get(Part, component.part_id)
     assert part is not None  # FK-guaranteed
-    geometry = await session.scalar(
-        select(PartGeometry).where(PartGeometry.part_id == part.id)
-    )
+    geometry = await session.scalar(select(PartGeometry).where(PartGeometry.part_id == part.id))
     material = (
         await session.get(Material, component.material_id)
         if component.material_id is not None
@@ -134,14 +130,10 @@ async def load_kalk_env(
     )
     export_controlled = bool(
         await session.scalar(
-            select(QuoteItem.export_controlled).where(
-                QuoteItem.root_component_id == component.id
-            )
+            select(QuoteItem.export_controlled).where(QuoteItem.root_component_id == component.id)
         )
     )
-    def_rows = (
-        (await session.execute(select(OperationDef.id, OperationDef.name))).tuples().all()
-    )
+    def_rows = (await session.execute(select(OperationDef.id, OperationDef.name))).tuples().all()
     ordered = sorted(breaks, key=lambda b: b.quantity)
     return KalkEnv(
         provider=await load_table_provider(session),
@@ -177,15 +169,15 @@ def build_part_object(env: KalkEnv, make_qty: int, deliver_qty: int) -> KalkObje
             "size_x": dims[0],
             "size_y": dims[1],
             "size_z": dims[2],
-            "max_dim": _f(geo.max_dim) if geo and geo.max_dim is not None else (
-                present[0] if present else None
-            ),
-            "med_dim": _f(geo.med_dim) if geo and geo.med_dim is not None else (
-                present[1] if len(present) > 1 else None
-            ),
-            "min_dim": _f(geo.min_dim) if geo and geo.min_dim is not None else (
-                present[-1] if present else None
-            ),
+            "max_dim": _f(geo.max_dim)
+            if geo and geo.max_dim is not None
+            else (present[0] if present else None),
+            "med_dim": _f(geo.med_dim)
+            if geo and geo.med_dim is not None
+            else (present[1] if len(present) > 1 else None),
+            "min_dim": _f(geo.min_dim)
+            if geo and geo.min_dim is not None
+            else (present[-1] if present else None),
             "area": _f(geo.area) if geo else None,
             "volume": _f(geo.volume) if geo else None,
             "weight": _f(geo.weight) if geo else None,
@@ -269,9 +261,7 @@ def evaluate_cell(
         eval_context={
             "part": build_part_object(env, make_qty, deliver_qty),
             "op_def": KalkObject("op_def", {"name": def_name or op.name, "erp_code": None}),
-            "line_item": KalkObject(
-                "line_item", {"is_export_controlled": env.export_controlled}
-            ),
+            "line_item": KalkObject("line_item", {"is_export_controlled": env.export_controlled}),
         },
         quantity=make_qty,
         overrides=overrides,
@@ -287,8 +277,7 @@ def evaluate_cell(
     )
 
     errors = [
-        {"code": e.code, "message": e.message, "line": e.line, "col": e.col}
-        for e in result.errors
+        {"code": e.code, "message": e.message, "line": e.line, "col": e.col} for e in result.errors
     ]
     calc: Decimal | None = None
     no_quote = False
@@ -382,9 +371,7 @@ async def operation_kalk_report(
         if operation.manual_setup_mins is not None:
             overrides["setup_time"] = float(operation.manual_setup_mins) / _MINUTES_PER_HOUR
         def_name = (
-            env.def_names.get(operation.operation_def_id)
-            if operation.operation_def_id
-            else None
+            env.def_names.get(operation.operation_def_id) if operation.operation_def_id else None
         )
         result = evaluate(
             operation.cost_formula,

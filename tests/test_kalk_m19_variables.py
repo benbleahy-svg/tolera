@@ -26,7 +26,7 @@ def ok(formula: str, **kwargs: Any) -> EvalResult:
 def cost(formula: str, **kwargs: Any) -> float:
     result = ok(formula, **kwargs)
     assert result.output is not None
-    return result.output["COST"]
+    return float(result.output["COST"])
 
 
 # ---------------------------------------------------------------------------
