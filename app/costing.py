@@ -112,37 +112,143 @@ async def recalculate_component(
 
     Idempotent and override-preserving: ``manual_cost`` is never read or written.
     Call after any change that can move a calc — op added/edited, breaks reshaped.
-    (Cells of removed breaks/ops are gone already via FK cascade.)"""
+    (Cells of removed breaks/ops are gone already via FK cascade.)
+
+    M1.9: an operation with a ``cost_formula`` snapshot gets its calc from Kalk
+    instead of the mode arithmetic. Ops evaluate in **router order per quantity**
+    so the workpiece dict and cost dictionary thread op → op; the Kalk batch is
+    prefetched async, computed off the event loop, then applied (see
+    ``app.kalk_costing``)."""
+    from anyio import to_thread
+
+    from . import kalk_costing
+    from .models import Component
+
     operations = (
-        await session.scalars(select(Operation).where(Operation.component_id == component_id))
-    ).all()
-    breaks = (
         await session.scalars(
-            select(ComponentQuantity).where(ComponentQuantity.component_id == component_id)
+            select(Operation)
+            .where(Operation.component_id == component_id)
+            .order_by(Operation.position, Operation.created_at, Operation.id)
         )
     ).all()
+    breaks = sorted(
+        (
+            await session.scalars(
+                select(ComponentQuantity).where(ComponentQuantity.component_id == component_id)
+            )
+        ).all(),
+        key=lambda b: b.quantity,
+    )
     cells = (
         await session.scalars(select(QuoteCell).where(QuoteCell.component_id == component_id))
     ).all()
     by_key = {(cell.operation_id, cell.quantity): cell for cell in cells}
 
-    for op in operations:
+    env: kalk_costing.KalkEnv | None = None
+    if any(op.cost_formula for op in operations):
+        component = await session.get(Component, component_id)
+        assert component is not None
+        env = await kalk_costing.load_kalk_env(session, component, list(breaks))
+
+    def compute() -> tuple[
+        dict[tuple[uuid.UUID, int], Decimal | None],
+        dict[uuid.UUID, kalk_costing.OpTimes],
+    ]:
+        """Pure batch over prefetched data — runs in a worker thread."""
+        calcs: dict[tuple[uuid.UUID, int], Decimal | None] = {}
+        op_times: dict[uuid.UUID, kalk_costing.OpTimes] = {}
         for brk in breaks:
             make_qty = brk.make_quantity if brk.make_quantity is not None else brk.quantity
-            calc = compute_calc_cost(op, make_qty)
-            cell = by_key.get((op.id, brk.quantity))
-            if cell is None:
-                session.add(
-                    QuoteCell(
-                        org_id=org_id,
-                        operation_id=op.id,
-                        component_id=component_id,
-                        quantity=brk.quantity,
-                        calc_cost=calc,
+            deliver_qty = brk.deliver_quantity if brk.deliver_quantity is not None else brk.quantity
+            workpiece: dict[str, object] = {}
+            # evaluation-scoped working state, seeded fresh per break so
+            # recalculation stays idempotent and matches the drawer report
+            custom_attributes: dict[str, object] = (
+                dict(env.part.custom_attributes) if env is not None else {}
+            )
+            cost_values: dict[str, float] = {
+                "--material--": 0.0,
+                "--inside--": 0.0,
+                "--outside--": 0.0,
+                "--total--": 0.0,
+            }
+            for op in operations:
+                if op.cost_formula and env is not None:
+                    cell_eval = kalk_costing.evaluate_cell(
+                        env,
+                        op,
+                        brk.quantity,
+                        make_qty,
+                        deliver_qty,
+                        workpiece,
+                        cost_values,
+                        custom_attributes,
                     )
+                    calc = cell_eval.calc_cost
+                    workpiece = cell_eval.workpiece
+                    custom_attributes.update(cell_eval.custom_attributes)
+                    if op.id not in op_times:  # lowest break = the row display pair
+                        op_times[op.id] = kalk_costing.OpTimes(
+                            runtime_mins=kalk_costing.hours_to_mins(cell_eval.runtime_hours),
+                            runtime_overridden=cell_eval.runtime_overridden,
+                            setup_mins=kalk_costing.hours_to_mins(cell_eval.setup_hours),
+                            setup_overridden=cell_eval.setup_overridden,
+                        )
+                else:
+                    calc = compute_calc_cost(op, make_qty)
+                calcs[(op.id, brk.quantity)] = calc
+                # the downstream cost dictionary sees this op's EFFECTIVE cost
+                existing = by_key.get((op.id, brk.quantity))
+                manual = existing.manual_cost if existing is not None else None
+                effective = manual if manual is not None else calc
+                if effective is not None:
+                    amount = float(effective)
+                    cost_values[op.name] = cost_values.get(op.name, 0.0) + amount
+                    # KALK-REFERENCE §7: the key matches the op name OR its def name
+                    def_name = (
+                        env.def_names.get(op.operation_def_id)
+                        if env is not None and op.operation_def_id is not None
+                        else None
+                    )
+                    if def_name and def_name != op.name:
+                        cost_values[def_name] = cost_values.get(def_name, 0.0) + amount
+                    if op.category is OpCategory.material:
+                        cost_values["--material--"] += amount
+                    elif op.is_outside_service:
+                        cost_values["--outside--"] += amount
+                    else:
+                        cost_values["--inside--"] += amount
+                    cost_values["--total--"] += amount
+        return calcs, op_times
+
+    calcs, op_times = await to_thread.run_sync(compute)
+
+    for op in operations:
+        times = op_times.get(op.id)
+        if times is not None:
+            # Formula-computed times only: an applied manual override leaves the
+            # calc side untouched (never contaminate the calc-vs-manual pair);
+            # otherwise assign even None, so stale times from an earlier formula
+            # are cleared rather than surviving edits.
+            if not times.runtime_overridden:
+                op.calc_runtime_mins = times.runtime_mins
+            if not times.setup_overridden:
+                op.calc_setup_mins = times.setup_mins
+
+    for (op_id, quantity), calc in calcs.items():
+        cell = by_key.get((op_id, quantity))
+        if cell is None:
+            session.add(
+                QuoteCell(
+                    org_id=org_id,
+                    operation_id=op_id,
+                    component_id=component_id,
+                    quantity=quantity,
+                    calc_cost=calc,
                 )
-            elif cell.calc_cost != calc:
-                cell.calc_cost = calc
+            )
+        elif cell.calc_cost != calc:
+            cell.calc_cost = calc
     await session.flush()
 
 

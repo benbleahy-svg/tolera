@@ -81,6 +81,13 @@ export function EstimatingPage() {
     [fail],
   );
 
+  // Stable reference — KalkSection's report effect depends on it, so an inline
+  // arrow would refetch the report on every unrelated page re-render.
+  const loadKalkReport = useCallback(
+    () => api.getKalkReport(drawerOpId ?? ''),
+    [api, drawerOpId],
+  );
+
   const pickMaterial = (materialId: string) => {
     if (componentId) apply(api.setComponentMaterial(componentId, materialId));
   };
@@ -325,6 +332,11 @@ export function EstimatingPage() {
           }
           onClose={() => setDrawerOpId(null)}
           disabled={!editable}
+          onKalkCheck={api.kalkCheck}
+          loadKalkReport={loadKalkReport}
+          onSaveOverrides={(overrides) =>
+            apply(api.setVariableOverrides(drawerOp.id, overrides))
+          }
         />
       )}
       {changingProcess && (

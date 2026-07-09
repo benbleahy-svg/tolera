@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from .accounts import accounts_router, contacts_router
 from .config import Settings, get_settings
+from .custom_tables import custom_tables_router
 from .db import make_engine, make_sessionmaker
 from .errors import register_exception_handlers
 from .health import router as health_router
@@ -67,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(saved_views_router)
     app.include_router(materials_router)
     app.include_router(operations_router)
+    app.include_router(custom_tables_router)
 
     return app
 

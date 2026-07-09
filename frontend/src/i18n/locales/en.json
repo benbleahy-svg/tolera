@@ -160,7 +160,9 @@
   "common": {
     "cancel": "Cancel",
     "save": "Save",
-    "close": "Close"
+    "close": "Close",
+    "yes": "Yes",
+    "no": "No"
   },
   "estimating": {
     "title": "Quote {{number}} — Costing",
@@ -223,5 +225,36 @@
     "rollup_outside": "Outside processing",
     "rollup_total": "Total cost",
     "unpriced_rows_hint": "At least one row has neither a rate nor a manual cost."
+  },
+  "kalk": {
+    "formula": "Kalk formula",
+    "formula_placeholder": "COST = setup_time * rate + runtime * part.qty * rate",
+    "check": "Check",
+    "check_ok": "The formula is valid.",
+    "error_at_line": "Line {{line}}: {{message}}",
+    "save_formula": "Save formula",
+    "variables": "Variables",
+    "calculated_option": "Calculated: {{value}}",
+    "save_overrides": "Apply variables",
+    "check_failed": "Check failed — please try again."
+  },
+  "configure": {
+    "custom_tables": "Custom Tables",
+    "custom_tables_hint": "Tables for Kalk formulas (table_var / table_lookup) — column types: text, number, yes/no.",
+    "new_table": "New table",
+    "table_name": "Table name",
+    "column_name": "Column name",
+    "column_type": "Column type",
+    "type_string": "Text",
+    "type_numeric": "Number",
+    "type_boolean": "Yes/No",
+    "add_column": "Add column",
+    "create_table": "Create table",
+    "row_count": "{{count}} rows",
+    "import_csv": "Import CSV",
+    "delete_table": "Delete table",
+    "add_row": "Add row",
+    "remove_row": "Remove row",
+    "save_rows": "Save rows"
   }
 }

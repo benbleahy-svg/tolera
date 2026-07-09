@@ -15,24 +15,28 @@ from typing import Any
 from app.services.kalk.errors import KalkAbort, KalkError
 from app.services.kalk.executor import Executor, InProcessExecutor
 from app.services.kalk.limits import Limits
+from app.services.kalk.objects import ContextData
 from app.services.kalk.runtime import (
     BUILTIN_NAMES,
     OPERATION_COST_NAMES,
+    PRICING_ITEM_NAMES,
     DynamicVar,
     Runtime,
     _sanitize_exception,
 )
+from app.services.kalk.tables import TableProvider
 from app.services.kalk.transform import instrument
 from app.services.kalk.validator import parse_and_validate
 
 KALK_FILENAME = "<kalk>"
 
-# M1.8 implements operation_cost; the other four (KALK-REFERENCE §1) land in
-# M1.9 (pricing_item, add_on, discount) and M4 (operation_generation).
-SUPPORTED_CONTEXTS = frozenset({"operation_cost"})
+# M1.9 implements operation_cost + pricing_item; add_on/discount land with
+# their items (M1.11/M1.10) and operation_generation with M4 (KALK-REFERENCE §1).
+SUPPORTED_CONTEXTS = frozenset({"operation_cost", "pricing_item"})
 
 _CONTEXT_NAMES: dict[str, frozenset[str]] = {
     "operation_cost": OPERATION_COST_NAMES,
+    "pricing_item": PRICING_ITEM_NAMES,
 }
 
 
@@ -46,9 +50,13 @@ class CheckResult:
 class EvalResult:
     output: dict[str, Any] | None = None
     declared_variables: list[dict[str, Any]] = field(default_factory=list)
+    variable_groups: list[dict[str, Any]] = field(default_factory=list)
     applied_overrides: list[str] = field(default_factory=list)
     notes: str | None = None
     operation_name: str | None = None
+    profit_item_name: str | None = None
+    workpiece: dict[str, Any] = field(default_factory=dict)
+    custom_attributes: dict[str, Any] = field(default_factory=dict)
     errors: list[KalkError] = field(default_factory=list)
 
 
@@ -67,7 +75,8 @@ def check(
             errors=[
                 KalkError(
                     code="invalid_context",
-                    message=f"context {context_type!r} is not available in M1.8",
+                    message=f"context {context_type!r} is not supported yet "
+                    f"(available: {', '.join(sorted(SUPPORTED_CONTEXTS))})",
                 )
             ],
         )
@@ -84,6 +93,8 @@ def evaluate(
     overrides: Mapping[str, object] | None = None,
     limits: Limits | None = None,
     executor: Executor | None = None,
+    table_provider: TableProvider | None = None,
+    context_data: ContextData | None = None,
 ) -> EvalResult:
     limits = limits or Limits()
     eval_context = dict(eval_context or {})
@@ -93,7 +104,8 @@ def evaluate(
             errors=[
                 KalkError(
                     code="invalid_context",
-                    message=f"context {context_type!r} is not available in M1.8",
+                    message=f"context {context_type!r} is not supported yet "
+                    f"(available: {', '.join(sorted(SUPPORTED_CONTEXTS))})",
                 )
             ]
         )
@@ -105,8 +117,14 @@ def evaluate(
 
     code = compile(instrument(tree), KALK_FILENAME, "exec")
 
-    runtime = Runtime(limits=limits, overrides=overrides)
-    namespace = runtime.build_globals(eval_context, quantity)
+    runtime = Runtime(
+        limits=limits,
+        overrides=overrides,
+        quantity=quantity,
+        table_provider=table_provider,
+        context_data=context_data,
+    )
+    namespace = runtime.build_globals(eval_context, context_type)
     result = EvalResult()
 
     try:
@@ -118,12 +136,17 @@ def evaluate(
         result.errors.append(_locate(error, exc.__traceback__))
 
     result.declared_variables = runtime.declared_variables
+    result.variable_groups = runtime.variable_groups
     result.applied_overrides = runtime.applied_overrides
     result.notes = runtime.notes
     result.operation_name = runtime.operation_name
+    result.profit_item_name = runtime.profit_item_name
+    result.workpiece = runtime.workpiece
+    result.custom_attributes = runtime.custom_attributes_out
 
     if not result.errors:
-        output = _extract_operation_cost_output(namespace, runtime)
+        extract = _OUTPUT_EXTRACTORS[context_type]
+        output = extract(namespace, runtime)
         if isinstance(output, list):
             result.errors.extend(output)
         else:
@@ -173,6 +196,32 @@ def _extract_operation_cost_output(
     assert isinstance(cost, int | float)
     assert isinstance(days, int | float)
     return {"COST": float(cost), "DAYS": int(days), "no_quote": False}
+
+
+def _extract_pricing_item_output(
+    namespace: dict[str, object], runtime: Runtime
+) -> dict[str, Any] | list[KalkError]:
+    percentage = namespace.get("PERCENTAGE")
+    if isinstance(percentage, DynamicVar):
+        try:
+            percentage = percentage.kalk_value
+        except KalkAbort as exc:
+            return [exc.error]
+    if percentage is None and "PERCENTAGE" not in namespace:
+        return [KalkError(code="missing_output", message="the formula never set PERCENTAGE")]
+    if (
+        isinstance(percentage, bool)
+        or not isinstance(percentage, int | float)
+        or not math.isfinite(percentage)
+    ):
+        return [KalkError(code="invalid_output", message="PERCENTAGE must be a finite number")]
+    return {"PERCENTAGE": float(percentage), "custom_cost": runtime.custom_cost}
+
+
+_OUTPUT_EXTRACTORS: dict[str, Any] = {
+    "operation_cost": _extract_operation_cost_output,
+    "pricing_item": _extract_pricing_item_output,
+}
 
 
 def _locate(error: KalkError, tb: TracebackType | None) -> KalkError:

@@ -11,6 +11,8 @@ import { apiFetch, type TokenGetter } from '../api/client';
 import type {
   ClassNode,
   ComponentCosting,
+  KalkCheckResult,
+  KalkQtyReport,
   MaterialOut,
   MaterialSearchHit,
   MaterialUpdateBody,
@@ -19,6 +21,7 @@ import type {
   OperationUpdateBody,
   ProcessOut,
   QuoteSummary,
+  VariableOverrideValue,
 } from './types';
 
 export interface EstimatingApi {
@@ -47,6 +50,12 @@ export interface EstimatingApi {
     operationId: string,
     quantity: number,
     manualCost: string | null,
+  ) => Promise<ComponentCosting>;
+  kalkCheck: (formula: string) => Promise<KalkCheckResult>;
+  getKalkReport: (operationId: string) => Promise<KalkQtyReport[]>;
+  setVariableOverrides: (
+    operationId: string,
+    overrides: Record<string, VariableOverrideValue>,
   ) => Promise<ComponentCosting>;
 }
 
@@ -96,6 +105,14 @@ export function useEstimatingApi(): EstimatingApi {
         apiFetch(`/api/operations/${operationId}/cells/${quantity}`, token, {
           method: 'PATCH',
           body: { manual_cost: manualCost },
+        }),
+      kalkCheck: (formula) =>
+        apiFetch('/api/kalk/check', token, { method: 'POST', body: { formula } }),
+      getKalkReport: (operationId) => apiFetch(`/api/operations/${operationId}/kalk`, token),
+      setVariableOverrides: (operationId, overrides) =>
+        apiFetch(`/api/operations/${operationId}/variables`, token, {
+          method: 'PUT',
+          body: { overrides },
         }),
     };
   }, [getToken]);
