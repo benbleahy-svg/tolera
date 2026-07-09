@@ -18,14 +18,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from app.services.kalk.errors import KalkAbort, KalkError
+from app.services.kalk.errors import abort as _abort
 
 if TYPE_CHECKING:
     from app.services.kalk.runtime import Runtime
-
-
-def _abort(code: str, message: str) -> KalkAbort:
-    return KalkAbort(KalkError(code=code, message=message))
 
 
 class KalkObject:

@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from app.services.kalk.errors import KalkAbort, KalkError
+from app.services.kalk.errors import abort as _abort
 from app.services.kalk.lists import P3LList
 
 if TYPE_CHECKING:
@@ -25,10 +25,6 @@ COLUMN_TYPES = ("boolean", "numeric", "string")
 CONDITIONS = ("=", ">", ">=", "<", "<=", "range", "contains")
 TABLE_VAR_MAX_ROWS = 200
 TABLE_LOOKUP_MAX_ROWS = 10_000
-
-
-def _abort(code: str, message: str) -> KalkAbort:
-    return KalkAbort(KalkError(code=code, message=message))
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +332,26 @@ class TableRow:
         return hash((self.table, self.row_number))
 
 
+def resolve_selected_row(
+    runtime: Runtime, name: str, rows: list[TableRow], default: TableRow | None
+) -> TableRow | None:
+    """Apply a UI row-number override at the freeze/selection point.
+
+    The single place override-selection semantics live — shared by
+    ``table_var``'s frozen path and ``TableVariable._freeze``.
+    """
+    override = runtime.take_row_override(name)
+    if override is None:
+        return default
+    for row in rows:
+        if row.row_number == override:
+            return row
+    raise _abort(
+        "runtime_error",
+        f"override for {name!r} selects row {override}, which no longer matches",
+    )
+
+
 class TableVariable:
     """``table_var(..., frozen=False)`` — select → freeze → read (§5).
 
@@ -359,17 +375,7 @@ class TableVariable:
                 f"table variable {self._name!r} was selected twice (one selection only)",
             )
         self._selection_made = True
-        override = self._runtime.take_row_override(self._name)
-        if override is not None:
-            for row in self._rows:
-                if row.row_number == override:
-                    selected = row
-                    break
-            else:
-                raise _abort(
-                    "runtime_error",
-                    f"override for {self._name!r} selects row {override}, which no longer matches",
-                )
+        selected = resolve_selected_row(self._runtime, self._name, self._rows, selected)
         self._selected = selected
         self._runtime.record_table_var_value(self._name, selected)
 

@@ -177,9 +177,13 @@ export function KalkSection({
   useEffect(() => {
     if (!formula) return;
     let cancelled = false;
-    void loadReport().then((data) => {
-      if (!cancelled) setReport(data);
-    });
+    void loadReport()
+      .then((data) => {
+        if (!cancelled) setReport(data);
+      })
+      .catch(() => {
+        if (!cancelled) setReport(null); // failed load: keep the panel hidden, no stale data
+      });
     return () => {
       cancelled = true;
     };
@@ -248,7 +252,18 @@ export function KalkSection({
       <div className="est-actions">
         <button
           type="button"
-          onClick={() => void onCheck(draft).then(setCheckResult)}
+          onClick={() =>
+            void onCheck(draft)
+              .then(setCheckResult)
+              .catch(() =>
+                setCheckResult({
+                  ok: false,
+                  errors: [
+                    { code: 'check_failed', message: t('kalk.check_failed'), line: null, col: null },
+                  ],
+                }),
+              )
+          }
           disabled={draft.trim() === ''}
         >
           {t('kalk.check')}

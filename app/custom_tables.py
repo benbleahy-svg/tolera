@@ -31,7 +31,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
@@ -207,11 +207,9 @@ async def _replace_rows(
     clean_rows: list[dict[str, Any]],
     org_id: uuid.UUID,
 ) -> None:
-    existing = (
-        await session.scalars(select(CustomTableRow).where(CustomTableRow.table_id == table.id))
-    ).all()
-    for row in existing:
-        await session.delete(row)
+    # one set-based DELETE (a save/import replaces up to 10,000 rows); flush
+    # before re-inserting so the new row_numbers don't collide with the old
+    await session.execute(delete(CustomTableRow).where(CustomTableRow.table_id == table.id))
     await session.flush()
     for index, data in enumerate(clean_rows):
         session.add(
@@ -426,14 +424,14 @@ def _parse_cell(cell: str, column_type: str, name: str, index: int) -> Any:
         except ValueError:
             raise AppError(
                 "invalid_cell",
-                f"Row {index + 1}, column {name!r}: {cell!r} is not a number.",
+                f"Row {index + 1}, column {name!r}: the value is not a number.",
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             ) from None
         if not math.isfinite(value):
             # float() accepts "inf"/"nan", which JSONB cannot store — reject here
             raise AppError(
                 "invalid_cell",
-                f"Row {index + 1}, column {name!r}: {cell!r} is not a finite number.",
+                f"Row {index + 1}, column {name!r}: the value is not a finite number.",
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
         return int(value) if value.is_integer() else value
@@ -444,6 +442,6 @@ def _parse_cell(cell: str, column_type: str, name: str, index: int) -> Any:
         return False
     raise AppError(
         "invalid_cell",
-        f"Row {index + 1}, column {name!r}: {cell!r} is not a boolean.",
+        f"Row {index + 1}, column {name!r}: the value is not a boolean.",
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )

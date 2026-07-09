@@ -235,7 +235,8 @@
     "save_formula": "Save formula",
     "variables": "Variables",
     "calculated_option": "Calculated: {{value}}",
-    "save_overrides": "Apply variables"
+    "save_overrides": "Apply variables",
+    "check_failed": "Check failed — please try again."
   },
   "configure": {
     "custom_tables": "Custom Tables",

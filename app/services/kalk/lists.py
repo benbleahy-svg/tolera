@@ -15,7 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from app.services.kalk.errors import KalkAbort, KalkError
+from app.services.kalk.errors import KalkAbort
+from app.services.kalk.errors import abort as _abort
 
 if TYPE_CHECKING:
     from app.services.kalk.runtime import Runtime
@@ -31,10 +32,6 @@ class MultiSort(tuple):  # type: ignore[type-arg]
     """Opaque multi-key sort value (``create_multi_sort()``) — compares as a tuple."""
 
     __slots__ = ()
-
-
-def _abort(code: str, message: str) -> KalkAbort:
-    return KalkAbort(KalkError(code=code, message=message))
 
 
 def create_list(runtime: Runtime, *args: object) -> P3LList:

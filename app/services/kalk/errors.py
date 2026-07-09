@@ -38,3 +38,8 @@ class KalkAbort(Exception):
     def __init__(self, error: KalkError) -> None:
         super().__init__(error.message)
         self.error = error
+
+
+def abort(code: str, message: str) -> KalkAbort:
+    """The one way guarded runtime code raises a typed in-formula error."""
+    return KalkAbort(KalkError(code=code, message=message))

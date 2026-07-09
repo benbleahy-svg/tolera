@@ -18,7 +18,8 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
 from app.services.kalk import lists, tables
-from app.services.kalk.errors import KalkAbort, KalkError
+from app.services.kalk.errors import KalkAbort
+from app.services.kalk.errors import abort as _abort
 from app.services.kalk.limits import Limits
 from app.services.kalk.lists import P3LList
 from app.services.kalk.objects import ContextData, KalkObject
@@ -43,10 +44,6 @@ class ValueType:
 NUMBER = ValueType("number")
 CURRENCY = ValueType("currency")
 STRING = ValueType("string")
-
-
-def _abort(code: str, message: str) -> KalkAbort:
-    return KalkAbort(KalkError(code=code, message=message))
 
 
 def _type_ok(value_type: ValueType, value: object) -> bool:
@@ -532,18 +529,7 @@ class Runtime:
         self.declared_variables.append(declaration)
         if not frozen:
             return TableVariable(self, name, rows)
-        selected = rows[0] if rows else None
-        override = self.take_row_override(name)
-        if override is not None:
-            for row in rows:
-                if row.row_number == override:
-                    selected = row
-                    break
-            else:
-                raise _abort(
-                    "runtime_error",
-                    f"override for {name!r} selects row {override}, which no longer matches",
-                )
+        selected = tables.resolve_selected_row(self, name, rows, rows[0] if rows else None)
         declaration["value"] = selected.row_number if selected is not None else None
         return selected
 
@@ -720,7 +706,8 @@ class Runtime:
                 "runtime_error",
                 "set_workpiece_value() takes a number, string, boolean, or None",
             )
-        self.workpiece[key] = value
+        # same magnitude/length caps as every other value sink (sandbox contract)
+        self.workpiece[key] = self._check_number(value) if value is not None else value
 
     def get_workpiece_value(self, key: object, default: object = None) -> object:
         self.tick()
@@ -749,6 +736,7 @@ class Runtime:
                 "runtime_error",
                 "set_custom_attribute() takes a number, string, or boolean",
             )
+        value = self._check_number(value)  # magnitude/length caps (sandbox contract)
         existing = self.custom_attributes.get(key)
         if existing is not None and (
             isinstance(existing, bool) != isinstance(value, bool)
@@ -810,7 +798,9 @@ class Runtime:
             raise _abort("runtime_error", "set_custom_cost() takes a number")
         if not math.isfinite(cost):
             raise _abort("runtime_error", "set_custom_cost() takes a finite number")
-        self.custom_cost = float(cost)
+        checked = self._check_number(cost)  # magnitude cap (sandbox contract)
+        assert isinstance(checked, int | float)
+        self.custom_cost = float(checked)
 
     def get_components(self, order: object = "leaf_to_root") -> P3LList:
         self.tick()

@@ -235,7 +235,8 @@
     "save_formula": "Formel speichern",
     "variables": "Variablen",
     "calculated_option": "Berechnet: {{value}}",
-    "save_overrides": "Variablen übernehmen"
+    "save_overrides": "Variablen übernehmen",
+    "check_failed": "Prüfung fehlgeschlagen — bitte erneut versuchen."
   },
   "configure": {
     "custom_tables": "Eigene Tabellen",
