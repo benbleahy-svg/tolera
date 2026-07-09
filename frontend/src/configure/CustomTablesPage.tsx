@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 
 import { ApiError } from '../api/client';
 import {
@@ -157,6 +158,10 @@ export function CustomTablesPage() {
 
   return (
     <main className="configure-page">
+      <nav className="est-subnav">
+        <span aria-current="page">{t('configure.custom_tables')}</span>
+        <Link to="/configure/pricing">{t('configure.pricing')}</Link>
+      </nav>
       <h1>{t('configure.custom_tables')}</h1>
       <p className="configure-hint">{t('configure.custom_tables_hint')}</p>
       {error && <p role="alert">{error}</p>}

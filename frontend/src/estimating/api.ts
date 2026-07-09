@@ -11,6 +11,8 @@ import { apiFetch, type TokenGetter } from '../api/client';
 import type {
   ClassNode,
   ComponentCosting,
+  PricingItemCreateBody,
+  PricingSummary,
   KalkCheckResult,
   KalkQtyReport,
   MaterialOut,
@@ -57,6 +59,30 @@ export interface EstimatingApi {
     operationId: string,
     overrides: Record<string, VariableOverrideValue>,
   ) => Promise<ComponentCosting>;
+  getPricing: (componentId: string) => Promise<PricingSummary>;
+  addPricingItem: (componentId: string, body: PricingItemCreateBody) => Promise<unknown>;
+  removePricingItem: (pricingItemId: string) => Promise<void>;
+  setPricingItemPct: (
+    pricingItemId: string,
+    quantity: number,
+    manualPct: string | null,
+  ) => Promise<unknown>;
+  addDiscount: (
+    componentId: string,
+    body: { name: string; default_pct?: string | null },
+  ) => Promise<unknown>;
+  removeDiscount: (discountId: string) => Promise<void>;
+  setDiscountPct: (
+    discountId: string,
+    quantity: number,
+    manualPct: string | null,
+  ) => Promise<unknown>;
+  setUnitPriceOverride: (
+    componentId: string,
+    quantity: number,
+    manualUnitPrice: string | null,
+  ) => Promise<unknown>;
+  refreshPricing: (quoteId: string) => Promise<{ refreshed_items: number }>;
 }
 
 /** Build an estimating API client bound to the current Clerk session token. */
@@ -114,6 +140,35 @@ export function useEstimatingApi(): EstimatingApi {
           method: 'PUT',
           body: { overrides },
         }),
+      getPricing: (componentId) => apiFetch(`/api/components/${componentId}/pricing`, token),
+      addPricingItem: (componentId, body) =>
+        apiFetch(`/api/components/${componentId}/pricing-items`, token, {
+          method: 'POST',
+          body,
+        }),
+      removePricingItem: (pricingItemId) =>
+        apiFetch(`/api/pricing-items/${pricingItemId}`, token, { method: 'DELETE' }),
+      setPricingItemPct: (pricingItemId, quantity, manualPct) =>
+        apiFetch(`/api/pricing-items/${pricingItemId}/cells/${quantity}`, token, {
+          method: 'PATCH',
+          body: { manual_pct: manualPct },
+        }),
+      addDiscount: (componentId, body) =>
+        apiFetch(`/api/components/${componentId}/discounts`, token, { method: 'POST', body }),
+      removeDiscount: (discountId) =>
+        apiFetch(`/api/discounts/${discountId}`, token, { method: 'DELETE' }),
+      setDiscountPct: (discountId, quantity, manualPct) =>
+        apiFetch(`/api/discounts/${discountId}/cells/${quantity}`, token, {
+          method: 'PATCH',
+          body: { manual_pct: manualPct },
+        }),
+      setUnitPriceOverride: (componentId, quantity, manualUnitPrice) =>
+        apiFetch(`/api/components/${componentId}/price/${quantity}`, token, {
+          method: 'PATCH',
+          body: { manual_unit_price: manualUnitPrice },
+        }),
+      refreshPricing: (quoteId) =>
+        apiFetch(`/api/quotes/${quoteId}/refresh-pricing`, token, { method: 'POST' }),
     };
   }, [getToken]);
 }

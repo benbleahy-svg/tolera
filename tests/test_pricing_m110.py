@@ -23,10 +23,10 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from app.pricing import margin_amount, markup_amount, round_price, target_margin_amount
 from fastapi.testclient import TestClient
 
 from app.models import MembershipRole, ObtainMethod, OpCategory
+from app.pricing import margin_amount, markup_amount, round_price, target_margin_amount
 from tests.conftest import Seeder, authed
 
 ADMIN = [MembershipRole.admin]
