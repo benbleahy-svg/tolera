@@ -8,6 +8,7 @@
 import { useClerk } from '@clerk/clerk-react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
+import { CustomTablesPage } from './configure/CustomTablesPage';
 import { AccountDetailPage } from './contacts/AccountDetailPage';
 import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
@@ -19,7 +20,7 @@ import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
 /** Nav destinations that have a real screen; the rest render a placeholder. */
-const REAL_ROUTES = new Set(['/contacts', '/parts', '/quotes']);
+const REAL_ROUTES = new Set(['/contacts', '/parts', '/quotes', '/configure']);
 
 export default function App() {
   const { signOut } = useClerk();
@@ -39,6 +40,9 @@ export default function App() {
         <Route path="/quotes" element={<QuotesPage />} />
         {/* Line-item estimating view — the M1.7 Materials & Operations slice. */}
         <Route path="/quotes/:quoteId" element={<EstimatingPage />} />
+        {/* Configure lands on Custom Tables (M1.9); the full Configure section
+            (operation library pages, …) grows a sub-nav with M1.12. */}
+        <Route path="/configure" element={<CustomTablesPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -325,6 +325,11 @@ export function EstimatingPage() {
           }
           onClose={() => setDrawerOpId(null)}
           disabled={!editable}
+          onKalkCheck={api.kalkCheck}
+          loadKalkReport={() => api.getKalkReport(drawerOp.id)}
+          onSaveOverrides={(overrides) =>
+            apply(api.setVariableOverrides(drawerOp.id, overrides))
+          }
         />
       )}
       {changingProcess && (

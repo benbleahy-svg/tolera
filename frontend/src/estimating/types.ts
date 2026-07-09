@@ -40,7 +40,59 @@ export interface OperationOut {
   is_finish: boolean;
   is_from_factory: boolean;
   notes: string | null;
+  cost_formula: string | null;
+  variable_overrides: Record<string, VariableOverrideValue>;
   cells: QuoteCellOut[];
+}
+
+/** A Kalk variable override: plain value, or `{ "<qty>": value }` per break. */
+export type OverrideScalar = boolean | number | string;
+export type VariableOverrideValue = OverrideScalar | Record<string, OverrideScalar>;
+
+export interface KalkError {
+  code: string;
+  message: string;
+  line: number | null;
+  col: number | null;
+}
+
+export interface KalkCheckResult {
+  ok: boolean;
+  errors: KalkError[];
+}
+
+/** One declared variable from an evaluation (drawer variables panel). */
+export interface KalkDeclaredVariable {
+  name: string;
+  kind?: 'var' | 'drop_down' | 'table_var';
+  value_type: string;
+  default: OverrideScalar | null;
+  description: string;
+  default_visible: boolean;
+  frozen: boolean;
+  quantity_specific: boolean;
+  value: OverrideScalar | null;
+  options?: OverrideScalar[] | { row_number: number; display: string }[];
+  table_name?: string;
+  display_column_name?: string | null;
+}
+
+export interface KalkVariableGroup {
+  name: string;
+  default_collapsed: boolean;
+  members: string[];
+}
+
+/** One quantity break's evaluation in the drawer report. */
+export interface KalkQtyReport {
+  quantity: number;
+  output: Record<string, unknown> | null;
+  declared_variables: KalkDeclaredVariable[];
+  variable_groups: KalkVariableGroup[];
+  applied_overrides: string[];
+  notes: string | null;
+  operation_name: string | null;
+  errors: KalkError[];
 }
 
 export interface CostBucket {
@@ -158,6 +210,7 @@ export interface OperationUpdateBody {
   is_outside_service?: boolean;
   is_finish?: boolean;
   notes?: string | null;
+  cost_formula?: string | null;
 }
 
 export interface MaterialUpdateBody {

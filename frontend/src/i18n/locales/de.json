@@ -160,7 +160,9 @@
   "common": {
     "cancel": "Abbrechen",
     "save": "Speichern",
-    "close": "Schließen"
+    "close": "Schließen",
+    "yes": "Ja",
+    "no": "Nein"
   },
   "estimating": {
     "title": "Angebot {{number}} — Kalkulation",
@@ -223,5 +225,35 @@
     "rollup_outside": "Fremdleistung",
     "rollup_total": "Gesamtkosten",
     "unpriced_rows_hint": "Mindestens eine Zeile hat weder Satz noch manuelle Kosten."
+  },
+  "kalk": {
+    "formula": "Kalk-Formel",
+    "formula_placeholder": "COST = setup_time * rate + runtime * part.qty * rate",
+    "check": "Prüfen",
+    "check_ok": "Formel ist gültig.",
+    "error_at_line": "Zeile {{line}}: {{message}}",
+    "save_formula": "Formel speichern",
+    "variables": "Variablen",
+    "calculated_option": "Berechnet: {{value}}",
+    "save_overrides": "Variablen übernehmen"
+  },
+  "configure": {
+    "custom_tables": "Eigene Tabellen",
+    "custom_tables_hint": "Tabellen für Kalk-Formeln (table_var / table_lookup) — Spaltentypen: Text, Zahl, Ja/Nein.",
+    "new_table": "Neue Tabelle",
+    "table_name": "Tabellenname",
+    "column_name": "Spaltenname",
+    "column_type": "Spaltentyp",
+    "type_string": "Text",
+    "type_numeric": "Zahl",
+    "type_boolean": "Ja/Nein",
+    "add_column": "Spalte hinzufügen",
+    "create_table": "Tabelle anlegen",
+    "row_count": "{{count}} Zeilen",
+    "import_csv": "CSV importieren",
+    "delete_table": "Tabelle löschen",
+    "add_row": "Zeile hinzufügen",
+    "remove_row": "Zeile entfernen",
+    "save_rows": "Zeilen speichern"
   }
 }

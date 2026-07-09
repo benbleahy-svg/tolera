@@ -1096,6 +1096,7 @@ class OperationDef(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    cost_formula: Mapped[str | None] = mapped_column(Text)
     deleted_at: Mapped[datetime | None] = _deleted_at()
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
@@ -1183,6 +1184,13 @@ class Operation(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     notes: Mapped[str | None] = mapped_column(Text)
+    # Kalk (M1.9): formula snapshot copied from the def at attach (E4-d freeze);
+    # variable_overrides = {name: value} / {name: {"<qty>": value}} — the
+    # runtime/setup_time specials keep using the manual_*_mins columns instead.
+    cost_formula: Mapped[str | None] = mapped_column(Text)
+    variable_overrides: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1228,3 +1236,64 @@ class QuoteCell(Base):
     manual_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+class CustomTable(Base):
+    """An org Custom Table backing Kalk ``table_var``/``table_lookup`` (spec
+    ``#kalk-tables``, ``#customcat``; DECISIONS.md 2026-07-08). ``columns`` is
+    ``[{name, type}]`` with type ∈ boolean | numeric | string; names are
+    alphanumeric with no leading digit because formulas dot-access them."""
+
+    __tablename__ = "custom_table"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_custom_table_org_id_id"),
+        UniqueConstraint("org_id", "name", name="uq_custom_table_org_name"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    columns: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+    rows: Mapped[list[CustomTableRow]] = relationship(
+        back_populates="table",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="CustomTableRow.row_number",
+        primaryjoin="and_(CustomTable.id == foreign(CustomTableRow.table_id), "
+        "CustomTable.org_id == CustomTableRow.org_id)",
+    )
+
+
+class CustomTableRow(Base):
+    """One Custom Table row; ``data`` is ``{column: value}`` (null = empty cell).
+    Carries its own ``org_id`` + composite FK so a row can never reference
+    another org's table (tier-1 org-scoping)."""
+
+    __tablename__ = "custom_table_row"
+    __table_args__ = (
+        UniqueConstraint("table_id", "row_number", name="uq_custom_table_row_table_number"),
+        ForeignKeyConstraint(
+            ["org_id", "table_id"],
+            ["custom_table.org_id", "custom_table.id"],
+            name="fk_custom_table_row_table_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_custom_table_row_org_table", "org_id", "table_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    table_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+    table: Mapped[CustomTable] = relationship(
+        back_populates="rows",
+        primaryjoin="and_(CustomTable.id == foreign(CustomTableRow.table_id), "
+        "CustomTable.org_id == CustomTableRow.org_id)",
+    )

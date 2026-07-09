@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +40,7 @@ from .authz import Permission, require
 from .costing import CostBucket, effective_cost, recalculate_component, rollup_inputs
 from .deps import get_session
 from .errors import AppError
+from .kalk_costing import operation_kalk_report
 from .models import (
     CalculationMode,
     Component,
@@ -55,6 +56,7 @@ from .models import (
     QuoteStatus,
     SetupBasis,
 )
+from .services import kalk
 
 operations_router = APIRouter(prefix="/api", tags=["operations"])
 
@@ -80,6 +82,7 @@ class OperationDefOut(BaseModel):
     is_finish: bool
     is_pre_installed: bool
     sort_order: int
+    cost_formula: str | None
 
 
 class OperationDefCreate(BaseModel):
@@ -96,6 +99,16 @@ class OperationDefCreate(BaseModel):
     surcharge_pct: Annotated[Decimal, Field(ge=0, le=100)] = Decimal(0)
     is_outside_service: bool = False
     is_finish: bool = False
+    cost_formula: Annotated[str | None, Field(max_length=100_000)] = None
+
+
+class OperationDefFormulaUpdate(BaseModel):
+    """Configure-side Kalk editor save. ``null`` clears the formula (the op
+    falls back to its mode arithmetic on future attaches)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cost_formula: Annotated[str | None, Field(max_length=100_000)]
 
 
 class QuoteCellOut(BaseModel):
@@ -128,6 +141,8 @@ class OperationOut(BaseModel):
     is_finish: bool
     is_from_factory: bool
     notes: str | None
+    cost_formula: str | None
+    variable_overrides: dict[str, Any]
     cells: list[QuoteCellOut]
 
 
@@ -179,6 +194,23 @@ class OperationUpdate(BaseModel):
     is_outside_service: bool = False
     is_finish: bool = False
     notes: Annotated[str | None, Field(max_length=10_000)] = None
+    # Kalk (M1.9): edits this quote's snapshot only (never the library def);
+    # an explicit null falls the op back to its mode arithmetic.
+    cost_formula: Annotated[str | None, Field(max_length=100_000)] = None
+
+
+class VariableOverridesUpdate(BaseModel):
+    """Replace an operation's Kalk variable overrides (DECISIONS.md 2026-07-08):
+    ``{name: value}`` for plain vars, ``{name: {"<qty>": value}}`` for
+    quantity-specific ones. The evaluator validates types/membership per
+    variable at recalc; this schema only enforces the shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    overrides: dict[
+        str,
+        bool | int | float | str | dict[str, bool | int | float | str],
+    ]
 
 
 class OperationOrder(BaseModel):
@@ -272,6 +304,22 @@ async def _lock_editable_quote(session: AsyncSession, component: Component) -> Q
     return quote
 
 
+def _validate_formula(formula: str) -> None:
+    """Saving an invalid Kalk formula is a clean 422 with positioned errors
+    (acceptance: the editor rejects invalid Kalk with a clear error)."""
+    result = kalk.check(formula, context_type="operation_cost")
+    if not result.ok:
+        raise AppError(
+            "invalid_formula",
+            "The Kalk formula is invalid.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            details=[
+                {"code": e.code, "message": e.message, "line": e.line, "col": e.col}
+                for e in result.errors
+            ],
+        )
+
+
 def _def_out(op_def: OperationDef) -> OperationDefOut:
     return OperationDefOut(
         id=op_def.id,
@@ -288,6 +336,7 @@ def _def_out(op_def: OperationDef) -> OperationDefOut:
         is_finish=op_def.is_finish,
         is_pre_installed=op_def.is_pre_installed,
         sort_order=op_def.sort_order,
+        cost_formula=op_def.cost_formula,
     )
 
 
@@ -324,6 +373,8 @@ def _operation_out(op: Operation, cells: list[QuoteCell]) -> OperationOut:
         is_finish=op.is_finish,
         is_from_factory=op.is_from_factory,
         notes=op.notes,
+        cost_formula=op.cost_formula,
+        variable_overrides=op.variable_overrides,
         cells=cell_out,
     )
 
@@ -413,8 +464,33 @@ async def create_operation_def(
             "An operation with this name already exists in the library.",
             status_code=status.HTTP_409_CONFLICT,
         )
+    if payload.cost_formula is not None:
+        _validate_formula(payload.cost_formula)
     op_def = OperationDef(org_id=principal.active_org_id, **payload.model_dump())
     session.add(op_def)
+    await session.flush()
+    return _def_out(op_def)
+
+
+@operations_router.patch("/operation-defs/{def_id}")
+async def update_operation_def_formula(
+    def_id: uuid.UUID,
+    payload: OperationDefFormulaUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.config_edit))],
+) -> OperationDefOut:
+    """The Configure-side Kalk editor save. Existing quote operations keep their
+    snapshot (E4-d config-freeze) — only future attaches see the new formula."""
+    op_def = await session.get(OperationDef, def_id)
+    if op_def is None or op_def.deleted_at is not None:
+        raise AppError(
+            "not_found",
+            "Operation definition not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    if payload.cost_formula is not None:
+        _validate_formula(payload.cost_formula)
+    op_def.cost_formula = payload.cost_formula
     await session.flush()
     return _def_out(op_def)
 
@@ -486,7 +562,8 @@ async def add_operation(
             await session.flush()
 
     # Config is COPIED from the def at attach time: a later library edit never
-    # silently reprices an existing quote (config-freeze posture, E4-d).
+    # silently reprices an existing quote (config-freeze posture, E4-d) —
+    # including the Kalk formula snapshot (DECISIONS.md 2026-07-08).
     operation = Operation(
         org_id=principal.active_org_id,
         component_id=component.id,
@@ -499,6 +576,7 @@ async def add_operation(
         labour_rate=op_def.labour_rate,
         setup_basis=op_def.setup_basis,
         setup_cost=op_def.setup_cost,
+        cost_formula=op_def.cost_formula,
         calc_setup_mins=op_def.setup_time_mins,
         # Outside-process defs are outside services by construction.
         is_outside_service=(
@@ -523,7 +601,10 @@ async def update_operation(
     operation = await _get_operation_or_404(session, operation_id)
     component = await _get_component_or_404(session, operation.component_id)
     await _lock_editable_quote(session, component)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if updates.get("cost_formula") is not None:
+        _validate_formula(updates["cost_formula"])
+    for field, value in updates.items():
         setattr(operation, field, value)
     await session.flush()
     await recalculate_component(session, principal.active_org_id, component.id)
@@ -564,6 +645,8 @@ async def duplicate_operation(
         is_outside_service=operation.is_outside_service,
         is_finish=operation.is_finish,
         notes=operation.notes,
+        cost_formula=operation.cost_formula,
+        variable_overrides=dict(operation.variable_overrides),
     )
     session.add(copy)
     await session.flush()
@@ -653,6 +736,102 @@ async def set_cell_override(
     await session.flush()
     await recalculate_component(session, principal.active_org_id, component.id)
     return await _component_costing(session, component)
+
+
+# --------------------------------------------------------------------------- #
+# Kalk (M1.9): editor CHECK, variable overrides, the drawer's evaluation report
+# --------------------------------------------------------------------------- #
+class KalkCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    formula: Annotated[str, Field(max_length=100_000)]
+    context_type: str = "operation_cost"
+
+
+class KalkErrorOut(BaseModel):
+    code: str
+    message: str
+    line: int | None
+    col: int | None
+
+
+class KalkCheckResult(BaseModel):
+    ok: bool
+    errors: list[KalkErrorOut]
+
+
+@operations_router.post("/kalk/check")
+async def kalk_check(
+    payload: KalkCheckRequest,
+    _: Annotated[Principal, Depends(require(Permission.view_all))],
+) -> KalkCheckResult:
+    """The editor CHECK button — static validation only, never executes."""
+    result = kalk.check(payload.formula, context_type=payload.context_type)
+    return KalkCheckResult(
+        ok=result.ok,
+        errors=[
+            KalkErrorOut(code=e.code, message=e.message, line=e.line, col=e.col)
+            for e in result.errors
+        ],
+    )
+
+
+@operations_router.put("/operations/{operation_id}/variables")
+async def set_variable_overrides(
+    operation_id: uuid.UUID,
+    payload: VariableOverridesUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> ComponentCosting:
+    """Replace the operation's Kalk variable overrides and recalculate. The
+    special ``runtime``/``setup_time`` names are rejected here — they override
+    via the M1.7 ``manual_*_mins`` pair (DECISIONS.md 2026-07-08)."""
+    operation = await _get_operation_or_404(session, operation_id)
+    component = await _get_component_or_404(session, operation.component_id)
+    await _lock_editable_quote(session, component)
+    if "runtime" in payload.overrides or "setup_time" in payload.overrides:
+        raise AppError(
+            "validation_error",
+            "runtime and setup_time override via the operation's manual time fields.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+    operation.variable_overrides = payload.overrides
+    await session.flush()
+    await recalculate_component(session, principal.active_org_id, component.id)
+    return await _component_costing(session, component)
+
+
+@operations_router.get("/operations/{operation_id}/kalk")
+async def get_operation_kalk_report(
+    operation_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.view_all))],
+) -> list[dict[str, Any]]:
+    """The drawer's per-break evaluation report: declared variables (with
+    current values/options), groups, applied overrides, output, and errors.
+    An operation without a formula reports an empty list."""
+    operation = await _get_operation_or_404(session, operation_id)
+    if operation.cost_formula is None:
+        return []
+    component = await _get_component_or_404(session, operation.component_id)
+    operations = (
+        await session.scalars(
+            select(Operation)
+            .where(Operation.component_id == component.id)
+            .order_by(Operation.position, Operation.created_at, Operation.id)
+        )
+    ).all()
+    breaks = (
+        await session.scalars(
+            select(ComponentQuantity).where(ComponentQuantity.component_id == component.id)
+        )
+    ).all()
+    cells = (
+        await session.scalars(select(QuoteCell).where(QuoteCell.component_id == component.id))
+    ).all()
+    return await operation_kalk_report(
+        session, component, operation, list(operations), list(breaks), list(cells)
+    )
 
 
 # --------------------------------------------------------------------------- #

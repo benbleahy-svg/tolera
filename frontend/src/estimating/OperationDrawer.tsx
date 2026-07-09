@@ -9,7 +9,14 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { OperationOut, OperationUpdateBody } from './types';
+import { KalkSection } from './KalkSection';
+import type {
+  KalkCheckResult,
+  KalkQtyReport,
+  OperationOut,
+  OperationUpdateBody,
+  VariableOverrideValue,
+} from './types';
 
 interface Props {
   operation: OperationOut;
@@ -18,6 +25,10 @@ interface Props {
   onCellOverride: (quantity: number, manualCost: string | null) => void;
   onClose: () => void;
   disabled?: boolean;
+  // Kalk (M1.9)
+  onKalkCheck: (formula: string) => Promise<KalkCheckResult>;
+  loadKalkReport: () => Promise<KalkQtyReport[]>;
+  onSaveOverrides: (overrides: Record<string, VariableOverrideValue>) => void;
 }
 
 /** One Calculated-vs-Override row: read-only calc, editable override. */
@@ -55,6 +66,9 @@ export function OperationDrawer({
   onCellOverride,
   onClose,
   disabled,
+  onKalkCheck,
+  loadKalkReport,
+  onSaveOverrides,
 }: Props) {
   const { t } = useTranslation();
   const [setupMins, setSetupMins] = useState(operation.manual_setup_mins ?? '');
@@ -182,6 +196,15 @@ export function OperationDrawer({
           </div>
         ))}
       </section>
+      <KalkSection
+        formula={operation.cost_formula}
+        variableOverrides={operation.variable_overrides}
+        loadReport={loadKalkReport}
+        onCheck={onKalkCheck}
+        onSaveFormula={(formula) => onSave({ cost_formula: formula })}
+        onSaveOverrides={onSaveOverrides}
+        disabled={disabled}
+      />
       <section>
         <h4>{t('estimating.notes')}</h4>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />

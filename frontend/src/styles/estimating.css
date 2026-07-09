@@ -266,3 +266,45 @@
 .est-error {
   color: var(--danger, #b3261e);
 }
+
+/* --- Kalk panel (M1.9) ------------------------------------------------- */
+
+.est-kalk-editor {
+  width: 100%;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  tab-size: 4;
+  resize: vertical;
+}
+
+.est-kalk-ok {
+  color: var(--success, #1b6e3c);
+  margin: 0.25rem 0;
+}
+
+.est-kalk-errors {
+  color: var(--danger, #b3261e);
+  white-space: pre-line;
+  margin: 0.25rem 0;
+}
+
+.est-kalk-perqty {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.est-kalk-perqty label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.est-kalk-perqty input {
+  width: 5rem;
+}
+
+.est-kalk details {
+  margin: 0.25rem 0;
+}

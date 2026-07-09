@@ -19,6 +19,39 @@
 
 ---
 
+## [2026-07-08] M1.9 Kalk→money quantization — numeric(14,4) half-up at the cell, minor units only at quote totals
+
+**Status:** RESOLVED
+**Question:** M1.8 deferred the float→integer-minor-units rule to M1.9, when Kalk `COST` becomes the `calc_cost` source. Two dimensions: rounding mode (banker's half-even — Kalk `round()` parity — vs kaufmännische Rundung half-up) and quantization point (per op-cell vs only at the quote-total boundary).
+**Options considered:** (1) quantize each cell to integer cents (roll-up = exact integer sums); (2) keep sub-cent precision through the roll-up, quantize to minor units only at the quote-total/display boundary.
+**Decision:** **(2)**, extending the existing 2026-06-27 money convention already encoded in `app/costing.py`: Kalk `COST` (float) converts via `repr` → `Decimal` quantized to **4 dp, ROUND_HALF_UP** (`numeric(14,4)` — the same `_quant` M1.7 mode arithmetic uses) when persisted to `quote_cell.calc_cost`; integer minor units + currency appear only at the quote-total boundary (M1.10/M1.11). The tier-1 "money = integer minor units" invariant applies to quote-level money; unit-level `numeric(14,4)` is the established sub-cent costing precision. Demo E golden figures validate this end-to-end at M1.10.
+**Resolved:** 2026-07-08 (M1.9 grill, Benjamin — "quantize at the total/display boundary")
+**Affects:** M1.9 (Kalk→`calc_cost` wiring), M1.10 (roll-up + goldens), M1.11 (VAT/net-gross minor-unit boundary).
+
+## [2026-07-08] M1.9 cost_formula snapshot-on-attach (config-freeze E4-d)
+
+**Status:** RESOLVED
+**Question:** `cost_formula` lands on `operation_def` at M1.9. Does a quote-level `operation` row reference the def's formula live, or copy it at attach time, given E4-d freezes pricing config for existing drafts?
+**Decision:** **Snapshot-on-attach.** `operation.cost_formula` is copied from `operation_def.cost_formula` when the operation is added to a quote; editing the def never re-prices an existing draft. M1.10's "Refresh Pricing" re-copies deliberately. Evaluation always reads the operation row's snapshot.
+**Resolved:** 2026-07-08 (M1.9 grill, Benjamin)
+**Affects:** M1.9 schema + costing service, M1.10 (Refresh Pricing), M1.12 (seeded formulas).
+
+## [2026-07-08] M1.9 Kalk variable overrides — jsonb on the operation row
+
+**Status:** RESOLVED
+**Question:** Where do UI overrides of Kalk-declared variables persist (per quote-operation; per quantity break for `quantity_specific=True`), preserving the calc-vs-override invariant?
+**Decision:** `operation.variable_overrides jsonb` — `{var_name: value}` for plain vars, `{var_name: {"<qty>": value}}` for quantity-specific ones — passed as `overrides` into `evaluate()`; re-evaluation never touches it. The special `runtime`/`setup_time` names keep flowing through the existing `manual_runtime_mins`/`manual_setup_mins` columns (calc\_/manual\_ pairs from M1.7), not the jsonb; a formula's frozen `runtime`/`setup_time` outputs write `calc_runtime_mins`/`calc_setup_mins` (hours→minutes at the boundary).
+**Resolved:** 2026-07-08 (M1.9 grill, Benjamin)
+**Affects:** M1.9 schema + evaluation wiring, M1.10 (re-pricing keeps overrides).
+
+## [2026-07-08] M1.9 custom-table column types + caps
+
+**Status:** RESOLVED
+**Question:** `DB-SCHEMA.sql` gives `custom_table.columns jsonb [{name,type}]` without a closed type set.
+**Decision:** v1 column types = **boolean | numeric | string** (the KB filter-condition matrix's type set; no date/currency columns). Column names alphanumeric, no leading digit (dot-accessed in formulas). Caps kept as spec'd: `table_var` ≤200 rows, `table_lookup` ≤10,000, drop-down search ≤50. CSV import is in v1 scope (types validated against the declared columns on import).
+**Resolved:** 2026-07-08 (M1.9 grill, Benjamin — recommendation approved)
+**Affects:** M1.9 (custom-table entity/API/UI, `table_var`/`table_lookup` runtime).
+
 ## [2026-07-08] M1.8 Kalk sandbox isolation boundary — in-process restricted-AST evaluator (v1) behind an executor seam
 
 **Status:** RESOLVED

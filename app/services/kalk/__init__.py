@@ -11,18 +11,38 @@ can load it for determinism checks and future subprocess executors.
 """
 
 from app.services.kalk.errors import KalkError
-from app.services.kalk.evaluator import CheckResult, EvalResult, check, evaluate
+from app.services.kalk.evaluator import (
+    SUPPORTED_CONTEXTS,
+    CheckResult,
+    EvalResult,
+    check,
+    evaluate,
+)
 from app.services.kalk.executor import Executor, InProcessExecutor
 from app.services.kalk.limits import Limits
+from app.services.kalk.objects import ContextData, KalkObject
 from app.services.kalk.serialization import canonical_bytes
+from app.services.kalk.tables import (
+    MappingTableProvider,
+    TableColumn,
+    TableProvider,
+    TableSnapshot,
+)
 
 __all__ = [
+    "SUPPORTED_CONTEXTS",
     "CheckResult",
+    "ContextData",
     "EvalResult",
     "Executor",
     "InProcessExecutor",
     "KalkError",
+    "KalkObject",
     "Limits",
+    "MappingTableProvider",
+    "TableColumn",
+    "TableProvider",
+    "TableSnapshot",
     "canonical_bytes",
     "check",
     "evaluate",

@@ -22,6 +22,9 @@ const duplicateOperation = vi.fn();
 const removeOperation = vi.fn();
 const reorderOperations = vi.fn();
 const setCellOverride = vi.fn();
+const kalkCheck = vi.fn();
+const getKalkReport = vi.fn().mockResolvedValue([]);
+const setVariableOverrides = vi.fn();
 
 // Mock the estimating API module so the page never touches Clerk/network.
 vi.mock('./api', () => ({
@@ -41,6 +44,9 @@ vi.mock('./api', () => ({
     removeOperation,
     reorderOperations,
     setCellOverride,
+    kalkCheck,
+    getKalkReport,
+    setVariableOverrides,
   }),
 }));
 
@@ -77,6 +83,8 @@ function op(name: string, cells: QuoteCellOut[], extra: Partial<OperationOut> = 
     is_finish: false,
     is_from_factory: false,
     notes: null,
+    cost_formula: null,
+    variable_overrides: {},
     cells,
     ...extra,
   };

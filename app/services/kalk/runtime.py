@@ -8,6 +8,7 @@ here may raise anything else for in-formula misuse.
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 import statistics
@@ -16,8 +17,15 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
+from app.services.kalk import lists, tables
 from app.services.kalk.errors import KalkAbort, KalkError
 from app.services.kalk.limits import Limits
+from app.services.kalk.lists import P3LList
+from app.services.kalk.objects import ContextData, KalkObject
+from app.services.kalk.tables import TableProvider, TableRow, TableVariable
+from app.services.kalk.variables import DropDownVar, VariableGroup
+
+_MISSING = object()
 
 
 class ValueType:
@@ -79,7 +87,12 @@ class DynamicVar:
         if self._frozen:
             return
         self._frozen = True
-        value = self._runtime.apply_override(self._name, self._value_type, self._pending)
+        value = self._runtime.apply_override(
+            self._name,
+            self._value_type,
+            self._pending,
+            quantity_specific=self._declaration["quantity_specific"],
+        )
         self._pending = value
         self._declaration["value"] = value
 
@@ -94,18 +107,36 @@ class DynamicVar:
 
 
 class Runtime:
-    def __init__(self, limits: Limits, overrides: Mapping[str, object] | None) -> None:
+    def __init__(
+        self,
+        limits: Limits,
+        overrides: Mapping[str, object] | None,
+        quantity: int = 1,
+        table_provider: TableProvider | None = None,
+        context_data: ContextData | None = None,
+    ) -> None:
         self.limits = limits
         self.overrides: dict[str, object] = dict(overrides or {})
+        self.quantity = quantity
+        self.table_provider = table_provider
+        self.context_data = context_data or ContextData()
         self._deadline = time.monotonic() + limits.deadline_seconds
         self._ops = 0
         self._value_types = {"number": NUMBER, "currency": CURRENCY, "string": STRING}
         # contract outputs
         self.declared_variables: list[dict[str, Any]] = []
+        self.variable_groups: list[dict[str, Any]] = []
         self.applied_overrides: list[str] = []
         self.operation_name: str | None = None
         self.notes: str | None = None
         self.no_quote_called = False
+        # operation-context state (KALK-REFERENCE §7-§8)
+        self.workpiece: dict[str, Any] = dict(self.context_data.workpiece)
+        self.custom_attributes: dict[str, Any] = dict(self.context_data.custom_attributes)
+        self.custom_attributes_out: dict[str, Any] = {}
+        # pricing-item-context state (KALK-REFERENCE §11.3)
+        self.profit_item_name: str | None = None
+        self.custom_cost: float | None = None
 
     # -- caps ---------------------------------------------------------------
 
@@ -169,6 +200,9 @@ class Runtime:
             raise
         except Exception as exc:
             raise _abort("runtime_error", _sanitize_exception(exc)) from None
+        if isinstance(result, list) and not isinstance(result, P3LList):
+            # list + list / list * n on P3LLists must stay P3LLists
+            result = P3LList(result)
         return self._check_number(result)
 
     def _pow(self, base: object, exponent: object) -> object:
@@ -212,6 +246,12 @@ class Runtime:
         if isinstance(obj, DynamicVar):
             if name in ("update", "freeze"):
                 return getattr(obj, name)
+        elif isinstance(
+            obj, KalkObject | TableRow | TableVariable | DropDownVar | VariableGroup
+        ):
+            return obj.kalk_getattr(self, name)
+        elif isinstance(obj, P3LList):
+            return lists.list_attr(self, obj, name)
         elif isinstance(obj, str):
             if name == "split":
                 return self._guarded_split(obj)
@@ -234,15 +274,15 @@ class Runtime:
 
     # -- guarded string methods ----------------------------------------------
 
-    def _guarded_split(self, value: str) -> Callable[..., list[str]]:
-        def split(sep: object = None, maxsplit: object = -1) -> list[str]:
+    def _guarded_split(self, value: str) -> Callable[..., P3LList]:
+        def split(sep: object = None, maxsplit: object = -1) -> P3LList:
             self.tick()
             sep_u = self.unwrap(sep)
             if sep_u is not None and not isinstance(sep_u, str):
                 raise _abort("runtime_error", "split() separator must be a string")
             if not isinstance(maxsplit, int):
                 raise _abort("runtime_error", "split() maxsplit must be an integer")
-            return value.split(sep_u, maxsplit)
+            return P3LList(value.split(sep_u, maxsplit))
 
         return split
 
@@ -283,10 +323,41 @@ class Runtime:
 
     # -- variables ------------------------------------------------------------
 
-    def apply_override(self, name: str, value_type: ValueType, current: object) -> object:
+    def _raw_override(self, name: str, quantity_specific: bool) -> object:
+        """Resolve the stored override for a variable, honouring per-quantity shape.
+
+        Quantity-specific overrides are persisted as ``{name: {"<qty>": value}}``
+        (DECISIONS.md 2026-07-08); returns ``_MISSING`` when no override applies
+        to the current quantity.
+        """
         if name not in self.overrides:
+            return _MISSING
+        raw = self.overrides[name]
+        if quantity_specific:
+            if not isinstance(raw, Mapping):
+                raise _abort(
+                    "runtime_error",
+                    f"override for quantity-specific variable {name!r} must map "
+                    "quantity to value",
+                )
+            return raw.get(str(self.quantity), _MISSING)
+        if isinstance(raw, Mapping):
+            raise _abort(
+                "runtime_error",
+                f"variable {name!r} is not quantity-specific but has a per-quantity override",
+            )
+        return raw
+
+    def apply_override(
+        self,
+        name: str,
+        value_type: ValueType,
+        current: object,
+        quantity_specific: bool = False,
+    ) -> object:
+        value = self._raw_override(name, quantity_specific)
+        if value is _MISSING:
             return current
-        value = self.overrides[name]
         if not _type_ok(value_type, value):
             raise _abort(
                 "runtime_error",
@@ -294,6 +365,69 @@ class Runtime:
             )
         self.applied_overrides.append(name)
         return value
+
+    def take_row_override(self, name: str) -> int | None:
+        """The row_number override for a table variable (applies at selection)."""
+        declaration = self._declaration_by_name(name)
+        value = self._raw_override(name, bool(declaration and declaration["quantity_specific"]))
+        if value is _MISSING:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise _abort(
+                "runtime_error",
+                f"override for table variable {name!r} must be a row number",
+            )
+        self.applied_overrides.append(name)
+        return value
+
+    def record_table_var_value(self, name: str, row: TableRow | None) -> None:
+        declaration = self._declaration_by_name(name)
+        if declaration is not None:
+            declaration["value"] = row.row_number if row is not None else None
+
+    def resolve_dropdown_override(
+        self, name: str, declaration: dict[str, Any], value: object
+    ) -> object:
+        override = self._raw_override(name, declaration["quantity_specific"])
+        if override is _MISSING:
+            return value
+        if not _type_ok(self._value_types[declaration["value_type"]], override):
+            raise _abort(
+                "runtime_error",
+                f"override for {name!r} is not a {declaration['value_type']}",
+            )
+        self.applied_overrides.append(name)
+        return override
+
+    def check_dropdown_options(
+        self, name: str, value_type: ValueType, options: object
+    ) -> list[Any]:
+        options = self.unwrap(options)
+        if not isinstance(options, list | tuple):
+            raise _abort("runtime_error", f"drop-down {name!r} options must be a list")
+        checked: list[Any] = []
+        for raw in options:
+            option = self.unwrap(raw)
+            if not _type_ok(value_type, option):
+                raise _abort(
+                    "runtime_error",
+                    f"drop-down {name!r} option {option!r} is not a {value_type.name}",
+                )
+            checked.append(option)
+        return checked
+
+    def _declaration_by_name(self, name: str) -> dict[str, Any] | None:
+        for declaration in self.declared_variables:
+            if declaration["name"] == name:
+                return declaration
+        return None
+
+    def _register_name(self, fn: str, name: object) -> str:
+        if not isinstance(name, str) or not name:
+            raise _abort("runtime_error", f"{fn}() name must be a non-empty string")
+        if self._declaration_by_name(name) is not None:
+            raise _abort("runtime_error", f"variable {name!r} is declared twice")
+        return name
 
     def var(
         self,
@@ -328,15 +462,190 @@ class Runtime:
         self.declared_variables.append(declaration)
         if not frozen:
             return DynamicVar(self, name, declaration)
-        value = self.apply_override(name, value_type, default)
+        value = self.apply_override(
+            name, value_type, default, quantity_specific=bool(quantity_specific)
+        )
         declaration["value"] = value
         return value
 
-    def _m19_stub(self, fn_name: str) -> Callable[..., object]:
+    def _m4_stub(self, fn_name: str) -> Callable[..., object]:
         def stub(*_args: object, **_kwargs: object) -> object:
-            raise _abort("runtime_error", f"{fn_name}() is not available until M1.9")
+            raise _abort(
+                "runtime_error",
+                f"{fn_name}() is not available until M4 (GeometryService interrogation)",
+            )
 
         return stub
+
+    # -- declaration functions: tables, drop-downs, groups (KALK-REFERENCE §3, §5)
+
+    def _get_snapshot(self, fn: str, table_name: object) -> tables.TableSnapshot:
+        if not isinstance(table_name, str) or not table_name:
+            raise _abort("runtime_error", f"{fn}() table_name must be a non-empty string")
+        snapshot = self.table_provider.get_table(table_name) if self.table_provider else None
+        if snapshot is None:
+            raise _abort("runtime_error", f"no custom table named {table_name!r}")
+        return snapshot
+
+    def table_var(
+        self,
+        name: object,
+        description: object = "",
+        table_name: object = None,
+        filters: object = None,
+        order_by: object = None,
+        display_column_name: object = None,
+        frozen: object = True,
+        quantity_specific: object = False,
+    ) -> object:
+        self.tick()
+        name = self._register_name("table_var", name)
+        snapshot = self._get_snapshot("table_var", table_name)
+        if (
+            display_column_name is not None
+            and snapshot.column_type(str(display_column_name)) is None
+        ):
+            raise _abort(
+                "runtime_error",
+                f"table {snapshot.name!r} has no column {display_column_name!r}",
+            )
+        rows = tables.match_rows(self, snapshot, filters, order_by)
+        rows = rows[: tables.TABLE_VAR_MAX_ROWS]
+
+        def display(row: TableRow) -> str:
+            if display_column_name is not None:
+                return str(row.data.get(str(display_column_name)))
+            return f"Zeile {row.row_number}"
+
+        declaration: dict[str, Any] = {
+            "name": name,
+            "kind": "table_var",
+            "value_type": "table_row",
+            "default": None,
+            "description": description if isinstance(description, str) else "",
+            "default_visible": True,
+            "frozen": bool(frozen),
+            "quantity_specific": bool(quantity_specific),
+            "table_name": snapshot.name,
+            "display_column_name": (
+                str(display_column_name) if display_column_name is not None else None
+            ),
+            "options": [{"row_number": r.row_number, "display": display(r)} for r in rows],
+            "value": None,
+        }
+        self.declared_variables.append(declaration)
+        if not frozen:
+            return TableVariable(self, name, rows)
+        selected = rows[0] if rows else None
+        override = self.take_row_override(name)
+        if override is not None:
+            for row in rows:
+                if row.row_number == override:
+                    selected = row
+                    break
+            else:
+                raise _abort(
+                    "runtime_error",
+                    f"override for {name!r} selects row {override}, which no longer matches",
+                )
+        declaration["value"] = selected.row_number if selected is not None else None
+        return selected
+
+    def table_lookup(
+        self,
+        table_name: object = None,
+        filters: object = None,
+        order_by: object = None,
+        quantity_specific: object = False,  # accepted for P3L parity; no UI variable
+    ) -> P3LList:
+        self.tick()
+        snapshot = self._get_snapshot("table_lookup", table_name)
+        rows = tables.match_rows(self, snapshot, filters, order_by)
+        return P3LList(rows[: tables.TABLE_LOOKUP_MAX_ROWS])
+
+    def drop_down_var(
+        self,
+        name: object,
+        default_value: object = None,
+        default_options: object = None,
+        description: object = "",
+        value_type: object = NUMBER,
+        frozen: object = True,
+        quantity_specific: object = False,
+    ) -> object:
+        self.tick()
+        name = self._register_name("drop_down_var", name)
+        if not isinstance(value_type, ValueType):
+            raise _abort(
+                "runtime_error",
+                "drop_down_var() value_type must be number, currency, or string",
+            )
+        options = self.check_dropdown_options(name, value_type, default_options)
+        if not options:
+            raise _abort("runtime_error", f"drop-down {name!r} needs at least one option")
+        default_value = self.unwrap(default_value)
+        if default_value not in options:
+            raise _abort(
+                "runtime_error",
+                f"drop-down {name!r} default value is not one of the options",
+            )
+        declaration: dict[str, Any] = {
+            "name": name,
+            "kind": "drop_down",
+            "value_type": value_type.name,
+            "default": default_value,
+            "description": description if isinstance(description, str) else "",
+            "default_visible": True,
+            "frozen": bool(frozen),
+            "quantity_specific": bool(quantity_specific),
+            "options": list(options),
+            "value": None,
+        }
+        self.declared_variables.append(declaration)
+        if not frozen:
+            return DropDownVar(self, name, value_type, options, declaration)
+        value = self.resolve_dropdown_override(name, declaration, default_value)
+        if value not in options:
+            raise _abort(
+                "runtime_error",
+                f"override for drop-down {name!r} is not one of the options",
+            )
+        declaration["value"] = value
+        return value
+
+    def variable_group(self, name: object, default_collapsed: object = False) -> VariableGroup:
+        self.tick()
+        if not isinstance(name, str) or not name:
+            raise _abort("runtime_error", "variable_group() name must be a non-empty string")
+        if any(g["name"] == name for g in self.variable_groups):
+            raise _abort("runtime_error", f"variable group {name!r} is declared twice")
+        group: dict[str, Any] = {
+            "name": name,
+            "default_collapsed": bool(default_collapsed),
+            "members": [],
+        }
+        self.variable_groups.append(group)
+        return VariableGroup(self, group)
+
+    def add_to_group(self, group: dict[str, Any], var_name: str) -> None:
+        if var_name in ("runtime", "setup_time"):
+            # KALK-REFERENCE §3: the primary specials never join a group
+            raise _abort(
+                "runtime_error",
+                "runtime and setup_time cannot be added to a variable group",
+            )
+        if self._declaration_by_name(var_name) is None:
+            raise _abort(
+                "runtime_error",
+                f"add_by_name(): no variable named {var_name!r} is declared",
+            )
+        for existing in self.variable_groups:
+            if var_name in existing["members"]:
+                raise _abort(
+                    "runtime_error",
+                    f"variable {var_name!r} is already in group {existing['name']!r}",
+                )
+        group["members"].append(var_name)
 
     # -- operation-cost context functions --------------------------------------
 
@@ -348,6 +657,7 @@ class Runtime:
 
     def set_notes(self, notes: object) -> None:
         self.tick()
+        notes = self.unwrap(notes)
         if not isinstance(notes, str):
             raise _abort("runtime_error", "set_notes() takes a string")
         self.notes = notes
@@ -356,10 +666,197 @@ class Runtime:
         self.tick()
         self.no_quote_called = True
 
+    def set_notes_from_list(self, notes: object) -> None:
+        self.tick()
+        notes = self.unwrap(notes)
+        if not isinstance(notes, list | tuple):
+            raise _abort("runtime_error", "set_notes_from_list() takes a list of strings")
+        parts: list[str] = []
+        for raw in notes:
+            item = self.unwrap(raw)
+            if not isinstance(item, str):
+                raise _abort("runtime_error", "set_notes_from_list() takes a list of strings")
+            parts.append(item)
+        joined = "\n".join(parts)
+        if len(joined) > self.limits.max_str_len:
+            raise _abort("resource_limit", "string grew too long")
+        self.notes = joined
+
+    def is_close(self, n1: object, n2: object, tol: object = 0.001) -> bool:
+        self.tick()
+        values: list[int | float] = []
+        for raw in (n1, n2, tol):
+            v = self.unwrap(raw)
+            if isinstance(v, bool) or not isinstance(v, int | float):
+                raise _abort("runtime_error", "is_close() takes numbers")
+            values.append(v)
+        return abs(values[0] - values[1]) <= values[2]
+
+    def is_a_in_b(self, a: object, b: object) -> bool:
+        self.tick()
+        a = self.unwrap(a)
+        b = self.unwrap(b)
+        if isinstance(a, str) and isinstance(b, str):
+            return a.lower() in b.lower()  # case-insensitive, the common material test
+        if isinstance(b, list | tuple):
+            return a in b
+        raise _abort("runtime_error", "is_a_in_b() takes strings or a value and a list")
+
+    def get_quantities(self) -> P3LList:
+        self.tick()
+        return P3LList(self.context_data.quantities)
+
+    def get_make_quantities(self) -> P3LList:
+        self.tick()
+        return P3LList(self.context_data.make_quantities)
+
+    def get_bom_quantities(self) -> P3LList:
+        self.tick()
+        return P3LList(self.context_data.bom_quantities)
+
+    def set_workpiece_value(self, key: object, value: object) -> None:
+        self.tick()
+        if not isinstance(key, str) or not key:
+            raise _abort("runtime_error", "set_workpiece_value() key must be a non-empty string")
+        value = self.unwrap(value)
+        if value is not None and not isinstance(value, bool | int | float | str):
+            raise _abort(
+                "runtime_error",
+                "set_workpiece_value() takes a number, string, boolean, or None",
+            )
+        self.workpiece[key] = value
+
+    def get_workpiece_value(self, key: object, default: object = None) -> object:
+        self.tick()
+        if not isinstance(key, str):
+            raise _abort("runtime_error", "get_workpiece_value() key must be a string")
+        return self.workpiece.get(key, self.unwrap(default))
+
+    def get_cost_value(self, key: object) -> float:
+        """Summed cost of cells matching ``key`` for the current quantity (§7).
+
+        Special keys: ``--material--``, ``--outside--``, ``--inside--``,
+        ``--total--``. An unknown name sums nothing → 0.0 (P3L parity).
+        """
+        self.tick()
+        if not isinstance(key, str):
+            raise _abort("runtime_error", "get_cost_value() key must be a string")
+        return float(self.context_data.cost_values.get(key, 0.0))
+
+    def set_custom_attribute(self, key: object, value: object) -> None:
+        self.tick()
+        if not isinstance(key, str) or not key:
+            raise _abort("runtime_error", "set_custom_attribute() key must be a non-empty string")
+        value = self.unwrap(value)
+        if not isinstance(value, bool | int | float | str):
+            raise _abort(
+                "runtime_error",
+                "set_custom_attribute() takes a number, string, or boolean",
+            )
+        existing = self.custom_attributes.get(key)
+        if existing is not None and (
+            isinstance(existing, bool) != isinstance(value, bool)
+            or isinstance(existing, str) != isinstance(value, str)
+        ):
+            # KALK-REFERENCE §8: custom attributes are type-stable
+            raise _abort(
+                "runtime_error",
+                f"custom attribute {key!r} cannot change type",
+            )
+        self.custom_attributes[key] = value
+        self.custom_attributes_out[key] = value
+
+    def get_custom_attribute(self, key: object, default: object = None) -> object:
+        self.tick()
+        if not isinstance(key, str):
+            raise _abort("runtime_error", "get_custom_attribute() key must be a string")
+        return self.custom_attributes.get(key, self.unwrap(default))
+
+    def get_children(
+        self,
+        obtain_method: object = None,
+        is_assembly: object = None,
+        recursive: object = False,
+    ) -> P3LList:
+        self.tick()
+        source = self.context_data.descendants if recursive else self.context_data.children
+        result = P3LList()
+        for child in source:
+            if obtain_method is not None and child.attrs.get("obtain_method") != obtain_method:
+                continue
+            if is_assembly is not None and child.attrs.get("is_assembly") != bool(is_assembly):
+                continue
+            result.append(child)
+        return result
+
+    def units_mm(self) -> None:
+        self.tick()  # metric is the only mode (DACH delta) — an explicit no-op
+
+    def units_in(self) -> None:
+        self.tick()
+        raise _abort(
+            "runtime_error",
+            "units_in() is not supported — Tolera formulas are metric-native (DACH)",
+        )
+
+    # -- pricing-item context functions (KALK-REFERENCE §11.3) -------------------
+
+    def set_profit_item_name(self, name: object) -> None:
+        self.tick()
+        if not isinstance(name, str):
+            raise _abort("runtime_error", "set_profit_item_name() takes a string")
+        self.profit_item_name = name
+
+    def set_custom_cost(self, cost: object) -> None:
+        self.tick()
+        cost = self.unwrap(cost)
+        if isinstance(cost, bool) or not isinstance(cost, int | float):
+            raise _abort("runtime_error", "set_custom_cost() takes a number")
+        if not math.isfinite(cost):
+            raise _abort("runtime_error", "set_custom_cost() takes a finite number")
+        self.custom_cost = float(cost)
+
+    def get_components(self, order: object = "leaf_to_root") -> P3LList:
+        self.tick()
+        if order not in ("leaf_to_root", "root_to_leaf"):
+            raise _abort(
+                "runtime_error",
+                "get_components() order must be 'leaf_to_root' or 'root_to_leaf'",
+            )
+        components = self.context_data.components
+        if order == "root_to_leaf":
+            components = list(reversed(components))
+        return P3LList(components)
+
+    def _component_uuid(self, fn: str, component: object) -> str:
+        component = self.unwrap(component)
+        if isinstance(component, str):
+            return component
+        if isinstance(component, KalkObject):
+            uuid = component.attrs.get("uuid")
+            if isinstance(uuid, str):
+                return uuid
+        raise _abort("runtime_error", f"{fn}() takes a component or a component uuid")
+
+    def get_component_children(self, component: object) -> P3LList:
+        self.tick()
+        uuid = self._component_uuid("get_children", component)
+        return P3LList(self.context_data.component_children.get(uuid, []))
+
+    def get_operations(self, component: object) -> P3LList:
+        self.tick()
+        uuid = self._component_uuid("get_operations", component)
+        return P3LList(self.context_data.component_operations.get(uuid, []))
+
+    def get_material_operations(self, component: object) -> P3LList:
+        self.tick()
+        uuid = self._component_uuid("get_material_operations", component)
+        return P3LList(self.context_data.component_material_operations.get(uuid, []))
+
     # -- helpers ----------------------------------------------------------------
 
     def unwrap(self, value: object) -> object:
-        if isinstance(value, DynamicVar):
+        if isinstance(value, DynamicVar | DropDownVar):
             return value.kalk_value
         return value
 
@@ -447,7 +944,7 @@ class Runtime:
             raise _abort("resource_limit", "string grew too long")
         return result
 
-    def b_split(self, value: object, sep: object = None) -> list[str]:
+    def b_split(self, value: object, sep: object = None) -> P3LList:
         self.tick()
         value = self.unwrap(value)
         if not isinstance(value, str):
@@ -456,7 +953,9 @@ class Runtime:
 
     # -- namespace -------------------------------------------------------------
 
-    def build_globals(self, eval_context: Mapping[str, object], quantity: int) -> dict[str, object]:
+    def build_globals(
+        self, eval_context: Mapping[str, object], context_type: str = "operation_cost"
+    ) -> dict[str, object]:
         namespace: dict[str, object] = {
             "__builtins__": {},
             # hooks injected by the transformer
@@ -475,24 +974,99 @@ class Runtime:
             "ceil": self.b_ceil,
             "str": self.b_str,
             "split": self.b_split,
-            # variable system (M1.8: var; the rest are M1.9 stubs)
+            # variable system (KALK-REFERENCE §3, §5)
             "var": self.var,
-            "table_var": self._m19_stub("table_var"),
-            "table_lookup": self._m19_stub("table_lookup"),
-            "variable_group": self._m19_stub("variable_group"),
-            "drop_down_var": self._m19_stub("drop_down_var"),
+            "table_var": self.table_var,
+            "table_lookup": self.table_lookup,
+            "variable_group": self.variable_group,
+            "drop_down_var": self.drop_down_var,
             "number": NUMBER,
             "currency": CURRENCY,
             "string": STRING,
-            # operation-cost context
-            "no_quote": self.no_quote,
-            "set_operation_name": self.set_operation_name,
-            "set_notes": self.set_notes,
-            "quantity": quantity,
+            # lists + table filtering (KALK-REFERENCE §4, §5)
+            "create_list": functools.partial(lists.create_list, self),
+            "create_multi_sort": functools.partial(lists.create_multi_sort, self),
+            "iterate": functools.partial(lists.iterate, self),
+            "create_filter": functools.partial(tables.create_filter, self),
+            "filter": functools.partial(tables.filter_, self),
+            "exclude": functools.partial(tables.exclude, self),
+            "create_order_by": functools.partial(tables.create_order_by, self),
+            "create_range": functools.partial(tables.create_range, self),
         }
+        if context_type == "operation_cost":
+            namespace.update(
+                {
+                    "no_quote": self.no_quote,
+                    "set_operation_name": self.set_operation_name,
+                    "set_notes": self.set_notes,
+                    "set_notes_from_list": self.set_notes_from_list,
+                    "is_close": self.is_close,
+                    "is_a_in_b": self.is_a_in_b,
+                    "quantity": self.quantity,
+                    "get_quantities": self.get_quantities,
+                    "get_make_quantities": self.get_make_quantities,
+                    "get_bom_quantities": self.get_bom_quantities,
+                    "set_workpiece_value": self.set_workpiece_value,
+                    "get_workpiece_value": self.get_workpiece_value,
+                    "get_cost_value": self.get_cost_value,
+                    "set_custom_attribute": self.set_custom_attribute,
+                    "get_custom_attribute": self.get_custom_attribute,
+                    "get_children": self.get_children,
+                    "units_mm": self.units_mm,
+                    "units_in": self.units_in,
+                    # domain objects — the wiring supplies real ones via eval_context
+                    "part": None,
+                    "quote": None,
+                    "op_def": None,
+                    "line_item": None,
+                }
+            )
+            # geometry analyzers arrive with M4 (GeometryService)
+            for analyzer in ANALYZER_NAMES:
+                namespace[analyzer] = self._m4_stub(analyzer)
+        elif context_type == "pricing_item":
+            namespace.update(
+                {
+                    # calculation-type constants + globals; the wiring overrides
+                    # via eval_context (defaults keep CHECK-only runs evaluable)
+                    "MARKUP": "MARKUP",
+                    "MARGIN": "MARGIN",
+                    "MATERIAL_COST": 0.0,
+                    "INSIDE_COST": 0.0,
+                    "OUTSIDE_COST": 0.0,
+                    "PURCHASED_COMPONENT_COST": 0.0,
+                    "TOTAL_COST": 0.0,
+                    "CALCULATION_TYPE": "MARKUP",
+                    "COST_CATEGORY": "general",
+                    "CATEGORY_COST": 0.0,
+                    "REQUESTED_QUANTITY": self.quantity,
+                    "contact": None,
+                    "set_profit_item_name": self.set_profit_item_name,
+                    "set_custom_cost": self.set_custom_cost,
+                    "get_components": self.get_components,
+                    "get_children": self.get_component_children,
+                    "get_operations": self.get_operations,
+                    "get_material_operations": self.get_material_operations,
+                    # generic comparison helpers — shared with the op context
+                    "is_close": self.is_close,
+                    "is_a_in_b": self.is_a_in_b,
+                }
+            )
         namespace.update(eval_context)
         return namespace
 
+
+ANALYZER_NAMES = (
+    "analyze_mill3",
+    "analyze_lathe",
+    "analyze_sheet_metal",
+    "analyze_tube_laser",
+    "analyze_wire_edm",
+    "analyze_casting",
+    "analyze_additive",
+    "manual_nest",
+    "get_features",
+)
 
 BUILTIN_NAMES = frozenset(
     {
@@ -515,10 +1089,69 @@ BUILTIN_NAMES = frozenset(
         "number",
         "currency",
         "string",
+        "create_list",
+        "create_multi_sort",
+        "iterate",
+        "create_filter",
+        "filter",
+        "exclude",
+        "create_order_by",
+        "create_range",
     }
 )
 
-OPERATION_COST_NAMES = frozenset({"no_quote", "set_operation_name", "set_notes", "quantity"})
+OPERATION_COST_NAMES = frozenset(
+    {
+        "no_quote",
+        "set_operation_name",
+        "set_notes",
+        "set_notes_from_list",
+        "is_close",
+        "is_a_in_b",
+        "quantity",
+        "get_quantities",
+        "get_make_quantities",
+        "get_bom_quantities",
+        "set_workpiece_value",
+        "get_workpiece_value",
+        "get_cost_value",
+        "set_custom_attribute",
+        "get_custom_attribute",
+        "get_children",
+        "units_mm",
+        "units_in",
+        "part",
+        "quote",
+        "op_def",
+        "line_item",
+        *ANALYZER_NAMES,
+    }
+)
+
+PRICING_ITEM_NAMES = frozenset(
+    {
+        "MARKUP",
+        "MARGIN",
+        "MATERIAL_COST",
+        "INSIDE_COST",
+        "OUTSIDE_COST",
+        "PURCHASED_COMPONENT_COST",
+        "TOTAL_COST",
+        "CALCULATION_TYPE",
+        "COST_CATEGORY",
+        "CATEGORY_COST",
+        "REQUESTED_QUANTITY",
+        "contact",
+        "set_profit_item_name",
+        "set_custom_cost",
+        "get_components",
+        "get_children",
+        "get_operations",
+        "get_material_operations",
+        "is_close",
+        "is_a_in_b",
+    }
+)
 
 
 def _sanitize_exception(exc: Exception) -> str:
