@@ -190,6 +190,22 @@ def test_csv_import_german_locale(app_client: TestClient, seeder: Seeder) -> Non
         assert mismatch.status_code == 422
         assert mismatch.json()["code"] == "csv_header_mismatch"
 
+        # float() accepts "inf"/"nan"/huge exponents — JSONB cannot store them,
+        # so the parser must reject non-finite numerics with a clean 422
+        for bad_number in ("inf", "nan", "1e400"):
+            res = app_client.post(
+                f"/api/custom-tables/{table_id}/import",
+                files={
+                    "file": (
+                        "inf.csv",
+                        f"material,preis,schwierig\nStahl,{bad_number},\n".encode(),
+                        "text/csv",
+                    )
+                },
+            )
+            assert res.status_code == 422, bad_number
+            assert res.json()["code"] == "invalid_cell"
+
 
 def test_custom_tables_org_isolated(app_client: TestClient, seeder: Seeder) -> None:
     org_a, user_a = _org_admin(seeder, "org-a")

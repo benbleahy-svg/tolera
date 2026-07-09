@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import re
 import uuid
 from typing import Annotated, Any
@@ -127,7 +128,10 @@ def _value_fits(value: Any, column_type: str) -> bool:
     if column_type == "boolean":
         return isinstance(value, bool)
     if column_type == "numeric":
-        return isinstance(value, int | float) and not isinstance(value, bool)
+        # finite only — JSON parsing can produce inf (1e400) and JSONB rejects it
+        return (
+            isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
+        )
     return isinstance(value, str)
 
 
@@ -425,6 +429,13 @@ def _parse_cell(cell: str, column_type: str, name: str, index: int) -> Any:
                 f"Row {index + 1}, column {name!r}: {cell!r} is not a number.",
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             ) from None
+        if not math.isfinite(value):
+            # float() accepts "inf"/"nan", which JSONB cannot store — reject here
+            raise AppError(
+                "invalid_cell",
+                f"Row {index + 1}, column {name!r}: {cell!r} is not a finite number.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
         return int(value) if value.is_integer() else value
     lowered = cell.lower()
     if lowered in _TRUE_WORDS:

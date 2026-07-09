@@ -138,6 +138,7 @@ def list_attr(runtime: Runtime, obj: P3LList, name: str) -> object:
             raise _abort("runtime_error", "pop() index out of range") from None
 
     def sort(fn: object) -> P3LList:
+        runtime.tick()  # budget the call itself, not just the per-item lambdas
         try:
             obj.sort(key=_sort_key(runtime, fn))  # type: ignore[arg-type]  # stable — determinism contract
         except KalkAbort:
