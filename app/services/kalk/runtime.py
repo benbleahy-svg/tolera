@@ -325,18 +325,17 @@ class Runtime:
         """Resolve the stored override for a variable, honouring per-quantity shape.
 
         Quantity-specific overrides are persisted as ``{name: {"<qty>": value}}``
-        (DECISIONS.md 2026-07-08); returns ``_MISSING`` when no override applies
-        to the current quantity.
+        keyed by the **break quantity** (DECISIONS.md 2026-07-08); a plain
+        scalar on a quantity-specific variable applies at every break (the
+        ``runtime``/``setup_time`` manual pair takes this path). Returns
+        ``_MISSING`` when no override applies to the current quantity.
         """
         if name not in self.overrides:
             return _MISSING
         raw = self.overrides[name]
         if quantity_specific:
             if not isinstance(raw, Mapping):
-                raise _abort(
-                    "runtime_error",
-                    f"override for quantity-specific variable {name!r} must map quantity to value",
-                )
+                return raw  # scalar override → same value for every break
             return raw.get(str(self.quantity), _MISSING)
         if isinstance(raw, Mapping):
             raise _abort(

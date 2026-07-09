@@ -127,6 +127,7 @@ def list_attr(runtime: Runtime, obj: P3LList, name: str) -> object:
 
     def pop(index: object = 0) -> object:
         runtime.tick()
+        index = runtime.unwrap(index)
         if not isinstance(index, int) or isinstance(index, bool):
             raise _abort("runtime_error", "pop() index must be an integer")
         if not obj:

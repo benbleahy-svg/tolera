@@ -425,6 +425,14 @@ COST = runtime * 100
         res = app_client.patch(f"/api/operations/{op['id']}", json={"manual_runtime_mins": "15"})
         row = _op_row(res.json(), "Schleifen")
         assert _cell(row, 1)["calc_cost"] == "25.0000"
+        # …and the manual value must NOT contaminate the calc side of the pair
+        # (M1.9 review finding): the formula's own runtime stays underneath.
+        assert row["calc_runtime_mins"] == "30.0000"
+
+        # a formula that no longer declares runtime clears the stale calc time
+        res2 = app_client.patch(f"/api/operations/{op['id']}", json={"cost_formula": "COST = 7"})
+        row2 = _op_row(res2.json(), "Schleifen")
+        assert row2["calc_runtime_mins"] is None
 
 
 # --------------------------------------------------------------------------- #

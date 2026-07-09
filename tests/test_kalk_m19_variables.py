@@ -231,6 +231,33 @@ def test_plain_var_rejects_per_quantity_override() -> None:
     assert "not quantity-specific" in result.errors[0].message
 
 
+def test_scalar_override_on_quantity_specific_var_applies_to_all_breaks() -> None:
+    # the runtime/setup_time manual pair takes this path (kalk_costing wiring)
+    overrides = {"Per Part": 3.0}
+    assert cost(QTY_VAR, quantity=5, overrides=overrides) == 15.0
+    assert cost(QTY_VAR, quantity=20, overrides=overrides) == 60.0
+
+
+def test_override_key_is_the_quantity_param_not_the_formula_global() -> None:
+    """The wiring keys overrides by the UI-visible break quantity (evaluate's
+    ``quantity``) while the formula's ``quantity`` global carries the make
+    quantity via eval_context — a break with scrap must still honour the
+    estimator's per-break override (M1.9 review finding)."""
+    formula = """
+x = var('X', 1.0, '', number, True, True, True)
+COST = x * quantity
+"""
+    result = ok(
+        formula,
+        quantity=10,  # break quantity — what the drawer shows and keys by
+        eval_context={"quantity": 12},  # make quantity (scrap allowance)
+        overrides={"X": {"10": 2.0}},
+    )
+    assert result.output is not None
+    assert result.output["COST"] == 24.0  # override applied x make qty
+    assert result.applied_overrides == ["X"]
+
+
 def test_quantity_specific_dynamic_var_freeze_point() -> None:
     formula = """
 x = var('X', 0.0, '', number, True, False, True)

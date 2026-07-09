@@ -75,7 +75,8 @@ def check(
             errors=[
                 KalkError(
                     code="invalid_context",
-                    message=f"context {context_type!r} is not available in M1.8",
+                    message=f"context {context_type!r} is not supported yet "
+                    f"(available: {', '.join(sorted(SUPPORTED_CONTEXTS))})",
                 )
             ],
         )

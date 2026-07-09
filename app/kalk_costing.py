@@ -17,8 +17,15 @@ the Kalk evaluator instead of the M1.7 mode arithmetic (DECISIONS.md
 * **Data flow:** ops evaluate in router order per quantity; the workpiece
   dict and the cost dictionary (upstream effective costs, incl. the
   ``--material--``/``--inside--``/``--outside--``/``--total--`` specials)
-  thread op → op. ``set_custom_attribute`` persists to
-  ``part.custom_attributes``.
+  thread op → op. ``set_custom_attribute`` is **evaluation-scoped working
+  state** in M1.9 (seeded from ``part.custom_attributes`` fresh per break,
+  visible to downstream ops, not persisted back) — recalculation stays
+  idempotent; part-level persistence is revisited when rules/extraction
+  write attributes (M3).
+* **Override keys:** quantity-specific overrides key on the **break**
+  quantity (what the UI shows); the formula's ``quantity`` global is the
+  make quantity. A plain scalar override on a quantity-specific variable
+  applies at every break — the ``manual_*_mins`` pair takes that path.
 * **Row modifiers stay #oplibrary-owned:** ``surcharge_pct`` applies on the
   formula's COST like on the mode arithmetic; material lines additionally
   gross up by ``1 / yield_factor`` (scrap — the M1.7 decision's "once a calc
@@ -207,13 +214,27 @@ def build_part_object(env: KalkEnv, make_qty: int, deliver_qty: int) -> KalkObje
     )
 
 
+@dataclass(frozen=True)
+class OpTimes:
+    """The lowest break's formula-computed row times (the display pair)."""
+
+    runtime_mins: Decimal | None
+    runtime_overridden: bool
+    setup_mins: Decimal | None
+    setup_overridden: bool
+
+
 @dataclass
 class CellEval:
     calc_cost: Decimal | None
     workpiece: dict[str, Any]
     custom_attributes: dict[str, Any]
+    # formula-computed times only; None when absent OR manually overridden
+    # (the *_overridden flags distinguish "keep as-is" from "clear stale")
     runtime_hours: float | None
+    runtime_overridden: bool
     setup_hours: float | None
+    setup_overridden: bool
     errors: list[dict[str, Any]]
     no_quote: bool
 
@@ -239,16 +260,23 @@ def _declared_value(result: EvalResult, name: str) -> float | None:
 def evaluate_cell(
     env: KalkEnv,
     op: Operation,
+    break_qty: int,
     make_qty: int,
     deliver_qty: int,
     workpiece: dict[str, Any],
     cost_values: dict[str, float],
     custom_attributes: dict[str, Any],
 ) -> CellEval:
-    """One (operation x quantity) evaluation — pure/synchronous (thread-safe)."""
+    """One (operation x quantity) evaluation — pure/synchronous (thread-safe).
+
+    ``break_qty`` is the UI-visible break value: it keys quantity-specific
+    overrides (Runtime.quantity). The formula's ``quantity`` global stays the
+    **make** quantity (Losgröße — P3L parity), injected via ``eval_context``.
+    """
     assert op.cost_formula is not None
     overrides: dict[str, Any] = dict(op.variable_overrides or {})
     # the runtime/setup_time specials override via the M1.7 manual_*_mins pair
+    # (a plain scalar applies at every break, even for quantity-specific vars)
     if op.manual_runtime_mins is not None:
         overrides["runtime"] = float(op.manual_runtime_mins) / _MINUTES_PER_HOUR
     if op.manual_setup_mins is not None:
@@ -262,8 +290,9 @@ def evaluate_cell(
             "part": build_part_object(env, make_qty, deliver_qty),
             "op_def": KalkObject("op_def", {"name": def_name or op.name, "erp_code": None}),
             "line_item": KalkObject("line_item", {"is_export_controlled": env.export_controlled}),
+            "quantity": make_qty,
         },
-        quantity=make_qty,
+        quantity=break_qty,
         overrides=overrides,
         table_provider=env.provider,
         context_data=ContextData(
@@ -286,12 +315,23 @@ def evaluate_cell(
             no_quote = True  # blank the cell deliberately (KALK-REFERENCE §11.1)
         else:
             calc = kalk_output_to_calc(op, result.output["COST"])
+    # An overridden runtime/setup_time freezes to the MANUAL value — writing it
+    # back would contaminate the calc side of the calc-vs-manual pair, so the
+    # write-back only carries formula-computed times.
     return CellEval(
         calc_cost=calc,
         workpiece=result.workpiece,
         custom_attributes=result.custom_attributes,
-        runtime_hours=_declared_value(result, "runtime"),
-        setup_hours=_declared_value(result, "setup_time"),
+        runtime_hours=(
+            None if "runtime" in result.applied_overrides else _declared_value(result, "runtime")
+        ),
+        runtime_overridden="runtime" in result.applied_overrides,
+        setup_hours=(
+            None
+            if "setup_time" in result.applied_overrides
+            else _declared_value(result, "setup_time")
+        ),
+        setup_overridden="setup_time" in result.applied_overrides,
         errors=errors,
         no_quote=no_quote,
     )
@@ -342,7 +382,14 @@ async def operation_kalk_report(
                 break
             if op.cost_formula:  # rebuild the workpiece state this op would see
                 upstream = evaluate_cell(
-                    env, op, make_qty, deliver_qty, workpiece, cost_values, custom_attributes
+                    env,
+                    op,
+                    brk.quantity,
+                    make_qty,
+                    deliver_qty,
+                    workpiece,
+                    cost_values,
+                    custom_attributes,
                 )
                 workpiece = upstream.workpiece
                 custom_attributes.update(upstream.custom_attributes)
@@ -384,8 +431,9 @@ async def operation_kalk_report(
                 "line_item": KalkObject(
                     "line_item", {"is_export_controlled": env.export_controlled}
                 ),
+                "quantity": make_qty,
             },
-            quantity=make_qty,
+            quantity=brk.quantity,  # override key = the UI-visible break value
             overrides=overrides,
             table_provider=env.provider,
             context_data=ContextData(

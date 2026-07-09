@@ -388,14 +388,14 @@ async def import_csv(
 
     rows: list[dict[str, Any]] = []
     for index, record in enumerate(reader):
+        if not record or all(not cell.strip() for cell in record):
+            continue  # skip blank lines (before the cap — trailing newlines are common)
         if len(rows) >= TABLE_LOOKUP_MAX_ROWS:
             raise AppError(
                 "too_many_rows",
                 f"Custom tables are limited to {TABLE_LOOKUP_MAX_ROWS} rows.",
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
-        if not record or all(not cell.strip() for cell in record):
-            continue  # skip blank lines
         if len(record) != len(header):
             raise AppError(
                 "invalid_csv",

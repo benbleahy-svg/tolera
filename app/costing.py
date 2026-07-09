@@ -152,19 +152,20 @@ async def recalculate_component(
 
     def compute() -> tuple[
         dict[tuple[uuid.UUID, int], Decimal | None],
-        dict[uuid.UUID, tuple[Decimal | None, Decimal | None]],
-        dict[str, object],
+        dict[uuid.UUID, kalk_costing.OpTimes],
     ]:
         """Pure batch over prefetched data — runs in a worker thread."""
         calcs: dict[tuple[uuid.UUID, int], Decimal | None] = {}
-        op_times: dict[uuid.UUID, tuple[Decimal | None, Decimal | None]] = {}
-        custom_attributes: dict[str, object] = (
-            dict(env.part.custom_attributes) if env is not None else {}
-        )
+        op_times: dict[uuid.UUID, kalk_costing.OpTimes] = {}
         for brk in breaks:
             make_qty = brk.make_quantity if brk.make_quantity is not None else brk.quantity
             deliver_qty = brk.deliver_quantity if brk.deliver_quantity is not None else brk.quantity
             workpiece: dict[str, object] = {}
+            # evaluation-scoped working state, seeded fresh per break so
+            # recalculation stays idempotent and matches the drawer report
+            custom_attributes: dict[str, object] = (
+                dict(env.part.custom_attributes) if env is not None else {}
+            )
             cost_values: dict[str, float] = {
                 "--material--": 0.0,
                 "--inside--": 0.0,
@@ -174,15 +175,24 @@ async def recalculate_component(
             for op in operations:
                 if op.cost_formula and env is not None:
                     cell_eval = kalk_costing.evaluate_cell(
-                        env, op, make_qty, deliver_qty, workpiece, cost_values, custom_attributes
+                        env,
+                        op,
+                        brk.quantity,
+                        make_qty,
+                        deliver_qty,
+                        workpiece,
+                        cost_values,
+                        custom_attributes,
                     )
                     calc = cell_eval.calc_cost
                     workpiece = cell_eval.workpiece
                     custom_attributes.update(cell_eval.custom_attributes)
                     if op.id not in op_times:  # lowest break = the row display pair
-                        op_times[op.id] = (
-                            kalk_costing.hours_to_mins(cell_eval.runtime_hours),
-                            kalk_costing.hours_to_mins(cell_eval.setup_hours),
+                        op_times[op.id] = kalk_costing.OpTimes(
+                            runtime_mins=kalk_costing.hours_to_mins(cell_eval.runtime_hours),
+                            runtime_overridden=cell_eval.runtime_overridden,
+                            setup_mins=kalk_costing.hours_to_mins(cell_eval.setup_hours),
+                            setup_overridden=cell_eval.setup_overridden,
                         )
                 else:
                     calc = compute_calc_cost(op, make_qty)
@@ -209,20 +219,21 @@ async def recalculate_component(
                     else:
                         cost_values["--inside--"] += amount
                     cost_values["--total--"] += amount
-        return calcs, op_times, custom_attributes
+        return calcs, op_times
 
-    calcs, op_times, custom_attributes = await to_thread.run_sync(compute)
+    calcs, op_times = await to_thread.run_sync(compute)
 
     for op in operations:
         times = op_times.get(op.id)
         if times is not None:
-            runtime_mins, setup_mins = times
-            if runtime_mins is not None:
-                op.calc_runtime_mins = runtime_mins
-            if setup_mins is not None:
-                op.calc_setup_mins = setup_mins
-    if env is not None and custom_attributes != env.part.custom_attributes:
-        env.part.custom_attributes = custom_attributes
+            # Formula-computed times only: an applied manual override leaves the
+            # calc side untouched (never contaminate the calc-vs-manual pair);
+            # otherwise assign even None, so stale times from an earlier formula
+            # are cleared rather than surviving edits.
+            if not times.runtime_overridden:
+                op.calc_runtime_mins = times.runtime_mins
+            if not times.setup_overridden:
+                op.calc_setup_mins = times.setup_mins
 
     for (op_id, quantity), calc in calcs.items():
         cell = by_key.get((op_id, quantity))
