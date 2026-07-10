@@ -36,6 +36,7 @@ interface Props {
   onItemPctOverride: (pricingItemId: string, quantity: number, manualPct: string | null) => void;
   onAddDiscount: (name: string, defaultPct: string) => void;
   onRemoveDiscount: (discountId: string) => void;
+  onDiscountPctOverride: (discountId: string, quantity: number, manualPct: string | null) => void;
   onUnitPriceOverride: (quantity: number, manualUnitPrice: string | null) => void;
 }
 
@@ -58,7 +59,7 @@ function PctCell({
   pct,
   overridden,
   amount,
-  unreachable,
+  unreachable = false,
   editable,
   label,
   formatMoney,
@@ -66,8 +67,9 @@ function PctCell({
 }: {
   pct: string | null;
   overridden: boolean;
-  amount: string | null;
-  unreachable: boolean;
+  /** The $ contribution shown beneath the %; undefined = pct-only cell. */
+  amount?: string | null;
+  unreachable?: boolean;
   editable: boolean;
   label: string;
   formatMoney: (value: string | null) => string;
@@ -115,8 +117,12 @@ function PctCell({
           {formatPct(pct)}
           {overridden && ' *'}
         </span>
-        <br />
-        <small>{formatMoney(amount)}</small>
+        {amount !== undefined && (
+          <>
+            <br />
+            <small>{formatMoney(amount)}</small>
+          </>
+        )}
         {unreachable && (
           <span className="est-warning" title={t('pricing.unreachable_hint')}>
             {' '}
@@ -241,6 +247,7 @@ export function PricingSection({
   onItemPctOverride,
   onAddDiscount,
   onRemoveDiscount,
+  onDiscountPctOverride,
   onUnitPriceOverride,
 }: Props) {
   const { t } = useTranslation();
@@ -572,9 +579,20 @@ export function PricingSection({
                 {quantities.map((quantity) => {
                   const cell = discount.cells.find((c) => c.quantity === quantity);
                   return (
-                    <td key={quantity} className="est-num">
-                      {formatPct(cell?.pct ?? null)}
-                    </td>
+                    <PctCell
+                      key={quantity}
+                      pct={cell?.pct ?? null}
+                      overridden={cell?.manual_pct != null}
+                      editable={editable}
+                      label={t('pricing.discount_pct_override_label', {
+                        name: discount.name,
+                        quantity,
+                      })}
+                      formatMoney={formatMoney}
+                      onOverride={(manualPct) =>
+                        onDiscountPctOverride(discount.id, quantity, manualPct)
+                      }
+                    />
                   );
                 })}
                 <td className="est-row-actions">

@@ -315,6 +315,9 @@ export function EstimatingPage() {
                 applyPricing(api.addDiscount(componentId, { name, default_pct: defaultPct }))
               }
               onRemoveDiscount={(id) => applyPricing(api.removeDiscount(id))}
+              onDiscountPctOverride={(id, quantity, manualPct) =>
+                applyPricing(api.setDiscountPct(id, quantity, manualPct))
+              }
               onUnitPriceOverride={(quantity, manualUnitPrice) =>
                 componentId &&
                 applyPricing(api.setUnitPriceOverride(componentId, quantity, manualUnitPrice))

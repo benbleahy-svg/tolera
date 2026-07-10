@@ -305,6 +305,7 @@
     "discount_name": "Discount name",
     "discount_pct": "Discount (%)",
     "total_discount": "Total Discount",
-    "total_incl_discounts": "Total (incl. Discounts)"
+    "total_incl_discounts": "Total (incl. Discounts)",
+    "discount_pct_override_label": "Discount override for {{name}}, quantity {{quantity}}"
   }
 }

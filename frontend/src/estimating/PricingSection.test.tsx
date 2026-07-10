@@ -148,6 +148,7 @@ function renderSection(overrides: Partial<Parameters<typeof PricingSection>[0]> 
       onItemPctOverride={noop}
       onAddDiscount={noop}
       onRemoveDiscount={noop}
+      onDiscountPctOverride={noop}
       onUnitPriceOverride={noop}
       {...overrides}
     />,
@@ -221,6 +222,20 @@ describe('PricingSection', () => {
         default_pct: '10',
       }),
     );
+  });
+
+  it('overrides a discount % through the cell input (Greptile finding)', async () => {
+    const onDiscountPctOverride = vi.fn();
+    await renderSection({ onDiscountPctOverride });
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Rabatt-Override für Treuerabatt, Losgröße 1' }),
+    );
+    const input = screen.getByRole('textbox', {
+      name: 'Rabatt-Override für Treuerabatt, Losgröße 1',
+    });
+    await userEvent.clear(input);
+    await userEvent.type(input, '7,5{Enter}');
+    expect(onDiscountPctOverride).toHaveBeenCalledWith('d-1', 1, '7.5');
   });
 
   it('disables mutation affordances when not editable', async () => {

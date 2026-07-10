@@ -305,6 +305,7 @@
     "discount_name": "Rabattname",
     "discount_pct": "Rabatt (%)",
     "total_discount": "Rabatt gesamt",
-    "total_incl_discounts": "Gesamtpreis (inkl. Rabatte)"
+    "total_incl_discounts": "Gesamtpreis (inkl. Rabatte)",
+    "discount_pct_override_label": "Rabatt-Override für {{name}}, Losgröße {{quantity}}"
   }
 }
