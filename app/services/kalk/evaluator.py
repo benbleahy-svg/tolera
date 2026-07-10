@@ -18,6 +18,7 @@ from app.services.kalk.limits import Limits
 from app.services.kalk.objects import ContextData
 from app.services.kalk.runtime import (
     BUILTIN_NAMES,
+    DISCOUNT_NAMES,
     OPERATION_COST_NAMES,
     PRICING_ITEM_NAMES,
     DynamicVar,
@@ -30,13 +31,14 @@ from app.services.kalk.validator import parse_and_validate
 
 KALK_FILENAME = "<kalk>"
 
-# M1.9 implements operation_cost + pricing_item; add_on/discount land with
-# their items (M1.11/M1.10) and operation_generation with M4 (KALK-REFERENCE §1).
-SUPPORTED_CONTEXTS = frozenset({"operation_cost", "pricing_item"})
+# M1.9 implemented operation_cost + pricing_item, M1.10 adds discount;
+# add_on lands with M1.11 and operation_generation with M4 (KALK-REFERENCE §1).
+SUPPORTED_CONTEXTS = frozenset({"operation_cost", "pricing_item", "discount"})
 
 _CONTEXT_NAMES: dict[str, frozenset[str]] = {
     "operation_cost": OPERATION_COST_NAMES,
     "pricing_item": PRICING_ITEM_NAMES,
+    "discount": DISCOUNT_NAMES,
 }
 
 
@@ -55,6 +57,7 @@ class EvalResult:
     notes: str | None = None
     operation_name: str | None = None
     profit_item_name: str | None = None
+    discount_name: str | None = None
     workpiece: dict[str, Any] = field(default_factory=dict)
     custom_attributes: dict[str, Any] = field(default_factory=dict)
     errors: list[KalkError] = field(default_factory=list)
@@ -141,6 +144,7 @@ def evaluate(
     result.notes = runtime.notes
     result.operation_name = runtime.operation_name
     result.profit_item_name = runtime.profit_item_name
+    result.discount_name = runtime.discount_name
     result.workpiece = runtime.workpiece
     result.custom_attributes = runtime.custom_attributes_out
 
@@ -218,9 +222,37 @@ def _extract_pricing_item_output(
     return {"PERCENTAGE": float(percentage), "custom_cost": runtime.custom_cost}
 
 
+def _extract_discount_output(
+    namespace: dict[str, object], runtime: Runtime
+) -> dict[str, Any] | list[KalkError]:
+    percentage = namespace.get("PERCENTAGE")
+    if isinstance(percentage, DynamicVar):
+        try:
+            percentage = percentage.kalk_value
+        except KalkAbort as exc:
+            return [exc.error]
+    if percentage is None and "PERCENTAGE" not in namespace:
+        return [KalkError(code="missing_output", message="the formula never set PERCENTAGE")]
+    if (
+        isinstance(percentage, bool)
+        or not isinstance(percentage, int | float)
+        or not math.isfinite(percentage)
+        or percentage < 0
+    ):
+        # the discount contract fixes PERCENTAGE as positive (KALK-REFERENCE §1)
+        # — a sign flip would turn a discount into a hidden surcharge
+        return [
+            KalkError(
+                code="invalid_output", message="PERCENTAGE must be a finite, non-negative number"
+            )
+        ]
+    return {"PERCENTAGE": float(percentage)}
+
+
 _OUTPUT_EXTRACTORS: dict[str, Any] = {
     "operation_cost": _extract_operation_cost_output,
     "pricing_item": _extract_pricing_item_output,
+    "discount": _extract_discount_output,
 }
 
 

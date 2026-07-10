@@ -731,6 +731,12 @@ class Component(Base):
         _obtain_method_enum, nullable=False, server_default=ObtainMethod.manufactured.value
     )
     is_assembly: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # M1.10 pre-M4 cost sources (DECISIONS.md 2026-07-09): per-unit piece price
+    # (PURCHASED children → the Purchased-Components bucket) and a per-unit
+    # manual override that replaces a child's rolled-up cost (→ Component
+    # Overrides bucket). The full purchased_component entity lands at M4.
+    piece_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    manual_override_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -820,6 +826,25 @@ class ComponentQuantity(Base):
     # service always populates them (= quantity) so the iterators never align a NULL.
     make_quantity: Mapped[int | None] = mapped_column(Integer)
     deliver_quantity: Mapped[int | None] = mapped_column(Integer)
+    # M1.10 per-break roll-up + price results (spec #costing / #kalk-rollup;
+    # folded DDL minus lead_time_days → M1.11). The pricing engine writes the
+    # calc side; manual_unit_price is the estimator's override; unit_price /
+    # total_price are the buyer-facing resolved values (incl. discounts),
+    # rounded HALF-UP to 2 dp at this boundary (DECISIONS.md 2026-07-09).
+    material_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    inside_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    outside_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    purchased_component_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    child_override_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    calc_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    manual_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    total_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    total_discount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    total_discount_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    total_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    profit_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1297,3 +1322,268 @@ class CustomTableRow(Base):
         primaryjoin="and_(CustomTable.id == foreign(CustomTableRow.table_id), "
         "CustomTable.org_id == CustomTableRow.org_id)",
     )
+
+
+# --------------------------------------------------------------------------- #
+# M1.10 — Pricing layer: cost roll-up columns, pricing items, discounts
+# --------------------------------------------------------------------------- #
+class CalcType(enum.StrEnum):
+    """A pricing item's calculation type (spec ``#costing`` Pricing section;
+    canonical ``calc_type`` enum + the M1.10 ``target_margin`` extension,
+    DECISIONS.md 2026-07-09). Every amount is computed **off cost,
+    independently** — items sum, they never compound:
+
+    * ``markup`` — ``amount = category_cost x pct``.
+    * ``margin`` — ``amount = category_cost x pct/(1-pct)`` (nets ``pct``
+      margin on that slice; DECISIONS.md 2026-06-14).
+    * ``target_margin`` — back-solve the amount so the line's overall
+      profit/total (excl. discounts) hits the target, holding the other items
+      fixed; negative solution ⇒ **unreachable** (contribution 0 + flag).
+    """
+
+    markup = "markup"
+    margin = "margin"
+    target_margin = "target_margin"
+
+
+class CostCategory(enum.StrEnum):
+    """The five standard cost categories (spec ``#costing`` — mutually
+    exclusive and exhaustive; ``general`` targets the whole Total Estimated
+    Cost). Custom categories are **not** enum values — they live on their
+    pricing item (``is_custom + custom_category_name``)."""
+
+    general = "general"
+    material = "material"
+    inside = "inside"
+    outside = "outside"
+    purchased_component = "purchased_component"
+
+
+_calc_type_enum = Enum(CalcType, name="calc_type", create_type=False)
+_cost_category_enum = Enum(CostCategory, name="cost_category", create_type=False)
+
+
+class PricingItemDef(Base):
+    """An org-library pricing item (Configure → Pricing; spec ``#costing``,
+    DemoE frame 16). Quote items receive **snapshot-on-attach** copies (E4-d
+    freeze; DECISIONS.md 2026-07-09) — editing a def never reprices an
+    existing draft; Refresh Pricing re-copies deliberately. A custom def
+    carries its category's ``custom_category_name`` + ``color`` + the Kalk
+    ``formula`` that computes the category cost via ``set_custom_cost()``."""
+
+    __tablename__ = "pricing_item_def"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_pricing_item_def_org_id_id"),
+        CheckConstraint(
+            "NOT is_custom OR custom_category_name IS NOT NULL",
+            name="ck_pricing_item_def_custom_named",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    calc_type: Mapped[CalcType] = mapped_column(
+        _calc_type_enum, nullable=False, server_default=CalcType.markup.value
+    )
+    category: Mapped[CostCategory] = mapped_column(
+        _cost_category_enum, nullable=False, server_default=CostCategory.general.value
+    )
+    is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    custom_category_name: Mapped[str | None] = mapped_column(String)
+    color: Mapped[str | None] = mapped_column(String)
+    formula: Mapped[str | None] = mapped_column(Text)
+    default_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class DiscountDef(Base):
+    """An org-library discount (Configure → Discounts; spec ``#costing``
+    Discounts). Same snapshot-on-attach posture as :class:`PricingItemDef`.
+    ``PERCENTAGE`` is positive; fixed via ``default_pct`` or Kalk-computed."""
+
+    __tablename__ = "discount_def"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_discount_def_org_id_id"),
+        CheckConstraint(
+            "default_pct IS NULL OR default_pct >= 0", name="ck_discount_def_pct_positive"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    formula: Mapped[str | None] = mapped_column(Text)
+    default_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class PricingItem(Base):
+    """A pricing item on a quote item's **root component** — one row of the
+    Pricing stack (spec ``#costing``: independent, additive, each targeting a
+    standard category or its own custom category). Config is a snapshot
+    (``source_def_id`` remembers provenance for Refresh Pricing);
+    ``is_from_factory`` rows re-snapshot on refresh, manual rows don't.
+    ``position`` is the stack order (display only — the math is additive)."""
+
+    __tablename__ = "pricing_item"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_pricing_item_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_pricing_item_component_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "source_def_id"],
+            ["pricing_item_def.org_id", "pricing_item_def.id"],
+            name="fk_pricing_item_source_def_org",
+        ),
+        CheckConstraint(
+            "NOT is_custom OR custom_category_name IS NOT NULL",
+            name="ck_pricing_item_custom_named",
+        ),
+        Index("ix_pricing_item_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_def_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    calc_type: Mapped[CalcType] = mapped_column(
+        _calc_type_enum, nullable=False, server_default=CalcType.markup.value
+    )
+    category: Mapped[CostCategory] = mapped_column(
+        _cost_category_enum, nullable=False, server_default=CostCategory.general.value
+    )
+    is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    custom_category_name: Mapped[str | None] = mapped_column(String)
+    color: Mapped[str | None] = mapped_column(String)
+    formula: Mapped[str | None] = mapped_column(Text)
+    default_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    is_from_factory: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class PricingItemCell(Base):
+    """One pricing item's value at one quantity break. Calc-vs-override pairs
+    for both the **%** and the **$ amount** (folded DDL ``calc_profit`` /
+    ``manual_profit``); resolution: ``manual_profit`` wins outright, else the
+    amount recomputes from ``COALESCE(manual_pct, calc_pct)``. Custom rows
+    persist their ``set_custom_cost()`` output as ``calc_custom_cost`` (the
+    colored Costing row). ``unreachable`` flags a target-margin back-solve
+    that went negative (contribution 0; DECISIONS.md 2026-07-09)."""
+
+    __tablename__ = "pricing_item_cell"
+    __table_args__ = (
+        UniqueConstraint("pricing_item_id", "quantity", name="uq_pricing_item_cell_item_qty"),
+        ForeignKeyConstraint(
+            ["org_id", "pricing_item_id"],
+            ["pricing_item.org_id", "pricing_item.id"],
+            name="fk_pricing_item_cell_item_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["component_id", "quantity"],
+            ["component_quantity.component_id", "component_quantity.quantity"],
+            name="fk_pricing_item_cell_component_quantity",
+            ondelete="CASCADE",
+        ),
+        Index("ix_pricing_item_cell_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    pricing_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    calc_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    manual_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    calc_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    manual_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    calc_custom_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    unreachable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class Discount(Base):
+    """A discount row on a root component (spec ``#costing`` Discounts —
+    applied **after** pricing items to the rounded unit price; percentages
+    **sum**, they don't compound). Snapshot posture mirrors
+    :class:`PricingItem`."""
+
+    __tablename__ = "discount"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_discount_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_discount_component_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "source_def_id"],
+            ["discount_def.org_id", "discount_def.id"],
+            name="fk_discount_source_def_org",
+        ),
+        Index("ix_discount_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_def_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    formula: Mapped[str | None] = mapped_column(Text)
+    default_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    is_from_factory: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class DiscountCell(Base):
+    """One discount's % at one quantity break (calc-vs-override pair)."""
+
+    __tablename__ = "discount_cell"
+    __table_args__ = (
+        UniqueConstraint("discount_id", "quantity", name="uq_discount_cell_discount_qty"),
+        ForeignKeyConstraint(
+            ["org_id", "discount_id"],
+            ["discount.org_id", "discount.id"],
+            name="fk_discount_cell_discount_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["component_id", "quantity"],
+            ["component_quantity.component_id", "component_quantity.quantity"],
+            name="fk_discount_cell_component_quantity",
+            ondelete="CASCADE",
+        ),
+        Index("ix_discount_cell_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    discount_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    calc_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    manual_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()

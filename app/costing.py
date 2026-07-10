@@ -251,6 +251,12 @@ async def recalculate_component(
             cell.calc_cost = calc
     await session.flush()
 
+    # M1.10: pricing always follows costs — every cost recalc re-runs the
+    # roll-up + pricing items + discounts (calc side only; overrides survive).
+    from . import pricing
+
+    await pricing.reprice_component(session, org_id, component_id)
+
 
 class CostBucket(BaseModel):
     """Roll-up inputs for one quantity break (spec ``#costing`` cost categories —

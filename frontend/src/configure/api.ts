@@ -30,6 +30,47 @@ export interface CustomTableDetail extends CustomTableOut {
   rows: ({ row_number: number } & TableRowData)[];
 }
 
+export type DefCalcType = 'markup' | 'margin' | 'target_margin';
+export type DefCategory =
+  | 'general'
+  | 'material'
+  | 'inside'
+  | 'outside'
+  | 'purchased_component';
+
+export interface PricingItemDefOut {
+  id: string;
+  name: string;
+  calc_type: DefCalcType;
+  category: DefCategory;
+  is_custom: boolean;
+  custom_category_name: string | null;
+  color: string | null;
+  formula: string | null;
+  default_pct: string | null;
+  position: number;
+}
+
+export interface PricingItemDefBody {
+  name: string;
+  calc_type: DefCalcType;
+  category?: DefCategory;
+  is_custom?: boolean;
+  custom_category_name?: string | null;
+  color?: string | null;
+  formula?: string | null;
+  default_pct?: string | null;
+  position?: number;
+}
+
+export interface DiscountDefOut {
+  id: string;
+  name: string;
+  formula: string | null;
+  default_pct: string | null;
+  position: number;
+}
+
 export interface ConfigureApi {
   listTables: () => Promise<CustomTableOut[]>;
   getTable: (tableId: string) => Promise<CustomTableDetail>;
@@ -38,6 +79,20 @@ export interface ConfigureApi {
   deleteTable: (tableId: string) => Promise<void>;
   replaceRows: (tableId: string, rows: TableRowData[]) => Promise<CustomTableDetail>;
   importCsv: (tableId: string, file: File) => Promise<CustomTableOut>;
+  listPricingItemDefs: () => Promise<PricingItemDefOut[]>;
+  createPricingItemDef: (body: PricingItemDefBody) => Promise<PricingItemDefOut>;
+  updatePricingItemDef: (
+    defId: string,
+    body: Partial<PricingItemDefBody>,
+  ) => Promise<PricingItemDefOut>;
+  deletePricingItemDef: (defId: string) => Promise<void>;
+  listDiscountDefs: () => Promise<DiscountDefOut[]>;
+  createDiscountDef: (body: {
+    name: string;
+    default_pct?: string | null;
+    formula?: string | null;
+  }) => Promise<DiscountDefOut>;
+  deleteDiscountDef: (defId: string) => Promise<void>;
 }
 
 export function useConfigureApi(): ConfigureApi {
@@ -60,6 +115,18 @@ export function useConfigureApi(): ConfigureApi {
         form.append('file', file);
         return apiUpload(`/api/custom-tables/${tableId}/import`, token, form);
       },
+      listPricingItemDefs: () => apiFetch('/api/pricing-item-defs', token),
+      createPricingItemDef: (body) =>
+        apiFetch('/api/pricing-item-defs', token, { method: 'POST', body }),
+      updatePricingItemDef: (defId, body) =>
+        apiFetch(`/api/pricing-item-defs/${defId}`, token, { method: 'PATCH', body }),
+      deletePricingItemDef: (defId) =>
+        apiFetch(`/api/pricing-item-defs/${defId}`, token, { method: 'DELETE' }),
+      listDiscountDefs: () => apiFetch('/api/discount-defs', token),
+      createDiscountDef: (body) =>
+        apiFetch('/api/discount-defs', token, { method: 'POST', body }),
+      deleteDiscountDef: (defId) =>
+        apiFetch(`/api/discount-defs/${defId}`, token, { method: 'DELETE' }),
     };
   }, [getToken]);
 }

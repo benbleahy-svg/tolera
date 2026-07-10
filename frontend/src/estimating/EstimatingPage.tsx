@@ -19,11 +19,13 @@ import { ChangeProcessModal } from './ChangeProcessModal';
 import { MaterialPicker } from './MaterialPicker';
 import { OperationDrawer } from './OperationDrawer';
 import { OperationsSection } from './OperationsSection';
+import { PricingSection } from './PricingSection';
 import type {
   ComponentCosting,
   MaterialSearchHit,
   OperationOut,
   OperationUpdateBody,
+  PricingSummary,
   ProcessOut,
   QuoteSummary,
 } from './types';
@@ -37,6 +39,7 @@ export function EstimatingPage() {
   const [quote, setQuote] = useState<QuoteSummary | null>(null);
   const [itemIndex, setItemIndex] = useState(0);
   const [costing, setCosting] = useState<ComponentCosting | null>(null);
+  const [pricing, setPricing] = useState<PricingSummary | null>(null);
   const [processes, setProcesses] = useState<ProcessOut[]>([]);
   const [material, setMaterial] = useState<MaterialSearchHit | null>(null);
   const [drawerOpId, setDrawerOpId] = useState<string | null>(null);
@@ -55,10 +58,16 @@ export function EstimatingPage() {
     api.listProcesses().then(setProcesses).catch(fail);
   }, [api, quoteId, fail]);
 
+  const loadPricing = useCallback(() => {
+    if (!componentId) return;
+    api.getPricing(componentId).then(setPricing).catch(fail);
+  }, [api, componentId, fail]);
+
   useEffect(() => {
     if (!componentId) return;
     api.getCosting(componentId).then(setCosting).catch(fail);
-  }, [api, componentId, fail]);
+    loadPricing();
+  }, [api, componentId, fail, loadPricing]);
 
   const formatMoney = useCallback(
     (value: string | null): string => {
@@ -76,9 +85,23 @@ export function EstimatingPage() {
   const apply = useCallback(
     (next: Promise<ComponentCosting>) => {
       setError(null);
-      next.then(setCosting).catch(fail);
+      next
+        .then((costingNext) => {
+          setCosting(costingNext);
+          loadPricing(); // pricing always follows costs (M1.10)
+        })
+        .catch(fail);
     },
-    [fail],
+    [fail, loadPricing],
+  );
+
+  // A pricing-side mutation moves prices AND the costing view's custom rows.
+  const applyPricing = useCallback(
+    (next: Promise<unknown>) => {
+      setError(null);
+      next.then(loadPricing).catch(fail);
+    },
+    [fail, loadPricing],
   );
 
   // Stable reference — KalkSection's report effect depends on it, so an inline
@@ -185,6 +208,22 @@ export function EstimatingPage() {
           <button type="button" onClick={() => setChangingProcess(true)} disabled={!editable}>
             {t('estimating.change_process')}
           </button>
+          <button
+            type="button"
+            disabled={!editable}
+            onClick={() => {
+              setError(null);
+              api
+                .refreshPricing(quoteId)
+                .then(() => {
+                  if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+                  loadPricing();
+                })
+                .catch(fail);
+            }}
+          >
+            {t('pricing.refresh_pricing')}
+          </button>
           <MaterialPicker
             selected={material}
             selectedPath={material?.path ?? null}
@@ -259,65 +298,32 @@ export function EstimatingPage() {
             disabled={!editable}
           />
 
-          <section className="est-section">
-            <h3>{t('estimating.rollup_title')}</h3>
-            <table className="est-table">
-              <thead>
-                <tr>
-                  <th>{t('estimating.rollup_category')}</th>
-                  {costing.buckets.map((bucket) => (
-                    <th key={bucket.quantity} className="est-num">
-                      {bucket.quantity}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>{t('estimating.rollup_material')}</td>
-                  {costing.buckets.map((bucket) => (
-                    <td key={bucket.quantity} className="est-num">
-                      {formatMoney(bucket.material_total)}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td>{t('estimating.rollup_inside')}</td>
-                  {costing.buckets.map((bucket) => (
-                    <td key={bucket.quantity} className="est-num">
-                      {formatMoney(bucket.inside_total)}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td>{t('estimating.rollup_outside')}</td>
-                  {costing.buckets.map((bucket) => (
-                    <td key={bucket.quantity} className="est-num">
-                      {formatMoney(bucket.outside_total)}
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td>{t('estimating.rollup_total')}</td>
-                  {costing.buckets.map((bucket) => (
-                    <td key={bucket.quantity} className="est-num">
-                      {formatMoney(bucket.total)}
-                      {bucket.has_unpriced_rows && (
-                        <span
-                          className="est-warning"
-                          title={t('estimating.unpriced_rows_hint')}
-                        >
-                          {' '}!
-                        </span>
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              </tfoot>
-            </table>
-          </section>
+          {pricing && (
+            <PricingSection
+              pricing={pricing}
+              formatMoney={formatMoney}
+              editable={editable}
+              onAddItem={(body) =>
+                componentId && applyPricing(api.addPricingItem(componentId, body))
+              }
+              onRemoveItem={(id) => applyPricing(api.removePricingItem(id))}
+              onItemPctOverride={(id, quantity, manualPct) =>
+                applyPricing(api.setPricingItemPct(id, quantity, manualPct))
+              }
+              onAddDiscount={(name, defaultPct) =>
+                componentId &&
+                applyPricing(api.addDiscount(componentId, { name, default_pct: defaultPct }))
+              }
+              onRemoveDiscount={(id) => applyPricing(api.removeDiscount(id))}
+              onDiscountPctOverride={(id, quantity, manualPct) =>
+                applyPricing(api.setDiscountPct(id, quantity, manualPct))
+              }
+              onUnitPriceOverride={(quantity, manualUnitPrice) =>
+                componentId &&
+                applyPricing(api.setUnitPriceOverride(componentId, quantity, manualUnitPrice))
+              }
+            />
+          )}
         </>
       )}
 

@@ -308,3 +308,49 @@
 .est-kalk details {
   margin: 0.25rem 0;
 }
+
+/* --------------------------- M1.10 pricing ------------------------------- */
+.est-subnav {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.est-subnav [aria-current='page'] {
+  font-weight: 600;
+}
+
+.est-hint {
+  color: var(--muted, #64748b);
+  font-size: 0.9rem;
+}
+
+.est-table .est-total-row td {
+  font-weight: 600;
+  border-top: 2px solid var(--border, #d0d7de);
+}
+
+.est-cell-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-align: right;
+  width: 100%;
+}
+
+.est-cell-button:disabled {
+  cursor: default;
+  color: inherit;
+}
+
+.est-cell-input {
+  width: 6rem;
+  text-align: right;
+}
+
+.est-table td small {
+  color: var(--muted, #64748b);
+}

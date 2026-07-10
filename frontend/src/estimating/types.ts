@@ -220,3 +220,113 @@ export interface MaterialUpdateBody {
   cost_per_area?: string | null;
   added_lead_time_days?: number;
 }
+
+// --------------------------------------------------------------------------- //
+// M1.10 — pricing (costing roll-up + pricing items + discounts)
+// --------------------------------------------------------------------------- //
+export type CalcType = 'markup' | 'margin' | 'target_margin';
+export type PricingCategory =
+  | 'general'
+  | 'material'
+  | 'inside'
+  | 'outside'
+  | 'purchased_component';
+
+export interface CustomCostRow {
+  pricing_item_id: string;
+  name: string | null;
+  color: string | null;
+  cost: string | null;
+}
+
+export interface CostingRow {
+  quantity: number;
+  material: string | null;
+  inside: string | null;
+  outside: string | null;
+  purchased_component: string | null;
+  child_override: string | null;
+  total: string | null;
+  unit_cost: string | null;
+  custom_rows: CustomCostRow[];
+}
+
+export interface PricingItemCellOut {
+  quantity: number;
+  calc_pct: string | null;
+  manual_pct: string | null;
+  pct: string | null;
+  calc_profit: string | null;
+  manual_profit: string | null;
+  amount: string | null;
+  calc_custom_cost: string | null;
+  unreachable: boolean;
+}
+
+export interface PricingItemOut {
+  id: string;
+  source_def_id: string | null;
+  name: string;
+  calc_type: CalcType;
+  category: PricingCategory;
+  is_custom: boolean;
+  custom_category_name: string | null;
+  color: string | null;
+  formula: string | null;
+  default_pct: string | null;
+  position: number;
+  is_from_factory: boolean;
+  cells: PricingItemCellOut[];
+}
+
+export interface DiscountCellOut {
+  quantity: number;
+  calc_pct: string | null;
+  manual_pct: string | null;
+  pct: string | null;
+}
+
+export interface DiscountOut {
+  id: string;
+  source_def_id: string | null;
+  name: string;
+  formula: string | null;
+  default_pct: string | null;
+  position: number;
+  is_from_factory: boolean;
+  cells: DiscountCellOut[];
+}
+
+export interface PricingTotalsRow {
+  quantity: number;
+  unit_cost: string | null;
+  total_excl_discounts: string | null;
+  calc_unit_price: string | null;
+  manual_unit_price: string | null;
+  unit_price: string | null;
+  total_price: string | null;
+  total_discount: string | null;
+  total_discount_pct: string | null;
+  total_profit: string | null;
+  profit_margin_pct: string | null;
+}
+
+export interface PricingSummary {
+  component_id: string;
+  quantities: number[];
+  costing: CostingRow[];
+  pricing_items: PricingItemOut[];
+  discounts: DiscountOut[];
+  totals: PricingTotalsRow[];
+}
+
+export interface PricingItemCreateBody {
+  name: string;
+  calc_type: CalcType;
+  category?: PricingCategory;
+  is_custom?: boolean;
+  custom_category_name?: string | null;
+  color?: string | null;
+  formula?: string | null;
+  default_pct?: string | null;
+}

@@ -25,6 +25,15 @@ const setCellOverride = vi.fn();
 const kalkCheck = vi.fn();
 const getKalkReport = vi.fn().mockResolvedValue([]);
 const setVariableOverrides = vi.fn();
+const getPricing = vi.fn();
+const addPricingItem = vi.fn();
+const removePricingItem = vi.fn();
+const setPricingItemPct = vi.fn();
+const addDiscount = vi.fn();
+const removeDiscount = vi.fn();
+const setDiscountPct = vi.fn();
+const setUnitPriceOverride = vi.fn();
+const refreshPricing = vi.fn();
 
 // Mock the estimating API module so the page never touches Clerk/network.
 vi.mock('./api', () => ({
@@ -47,6 +56,15 @@ vi.mock('./api', () => ({
     kalkCheck,
     getKalkReport,
     setVariableOverrides,
+    getPricing,
+    addPricingItem,
+    removePricingItem,
+    setPricingItemPct,
+    addDiscount,
+    removeDiscount,
+    setDiscountPct,
+    setUnitPriceOverride,
+    refreshPricing,
   }),
 }));
 
@@ -146,9 +164,86 @@ function renderPage() {
   );
 }
 
+function pricingSummary(): import('./types').PricingSummary {
+  const costingRow = (quantity: number, factor: number) => ({
+    quantity,
+    material: null,
+    inside: (25 * factor).toFixed(4),
+    outside: null,
+    purchased_component: null,
+    child_override: null,
+    total: (25 * factor).toFixed(4),
+    unit_cost: '25.0000',
+    custom_rows: [],
+  });
+  const itemCell = (quantity: number, amount: string) => ({
+    quantity,
+    calc_pct: '20.0000',
+    manual_pct: null,
+    pct: '20.0000',
+    calc_profit: amount,
+    manual_profit: null,
+    amount,
+    calc_custom_cost: null,
+    unreachable: false,
+  });
+  return {
+    component_id: 'c1',
+    quantities: [1, 10],
+    costing: [costingRow(1, 1), costingRow(10, 6.4)],
+    pricing_items: [
+      {
+        id: 'pi-1',
+        source_def_id: null,
+        name: 'General Markup',
+        calc_type: 'markup',
+        category: 'general',
+        is_custom: false,
+        custom_category_name: null,
+        color: null,
+        formula: null,
+        default_pct: '20',
+        position: 0,
+        is_from_factory: false,
+        cells: [itemCell(1, '5.0000'), itemCell(10, '32.0000')],
+      },
+    ],
+    discounts: [],
+    totals: [
+      {
+        quantity: 1,
+        unit_cost: '25.0000',
+        total_excl_discounts: '30.0000',
+        calc_unit_price: '30.00',
+        manual_unit_price: null,
+        unit_price: '30.00',
+        total_price: '30.00',
+        total_discount: '0.0000',
+        total_discount_pct: '0.0000',
+        total_profit: '5.0000',
+        profit_margin_pct: '16.6700',
+      },
+      {
+        quantity: 10,
+        unit_cost: '16.0000',
+        total_excl_discounts: '192.0000',
+        calc_unit_price: '19.20',
+        manual_unit_price: null,
+        unit_price: '19.20',
+        total_price: '192.00',
+        total_discount: '0.0000',
+        total_discount_pct: '0.0000',
+        total_profit: '32.0000',
+        profit_margin_pct: '16.6700',
+      },
+    ],
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   getQuote.mockResolvedValue(QUOTE);
+  getPricing.mockResolvedValue(pricingSummary());
   listProcesses.mockResolvedValue([
     { id: 'proc-mill', name: 'Milling', external_name: null },
     { id: 'proc-lathe', name: 'Lathe', external_name: null },
@@ -167,8 +262,11 @@ describe('EstimatingPage', () => {
     expect(await screen.findByText('Drehen')).toBeInTheDocument();
     expect(screen.getAllByText('25,00 €').length).toBeGreaterThan(0);
     expect(screen.getAllByText('160,00 €').length).toBeGreaterThan(0);
-    expect(screen.getByText('Kostenübersicht (je Losgröße)')).toBeInTheDocument();
-    expect(screen.getByText('Eigenfertigung')).toBeInTheDocument();
+    expect(screen.getByText('Kalkulation (Costing)')).toBeInTheDocument();
+    expect(screen.getByText('Interne Fertigung gesamt')).toBeInTheDocument();
+    // pricing renders below costing: the stack row + the discounted total
+    expect(screen.getByText('General Markup')).toBeInTheDocument();
+    expect(screen.getByText('Preisbildung (Pricing)')).toBeInTheDocument();
   });
 
   it('marks overridden cells and keeps the calc visible in the drawer', async () => {
