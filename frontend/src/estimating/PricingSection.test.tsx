@@ -124,6 +124,7 @@ function summary(): PricingSummary {
       {
         quantity: 1,
         unit_cost: '1702.3780',
+        total_excl_discounts: '2160.8396',
         calc_unit_price: '2160.84',
         manual_unit_price: null,
         unit_price: '2052.80',

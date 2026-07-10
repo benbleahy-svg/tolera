@@ -453,17 +453,13 @@ export function PricingSection({
           <tfoot>
             <tr className="est-total-row">
               <td>{t('pricing.total_excl_discounts')}</td>
-              {quantities.map((quantity) => {
-                const total = totals(quantity);
-                const preUnit = total?.manual_unit_price ?? total?.calc_unit_price ?? null;
-                const totalExcl =
-                  preUnit == null ? null : (Number(preUnit) * quantity).toFixed(2);
-                return (
-                  <td key={quantity} className="est-num">
-                    {formatMoney(totalExcl)}
-                  </td>
-                );
-              })}
+              {quantities.map((quantity) => (
+                // the API's exact figure (cost + Σ amounts) — rebuilding it
+                // from the rounded unit price drifts by cents at some breaks
+                <td key={quantity} className="est-num">
+                  {formatMoney(totals(quantity)?.total_excl_discounts ?? null)}
+                </td>
+              ))}
               <td />
             </tr>
             <tr>

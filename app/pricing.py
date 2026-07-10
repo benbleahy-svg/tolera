@@ -1169,10 +1169,37 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
             }
         )
 
+    def total_excl_discounts(brk: ComponentQuantity) -> Decimal | None:
+        """The authoritative Total (excl. Discounts) — spec #costing step 8:
+        Total Estimated Cost + Σ item amounts, at the exact 4-dp precision,
+        NOT rounded_unit x qty (which can drift by cents at some breaks).
+        A manual unit-price override redefines the pre-discount total as
+        manual x qty by construction."""
+        if brk.manual_unit_price is not None:
+            return _q4(brk.manual_unit_price * brk.quantity)
+        if brk.material_cost is None:  # never repriced — no roll-up state yet
+            return None
+        cost_total = (
+            brk.material_cost
+            + (brk.inside_cost or _ZERO)
+            + (brk.outside_cost or _ZERO)
+            + (brk.purchased_component_cost or _ZERO)
+            + (brk.child_override_cost or _ZERO)
+        )
+        amounts = _ZERO
+        for item in env.items:
+            cell = env.item_cells.get((item.id, brk.quantity))
+            if cell is None:
+                continue
+            amount = cell.manual_profit if cell.manual_profit is not None else cell.calc_profit
+            amounts += amount if amount is not None else _ZERO
+        return _q4(cost_total + amounts)
+
     totals = [
         {
             "quantity": brk.quantity,
             "unit_cost": brk.unit_cost,
+            "total_excl_discounts": total_excl_discounts(brk),
             "calc_unit_price": brk.calc_unit_price,
             "manual_unit_price": brk.manual_unit_price,
             "unit_price": brk.unit_price,

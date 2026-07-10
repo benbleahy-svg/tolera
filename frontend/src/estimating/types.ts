@@ -300,6 +300,7 @@ export interface DiscountOut {
 export interface PricingTotalsRow {
   quantity: number;
   unit_cost: string | null;
+  total_excl_discounts: string | null;
   calc_unit_price: string | null;
   manual_unit_price: string | null;
   unit_price: string | null;

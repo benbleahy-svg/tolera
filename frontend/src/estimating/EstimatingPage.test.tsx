@@ -213,6 +213,7 @@ function pricingSummary(): import('./types').PricingSummary {
       {
         quantity: 1,
         unit_cost: '25.0000',
+        total_excl_discounts: '30.0000',
         calc_unit_price: '30.00',
         manual_unit_price: null,
         unit_price: '30.00',
@@ -225,6 +226,7 @@ function pricingSummary(): import('./types').PricingSummary {
       {
         quantity: 10,
         unit_cost: '16.0000',
+        total_excl_discounts: '192.0000',
         calc_unit_price: '19.20',
         manual_unit_price: null,
         unit_price: '19.20',

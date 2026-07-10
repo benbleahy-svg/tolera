@@ -222,6 +222,8 @@ def test_golden_ex1_difficult_material(app_client: TestClient, seeder: Seeder) -
             "53.9368"
         )
         total = _total_row(pricing, 1)
+        # the authoritative pre-discount total (cost + Σ amounts, exact 4 dp)
+        assert Decimal(total["total_excl_discounts"]) == Decimal("2160.8396")
         assert Decimal(total["unit_price"]) == Decimal("2160.84")
         assert Decimal(total["total_price"]) == Decimal("2160.84")
 
@@ -546,7 +548,10 @@ def test_discounts_apply_after_markup_on_rounded_unit(
 
         pricing = _pricing(app_client, component)
         total = _total_row(pricing, 3)
-        # cost 100.01 → total excl. 120.012 → unit round2 = 40.00
+        # cost 100.01 → total excl. 120.012 → unit round2 = 40.00. The API's
+        # pre-discount total is the EXACT figure — rounded_unit x qty (120.00)
+        # would be a cent off (the Greptile finding).
+        assert Decimal(total["total_excl_discounts"]) == Decimal("120.0120")
         assert Decimal(total["calc_unit_price"]) == Decimal("40.00")
         # 15% off the ROUNDED unit: 40.00 x 0.85 = 34.00; invariant 34x3 = 102
         assert Decimal(total["unit_price"]) == Decimal("34.00")
@@ -651,8 +656,10 @@ def test_manual_unit_price_override(app_client: TestClient, seeder: Seeder) -> N
         assert res.status_code == 200, res.text
         pricing = _pricing(app_client, component)
         total = _total_row(pricing, 1)
-        # calc side retained beneath the override (calc-vs-override invariant)
+        # calc side retained beneath the override (calc-vs-override invariant);
+        # the override redefines the pre-discount total as manual x qty
         assert Decimal(total["calc_unit_price"]) == Decimal("120.00")
+        assert Decimal(total["total_excl_discounts"]) == Decimal("150.0000")
         assert Decimal(total["unit_price"]) == Decimal("150.00")
         assert Decimal(total["total_price"]) == Decimal("150.00")
         # clearing the override falls back to calculated
