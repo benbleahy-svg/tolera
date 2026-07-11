@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for the Tolera autonomous build loop (macOS).
+  Re-launches the loop every 5h15m so it self-resumes after each 5-hour usage-limit reset.
+
+  INSTALL (see AUTONOMOUS-SETUP-RUNBOOK.md):
+    1. Replace /ABSOLUTE/PATH/TO/Bid Factory below with your real repo path.
+    2. Replace tolera-CHANGE-ME with your private ntfy topic.
+    3. cp scripts/com.tolera.autobuild.plist ~/Library/LaunchAgents/
+    4. launchctl load ~/Library/LaunchAgents/com.tolera.autobuild.plist
+  Stop it any time:  launchctl unload ~/Library/LaunchAgents/com.tolera.autobuild.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.tolera.autobuild</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd "/Users/benjaminleahy/Documents/Claude/Projects/Bid Factory" &amp;&amp; scripts/resume-after-reset.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NTFY_TOPIC</key>
+    <string>tolera</string>
+    <key>AUTOBUILD_MODEL</key>
+    <string>opus</string>
+    <key>PATH</key>
+    <string>/Users/benjaminleahy/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- 5h15m = 18900s. Fires after each 5-hour window resets; the lockfile makes overlap a no-op. -->
+  <key>StartInterval</key>
+  <integer>18900</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/tolera-autobuild.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/tolera-autobuild.err.log</string>
+</dict>
+</plist>

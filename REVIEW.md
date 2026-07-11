@@ -1,6 +1,6 @@
 # Review instructions — Tolera / Bid Factory
 
-These rules are injected at highest priority into every AI reviewer (Anthropic Code Review + CodeRabbit). **Our team's human code review is light, so be thorough on correctness and on the tier-1 rules below — do not soften or skip findings.** Behaviour is verified by the author clicking the demo; you are the line-by-line safety net.
+These rules are injected at highest priority into every AI reviewer (**Greptile + CodeRabbit**). **We run a full bot-only merge with no human approval gate, so be thorough on correctness and on the tier-1 rules below — do not soften or skip findings.** Behaviour is verified by machine fixtures (golden + tax/rounding + property + RLS), not a human eyeball; you are the line-by-line safety net and the `@claude` action (Sonnet) fixes what you flag.
 
 ## What 🔴 Important (must-fix-before-merge) means here
 

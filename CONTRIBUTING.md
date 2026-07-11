@@ -25,19 +25,20 @@ Then run the loop (full detail in the playbook): **grill → TDD build → diagn
 - Build test-first (`/tdd`). Mandatory for pricing/geometry math.
 - Before the PR, run the **local review** (`coderabbit` in the terminal + `/code-review` in-session) and fix what they find.
 
-## 3. Open the PR — let the bots carry the review
+## 3. Open the PR — full bot-only merge, machines carry the review
 
-Our human code review is light, so the machines are the safety net and **you verify behaviour, not lines**:
+We run a **full bot-only auto-merge with no human approval gate** (decided 2026-06, recorded in `DECISIONS.md`; this overrides the old `CLAUDE.md §9` human-gate rule). The machines are the safety net and **correctness is proven by fixtures, not by an eyeball**:
 
 | Layer | Who | Gate |
 |---|---|---|
-| CI | ruff · mypy · pytest · eval-suite | must be green |
-| CodeRabbit | auto-reviews every PR (assertive, see `.coderabbit.yaml`) | resolve 🔴 |
-| Anthropic Code Review | multi-agent review vs. whole codebase (if enabled) | resolve 🔴 |
-| `@claude` | comment **"@claude address the review findings and push a fix"** — it reads the other bots' comments and commits | findings cleared |
-| **Human** | a teammate approves (required) — and **clicks the demo** to confirm it behaves | required ✋ |
+| CI | ruff · mypy · pytest · eval-suite | required — must be green |
+| Greptile | whole-codebase PR review | **required check** — resolve 🔴 |
+| CodeRabbit | advisory PR review + summaries (see `.coderabbit.yaml`) | feeds the fixer |
+| `@claude` (Sonnet) | reads Greptile + CodeRabbit comments and pushes fixes (cheap metered API) | findings cleared |
+| Money/tax/schema/auth | golden + tax/rounding + property + RLS fixtures | **required checks** — red blocks merge |
+| Merge | GitHub auto-merge on green | automatic, no approval |
 
-> The bots can't sign off the things that are *plausible but wrong* in our domain — a money rule, a tax rate, a tenancy boundary. For changes touching **money, tax, schema, auth, or customer data**, the Code Owner (see `.github/CODEOWNERS`) must approve. That's non-negotiable even when CI + bots are green.
+> The bots can't sign off the things that are *plausible but wrong* in our domain — a money rule, a tax rate, a tenancy boundary. We protect those with **required machine fixtures** (not a human tap): a wrong tax rounding fails its fixture and the PR cannot merge. Migrations are reversible and everything lands on `develop` (not production), and a **morning digest** (`.github/workflows/digest.yml`) reports overnight merges so anything off can be reverted async.
 
 ### Demo tests are how "done" is proven
 The 14 acceptance demos live as Playwright tests in [`e2e/`](e2e/). Each is a `fixme` placeholder until its milestone lands; when you build that milestone you **promote** the demo (remove `.fixme`, drive the flow per the `DemoX/` screenshots, assert the fixture). A promoted demo then gates every PR — so "the demo still works" is checked by a machine, not your memory. Template: `e2e/demos/demo-e-markups.spec.ts`; full guide: `e2e/README.md`.

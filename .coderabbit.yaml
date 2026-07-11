@@ -1,9 +1,12 @@
 # CodeRabbit config — https://docs.coderabbit.ai/configure-coderabbit
-# Our human review is light, so review assertively and enforce the tier-1 rules in REVIEW.md.
+# Full bot-only merge: review assertively and enforce the tier-1 rules in REVIEW.md.
+# Roles: Greptile is the REQUIRED PR-review gate (branch protection); CodeRabbit is advisory +
+# summaries and feeds findings the @claude action (Sonnet) fixes. So we comment, not hard-block.
+# NOTE: full inline PR review needs CodeRabbit Pro; the free tier is summaries + CLI only.
 language: en-US
 reviews:
   profile: assertive
-  request_changes_workflow: true
+  request_changes_workflow: false
   high_level_summary: true
   poem: false
   review_status: true
