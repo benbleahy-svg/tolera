@@ -151,10 +151,11 @@ describe('QuoteTotalsPanel', () => {
       country: 'DE',
       vat_label: 'MwSt.',
       vat_rate_pct: '19',
-      items: [{ quote_item_id: 'qi1', component_id: 'c1', quantity: 1, net_minor: 210000 }],
+      items: [{ quote_item_id: 'qi1', component_id: 'c1', quantity: 1, net_minor: 210000, unpriced: false }],
       net_minor: 210000,
       vat_minor: 39900,
       gross_minor: 249900,
+      has_unpriced_lines: false,
     };
     await renderWithProviders(<QuoteTotalsPanel totals={totals} />);
     expect(screen.getByText('Netto')).toBeInTheDocument();
@@ -174,6 +175,7 @@ describe('QuoteTotalsPanel', () => {
       net_minor: 210000,
       vat_minor: 17010,
       gross_minor: 227010,
+      has_unpriced_lines: false,
     };
     await renderWithProviders(<QuoteTotalsPanel totals={totals} />);
     expect(screen.getByText(/MWST \(8[.,]1 %\)/)).toBeInTheDocument();

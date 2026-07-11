@@ -394,6 +394,7 @@ def test_vat_line_de(seeder: Seeder, app_client: TestClient) -> None:
         assert body["net_minor"] == 210000
         assert body["vat_minor"] == 39900
         assert body["gross_minor"] == 249900
+        assert body["has_unpriced_lines"] is False
 
 
 def test_vat_line_at(seeder: Seeder, app_client: TestClient) -> None:
@@ -451,3 +452,21 @@ def test_totals_selects_the_requested_break(seeder: Seeder, app_client: TestClie
 def _op_id(client: TestClient, component_id: str) -> str:
     ops = client.get(f"/api/components/{component_id}/costing").json()["operations"]
     return str(ops[0]["id"])
+
+
+def test_totals_flags_unpriced_lines(seeder: Seeder, app_client: TestClient) -> None:
+    """An unresolved line contributes 0 but must never masquerade as a real
+    net — the flag mirrors PP's block-finalize-on-unpriced posture."""
+    org, user = _org_admin(seeder, "vat-unpriced")
+    with _as_admin(app_client, org, user) as client:
+        qid, _, component_id = _new_quote_item(client, [1])
+        # a material row has no M1.7 calc source and no manual cost → unpriceable
+        res = client.post(
+            f"/api/components/{component_id}/operations",
+            json={"name": "Rohmaterial", "category": "material"},
+        )
+        assert res.status_code == 201, res.text
+        body = client.get(f"/api/quotes/{qid}/totals").json()
+        assert body["has_unpriced_lines"] is True
+        assert body["items"][0]["unpriced"] is True
+        assert body["net_minor"] == 0

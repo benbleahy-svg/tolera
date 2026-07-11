@@ -22,11 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
 from .authz import Permission, require
+from .costing import rollup_inputs
 from .deps import get_session
 from .errors import AppError
 from .models import (
     AddOn,
+    AddOnCell,
     AddOnDef,
+    Component,
     ComponentQuantity,
     ExpediteOption,
     Organization,
@@ -135,10 +138,10 @@ async def _add_on_out(session: AsyncSession, add_on: AddOn) -> dict[str, Any]:
     )
 
 
-def _require_root_component(component: object) -> None:
+def _require_root_component(component: Component) -> None:
     # add-ons and expedites apply ONLY at the root component (= quote item);
     # PRICING-ENGINE-SPEC §3.4
-    if not getattr(component, "is_root_component", False):
+    if not component.is_root_component:
         raise AppError(
             "not_a_root_component",
             "Add-ons and expedite options live on the quote item's root component.",
@@ -351,8 +354,6 @@ async def set_add_on_cell_override(
     session: Annotated[AsyncSession, Depends(get_session)],
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> Any:
-    from .models import AddOnCell
-
     add_on = await _get_add_on_or_404(session, add_on_id)
     component = await _get_component_or_404(session, add_on.component_id)
     await _lock_editable(session, component)
@@ -431,7 +432,13 @@ async def apply_lead_times_to_all(
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> Any:
     """APPLY TO ALL (spec #addons): push the quote-level tiers — and, when
-    given, the standard lead time — to every line item and quantity."""
+    given, the standard lead time — to every line item and quantity.
+
+    The standard lands in ``manual_lead_time_days`` deliberately: this is an
+    explicit bulk *edit* by the estimator (the KB's "apply a standard lead
+    time ... to all quote items and quantities at once"), not a recalculation
+    — so it may replace earlier per-break edits, exactly like re-typing them.
+    Leave the field blank to push expedite tiers only (KB-exact)."""
     quote = await _get_quote_or_404(session, quote_id)
     _validate_tiers(payload.tiers)
     items = (
@@ -477,27 +484,33 @@ async def quote_totals(
     2026-07-08 minor-units boundary). Line = resolved total price at the
     selected break + its REQUIRED add-ons; optional add-ons and expedites are
     the buyer's checkout choice (M5). Selection: ``?item=<quote_item_id>:<qty>``
-    per line; unselected items use their lowest break."""
-    from .models import AddOnCell
-
+    per line; unselected items use their lowest break. A line whose price is
+    still unresolved contributes 0 and flips ``has_unpriced_lines`` — the
+    caller must not present that net as a final figure (PP blocks finalize on
+    unpriced work; it never invents a 0)."""
     quote = await _get_quote_or_404(session, quote_id)
     org = await session.get(Organization, quote.org_id)
-    assert org is not None  # RLS guarantees the active org is visible
+    if org is None:  # RLS should always expose the active org — fail loud
+        raise AppError(
+            "invalid_org",
+            "Active organization is not available.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
     profile = VAT_PROFILES[org.country]
 
     selections: dict[uuid.UUID, int] = {}
     for raw in item:
         item_id, sep, qty = raw.partition(":")
         try:
+            if not sep:
+                raise ValueError(raw)
             selections[uuid.UUID(item_id)] = int(qty)
-        except ValueError:
-            sep = ""
-        if not sep:
+        except ValueError as exc:
             raise AppError(
                 "invalid_selection",
                 "Selections take the form item=<quote_item_id>:<quantity>.",
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            )
+            ) from exc
 
     items = (
         await session.scalars(
@@ -506,6 +519,7 @@ async def quote_totals(
     ).all()
 
     net = _ZERO
+    has_unpriced = False
     lines: list[dict[str, Any]] = []
     for quote_item in items:
         breaks = sorted(
@@ -547,6 +561,12 @@ async def quote_totals(
             price = cell.manual_price if cell.manual_price is not None else cell.calc_price
             if price is not None:
                 required_total += price
+        # unpriced = never repriced OR some router row has neither a calc nor
+        # a manual cost at this break (the M1.14 missing-rates signal)
+        buckets = await rollup_inputs(session, quote_item.root_component_id)
+        bucket = next((b for b in buckets if b.quantity == brk.quantity), None)
+        unpriced = brk.total_price is None or (bucket is not None and bucket.has_unpriced_rows)
+        has_unpriced = has_unpriced or unpriced
         line_net = round_money((brk.total_price or _ZERO) + required_total)
         net += line_net
         lines.append(
@@ -555,6 +575,7 @@ async def quote_totals(
                 "component_id": str(quote_item.root_component_id),
                 "quantity": brk.quantity,
                 "net_minor": to_minor_units(line_net),
+                "unpriced": unpriced,
             }
         )
 
@@ -568,4 +589,5 @@ async def quote_totals(
         "net_minor": to_minor_units(net),
         "vat_minor": to_minor_units(vat),
         "gross_minor": to_minor_units(net + vat),
+        "has_unpriced_lines": has_unpriced,
     }

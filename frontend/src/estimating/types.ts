@@ -381,6 +381,7 @@ export interface QuoteTotalsItem {
   component_id: string;
   quantity: number;
   net_minor: number;
+  unpriced: boolean;
 }
 
 export interface QuoteTotals {
@@ -392,6 +393,7 @@ export interface QuoteTotals {
   net_minor: number;
   vat_minor: number;
   gross_minor: number;
+  has_unpriced_lines: boolean;
 }
 
 export interface PricingSummary {

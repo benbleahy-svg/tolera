@@ -52,6 +52,7 @@ const getQuoteTotals = vi.fn(() =>
     net_minor: 0,
     vat_minor: 0,
     gross_minor: 0,
+    has_unpriced_lines: false,
   }),
 );
 
