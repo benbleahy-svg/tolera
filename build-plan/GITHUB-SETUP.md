@@ -21,9 +21,11 @@ gh repo edit --default-branch develop   # PRs target develop by default
 
 ## 3. Protect both branches
 
-Branch protection is what enforces *one-PR-per-block*. **Solo for now:** GitHub won't let you approve your own PRs, so we require **0 human approvals** and lean on CI + CodeRabbit + Claude review as the gate — while still forcing every change through a PR. When a second teammate joins, bump approvals to **1** and turn on **Code Owner reviews** (`.github/CODEOWNERS` is already wired).
+Branch protection is what enforces *one-PR-per-block* and gates the **full bot-only auto-merge** (decided 2026-06; recorded in `DECISIONS.md`). We require **0 human approvals** permanently and lean on the **required status checks** as the gate — CI + Greptile, plus the money/tax/schema/auth fixtures — while still forcing every change through a PR. No human approval is needed or used.
 
-> Note: the `backend` status check is the job in `.github/workflows/ci.yml`. Add it to protection **after** CI has passed once (the CI file is a scaffold until M0.1 wires it to real code) — otherwise PRs will block on a check that never runs.
+> Note: status checks (`backend` from `.github/workflows/ci.yml`, `greptile`, and the fixture jobs) must be added to protection **after** each has run once (CI is a scaffold until M0.1) — otherwise PRs block on a check that never runs. Add Greptile + the `golden`/`tax`/`property`/`rls` fixture checks as they come online.
+
+> Also enable repo-level auto-merge: `gh repo edit OWNER/tolera --enable-auto-merge`. Then `/ship` runs `gh pr merge --auto --squash` and GitHub merges each PR the moment its required checks pass.
 
 ```bash
 for BR in develop main; do
@@ -46,9 +48,10 @@ done
 ```
 
 Knobs to know:
-- `required_approving_review_count`: **0** while solo (you can't approve your own PRs). Set to **1** when a teammate joins.
-- `require_code_owner_reviews`: **false** while solo; flip to **true** with a teammate to make `.github/CODEOWNERS` binding (schema/auth/pricing then need the owner's approval).
-- `enforce_admins: false` keeps you from being *locked out*; the PR + green-CI requirement still gates normal merges.
+- `required_approving_review_count`: **0** — full bot-only merge; we never require a human approval. (Leave at 0 even with teammates; the gate is the required checks, not approvals.)
+- `require_code_owner_reviews`: **false** — money/tax/schema/auth are gated by **required fixtures**, not Code-Owner approval. (`.github/CODEOWNERS` stays as documentation of ownership.)
+- `required_status_checks.checks`: add `greptile` and the `golden`/`tax`/`property`/`rls` fixture jobs alongside `backend` as they come online — these are the real gate.
+- `enforce_admins: false` keeps you from being *locked out*; the PR + green-checks requirement still gates every merge.
 
 ## 4. Create the `block` label and seed issues
 
@@ -75,14 +78,18 @@ gh secret set SSH_DEPLOY_KEY < ~/path/to/deploy_key
 claude /install-github-app
 ```
 
-This installs the app, stores `ANTHROPIC_API_KEY`, and writes the workflow (we've committed a reference at `.github/workflows/claude.yml` — let the installer reconcile it). After this, mention **`@claude`** in any PR/issue comment to have it act (e.g. *"@claude address CodeRabbit's findings and push a fix"*).
+This installs the app, stores `ANTHROPIC_API_KEY`, and writes the workflow (we've committed a reference at `.github/workflows/claude.yml`, **pinned to Sonnet 4.6** for cheap fix-findings — let the installer reconcile it but keep the `model:` line). The autonomous loop comments *"@claude address the review findings and push a fix"* on each PR; it reads Greptile + CodeRabbit comments and commits. Cost is ~$0.20–0.40/PR on Sonnet — set a monthly API spend cap in the Anthropic console as a backstop.
 
-## 7. (If you adopt it) enable Anthropic hosted Code Review
+## 7. Enable the PR reviewers — Greptile (required) + CodeRabbit
 
-Admin → [claude.ai/admin-settings/claude-code](https://claude.ai/admin-settings/claude-code) → Code Review → install the app on `tolera` → set **Review behavior = After every push** (catches issues as the PR evolves). It reads `REVIEW.md` + `CLAUDE.md` automatically. Requires a Team/Enterprise Claude plan; ~$15–25/review.
+We **do not** use Anthropic's hosted Code Review service (flat ~$15–25/review). The PR-review gate is **Greptile** (its own flat SaaS — $30/seat incl. 50 reviews, then $1; pre-Series-A startups under $2M get 50% off), with **CodeRabbit** as the advisory layer.
+
+1. **Greptile** — install the Greptile GitHub App on `tolera` (greptile.com → Connect GitHub), set review on **PR open + push**. It reads `REVIEW.md` + `CLAUDE.md`. Add its `greptile` status check to branch protection (§3) once it's posted once. Claim the startup discount before the 14-day trial converts.
+2. **CodeRabbit** — already configured via `.coderabbit.yaml` (advisory + summaries). Free tier = summaries + CLI; full inline PR review needs Pro — decide one-bot-vs-A/B per `build-plan/REVIEW-WORKFLOW-PROPOSAL.md`.
+3. **NTFY_TOPIC secret** (for the morning digest): `gh secret set NTFY_TOPIC` → your private ntfy topic.
 
 ## Done when
 - [ ] `tolera` private repo exists; `main` + `develop` pushed; default = `develop`.
-- [ ] Both branches protected (1 approval + Code Owners + CI check).
-- [ ] `block` label created; secrets stored.
-- [ ] `@claude` app installed; CodeRabbit + (optional) hosted Code Review enabled.
+- [ ] Both branches protected (**0 approvals** + required checks: CI + Greptile + fixtures); **auto-merge enabled**.
+- [ ] `block` label created; secrets stored (incl. `NTFY_TOPIC`).
+- [ ] `@claude` app installed (Sonnet-pinned); Greptile app installed; CodeRabbit configured.

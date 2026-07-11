@@ -27,3 +27,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Pin the fix-findings model to Sonnet — ~$0.20-0.40/PR vs ~4-5x on Opus.
+          # This action only addresses review findings; the heavy build runs locally on the
+          # subscription. Keep a monthly API spend cap set in the Anthropic console as a backstop.
+          model: claude-sonnet-4-6

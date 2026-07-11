@@ -1,0 +1,60 @@
+# Morning digest — summarise what auto-merged to develop in the last 24h and push it to your phone.
+# This is the "notify-after, don't approve-before" safety net for full bot-only merge: you stay
+# informed (especially about money/tax/schema/auth diffs) and can revert async, without being a gate.
+#
+# Requires repo secret NTFY_TOPIC (your private ntfy topic). No Anthropic API used.
+name: Morning digest
+
+on:
+  schedule:
+    - cron: "0 5 * * *"    # ~06:00/07:00 CET — adjust to taste (cron is UTC)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build and send digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          set -uo pipefail
+          since="$(date -u -d '24 hours ago' +%FT%TZ 2>/dev/null || date -u -v-24H +%FT%TZ)"
+
+          # PRs merged into develop in the last 24h.
+          merged="$(gh pr list --base develop --state merged --limit 100 \
+            --json number,title,mergedAt,files \
+            --jq "[.[] | select(.mergedAt > \"$since\")]")"
+
+          count="$(printf '%s' "$merged" | jq 'length')"
+
+          # Flag any that touched the sensitive paths.
+          sensitive="$(printf '%s' "$merged" | jq -r '
+            [.[] | select(any(.files[].path;
+              test("(^|/)(models|migrations|pricing|auth)/") or test("tax")))
+             | "  #\(.number) \(.title)"] | .[]' )"
+
+          body="Overnight: ${count} PR(s) auto-merged to develop."
+          if [ -n "$sensitive" ]; then
+            body="${body}
+          MONEY/TAX/SCHEMA/AUTH changes to eyeball:
+          ${sensitive}"
+          else
+            body="${body}
+          No money/tax/schema/auth changes."
+          fi
+
+          echo "$body" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${NTFY_TOPIC:-}" ]; then
+            curl -fsS -H "Title: Tolera nightly digest" -H "Priority: default" -H "Tags: sunrise" \
+              -d "$body" "https://ntfy.sh/${NTFY_TOPIC}" >/dev/null 2>&1 || true
+          fi
