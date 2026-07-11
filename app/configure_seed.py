@@ -76,7 +76,7 @@ _EXTRA_CLASSES: tuple[tuple[str, int], ...] = (
 # The §2 polymers as leaves under Kunststoff (standard densities, costs NULL).
 _POLYMER_FAMILY = ("Thermoplaste", "Polymers")
 _POLYMERS: tuple[tuple[str, str], ...] = (  # (display name, density g/cm3)
-    ("POM-C", "1.41"),
+    ("POM", "1.41"),
     ("PA6", "1.14"),
     ("PEEK", "1.32"),
 )
@@ -300,7 +300,7 @@ _DEFAULT_EXPEDITE_TIERS = [
 # ---------------------------------------------------------------------------
 # §7 partial — workflow steps, custom tables, email templates
 # ---------------------------------------------------------------------------
-_WORKFLOW_STEPS = ("Not Started", "In Progress", "On Hold", "Completed")
+_WORKFLOW_STEPS = ("Not Started", "In Progress", "On Hold", "Completed", "No Quote")
 
 _CUSTOM_TABLES: tuple[tuple[str, list[dict[str, str]]], ...] = (
     (
@@ -361,12 +361,18 @@ async def seed_configure_catalog(
     org = await session.get(Organization, org_id)
     assert org is not None  # provisioning always precedes the catalog seed
 
-    # DACH Costing Mode: DACH orgs are provisioned with it ON (#dach-costing);
-    # OrgCountry is DE/AT/CH-only, so every seeded org qualifies.
-    if not org.dach_costing_mode:
+    # First-ever configure seed? (no library yet). Org-level switches are only
+    # provisioned then — a re-seed must never undo an admin's explicit choice
+    # (spec #dach-costing: turning the mode off is a deliberate user action).
+    is_first_seed = (
+        await session.scalar(select(OperationDef.id).where(OperationDef.org_id == org_id).limit(1))
+    ) is None
+    if is_first_seed:
+        # DACH orgs are provisioned with the mode ON (#dach-costing);
+        # OrgCountry is DE/AT/CH-only, so every seeded org qualifies.
         org.dach_costing_mode = True
-    if org.default_expedite_tiers is None:
-        org.default_expedite_tiers = _DEFAULT_EXPEDITE_TIERS
+        if org.default_expedite_tiers is None:
+            org.default_expedite_tiers = _DEFAULT_EXPEDITE_TIERS
 
     classes_created = await _seed_classes(session, org_id)
     materials_created = await _seed_polymers(session, org_id)
@@ -576,7 +582,13 @@ async def _seed_pricing_item_defs(
         ).all()
     }
     created = 0
-    if "Standardaufschlag" not in existing:
+    if not dach_costing_mode and "Standardaufschlag" not in existing:
+        # §6 standard markup — the NON-DACH default. With DACH Costing Mode on
+        # the Zuschlagskalkulation chain IS the pricing default: its Gewinn
+        # item carries the profit, and a general markup on top would both
+        # double-count profit and pollute get_selbstkosten()'s "everything
+        # before Gewinn" base (the chain must price 261,80 for the spec's
+        # 100 € + 100 € example, not 305,80).
         session.add(
             PricingItemDef(
                 org_id=org_id,

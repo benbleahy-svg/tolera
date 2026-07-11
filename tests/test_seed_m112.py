@@ -55,10 +55,13 @@ def test_seed_counts_and_content(seeder: Seeder, app_client: TestClient) -> None
     assert result.materials_created == 3  # POM-C / PA6 / PEEK
     assert result.processes_created == 2  # Assembly + PC; Core-4 exist from M1.7
     assert result.router_rows_created == 18
-    assert result.pricing_item_defs_created == 5  # Standardaufschlag + 4 Zuschlag
+    # DACH orgs get the pure Zuschlagskalkulation chain — no Standardaufschlag
+    # on top (its Gewinn item carries the profit; a general markup would
+    # double-count and pollute get_selbstkosten())
+    assert result.pricing_item_defs_created == 4
     assert result.discount_defs_created == 1
     assert result.add_on_defs_created == 6  # the #addons AddOnType dropdown
-    assert result.workflow_steps_created == 4
+    assert result.workflow_steps_created == 5  # incl. "No Quote" (§7)
     assert result.custom_tables_created == 3
     assert result.email_templates_created == 2
 
@@ -146,12 +149,7 @@ def test_zuschlagskalkulation_chain_prices_the_spec_example(
         qid = client.post("/api/quotes", json={}).json()["id"]
         item = client.post(f"/api/quotes/{qid}/items").json()["items"][0]
         component_id = str(item["root_component_id"])
-        # the pure Zuschlag chain: drop the general Standardaufschlag def copy
-        pricing = client.get(f"/api/components/{component_id}/pricing").json()
-        standard = next(i for i in pricing["pricing_items"] if i["name"] == "Standardaufschlag")
-        res = client.delete(f"/api/pricing-items/{standard['id']}")
-        assert res.status_code == 204, res.text
-
+        # the seeded defaults ARE the pure Zuschlag chain — nothing to remove
         for name, category, cost in (
             ("Rohmaterial", "material", "100.0000"),
             ("Fräsen", None, "100.0000"),
