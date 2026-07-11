@@ -135,6 +135,17 @@ async def _add_on_out(session: AsyncSession, add_on: AddOn) -> dict[str, Any]:
     )
 
 
+def _require_root_component(component: object) -> None:
+    # add-ons and expedites apply ONLY at the root component (= quote item);
+    # PRICING-ENGINE-SPEC §3.4
+    if not getattr(component, "is_root_component", False):
+        raise AppError(
+            "not_a_root_component",
+            "Add-ons and expedite options live on the quote item's root component.",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+
+
 async def _get_add_on_or_404(session: AsyncSession, add_on_id: uuid.UUID) -> AddOn:
     add_on = await session.get(AddOn, add_on_id)
     if add_on is None:
@@ -250,6 +261,7 @@ async def add_add_on(
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> Any:
     component = await _get_component_or_404(session, component_id)
+    _require_root_component(component)
     await _lock_editable(session, component)
 
     name = payload.name
@@ -403,6 +415,7 @@ async def set_expedite_options(
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> Any:
     component = await _get_component_or_404(session, component_id)
+    _require_root_component(component)
     await _lock_editable(session, component)
     _validate_tiers(payload.options)
     await _replace_expedite_options(session, principal.active_org_id, component_id, payload.options)

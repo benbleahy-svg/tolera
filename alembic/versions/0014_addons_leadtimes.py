@@ -89,6 +89,7 @@ def upgrade() -> None:
             default_price numeric(14,4),
             default_is_required boolean NOT NULL DEFAULT false,
             calc_is_required boolean,           -- Kalk set_is_required() output
+            calc_name text,                     -- Kalk set_add_on_name() output
             manual_is_required boolean,         -- the UI Required toggle
             position integer NOT NULL DEFAULT 0,
             is_from_factory boolean NOT NULL DEFAULT false,

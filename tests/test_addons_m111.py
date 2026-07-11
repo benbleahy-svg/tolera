@@ -224,11 +224,15 @@ def test_set_is_required_drives_the_calc_side_and_toggle_overrides(
             client,
             component_id,
             name="NRE",
-            formula="set_is_required(True)\nPRICE = 50",
+            formula="set_add_on_name('NRE - P1')\nset_is_required(True)\nPRICE = 50",
             is_required=False,
         )
         assert created["calc_is_required"] is True
         assert created["is_required"] is True  # calc wins over the def default
+        # the formula's dynamic name surfaces for display; the snapshot stays
+        assert created["calc_name"] == "NRE - P1"
+        assert created["display_name"] == "NRE - P1"
+        assert created["name"] == "NRE"
         # the manual toggle outranks the formula (calc-vs-override, CLAUDE.md §5)
         res = client.patch(f"/api/add-ons/{created['id']}", json={"manual_is_required": False})
         assert res.status_code == 200, res.text

@@ -1686,6 +1686,9 @@ class AddOn(Base):
     )
     calc_is_required: Mapped[bool | None] = mapped_column(Boolean)
     manual_is_required: Mapped[bool | None] = mapped_column(Boolean)
+    # the formula's set_add_on_name() output (KB: naming conventions that
+    # depend on part attributes); display resolves calc_name ?? name
+    calc_name: Mapped[str | None] = mapped_column(String)
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     is_from_factory: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
@@ -1700,6 +1703,10 @@ class AddOn(Base):
         if self.calc_is_required is not None:
             return self.calc_is_required
         return self.default_is_required
+
+    @property
+    def display_name(self) -> str:
+        return self.calc_name if self.calc_name else self.name
 
 
 class AddOnCell(Base):

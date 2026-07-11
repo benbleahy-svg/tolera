@@ -51,6 +51,7 @@ from .errors import AppError
 from .models import (
     AddOn,
     AddOnCell,
+    AddOnDef,
     CalcType,
     Component,
     ComponentQuantity,
@@ -151,6 +152,7 @@ class PricingEnv:
     discount_cells: dict[tuple[uuid.UUID, int], DiscountCell]
     add_ons: list[AddOn]
     add_on_cells: dict[tuple[uuid.UUID, int], AddOnCell]
+    add_on_def_names: dict[uuid.UUID, str]
     expedites: list[ExpediteOption]
     def_names: dict[uuid.UUID, str]
     provider: MappingTableProvider
@@ -374,6 +376,9 @@ async def load_pricing_env(session: AsyncSession, component: Component) -> Prici
         discount_cells={(c.discount_id, c.quantity): c for c in discount_cells},
         add_ons=list(add_ons),
         add_on_cells={(c.add_on_id, c.quantity): c for c in add_on_cells},
+        add_on_def_names=dict(
+            (await session.execute(select(AddOnDef.id, AddOnDef.name))).tuples().all()
+        ),
         expedites=list(expedites),
         def_names=dict(def_rows),
         provider=await load_table_provider(session),
@@ -403,6 +408,7 @@ class AddOnEval:
     effective_price: Decimal
     calc_is_required: bool | None
     is_required: bool
+    calc_name: str | None = None  # the formula's set_add_on_name() output
 
 
 @dataclass
@@ -859,6 +865,7 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
             add_on_cell = env.add_on_cells.get((add_on.id, brk.quantity))
             calc_price: Decimal | None = None
             calc_required: bool | None = None
+            calc_name: str | None = None
             if add_on.formula:
                 eval_result = evaluate(
                     add_on.formula,
@@ -877,6 +884,7 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
                 if not eval_result.errors and eval_result.output is not None:
                     calc_price = _q4(Decimal(repr(eval_result.output["PRICE"])))
                     calc_required = eval_result.add_on_is_required
+                    calc_name = eval_result.add_on_name
             elif add_on.default_price is not None:
                 calc_price = _q4(add_on.default_price)
             manual_price = add_on_cell.manual_price if add_on_cell is not None else None
@@ -887,8 +895,21 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
                 required = calc_required
             else:
                 required = add_on.default_is_required
-            result.add_ons[add_on.id] = AddOnEval(calc_price, effective, calc_required, required)
-            price_values[add_on.name] = price_values.get(add_on.name, 0.0) + float(effective)
+            result.add_ons[add_on.id] = AddOnEval(
+                calc_price, effective, calc_required, required, calc_name
+            )
+            # the price dictionary matches by add-on name OR its definition
+            # name (KALK-REFERENCE §7); a dynamic rename counts under both
+            def_name = (
+                env.add_on_def_names.get(add_on.source_def_id)
+                if add_on.source_def_id is not None
+                else None
+            )
+            keys = {calc_name or add_on.name, add_on.name}
+            if def_name is not None:
+                keys.add(def_name)
+            for key in keys:
+                price_values[key] = price_values.get(key, 0.0) + float(effective)
             bucket = "--required_add_on--" if required else "--non_required_add_on--"
             price_values[bucket] += float(effective)
             if required:
@@ -988,6 +1009,7 @@ async def reprice_component(
             add_on_eval = results[0].add_ons.get(add_on.id)
             if add_on_eval is not None:
                 add_on.calc_is_required = add_on_eval.calc_is_required
+                add_on.calc_name = add_on_eval.calc_name
 
     await session.flush()
 
@@ -1365,6 +1387,8 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
                 "id": str(add_on.id),
                 "source_def_id": str(add_on.source_def_id) if add_on.source_def_id else None,
                 "name": add_on.name,
+                "calc_name": add_on.calc_name,
+                "display_name": add_on.display_name,
                 "formula": add_on.formula,
                 "default_price": add_on.default_price,
                 "default_is_required": add_on.default_is_required,
