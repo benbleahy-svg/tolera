@@ -90,6 +90,10 @@ filterwarnings = [
 [tool.coverage.run]
 source = ["app"]
 omit = ["app/celery_app.py"]
+# SQLAlchemy's asyncio bridge runs handler code inside greenlets after the
+# first DB await — without greenlet concurrency support coverage silently
+# drops every such frame, under-counting all API request paths.
+concurrency = ["thread", "greenlet"]
 
 [tool.coverage.report]
 show_missing = true
