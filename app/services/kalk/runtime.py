@@ -475,6 +475,17 @@ class Runtime:
 
         return stub
 
+    def _dach_stub(self, fn_name: str) -> Callable[..., object]:
+        # spec #dach-costing: get_herstellkosten()/get_selbstkosten() exist only
+        # when DACH Costing Mode is on — the wiring overrides via eval_context
+        def stub(*_args: object, **_kwargs: object) -> object:
+            raise _abort(
+                "runtime_error",
+                f"{fn_name}() requires DACH Costing Mode (Configure -> Settings)",
+            )
+
+        return stub
+
     # -- declaration functions: tables, drop-downs, groups (KALK-REFERENCE §3, §5)
 
     def _get_snapshot(self, fn: str, table_name: object) -> tables.TableSnapshot:
@@ -1067,6 +1078,10 @@ class Runtime:
                     "contact": None,
                     "set_profit_item_name": self.set_profit_item_name,
                     "set_custom_cost": self.set_custom_cost,
+                    # Zuschlagskalkulation helpers (spec #dach-costing; M1.12) —
+                    # real values arrive via eval_context when the mode is on
+                    "get_herstellkosten": self._dach_stub("get_herstellkosten"),
+                    "get_selbstkosten": self._dach_stub("get_selbstkosten"),
                     "get_components": self.get_components,
                     "get_children": self.get_component_children,
                     "get_operations": self.get_operations,
@@ -1254,6 +1269,8 @@ PRICING_ITEM_NAMES = frozenset(
         "contact",
         "set_profit_item_name",
         "set_custom_cost",
+        "get_herstellkosten",
+        "get_selbstkosten",
         "get_components",
         "get_children",
         "get_operations",

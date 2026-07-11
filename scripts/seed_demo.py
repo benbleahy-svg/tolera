@@ -16,6 +16,7 @@ import logging
 
 from app.catalog_seed import CatalogSeedResult, seed_material_catalog
 from app.config import get_settings
+from app.configure_seed import ConfigureSeedResult, seed_configure_catalog
 from app.crm_seed import FECHNER_SLUG, CrmSeedResult, seed_pilot_crm
 from app.db import make_engine, make_sessionmaker
 from app.logging import configure_logging
@@ -38,6 +39,11 @@ async def _run(
             async with sessionmaker() as session, session.begin():
                 catalog = await seed_material_catalog(session, org_id=result.org_id)
             _log_catalog(result.slug, catalog)
+            # M1.12: the full Configure catalog (54-op library, routers,
+            # pricing defaults, …) — its own transaction per org as well.
+            async with sessionmaker() as session, session.begin():
+                configure = await seed_configure_catalog(session, org_id=result.org_id)
+            _log_configure(result.slug, configure)
         # Seed the golden-thread CRM (Fechner account + contact) once the pilot org
         # exists — its own transaction so a CRM hiccup can't undo provisioning.
         crm: CrmSeedResult | None = None
@@ -59,6 +65,26 @@ def _log_catalog(slug: str, catalog: CatalogSeedResult) -> None:
             "families_created": catalog.families_created,
             "materials_created": catalog.materials_created,
             "processes_created": catalog.processes_created,
+        },
+    )
+
+
+def _log_configure(slug: str, configure: ConfigureSeedResult) -> None:
+    logger.info(
+        "seeded configure catalog",
+        extra={
+            "slug": slug,
+            "classes_created": configure.classes_created,
+            "materials_created": configure.materials_created,
+            "operation_defs_created": configure.operation_defs_created,
+            "processes_created": configure.processes_created,
+            "router_rows_created": configure.router_rows_created,
+            "pricing_item_defs_created": configure.pricing_item_defs_created,
+            "discount_defs_created": configure.discount_defs_created,
+            "add_on_defs_created": configure.add_on_defs_created,
+            "workflow_steps_created": configure.workflow_steps_created,
+            "custom_tables_created": configure.custom_tables_created,
+            "email_templates_created": configure.email_templates_created,
         },
     )
 

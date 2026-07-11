@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from alembic import command
 from app.auth import Principal, get_principal
 from app.catalog_seed import CatalogSeedResult, seed_material_catalog
+from app.configure_seed import ConfigureSeedResult, seed_configure_catalog
 from app.main import create_app
 from app.models import (
     Account,
@@ -360,6 +361,17 @@ class Seeder:
     async def _catalog(self, org_id: uuid.UUID) -> CatalogSeedResult:
         async with AsyncSession(self._engine) as session, session.begin():
             return await seed_material_catalog(session, org_id=org_id)
+
+    def configure_catalog(self, org_id: uuid.UUID) -> ConfigureSeedResult:
+        """Run the M1.12 Configure seed (54-op library, routers, pricing
+        defaults, …) for an org — the material catalog seeds first."""
+        return self._loop.run_until_complete(self._configure_catalog(org_id))
+
+    async def _configure_catalog(self, org_id: uuid.UUID) -> ConfigureSeedResult:
+        async with AsyncSession(self._engine) as session, session.begin():
+            await seed_material_catalog(session, org_id=org_id)
+        async with AsyncSession(self._engine) as session, session.begin():
+            return await seed_configure_catalog(session, org_id=org_id)
 
     async def _org(
         self, slug: str, name: str | None, *, country: str, currency: str, locale: str
