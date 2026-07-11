@@ -152,10 +152,12 @@ async def recalculate_component(
 
     def compute() -> tuple[
         dict[tuple[uuid.UUID, int], Decimal | None],
+        dict[tuple[uuid.UUID, int], int | None],
         dict[uuid.UUID, kalk_costing.OpTimes],
     ]:
         """Pure batch over prefetched data — runs in a worker thread."""
         calcs: dict[tuple[uuid.UUID, int], Decimal | None] = {}
+        cell_days: dict[tuple[uuid.UUID, int], int | None] = {}
         op_times: dict[uuid.UUID, kalk_costing.OpTimes] = {}
         for brk in breaks:
             make_qty = brk.make_quantity if brk.make_quantity is not None else brk.quantity
@@ -185,6 +187,7 @@ async def recalculate_component(
                         custom_attributes,
                     )
                     calc = cell_eval.calc_cost
+                    cell_days[(op.id, brk.quantity)] = cell_eval.days
                     workpiece = cell_eval.workpiece
                     custom_attributes.update(cell_eval.custom_attributes)
                     if op.id not in op_times:  # lowest break = the row display pair
@@ -196,6 +199,7 @@ async def recalculate_component(
                         )
                 else:
                     calc = compute_calc_cost(op, make_qty)
+                    cell_days[(op.id, brk.quantity)] = None  # mode rows carry no DAYS
                 calcs[(op.id, brk.quantity)] = calc
                 # the downstream cost dictionary sees this op's EFFECTIVE cost
                 existing = by_key.get((op.id, brk.quantity))
@@ -219,9 +223,9 @@ async def recalculate_component(
                     else:
                         cost_values["--inside--"] += amount
                     cost_values["--total--"] += amount
-        return calcs, op_times
+        return calcs, cell_days, op_times
 
-    calcs, op_times = await to_thread.run_sync(compute)
+    calcs, cell_days, op_times = await to_thread.run_sync(compute)
 
     for op in operations:
         times = op_times.get(op.id)
@@ -236,6 +240,7 @@ async def recalculate_component(
                 op.calc_setup_mins = times.setup_mins
 
     for (op_id, quantity), calc in calcs.items():
+        days = cell_days.get((op_id, quantity))
         cell = by_key.get((op_id, quantity))
         if cell is None:
             session.add(
@@ -245,10 +250,14 @@ async def recalculate_component(
                     component_id=component_id,
                     quantity=quantity,
                     calc_cost=calc,
+                    days=days,
                 )
             )
-        elif cell.calc_cost != calc:
-            cell.calc_cost = calc
+        else:
+            if cell.calc_cost != calc:
+                cell.calc_cost = calc
+            if cell.days != days:
+                cell.days = days
     await session.flush()
 
     # M1.10: pricing always follows costs — every cost recalc re-runs the

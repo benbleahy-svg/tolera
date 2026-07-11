@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .accounts import accounts_router, contacts_router
+from .addons import addons_router
 from .config import Settings, get_settings
 from .custom_tables import custom_tables_router
 from .db import make_engine, make_sessionmaker
@@ -70,6 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(materials_router)
     app.include_router(operations_router)
     app.include_router(pricing_router)
+    app.include_router(addons_router)
     app.include_router(custom_tables_router)
 
     return app

@@ -9,10 +9,14 @@ import { useAuth } from '@clerk/clerk-react';
 
 import { apiFetch, type TokenGetter } from '../api/client';
 import type {
+  AddOnCreateBody,
+  AddOnDefOut,
   ClassNode,
   ComponentCosting,
+  ExpediteTierBody,
   PricingItemCreateBody,
   PricingSummary,
+  QuoteTotals,
   KalkCheckResult,
   KalkQtyReport,
   MaterialOut,
@@ -83,6 +87,30 @@ export interface EstimatingApi {
     manualUnitPrice: string | null,
   ) => Promise<unknown>;
   refreshPricing: (quoteId: string) => Promise<{ refreshed_items: number }>;
+  // M1.11 — add-ons / lead times / expedite / VAT totals
+  listAddOnDefs: () => Promise<AddOnDefOut[]>;
+  addAddOn: (componentId: string, body: AddOnCreateBody) => Promise<unknown>;
+  updateAddOn: (
+    addOnId: string,
+    body: { manual_is_required?: boolean | null; name?: string },
+  ) => Promise<unknown>;
+  removeAddOn: (addOnId: string) => Promise<void>;
+  setAddOnPrice: (
+    addOnId: string,
+    quantity: number,
+    manualPrice: string | null,
+  ) => Promise<unknown>;
+  setLeadTime: (
+    componentId: string,
+    quantity: number,
+    manualLeadTimeDays: number | null,
+  ) => Promise<unknown>;
+  setExpediteOptions: (componentId: string, options: ExpediteTierBody[]) => Promise<unknown>;
+  applyLeadTimesToAll: (
+    quoteId: string,
+    body: { standard_lead_time_days?: number | null; tiers: ExpediteTierBody[] },
+  ) => Promise<unknown>;
+  getQuoteTotals: (quoteId: string) => Promise<QuoteTotals>;
 }
 
 /** Build an estimating API client bound to the current Clerk session token. */
@@ -169,6 +197,33 @@ export function useEstimatingApi(): EstimatingApi {
         }),
       refreshPricing: (quoteId) =>
         apiFetch(`/api/quotes/${quoteId}/refresh-pricing`, token, { method: 'POST' }),
+      listAddOnDefs: () => apiFetch('/api/add-on-defs', token),
+      addAddOn: (componentId, body) =>
+        apiFetch(`/api/components/${componentId}/add-ons`, token, { method: 'POST', body }),
+      updateAddOn: (addOnId, body) =>
+        apiFetch(`/api/add-ons/${addOnId}`, token, { method: 'PATCH', body }),
+      removeAddOn: (addOnId) => apiFetch(`/api/add-ons/${addOnId}`, token, { method: 'DELETE' }),
+      setAddOnPrice: (addOnId, quantity, manualPrice) =>
+        apiFetch(`/api/add-ons/${addOnId}/cells/${quantity}`, token, {
+          method: 'PATCH',
+          body: { manual_price: manualPrice },
+        }),
+      setLeadTime: (componentId, quantity, manualLeadTimeDays) =>
+        apiFetch(`/api/components/${componentId}/lead-time/${quantity}`, token, {
+          method: 'PATCH',
+          body: { manual_lead_time_days: manualLeadTimeDays },
+        }),
+      setExpediteOptions: (componentId, options) =>
+        apiFetch(`/api/components/${componentId}/expedite-options`, token, {
+          method: 'PUT',
+          body: { options },
+        }),
+      applyLeadTimesToAll: (quoteId, body) =>
+        apiFetch(`/api/quotes/${quoteId}/lead-times/apply-to-all`, token, {
+          method: 'POST',
+          body,
+        }),
+      getQuoteTotals: (quoteId) => apiFetch(`/api/quotes/${quoteId}/totals`, token),
     };
   }, [getToken]);
 }

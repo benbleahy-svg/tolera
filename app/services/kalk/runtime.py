@@ -136,6 +136,9 @@ class Runtime:
         self.custom_cost: float | None = None
         # discount-context state (KALK-REFERENCE §11.5; M1.10)
         self.discount_name: str | None = None
+        # add-on-context state (KALK-REFERENCE §11.4; M1.11)
+        self.add_on_name: str | None = None
+        self.add_on_is_required: bool | None = None
 
     # -- caps ---------------------------------------------------------------
 
@@ -801,6 +804,31 @@ class Runtime:
             raise _abort("runtime_error", "set_discount_name() takes a string")
         self.discount_name = name
 
+    # -- add-on context functions (KALK-REFERENCE §11.4; M1.11) -------------------
+
+    def set_add_on_name(self, name: object) -> None:
+        self.tick()
+        if not isinstance(name, str):
+            raise _abort("runtime_error", "set_add_on_name() takes a string")
+        self.add_on_name = name
+
+    def set_is_required(self, value: object) -> None:
+        self.tick()
+        value = self.unwrap(value)
+        if not isinstance(value, bool):
+            raise _abort("runtime_error", "set_is_required() takes a boolean")
+        self.add_on_is_required = value
+
+    def get_price_value(self, key: object) -> float:
+        """Summed price of the add-on cells above this one (§7 price dict).
+
+        Special keys: ``--required_add_on--``, ``--non_required_add_on--``.
+        An unknown name sums nothing → 0.0 (get_cost_value parity)."""
+        self.tick()
+        if not isinstance(key, str):
+            raise _abort("runtime_error", "get_price_value() key must be a string")
+        return float(self.context_data.price_values.get(key, 0.0))
+
     def set_custom_cost(self, cost: object) -> None:
         self.tick()
         cost = self.unwrap(cost)
@@ -1048,6 +1076,38 @@ class Runtime:
                     "is_a_in_b": self.is_a_in_b,
                 }
             )
+        elif context_type == "add_on":
+            # KALK-REFERENCE §11.4 / KB add-ons-p3l-cheat-sheet: the operation
+            # surface MINUS no_quote() / analyze_*() / set_operation_name()
+            # (KB-exact exclusions; analyzers absent = unknown name), PLUS
+            # set_add_on_name / set_is_required / get_price_value.
+            namespace.update(
+                {
+                    "set_add_on_name": self.set_add_on_name,
+                    "set_is_required": self.set_is_required,
+                    "get_price_value": self.get_price_value,
+                    "set_notes": self.set_notes,
+                    "set_notes_from_list": self.set_notes_from_list,
+                    "is_close": self.is_close,
+                    "is_a_in_b": self.is_a_in_b,
+                    "quantity": self.quantity,
+                    "get_quantities": self.get_quantities,
+                    "get_make_quantities": self.get_make_quantities,
+                    "get_bom_quantities": self.get_bom_quantities,
+                    "set_workpiece_value": self.set_workpiece_value,
+                    "get_workpiece_value": self.get_workpiece_value,
+                    "get_cost_value": self.get_cost_value,
+                    "set_custom_attribute": self.set_custom_attribute,
+                    "get_custom_attribute": self.get_custom_attribute,
+                    "get_children": self.get_children,
+                    "units_mm": self.units_mm,
+                    "units_in": self.units_in,
+                    # domain objects — the wiring supplies real ones via eval_context
+                    "part": None,
+                    "quote": None,
+                    "line_item": None,
+                }
+            )
         elif context_type == "discount":
             # KALK-REFERENCE §11.5: PERCENTAGE (positive) output; contact +
             # REQUESTED_QUANTITY + the variable/list/table/workpiece suite;
@@ -1148,6 +1208,33 @@ DISCOUNT_NAMES = frozenset(
         "get_workpiece_value",
         "is_close",
         "is_a_in_b",
+    }
+)
+
+ADD_ON_NAMES = frozenset(
+    {
+        "set_add_on_name",
+        "set_is_required",
+        "get_price_value",
+        "set_notes",
+        "set_notes_from_list",
+        "is_close",
+        "is_a_in_b",
+        "quantity",
+        "get_quantities",
+        "get_make_quantities",
+        "get_bom_quantities",
+        "set_workpiece_value",
+        "get_workpiece_value",
+        "get_cost_value",
+        "set_custom_attribute",
+        "get_custom_attribute",
+        "get_children",
+        "units_mm",
+        "units_in",
+        "part",
+        "quote",
+        "line_item",
     }
 )
 

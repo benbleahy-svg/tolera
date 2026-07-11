@@ -49,6 +49,9 @@ from .authz import Permission, require
 from .deps import get_session
 from .errors import AppError
 from .models import (
+    AddOn,
+    AddOnCell,
+    AddOnDef,
     CalcType,
     Component,
     ComponentQuantity,
@@ -56,6 +59,7 @@ from .models import (
     Discount,
     DiscountCell,
     DiscountDef,
+    ExpediteOption,
     Material,
     MaterialFamily,
     Node,
@@ -66,6 +70,7 @@ from .models import (
     PricingItem,
     PricingItemCell,
     PricingItemDef,
+    Process,
     Quote,
     QuoteItem,
 )
@@ -145,9 +150,17 @@ class PricingEnv:
     item_cells: dict[tuple[uuid.UUID, int], PricingItemCell]
     discounts: list[Discount]
     discount_cells: dict[tuple[uuid.UUID, int], DiscountCell]
+    add_ons: list[AddOn]
+    add_on_cells: dict[tuple[uuid.UUID, int], AddOnCell]
+    add_on_def_names: dict[uuid.UUID, str]
+    expedites: list[ExpediteOption]
     def_names: dict[uuid.UUID, str]
     provider: MappingTableProvider
     contact: KalkObject | None
+    # lead-time base (M1.11): process default + material adder; ``has_lead_base``
+    # distinguishes "no source at all" (calc stays NULL) from a genuine 0
+    base_lead_days: int = 0
+    has_lead_base: bool = False
 
 
 async def _material_names(
@@ -295,7 +308,37 @@ async def load_pricing_env(session: AsyncSession, component: Component) -> Prici
     discount_cells = (
         await session.scalars(select(DiscountCell).where(DiscountCell.component_id == component.id))
     ).all()
+    add_ons = (
+        await session.scalars(
+            select(AddOn)
+            .where(AddOn.component_id == component.id)
+            .order_by(AddOn.position, AddOn.created_at, AddOn.id)
+        )
+    ).all()
+    add_on_cells = (
+        await session.scalars(select(AddOnCell).where(AddOnCell.component_id == component.id))
+    ).all()
+    expedites = (
+        await session.scalars(
+            select(ExpediteOption)
+            .where(ExpediteOption.component_id == component.id)
+            .order_by(ExpediteOption.position, ExpediteOption.days_faster)
+        )
+    ).all()
     def_rows = (await session.execute(select(OperationDef.id, OperationDef.name))).tuples().all()
+
+    base_lead_days = 0
+    has_lead_base = False
+    if component.process_id is not None:
+        process = await session.get(Process, component.process_id)
+        if process is not None:
+            base_lead_days += process.default_lead_time_days
+            has_lead_base = True
+    if component.material_id is not None:
+        material = await session.get(Material, component.material_id)
+        if material is not None:
+            base_lead_days += material.added_lead_time_days
+            has_lead_base = True
 
     contact_obj: KalkObject | None = None
     quote_row = await session.scalar(
@@ -331,9 +374,17 @@ async def load_pricing_env(session: AsyncSession, component: Component) -> Prici
         item_cells={(c.pricing_item_id, c.quantity): c for c in item_cells},
         discounts=list(discounts),
         discount_cells={(c.discount_id, c.quantity): c for c in discount_cells},
+        add_ons=list(add_ons),
+        add_on_cells={(c.add_on_id, c.quantity): c for c in add_on_cells},
+        add_on_def_names=dict(
+            (await session.execute(select(AddOnDef.id, AddOnDef.name))).tuples().all()
+        ),
+        expedites=list(expedites),
         def_names=dict(def_rows),
         provider=await load_table_provider(session),
         contact=contact_obj,
+        base_lead_days=base_lead_days,
+        has_lead_base=has_lead_base,
     )
 
 
@@ -347,6 +398,17 @@ class ItemResult:
     effective_amount: Decimal  # what the totals actually used
     calc_custom_cost: Decimal | None
     unreachable: bool
+
+
+@dataclass
+class AddOnEval:
+    """One add-on at one break: calc-vs-override + resolved required-ness."""
+
+    calc_price: Decimal | None
+    effective_price: Decimal
+    calc_is_required: bool | None
+    is_required: bool
+    calc_name: str | None = None  # the formula's set_add_on_name() output
 
 
 @dataclass
@@ -370,6 +432,11 @@ class BreakResult:
     total_discount_pct: Decimal = _ZERO
     total_profit: Decimal = _ZERO
     profit_margin_pct: Decimal | None = None
+    # M1.11 — add-ons (after discounts, never in the unit price) + lead time
+    add_ons: dict[uuid.UUID, AddOnEval] = field(default_factory=dict)
+    required_add_on_total: Decimal = _ZERO
+    calc_lead_time_days: int | None = None
+    lead_time_days: int | None = None
 
 
 def _hours(mins: Decimal | None) -> float | None:
@@ -588,6 +655,15 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
             result.inside += root_cost
 
     root_key = str(env.component.id)
+    root_part_obj = _part_object(
+        env.part,
+        env.component,
+        env.material_name,
+        env.material_family,
+        make_qty,
+        deliver_qty,
+        1,
+    )
     root_obj = KalkObject(
         "component",
         {
@@ -596,15 +672,7 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
             "self_cost": float(root_self),
             "lead_time": 0,
             "process": None,
-            "part": _part_object(
-                env.part,
-                env.component,
-                env.material_name,
-                env.material_family,
-                make_qty,
-                deliver_qty,
-                1,
-            ),
+            "part": root_part_obj,
         },
     )
     components.append(root_obj)
@@ -748,6 +816,105 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
         result.profit_margin_pct = (result.total_profit / result.total_price * _HUNDRED).quantize(
             _PCT4, rounding=ROUND_HALF_UP
         )
+
+    # ---- lead time: base (process default + material adder) + Σ op DAYS ------
+    # (spec #addons Lead Times; PRICING-ENGINE-SPEC §3.2 "lead-time
+    # contribution = DAYS"). No source at all keeps calc NULL — PP blocks
+    # finalize on a missing base lead time, it never invents 0.
+    op_days_total = 0
+    has_op_days = False
+    for op in env.operations:
+        op_cell = env.cells.get((op.id, brk.quantity))
+        if op_cell is not None and op_cell.days is not None:
+            op_days_total += op_cell.days
+            has_op_days = True
+    if env.has_lead_base or has_op_days:
+        result.calc_lead_time_days = env.base_lead_days + op_days_total
+    result.lead_time_days = (
+        brk.manual_lead_time_days
+        if brk.manual_lead_time_days is not None
+        else result.calc_lead_time_days
+    )
+
+    # ---- add-ons: AFTER discounts; one-time fees, never in the unit price ----
+    # (PRICING-ENGINE-SPEC §3.5; KB add-ons-p3l-cheat-sheet). Position order
+    # matters: get_price_value() sees only the cells above the active add-on.
+    if env.add_ons:
+        addon_cost_values = {
+            "--material--": float(result.material),
+            "--inside--": float(result.inside),
+            "--outside--": float(result.outside),
+            "--total--": float(result.total_cost),
+        }
+        for op in env.operations:
+            op_cell = env.cells.get((op.id, brk.quantity))
+            if op_cell is None:
+                continue
+            op_cost = op_cell.manual_cost if op_cell.manual_cost is not None else op_cell.calc_cost
+            if op_cost is not None:
+                addon_cost_values[op.name] = addon_cost_values.get(op.name, 0.0) + float(op_cost)
+        price_values: dict[str, float] = {
+            "--required_add_on--": 0.0,
+            "--non_required_add_on--": 0.0,
+        }
+        break_quantities = [b.quantity for b in env.breaks]
+        break_make_quantities = [
+            b.make_quantity if b.make_quantity is not None else b.quantity for b in env.breaks
+        ]
+        for add_on in env.add_ons:
+            add_on_cell = env.add_on_cells.get((add_on.id, brk.quantity))
+            calc_price: Decimal | None = None
+            calc_required: bool | None = None
+            calc_name: str | None = None
+            if add_on.formula:
+                eval_result = evaluate(
+                    add_on.formula,
+                    context_type="add_on",
+                    eval_context={"part": root_part_obj, "quantity": make_qty},
+                    quantity=brk.quantity,
+                    table_provider=env.provider,
+                    context_data=ContextData(
+                        quantities=list(break_quantities),
+                        make_quantities=list(break_make_quantities),
+                        bom_quantities=list(break_quantities),
+                        cost_values=dict(addon_cost_values),
+                        price_values=dict(price_values),
+                    ),
+                )
+                if not eval_result.errors and eval_result.output is not None:
+                    calc_price = _q4(Decimal(repr(eval_result.output["PRICE"])))
+                    calc_required = eval_result.add_on_is_required
+                    calc_name = eval_result.add_on_name
+            elif add_on.default_price is not None:
+                calc_price = _q4(add_on.default_price)
+            manual_price = add_on_cell.manual_price if add_on_cell is not None else None
+            effective = _q4(manual_price if manual_price is not None else (calc_price or _ZERO))
+            if add_on.manual_is_required is not None:
+                required = add_on.manual_is_required
+            elif calc_required is not None:
+                required = calc_required
+            else:
+                required = add_on.default_is_required
+            result.add_ons[add_on.id] = AddOnEval(
+                calc_price, effective, calc_required, required, calc_name
+            )
+            # the price dictionary matches by add-on name OR its definition
+            # name (KALK-REFERENCE §7); a dynamic rename counts under both
+            def_name = (
+                env.add_on_def_names.get(add_on.source_def_id)
+                if add_on.source_def_id is not None
+                else None
+            )
+            keys = {calc_name or add_on.name, add_on.name}
+            if def_name is not None:
+                keys.add(def_name)
+            for key in keys:
+                price_values[key] = price_values.get(key, 0.0) + float(effective)
+            bucket = "--required_add_on--" if required else "--non_required_add_on--"
+            price_values[bucket] += float(effective)
+            if required:
+                result.required_add_on_total += effective
+        result.required_add_on_total = _q4(result.required_add_on_total)
     return result
 
 
@@ -783,6 +950,24 @@ async def reprice_component(
         brk.total_discount_pct = computed.total_discount_pct
         brk.total_profit = computed.total_profit
         brk.profit_margin_pct = computed.profit_margin_pct
+        brk.calc_lead_time_days = computed.calc_lead_time_days
+        brk.lead_time_days = computed.lead_time_days
+
+        for add_on in env.add_ons:
+            add_on_eval = computed.add_ons.get(add_on.id)
+            if add_on_eval is None:  # pragma: no cover
+                continue
+            add_on_cell = env.add_on_cells.get((add_on.id, brk.quantity))
+            if add_on_cell is None:
+                add_on_cell = AddOnCell(
+                    org_id=org_id,
+                    add_on_id=add_on.id,
+                    component_id=component_id,
+                    quantity=brk.quantity,
+                )
+                session.add(add_on_cell)
+                env.add_on_cells[(add_on.id, brk.quantity)] = add_on_cell
+            add_on_cell.calc_price = add_on_eval.calc_price
 
         for item in env.items:
             item_result = computed.items.get(item.id)
@@ -816,6 +1001,15 @@ async def reprice_component(
                 session.add(discount_cell)
                 env.discount_cells[(discount.id, brk.quantity)] = discount_cell
             discount_cell.calc_pct = pct
+
+    # the row-level calc side of the Required pair follows the lowest break
+    # (the display-pair precedent from the M1.9 op-times write-back)
+    if results:
+        for add_on in env.add_ons:
+            add_on_eval = results[0].add_ons.get(add_on.id)
+            if add_on_eval is not None:
+                add_on.calc_is_required = add_on_eval.calc_is_required
+                add_on.calc_name = add_on_eval.calc_name
 
     await session.flush()
 
@@ -1169,6 +1363,94 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
             }
         )
 
+    add_ons_out = []
+    for add_on in env.add_ons:
+        add_on_cells = []
+        for brk in env.breaks:
+            addon_cell = env.add_on_cells.get((add_on.id, brk.quantity))
+            if addon_cell is None:
+                continue
+            add_on_cells.append(
+                {
+                    "quantity": brk.quantity,
+                    "calc_price": addon_cell.calc_price,
+                    "manual_price": addon_cell.manual_price,
+                    "price": (
+                        addon_cell.manual_price
+                        if addon_cell.manual_price is not None
+                        else addon_cell.calc_price
+                    ),
+                }
+            )
+        add_ons_out.append(
+            {
+                "id": str(add_on.id),
+                "source_def_id": str(add_on.source_def_id) if add_on.source_def_id else None,
+                "name": add_on.name,
+                "calc_name": add_on.calc_name,
+                "display_name": add_on.display_name,
+                "formula": add_on.formula,
+                "default_price": add_on.default_price,
+                "default_is_required": add_on.default_is_required,
+                "calc_is_required": add_on.calc_is_required,
+                "manual_is_required": add_on.manual_is_required,
+                "is_required": add_on.is_required,
+                "position": add_on.position,
+                "is_from_factory": add_on.is_from_factory,
+                "cells": add_on_cells,
+            }
+        )
+
+    def required_add_ons_total(brk: ComponentQuantity) -> Decimal:
+        total = _ZERO
+        for add_on in env.add_ons:
+            if not add_on.is_required:
+                continue
+            cell = env.add_on_cells.get((add_on.id, brk.quantity))
+            if cell is None:
+                continue
+            price = cell.manual_price if cell.manual_price is not None else cell.calc_price
+            if price is not None:
+                total += price
+        return _q4(total)
+
+    # per-break lead times + the buyer-facing expedite rows (lead - days_faster,
+    # unit x (1 + markup%); KB dynamic-lead-times-guide)
+    lead_times_out = []
+    for brk in env.breaks:
+        expedite_rows = []
+        for option in env.expedites:
+            expedite_unit = (
+                round_price(brk.unit_price * (_HUNDRED + option.markup_pct) / _HUNDRED)
+                if brk.unit_price is not None
+                else None
+            )
+            expedite_rows.append(
+                {
+                    "id": str(option.id),
+                    "days_faster": option.days_faster,
+                    "markup_pct": option.markup_pct,
+                    "lead_time_days": (
+                        max(brk.lead_time_days - option.days_faster, 0)
+                        if brk.lead_time_days is not None
+                        else None
+                    ),
+                    "unit_price": expedite_unit,
+                    "total_price": (
+                        expedite_unit * brk.quantity if expedite_unit is not None else None
+                    ),
+                }
+            )
+        lead_times_out.append(
+            {
+                "quantity": brk.quantity,
+                "calc_lead_time_days": brk.calc_lead_time_days,
+                "manual_lead_time_days": brk.manual_lead_time_days,
+                "lead_time_days": brk.lead_time_days,
+                "expedites": expedite_rows,
+            }
+        )
+
     def total_excl_discounts(brk: ComponentQuantity) -> Decimal | None:
         """The authoritative Total (excl. Discounts) — spec #costing step 8:
         Total Estimated Cost + Σ item amounts, at the exact 4-dp precision,
@@ -1195,22 +1477,30 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
             amounts += amount if amount is not None else _ZERO
         return _q4(cost_total + amounts)
 
-    totals = [
-        {
-            "quantity": brk.quantity,
-            "unit_cost": brk.unit_cost,
-            "total_excl_discounts": total_excl_discounts(brk),
-            "calc_unit_price": brk.calc_unit_price,
-            "manual_unit_price": brk.manual_unit_price,
-            "unit_price": brk.unit_price,
-            "total_price": brk.total_price,
-            "total_discount": brk.total_discount,
-            "total_discount_pct": brk.total_discount_pct,
-            "total_profit": brk.total_profit,
-            "profit_margin_pct": brk.profit_margin_pct,
-        }
-        for brk in env.breaks
-    ]
+    totals = []
+    for brk in env.breaks:
+        required_total = required_add_ons_total(brk)
+        totals.append(
+            {
+                "quantity": brk.quantity,
+                "unit_cost": brk.unit_cost,
+                "total_excl_discounts": total_excl_discounts(brk),
+                "calc_unit_price": brk.calc_unit_price,
+                "manual_unit_price": brk.manual_unit_price,
+                "unit_price": brk.unit_price,
+                "total_price": brk.total_price,
+                "total_discount": brk.total_discount,
+                "total_discount_pct": brk.total_discount_pct,
+                "total_profit": brk.total_profit,
+                "profit_margin_pct": brk.profit_margin_pct,
+                # spec #addons roll-up rows — required add-ons only; the
+                # optional ones are the buyer's checkout choice (M5)
+                "total_required_add_ons": required_total,
+                "total_with_required_add_ons": (
+                    _q4(brk.total_price + required_total) if brk.total_price is not None else None
+                ),
+            }
+        )
 
     return {
         "component_id": str(component.id),
@@ -1218,6 +1508,8 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
         "costing": costing,
         "pricing_items": items_out,
         "discounts": discounts_out,
+        "add_ons": add_ons_out,
+        "lead_times": lead_times_out,
         "totals": totals,
     }
 

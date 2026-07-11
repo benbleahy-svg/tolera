@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
@@ -113,13 +113,13 @@ def _add_manual_op(
 def _add_pricing_item(client: TestClient, component_id: str, **payload: Any) -> dict[str, Any]:
     res = client.post(f"/api/components/{component_id}/pricing-items", json=payload)
     assert res.status_code == 201, res.text
-    return res.json()
+    return cast(dict[str, Any], res.json())
 
 
 def _pricing(client: TestClient, component_id: str) -> dict[str, Any]:
     res = client.get(f"/api/components/{component_id}/pricing")
     assert res.status_code == 200, res.text
-    return res.json()
+    return cast(dict[str, Any], res.json())
 
 
 def _total_row(pricing: dict[str, Any], quantity: int) -> dict[str, Any]:

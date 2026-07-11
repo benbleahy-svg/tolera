@@ -66,6 +66,10 @@ class ContextData:
     custom_attributes: dict[str, Any] = field(default_factory=dict)
     children: list[KalkObject] = field(default_factory=list)
     descendants: list[KalkObject] = field(default_factory=list)  # recursive flat BOM
+    # add-on context (KALK-REFERENCE §11.4 / §7 price dictionary; M1.11) —
+    # effective prices of the add-on cells above the active one, plus the
+    # --required_add_on-- / --non_required_add_on-- accumulators
+    price_values: dict[str, float] = field(default_factory=dict)
     # pricing-item context (KALK-REFERENCE §11.3) — components in leaf-to-root order
     components: list[KalkObject] = field(default_factory=list)
     component_children: dict[str, list[KalkObject]] = field(default_factory=dict)

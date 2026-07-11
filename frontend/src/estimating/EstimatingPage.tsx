@@ -14,12 +14,15 @@ import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
 import { useHasPermission } from '../session/session';
+import { AddOnsSection } from './AddOnsSection';
 import { useEstimatingApi } from './api';
 import { ChangeProcessModal } from './ChangeProcessModal';
+import { LeadTimesSection } from './LeadTimesSection';
 import { MaterialPicker } from './MaterialPicker';
 import { OperationDrawer } from './OperationDrawer';
 import { OperationsSection } from './OperationsSection';
 import { PricingSection } from './PricingSection';
+import { QuoteTotalsPanel } from './QuoteTotalsPanel';
 import type {
   ComponentCosting,
   MaterialSearchHit,
@@ -28,6 +31,7 @@ import type {
   PricingSummary,
   ProcessOut,
   QuoteSummary,
+  QuoteTotals,
 } from './types';
 
 export function EstimatingPage() {
@@ -40,6 +44,7 @@ export function EstimatingPage() {
   const [itemIndex, setItemIndex] = useState(0);
   const [costing, setCosting] = useState<ComponentCosting | null>(null);
   const [pricing, setPricing] = useState<PricingSummary | null>(null);
+  const [totals, setTotals] = useState<QuoteTotals | null>(null);
   const [processes, setProcesses] = useState<ProcessOut[]>([]);
   const [material, setMaterial] = useState<MaterialSearchHit | null>(null);
   const [drawerOpId, setDrawerOpId] = useState<string | null>(null);
@@ -61,7 +66,9 @@ export function EstimatingPage() {
   const loadPricing = useCallback(() => {
     if (!componentId) return;
     api.getPricing(componentId).then(setPricing).catch(fail);
-  }, [api, componentId, fail]);
+    // quote-level VAT totals move with every price/add-on change
+    if (quoteId) api.getQuoteTotals(quoteId).then(setTotals).catch(fail);
+  }, [api, componentId, quoteId, fail]);
 
   useEffect(() => {
     if (!componentId) return;
@@ -324,6 +331,47 @@ export function EstimatingPage() {
               }
             />
           )}
+
+          {pricing && (
+            <AddOnsSection
+              pricing={pricing}
+              formatMoney={formatMoney}
+              editable={editable}
+              loadDefs={api.listAddOnDefs}
+              onAdd={(body) => componentId && applyPricing(api.addAddOn(componentId, body))}
+              onRemove={(id) => applyPricing(api.removeAddOn(id))}
+              onToggleRequired={(id, manualIsRequired) =>
+                applyPricing(api.updateAddOn(id, { manual_is_required: manualIsRequired }))
+              }
+              onPriceOverride={(id, quantity, manualPrice) =>
+                applyPricing(api.setAddOnPrice(id, quantity, manualPrice))
+              }
+            />
+          )}
+
+          {pricing && (
+            <LeadTimesSection
+              pricing={pricing}
+              formatMoney={formatMoney}
+              editable={editable}
+              onLeadTimeOverride={(quantity, manualDays) =>
+                componentId && applyPricing(api.setLeadTime(componentId, quantity, manualDays))
+              }
+              onSetExpediteOptions={(options) =>
+                componentId && applyPricing(api.setExpediteOptions(componentId, options))
+              }
+              onApplyToAll={(standardDays, tiers) =>
+                applyPricing(
+                  api.applyLeadTimesToAll(quoteId, {
+                    standard_lead_time_days: standardDays,
+                    tiers,
+                  }),
+                )
+              }
+            />
+          )}
+
+          {totals && <QuoteTotalsPanel totals={totals} />}
         </>
       )}
 

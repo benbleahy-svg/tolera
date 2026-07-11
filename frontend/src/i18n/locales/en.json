@@ -162,7 +162,8 @@
     "save": "Save",
     "close": "Close",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "add": "Add"
   },
   "estimating": {
     "title": "Quote {{number}} — Costing",
@@ -306,6 +307,33 @@
     "discount_pct": "Discount (%)",
     "total_discount": "Total Discount",
     "total_incl_discounts": "Total (incl. Discounts)",
-    "discount_pct_override_label": "Discount override for {{name}}, quantity {{quantity}}"
+    "discount_pct_override_label": "Discount override for {{name}}, quantity {{quantity}}",
+    "add_ons_title": "Add-Ons",
+    "add_on": "Add-On",
+    "add_add_on": "ADD ADD-ON",
+    "add_on_type": "Add-on type",
+    "add_on_name": "Name",
+    "required": "Required",
+    "not_required": "Not Required",
+    "required_toggle_label": "Toggle required: {{name}}",
+    "add_on_price_label": "Price {{name}} at quantity {{qty}}",
+    "remove_add_on_label": "Remove add-on: {{name}}",
+    "total_required_add_ons": "Total Required Add-Ons",
+    "total_with_required_add_ons": "Total Price with Required Add-Ons",
+    "lead_times_title": "Lead Times",
+    "quantity": "Quantity",
+    "lead_time": "Lead time",
+    "lead_time_override_label": "Lead time at quantity {{qty}}",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "expedite_option": "Expedite {{index}}",
+    "standard_lead_time": "Standard lead time (days)",
+    "days_faster": "Days faster",
+    "markup_pct": "Markup %",
+    "set_expedites": "Set expedite options",
+    "apply_to_all": "APPLY TO ALL",
+    "quote_totals_title": "Quote totals",
+    "net_total": "Net",
+    "gross_total": "Gross"
   }
 }
