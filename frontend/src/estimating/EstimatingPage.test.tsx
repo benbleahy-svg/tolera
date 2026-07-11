@@ -34,6 +34,26 @@ const removeDiscount = vi.fn();
 const setDiscountPct = vi.fn();
 const setUnitPriceOverride = vi.fn();
 const refreshPricing = vi.fn();
+const listAddOnDefs = vi.fn(() => Promise.resolve([]));
+const addAddOn = vi.fn();
+const updateAddOn = vi.fn();
+const removeAddOn = vi.fn();
+const setAddOnPrice = vi.fn();
+const setLeadTime = vi.fn();
+const setExpediteOptions = vi.fn();
+const applyLeadTimesToAll = vi.fn();
+const getQuoteTotals = vi.fn(() =>
+  Promise.resolve({
+    currency: 'EUR',
+    country: 'DE',
+    vat_label: 'MwSt.',
+    vat_rate_pct: '19',
+    items: [],
+    net_minor: 0,
+    vat_minor: 0,
+    gross_minor: 0,
+  }),
+);
 
 // Mock the estimating API module so the page never touches Clerk/network.
 vi.mock('./api', () => ({
@@ -65,6 +85,15 @@ vi.mock('./api', () => ({
     setDiscountPct,
     setUnitPriceOverride,
     refreshPricing,
+    listAddOnDefs,
+    addAddOn,
+    updateAddOn,
+    removeAddOn,
+    setAddOnPrice,
+    setLeadTime,
+    setExpediteOptions,
+    applyLeadTimesToAll,
+    getQuoteTotals,
   }),
 }));
 
@@ -209,6 +238,8 @@ function pricingSummary(): import('./types').PricingSummary {
       },
     ],
     discounts: [],
+    add_ons: [],
+    lead_times: [],
     totals: [
       {
         quantity: 1,
@@ -222,6 +253,8 @@ function pricingSummary(): import('./types').PricingSummary {
         total_discount_pct: '0.0000',
         total_profit: '5.0000',
         profit_margin_pct: '16.6700',
+        total_required_add_ons: '0.0000',
+        total_with_required_add_ons: null,
       },
       {
         quantity: 10,
@@ -235,6 +268,8 @@ function pricingSummary(): import('./types').PricingSummary {
         total_discount_pct: '0.0000',
         total_profit: '32.0000',
         profit_margin_pct: '16.6700',
+        total_required_add_ons: '0.0000',
+        total_with_required_add_ons: null,
       },
     ],
   };

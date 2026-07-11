@@ -674,6 +674,12 @@ class Quote(Base):
     private_notes: Mapped[str | None] = mapped_column(Text)
     # E4-d freeze marker — column only in M1.4; freeze/Refresh-Pricing is pricing-engine work.
     config_frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # M1.11 — the top-of-quote dynamic-lead-time editor state (spec #addons
+    # "Expedite: configured at quote level; APPLY TO ALL pushes the tiers to
+    # every line item"): {"standard_lead_time_days": int|null, "tiers":
+    # [{"days_faster": int, "markup_pct": number}]}. Staging only — the math
+    # reads the per-component expedite_option rows the apply writes.
+    expedite_tiers: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Workflow-tracker + lifecycle timestamps.
     rfq_received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -845,6 +851,14 @@ class ComponentQuantity(Base):
     total_discount_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
     total_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     profit_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    # M1.11 per-break lead time (spec #addons Lead Times; the folded-DDL
+    # ``lead_time_days`` split into the CLAUDE.md §5 calc-vs-override pair,
+    # the same divergence M1.10 made for unit_price). calc = process default
+    # + material adder + Σ effective operation DAYS at this break; manual =
+    # the estimator's blue-text edit; lead_time_days = the resolved value.
+    calc_lead_time_days: Mapped[int | None] = mapped_column(Integer)
+    manual_lead_time_days: Mapped[int | None] = mapped_column(Integer)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1259,6 +1273,10 @@ class QuoteCell(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     calc_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     manual_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    # M1.11 — the operation's Kalk ``DAYS`` output (business days), the
+    # deferred column from the M1.7 quote_cell decision. Calc-only: the
+    # break-level ``manual_lead_time_days`` is the human override point.
+    days: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1585,5 +1603,164 @@ class DiscountCell(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     calc_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
     manual_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class AddOnDef(Base):
+    """An org's add-on **type** (spec ``#addons``: the searchable,
+    admin-configurable ``AddOnType`` dropdown behind ADD ADD-ON). Carries a
+    flat ``default_price`` or a Kalk ``add_on``-context ``formula`` (spec:
+    "flat or computed price") plus the Required default. Soft-delete +
+    live-name unique mirror :class:`PricingItemDef` (M1.10)."""
+
+    __tablename__ = "add_on_def"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_add_on_def_org_id_id"),
+        CheckConstraint(
+            "default_price IS NULL OR default_price >= 0",
+            name="ck_add_on_def_price_positive",
+        ),
+        Index(
+            "uq_add_on_def_org_name_live",
+            "org_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    formula: Mapped[str | None] = mapped_column(Text)
+    default_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    default_is_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class AddOn(Base):
+    """An add-on on a quote item's root component (spec ``#addons``: per-line
+    extra charge, per-qty, Required toggle) — a line-item one-time fee that
+    never touches the unit price (KB ``add-ons-p3l-cheat-sheet``) and applies
+    **after** discounts (PRICING-ENGINE-SPEC §3.5). Snapshot-on-attach from
+    :class:`AddOnDef` (E4-d). Required-ness resolves ``manual_is_required ??
+    calc_is_required ?? default_is_required`` (CLAUDE.md §5 pair; the calc
+    side is the formula's ``set_is_required``)."""
+
+    __tablename__ = "add_on"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_add_on_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_add_on_component_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "source_def_id"],
+            ["add_on_def.org_id", "add_on_def.id"],
+            name="fk_add_on_source_def_org",
+        ),
+        CheckConstraint(
+            "default_price IS NULL OR default_price >= 0",
+            name="ck_add_on_price_positive",
+        ),
+        Index("ix_add_on_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_def_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    formula: Mapped[str | None] = mapped_column(Text)
+    default_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    default_is_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    calc_is_required: Mapped[bool | None] = mapped_column(Boolean)
+    manual_is_required: Mapped[bool | None] = mapped_column(Boolean)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    is_from_factory: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+    @property
+    def is_required(self) -> bool:
+        if self.manual_is_required is not None:
+            return self.manual_is_required
+        if self.calc_is_required is not None:
+            return self.calc_is_required
+        return self.default_is_required
+
+
+class AddOnCell(Base):
+    """One add-on's PRICE at one quantity break (calc-vs-override pair —
+    ``calc_price`` from the Kalk formula or the flat default, ``manual_price``
+    the estimator's edit). One-time fee per break: never multiplied by qty."""
+
+    __tablename__ = "add_on_cell"
+    __table_args__ = (
+        UniqueConstraint("add_on_id", "quantity", name="uq_add_on_cell_add_on_qty"),
+        ForeignKeyConstraint(
+            ["org_id", "add_on_id"],
+            ["add_on.org_id", "add_on.id"],
+            name="fk_add_on_cell_add_on_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["component_id", "quantity"],
+            ["component_quantity.component_id", "component_quantity.quantity"],
+            name="fk_add_on_cell_component_quantity",
+            ondelete="CASCADE",
+        ),
+        Index("ix_add_on_cell_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    add_on_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    calc_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    manual_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class ExpediteOption(Base):
+    """One dynamic-lead-time tier on a root component (E4-c; folded DDL
+    ``expedite_option``): relative ``days_faster`` + ``markup_pct`` on price
+    (KB ``dynamic-lead-times-guide``: relative days + %, never a date or a
+    flat fee). Buyer-facing options only — they enter order money at M5."""
+
+    __tablename__ = "expedite_option"
+    __table_args__ = (
+        UniqueConstraint("component_id", "days_faster", name="uq_expedite_option_comp_days"),
+        ForeignKeyConstraint(
+            ["org_id", "component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_expedite_option_component_org",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("days_faster > 0", name="ck_expedite_option_days_positive"),
+        CheckConstraint("markup_pct >= 0", name="ck_expedite_option_markup_positive"),
+        Index("ix_expedite_option_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    days_faster: Mapped[int] = mapped_column(Integer, nullable=False)
+    markup_pct: Mapped[Decimal] = mapped_column(Numeric(7, 3), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()

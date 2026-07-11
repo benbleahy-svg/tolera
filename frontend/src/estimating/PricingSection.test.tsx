@@ -120,6 +120,8 @@ function summary(): PricingSummary {
         cells: [{ quantity: 1, calc_pct: '5.0000', manual_pct: null, pct: '5.0000' }],
       },
     ],
+    add_ons: [],
+    lead_times: [],
     totals: [
       {
         quantity: 1,
@@ -133,6 +135,8 @@ function summary(): PricingSummary {
         total_discount_pct: '5.0000',
         total_profit: '350.4220',
         profit_margin_pct: '17.0704',
+        total_required_add_ons: '0.0000',
+        total_with_required_add_ons: null,
       },
     ],
   };

@@ -162,7 +162,8 @@
     "save": "Speichern",
     "close": "Schließen",
     "yes": "Ja",
-    "no": "Nein"
+    "no": "Nein",
+    "add": "Hinzufügen"
   },
   "estimating": {
     "title": "Angebot {{number}} — Kalkulation",
@@ -306,6 +307,33 @@
     "discount_pct": "Rabatt (%)",
     "total_discount": "Rabatt gesamt",
     "total_incl_discounts": "Gesamtpreis (inkl. Rabatte)",
-    "discount_pct_override_label": "Rabatt-Override für {{name}}, Losgröße {{quantity}}"
+    "discount_pct_override_label": "Rabatt-Override für {{name}}, Losgröße {{quantity}}",
+    "add_ons_title": "Zusatzleistungen (Add-Ons)",
+    "add_on": "Add-On",
+    "add_add_on": "ADD-ON HINZUFÜGEN",
+    "add_on_type": "Add-On-Typ",
+    "add_on_name": "Name",
+    "required": "Erforderlich",
+    "not_required": "Optional",
+    "required_toggle_label": "Erforderlich umschalten: {{name}}",
+    "add_on_price_label": "Preis {{name}} bei Menge {{qty}}",
+    "remove_add_on_label": "Add-On entfernen: {{name}}",
+    "total_required_add_ons": "Summe erforderliche Add-Ons",
+    "total_with_required_add_ons": "Gesamtpreis inkl. erforderlicher Add-Ons",
+    "lead_times_title": "Lieferzeiten",
+    "quantity": "Menge",
+    "lead_time": "Lieferzeit",
+    "lead_time_override_label": "Lieferzeit bei Menge {{qty}}",
+    "days_one": "{{count}} Tag",
+    "days_other": "{{count}} Tage",
+    "expedite_option": "Express {{index}}",
+    "standard_lead_time": "Standard-Lieferzeit (Tage)",
+    "days_faster": "Tage schneller",
+    "markup_pct": "Aufschlag %",
+    "set_expedites": "Express-Optionen setzen",
+    "apply_to_all": "AUF ALLE ANWENDEN",
+    "quote_totals_title": "Angebotssumme",
+    "net_total": "Netto",
+    "gross_total": "Brutto"
   }
 }

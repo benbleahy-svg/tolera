@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -248,6 +248,8 @@ class QuoteDetail(BaseModel):
     sent_at: datetime | None
     config_frozen_at: datetime | None
     trashed: bool
+    # the top-of-quote dynamic-lead-time editor staging (M1.11 #addons)
+    expedite_tiers: dict[str, Any] | None
     allowed_transitions: list[QuoteStatus]
     workflow: WorkflowTracker
     items: list[QuoteItemOut]
@@ -393,6 +395,7 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
         sent_at=quote.sent_at,
         config_frozen_at=quote.config_frozen_at,
         trashed=quote.deleted_at is not None,
+        expedite_tiers=quote.expedite_tiers,
         allowed_transitions=sorted(allowed_targets(quote.status, quote.status_before_hold)),
         workflow=tracker,
         items=items,

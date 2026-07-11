@@ -17,6 +17,7 @@ from app.services.kalk.executor import Executor, InProcessExecutor
 from app.services.kalk.limits import Limits
 from app.services.kalk.objects import ContextData
 from app.services.kalk.runtime import (
+    ADD_ON_NAMES,
     BUILTIN_NAMES,
     DISCOUNT_NAMES,
     OPERATION_COST_NAMES,
@@ -31,14 +32,15 @@ from app.services.kalk.validator import parse_and_validate
 
 KALK_FILENAME = "<kalk>"
 
-# M1.9 implemented operation_cost + pricing_item, M1.10 adds discount;
-# add_on lands with M1.11 and operation_generation with M4 (KALK-REFERENCE §1).
-SUPPORTED_CONTEXTS = frozenset({"operation_cost", "pricing_item", "discount"})
+# M1.9 implemented operation_cost + pricing_item, M1.10 added discount,
+# M1.11 adds add_on; operation_generation arrives with M4 (KALK-REFERENCE §1).
+SUPPORTED_CONTEXTS = frozenset({"operation_cost", "pricing_item", "discount", "add_on"})
 
 _CONTEXT_NAMES: dict[str, frozenset[str]] = {
     "operation_cost": OPERATION_COST_NAMES,
     "pricing_item": PRICING_ITEM_NAMES,
     "discount": DISCOUNT_NAMES,
+    "add_on": ADD_ON_NAMES,
 }
 
 
@@ -58,6 +60,8 @@ class EvalResult:
     operation_name: str | None = None
     profit_item_name: str | None = None
     discount_name: str | None = None
+    add_on_name: str | None = None
+    add_on_is_required: bool | None = None
     workpiece: dict[str, Any] = field(default_factory=dict)
     custom_attributes: dict[str, Any] = field(default_factory=dict)
     errors: list[KalkError] = field(default_factory=list)
@@ -145,6 +149,8 @@ def evaluate(
     result.operation_name = runtime.operation_name
     result.profit_item_name = runtime.profit_item_name
     result.discount_name = runtime.discount_name
+    result.add_on_name = runtime.add_on_name
+    result.add_on_is_required = runtime.add_on_is_required
     result.workpiece = runtime.workpiece
     result.custom_attributes = runtime.custom_attributes_out
 
@@ -249,10 +255,36 @@ def _extract_discount_output(
     return {"PERCENTAGE": float(percentage)}
 
 
+def _extract_add_on_output(
+    namespace: dict[str, object], runtime: Runtime
+) -> dict[str, Any] | list[KalkError]:
+    price = namespace.get("PRICE")
+    if isinstance(price, DynamicVar):
+        try:
+            price = price.kalk_value
+        except KalkAbort as exc:
+            return [exc.error]
+    if price is None and "PRICE" not in namespace:
+        return [KalkError(code="invalid_output", message="the formula never set PRICE")]
+    if (
+        isinstance(price, bool)
+        or not isinstance(price, int | float)
+        or not math.isfinite(price)
+        or price < 0
+    ):
+        # a negative add-on would be a hidden discount (the discount-positivity
+        # rationale, KALK-REFERENCE §1); discounts own price reductions
+        return [
+            KalkError(code="invalid_output", message="PRICE must be a finite, non-negative number")
+        ]
+    return {"PRICE": float(price)}
+
+
 _OUTPUT_EXTRACTORS: dict[str, Any] = {
     "operation_cost": _extract_operation_cost_output,
     "pricing_item": _extract_pricing_item_output,
     "discount": _extract_discount_output,
+    "add_on": _extract_add_on_output,
 }
 
 

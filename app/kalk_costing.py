@@ -35,10 +35,10 @@ the Kalk evaluator instead of the M1.7 mode arithmetic (DECISIONS.md
   compatible with a future subprocess executor. Evaluation runs off the event
   loop via ``anyio.to_thread``.
 
-``DAYS`` is validated but not persisted until M1.11 (quote_cell carries no
-``days`` — M1.7 decision). Evaluation errors blank the cell (``calc_cost
-NULL`` = unpriceable, the M1.14 signal); the drawer surfaces them via
-``GET /api/operations/{id}/kalk``.
+``DAYS`` persists to ``quote_cell.days`` from M1.11 (the column the M1.7
+decision deferred) and feeds the per-break lead-time roll-up. Evaluation
+errors blank the cell (``calc_cost NULL`` = unpriceable, the M1.14 signal);
+the drawer surfaces them via ``GET /api/operations/{id}/kalk``.
 """
 
 from __future__ import annotations
@@ -227,6 +227,9 @@ class OpTimes:
 @dataclass
 class CellEval:
     calc_cost: Decimal | None
+    # the formula's DAYS output (business days; M1.11 quote_cell.days) —
+    # None when the eval errored or no_quote'd
+    days: int | None
     workpiece: dict[str, Any]
     custom_attributes: dict[str, Any]
     # formula-computed times only; None when absent OR manually overridden
@@ -309,17 +312,20 @@ def evaluate_cell(
         {"code": e.code, "message": e.message, "line": e.line, "col": e.col} for e in result.errors
     ]
     calc: Decimal | None = None
+    days: int | None = None
     no_quote = False
     if not errors and result.output is not None:
         if result.output.get("no_quote"):
             no_quote = True  # blank the cell deliberately (KALK-REFERENCE §11.1)
         else:
             calc = kalk_output_to_calc(op, result.output["COST"])
+            days = int(result.output["DAYS"])
     # An overridden runtime/setup_time freezes to the MANUAL value — writing it
     # back would contaminate the calc side of the calc-vs-manual pair, so the
     # write-back only carries formula-computed times.
     return CellEval(
         calc_cost=calc,
+        days=days,
         workpiece=result.workpiece,
         custom_attributes=result.custom_attributes,
         runtime_hours=(

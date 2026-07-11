@@ -309,6 +309,89 @@ export interface PricingTotalsRow {
   total_discount_pct: string | null;
   total_profit: string | null;
   profit_margin_pct: string | null;
+  total_required_add_ons: string | null;
+  total_with_required_add_ons: string | null;
+}
+
+// --- M1.11: add-ons, lead times, expedite, VAT totals (spec #addons/#dach-tax)
+
+export interface AddOnCellOut {
+  quantity: number;
+  calc_price: string | null;
+  manual_price: string | null;
+  price: string | null;
+}
+
+export interface AddOnOut {
+  id: string;
+  source_def_id: string | null;
+  name: string;
+  formula: string | null;
+  default_price: string | null;
+  default_is_required: boolean;
+  calc_is_required: boolean | null;
+  manual_is_required: boolean | null;
+  is_required: boolean;
+  position: number;
+  is_from_factory: boolean;
+  cells: AddOnCellOut[];
+}
+
+export interface AddOnDefOut {
+  id: string;
+  name: string;
+  formula: string | null;
+  default_price: string | null;
+  default_is_required: boolean;
+  position: number;
+}
+
+export interface AddOnCreateBody {
+  source_def_id?: string | null;
+  name?: string | null;
+  formula?: string | null;
+  default_price?: string | null;
+  is_required?: boolean | null;
+}
+
+export interface ExpediteRowOut {
+  id: string;
+  days_faster: number;
+  markup_pct: string;
+  lead_time_days: number | null;
+  unit_price: string | null;
+  total_price: string | null;
+}
+
+export interface LeadTimeRowOut {
+  quantity: number;
+  calc_lead_time_days: number | null;
+  manual_lead_time_days: number | null;
+  lead_time_days: number | null;
+  expedites: ExpediteRowOut[];
+}
+
+export interface ExpediteTierBody {
+  days_faster: number;
+  markup_pct: string;
+}
+
+export interface QuoteTotalsItem {
+  quote_item_id: string;
+  component_id: string;
+  quantity: number;
+  net_minor: number;
+}
+
+export interface QuoteTotals {
+  currency: string;
+  country: string;
+  vat_label: string;
+  vat_rate_pct: string;
+  items: QuoteTotalsItem[];
+  net_minor: number;
+  vat_minor: number;
+  gross_minor: number;
 }
 
 export interface PricingSummary {
@@ -317,6 +400,8 @@ export interface PricingSummary {
   costing: CostingRow[];
   pricing_items: PricingItemOut[];
   discounts: DiscountOut[];
+  add_ons: AddOnOut[];
+  lead_times: LeadTimeRowOut[];
   totals: PricingTotalsRow[];
 }
 

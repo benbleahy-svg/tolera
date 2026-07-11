@@ -261,7 +261,7 @@ class Seeder:
         cost_formula: str | None = None,
         is_outside_service: bool = False,
         is_finish: bool = False,
-        variable_overrides: dict | None = None,
+        variable_overrides: dict[str, object] | None = None,
         position: int = 0,
     ) -> uuid.UUID:
         """Plant an operation row directly — used for **child** components,
@@ -526,7 +526,7 @@ class Seeder:
         cost_formula: str | None,
         is_outside_service: bool,
         is_finish: bool,
-        variable_overrides: dict,
+        variable_overrides: dict[str, object],
         position: int,
     ) -> uuid.UUID:
         async with AsyncSession(self._engine) as session, session.begin():
