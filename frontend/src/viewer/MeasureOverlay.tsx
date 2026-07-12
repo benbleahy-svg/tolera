@@ -223,11 +223,16 @@ export function MeasureOverlay({
 
   const onDoubleClick = () => {
     if (!tool) return;
-    if ((tool === 'perimeter' || tool === 'area_custom') && clicks.length >= 2) {
-      finish(tool, clicks);
+    // a double-click fires two pointer-downs at the same spot — collapse the
+    // duplicate so the finish location counts exactly once
+    const deduped = clicks.filter(
+      (p, i) => i === 0 || Math.hypot(p.x - clicks[i - 1].x, p.y - clicks[i - 1].y) > 1,
+    );
+    if ((tool === 'perimeter' || tool === 'area_custom') && deduped.length >= 2) {
+      finish(tool, deduped);
       setClicks([]);
-    } else if (tool === 'count' && clicks.length >= 1) {
-      finish('count', clicks);
+    } else if (tool === 'count' && deduped.length >= 1) {
+      finish('count', deduped);
       setClicks([]);
     }
   };

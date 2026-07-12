@@ -434,6 +434,8 @@
     "measure_erase": "Messung löschen",
     "snapping": "Fangen",
     "precision": "Nachkommastellen",
-    "measurements_page": "Messungen Seite {{page}}"
+    "measurements_page": "Messungen Seite {{page}}",
+    "measure_undo": "Messung rückgängig",
+    "measure_redo": "Messung wiederholen"
   }
 }

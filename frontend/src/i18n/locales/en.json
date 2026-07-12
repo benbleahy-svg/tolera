@@ -434,6 +434,8 @@
     "measure_erase": "Erase measurement",
     "snapping": "Snapping",
     "precision": "Decimals",
-    "measurements_page": "Measurements page {{page}}"
+    "measurements_page": "Measurements page {{page}}",
+    "measure_undo": "Undo measurement",
+    "measure_redo": "Redo measurement"
   }
 }

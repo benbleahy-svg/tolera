@@ -186,7 +186,8 @@ export function formatMeasurement(measurement: Measurement, precision: number): 
         measurement.arc?.radiusMm ?? 0,
         'mm',
       )} · ${(measurement.arc?.centerAngleDeg ?? 0).toLocaleString('de-DE', {
-        maximumFractionDigits: 1,
+        minimumFractionDigits: precision,
+        maximumFractionDigits: precision,
       })}°`;
     case 'count':
       return String(measurement.count ?? measurement.points.length);

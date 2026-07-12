@@ -683,14 +683,14 @@ export function PdfViewerPage() {
             disabled={!measures.undoStack.length}
             onClick={() => dispatchMeasures({ kind: 'undo' })}
           >
-            {t('viewer.undo')}
+            {t('viewer.measure_undo')}
           </button>
           <button
             type="button"
             disabled={!measures.redoStack.length}
             onClick={() => dispatchMeasures({ kind: 'redo' })}
           >
-            {t('viewer.redo')}
+            {t('viewer.measure_redo')}
           </button>
           {scaleWarning && (
             <span role="alert" className="est-warning-banner">
