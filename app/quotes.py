@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal, get_principal
 from .authz import Permission, has_permission, require
+from .config_completeness import quote_items_missing_rates
 from .costing import recalculate_component
 from .deps import get_session
 from .errors import AppError
@@ -248,6 +249,9 @@ class QuoteDetail(BaseModel):
     sent_at: datetime | None
     config_frozen_at: datetime | None
     trashed: bool
+    # M1.14 #missing-rates-warning: how many line items use an operation whose
+    # rate resolves to nothing — non-blocking banner, reappears until rates set
+    missing_rates_item_count: int
     # the top-of-quote dynamic-lead-time editor staging (M1.11 #addons)
     expedite_tiers: dict[str, Any] | None
     allowed_transitions: list[QuoteStatus]
@@ -395,6 +399,7 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
         sent_at=quote.sent_at,
         config_frozen_at=quote.config_frozen_at,
         trashed=quote.deleted_at is not None,
+        missing_rates_item_count=await quote_items_missing_rates(session, quote.id),
         expedite_tiers=quote.expedite_tiers,
         allowed_transitions=sorted(allowed_targets(quote.status, quote.status_before_hold)),
         workflow=tracker,

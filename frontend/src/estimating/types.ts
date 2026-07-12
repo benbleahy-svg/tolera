@@ -42,6 +42,7 @@ export interface OperationOut {
   notes: string | null;
   cost_formula: string | null;
   variable_overrides: Record<string, VariableOverrideValue>;
+  missing_rate: boolean;
   cells: QuoteCellOut[];
 }
 
@@ -111,6 +112,7 @@ export interface ComponentCosting {
   quantities: number[];
   operations: OperationOut[];
   buckets: CostBucket[];
+  has_missing_rates: boolean;
 }
 
 export interface MaterialOut {
@@ -166,6 +168,7 @@ export interface OperationDefOut {
   is_finish: boolean;
   is_pre_installed: boolean;
   sort_order: number;
+  cost_formula: string | null;
 }
 
 /** The subset of the quote-detail response the estimating page reads (M1.4/M1.6). */
@@ -182,6 +185,7 @@ export interface QuoteSummary {
   number: string;
   status: string;
   currency: string;
+  missing_rates_item_count: number;
   items: QuoteItemSummary[];
 }
 

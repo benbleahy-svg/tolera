@@ -133,6 +133,7 @@ function op(name: string, cells: QuoteCellOut[], extra: Partial<OperationOut> = 
     notes: null,
     cost_formula: null,
     variable_overrides: {},
+    missing_rate: false,
     cells,
     ...extra,
   };
@@ -145,6 +146,7 @@ function costing(operations: OperationOut[]): ComponentCosting {
     process_id: null,
     quantities: [1, 10],
     operations,
+    has_missing_rates: false,
     buckets: [
       {
         quantity: 1,
@@ -171,6 +173,7 @@ const QUOTE = {
   number: 'A-0001',
   status: 'draft',
   currency: 'EUR',
+  missing_rates_item_count: 0,
   items: [
     {
       id: 'item-1',

@@ -9,6 +9,7 @@ import { useClerk } from '@clerk/clerk-react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { CustomTablesPage } from './configure/CustomTablesPage';
+import { OperationsPage } from './configure/OperationsPage';
 import { PricingDefsPage } from './configure/PricingDefsPage';
 import { AccountDetailPage } from './contacts/AccountDetailPage';
 import { ContactDetailPage } from './contacts/ContactDetailPage';
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="/configure" element={<CustomTablesPage />} />
         {/* Configure → Pricing: the org pricing-item/discount library (M1.10). */}
         <Route path="/configure/pricing" element={<PricingDefsPage />} />
+        <Route path="/configure/operations" element={<OperationsPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />

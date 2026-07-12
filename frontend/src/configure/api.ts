@@ -71,7 +71,19 @@ export interface DiscountDefOut {
   position: number;
 }
 
+export interface ConfigCompleteness {
+  unrated_operation_defs: number;
+  unrated_materials: number;
+}
+
 export interface ConfigureApi {
+  listOperationDefs: (q: string) => Promise<import('../estimating/types').OperationDefOut[]>;
+  updateOperationDef: (
+    defId: string,
+    body: { run_rate?: string | null; labour_rate?: string | null },
+  ) => Promise<unknown>;
+  getConfigCompleteness: () => Promise<ConfigCompleteness>;
+  applyRateToAll: (runRate: string) => Promise<{ updated: number }>;
   listTables: () => Promise<CustomTableOut[]>;
   getTable: (tableId: string) => Promise<CustomTableDetail>;
   createTable: (name: string, columns: ColumnSpec[]) => Promise<CustomTableOut>;
@@ -100,6 +112,15 @@ export function useConfigureApi(): ConfigureApi {
   return useMemo<ConfigureApi>(() => {
     const token: TokenGetter = () => getToken();
     return {
+      listOperationDefs: (q) => apiFetch(`/api/operation-defs?q=${encodeURIComponent(q)}`, token),
+      updateOperationDef: (defId, body) =>
+        apiFetch(`/api/operation-defs/${defId}`, token, { method: 'PATCH', body }),
+      getConfigCompleteness: () => apiFetch('/api/config-completeness', token),
+      applyRateToAll: (runRate) =>
+        apiFetch('/api/operation-defs/apply-rate', token, {
+          method: 'POST',
+          body: { run_rate: runRate },
+        }),
       listTables: () => apiFetch('/api/custom-tables', token),
       getTable: (tableId) => apiFetch(`/api/custom-tables/${tableId}`, token),
       createTable: (name, columns) =>
