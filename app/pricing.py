@@ -66,6 +66,7 @@ from .models import (
     OpCategory,
     Operation,
     OperationDef,
+    Organization,
     Part,
     PricingItem,
     PricingItemCell,
@@ -161,6 +162,8 @@ class PricingEnv:
     # distinguishes "no source at all" (calc stays NULL) from a genuine 0
     base_lead_days: int = 0
     has_lead_base: bool = False
+    # DACH Costing Mode (M1.12) — exposes the Zuschlagskalkulation Kalk helpers
+    dach_costing_mode: bool = False
 
 
 async def _material_names(
@@ -385,6 +388,10 @@ async def load_pricing_env(session: AsyncSession, component: Component) -> Prici
         contact=contact_obj,
         base_lead_days=base_lead_days,
         has_lead_base=has_lead_base,
+        dach_costing_mode=await session.scalar(
+            select(Organization.dach_costing_mode).where(Organization.id == component.org_id)
+        )
+        or False,
     )
 
 
@@ -702,30 +709,37 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
     }
 
     # ---- pricing items: independent, additive, off cost -----------------------
-    def evaluate_item(item: PricingItem) -> ItemResult:
+    def evaluate_item(item: PricingItem, prior_items_total: Decimal) -> ItemResult:
         cell = env.item_cells.get((item.id, brk.quantity))
         calc_pct: Decimal | None = None
         custom_cost: Decimal | None = None
         if item.formula:
+            eval_context: dict[str, Any] = {
+                "MATERIAL_COST": float(result.material),
+                "INSIDE_COST": float(result.inside),
+                "OUTSIDE_COST": float(result.outside),
+                "PURCHASED_COMPONENT_COST": float(result.purchased),
+                "TOTAL_COST": float(result.total_cost),
+                "CALCULATION_TYPE": ("MARGIN" if item.calc_type is CalcType.margin else "MARKUP"),
+                "COST_CATEGORY": item.custom_category_name or item.category.value,
+                "CATEGORY_COST": float(_ZERO if item.is_custom else category_cost[item.category]),
+                "REQUESTED_QUANTITY": brk.quantity,
+                "contact": env.contact,
+            }
+            if env.dach_costing_mode:
+                # Zuschlagskalkulation helpers (spec #dach-costing, M1.12):
+                # Herstellkosten = Material + Inside cost categories;
+                # Selbstkosten = everything before this item in the stack
+                # (all cost categories + prior items' amounts — the seed
+                # positions Gewinn last, so it sees MGK/VwGK/VtGK).
+                herstellkosten = float(_q4(result.material + result.inside))
+                selbstkosten = float(_q4(result.total_cost + prior_items_total))
+                eval_context["get_herstellkosten"] = lambda: herstellkosten
+                eval_context["get_selbstkosten"] = lambda: selbstkosten
             eval_result = evaluate(
                 item.formula,
                 context_type="pricing_item",
-                eval_context={
-                    "MATERIAL_COST": float(result.material),
-                    "INSIDE_COST": float(result.inside),
-                    "OUTSIDE_COST": float(result.outside),
-                    "PURCHASED_COMPONENT_COST": float(result.purchased),
-                    "TOTAL_COST": float(result.total_cost),
-                    "CALCULATION_TYPE": (
-                        "MARGIN" if item.calc_type is CalcType.margin else "MARKUP"
-                    ),
-                    "COST_CATEGORY": item.custom_category_name or item.category.value,
-                    "CATEGORY_COST": float(
-                        _ZERO if item.is_custom else category_cost[item.category]
-                    ),
-                    "REQUESTED_QUANTITY": brk.quantity,
-                    "contact": env.contact,
-                },
+                eval_context=eval_context,
                 quantity=brk.quantity,
                 table_provider=env.provider,
                 context_data=context_data,
@@ -761,7 +775,7 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
     for item in env.items:
         if item.calc_type is CalcType.target_margin:
             continue
-        item_result = evaluate_item(item)
+        item_result = evaluate_item(item, other_sum)
         result.items[item.id] = item_result
         other_sum += item_result.effective_amount
 

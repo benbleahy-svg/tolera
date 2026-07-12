@@ -1,0 +1,717 @@
+"""Idempotent per-org Configure seed (M1.12) — SEED-AND-FIXTURES Part 1 §2-§7.
+
+Extends the M1.7 material/process seed (``app.catalog_seed``) with everything
+else the pricing engine quotes against:
+
+* **§2** — the non-metal material classes (Kunststoff with POM/PA6/PEEK
+  leaves, Verbundwerkstoff, Sand, Wachs, Additiv, plus Holz and Sonstige per
+  DECISIONS.md 2026-07-07 "Foreign materials"). The Metall tree stays
+  M1.7-owned.
+* **§3** — the 54-op German library from spec ``#oplibrary`` (the numbered
+  tables are authoritative: rows 1-32 machine_plus_operator, 33-54
+  labour_only), plus the §3/§4 router-support entries (material lines,
+  PC piece price, assembly/shipping-prep, hardware insert, outside service,
+  engineering). ``is_pre_installed=true``; **rates stay NULL** — the spec is
+  explicit: "Rates are not pre-seeded — every shop configures their own."
+* **§4** — Core-4 router templates (``process_operation`` rows) +
+  ``Assembly | Parent-Level`` + the default purchased-component process.
+* **§6** — pricing defaults: Standardaufschlag, the Zuschlagskalkulation
+  items (spec ``#zuschlagskalkulation`` / ``#dach-costing`` — seeded when
+  DACH Costing Mode is on, which DACH orgs are provisioned with), a sample
+  Kalk volume discount, the six ``#addons`` AddOnType defs, and the org's
+  default expedite tiers.
+* **§7 partial** — workflow steps, the three example custom tables, German
+  email templates. The starter rule library waits for M3's rules engine.
+
+Idempotency follows ``app.catalog_seed``: natural-key match per org, then
+insert-or-reconcile. Re-seeding never overwrites user edits — existing rows
+keep their configured rates/percentages ("Defaults are starting points, not
+prescriptions"). Runs on the owner connection; ``org_id`` scopes every write.
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from decimal import Decimal
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import (
+    AddOnDef,
+    CalcType,
+    CalculationMode,
+    CostCategory,
+    CustomTable,
+    DiscountDef,
+    EmailTemplate,
+    Material,
+    MaterialClass,
+    MaterialFamily,
+    OpCategory,
+    OperationDef,
+    Organization,
+    PricingItemDef,
+    Process,
+    ProcessFamily,
+    ProcessOperation,
+    WorkflowStepDef,
+)
+
+# ---------------------------------------------------------------------------
+# §2 — non-metal classes (German-first; Metall is M1.7's)
+# ---------------------------------------------------------------------------
+# (class name, position). Metall holds position 0 from M1.7.
+_EXTRA_CLASSES: tuple[tuple[str, int], ...] = (
+    ("Kunststoff", 1),
+    ("Verbundwerkstoff", 2),
+    ("Sand", 3),
+    ("Wachs", 4),
+    ("Additiv", 5),
+    ("Holz", 6),
+    ("Sonstige", 7),
+)
+
+# The §2 polymers as leaves under Kunststoff (standard densities, costs NULL).
+_POLYMER_FAMILY = ("Thermoplaste", "Polymers")
+_POLYMERS: tuple[tuple[str, str], ...] = (  # (display name, density g/cm3)
+    ("POM", "1.41"),
+    ("PA6", "1.14"),
+    ("PEEK", "1.32"),
+)
+
+# ---------------------------------------------------------------------------
+# §3 — the 54-op German library (spec #oplibrary, numbered tables verbatim)
+# ---------------------------------------------------------------------------
+_MACHINE_OPERATOR_OPS: tuple[str, ...] = (
+    "Fräsen/Drehen",
+    "Fräsen",
+    "Drehen",
+    "Bohren",
+    "Senken",
+    "Schleifen 1",
+    "Schleifen 2",
+    "Honen",
+    "Zerspanen",
+    "Sägen/Schneiden",
+    "Auf Gehrung",
+    "V-Cut",
+    "Kanten",
+    "Biegen",
+    "Walzen",
+    "Richten",
+    "Verformen",
+    "Strahlen",
+    "Bürsten",
+    "Gewindefräsen",
+    "Verzahnen",
+    "Laserschneiden Blech",
+    "Laserschneiden Rohr",
+    "Plasmaschneiden",
+    "Brennschneiden",
+    "Wasserstrahlschneiden",
+    "Erodieren Senk",
+    "Drahterodieren",
+    "Punktschweißen",
+    "Roboterschweißen",
+    "Lackieren",
+    "Pulverbeschichten",
+)
+
+_LABOUR_ONLY_OPS: tuple[str, ...] = (
+    "Schweißen",
+    "MAG/MIG Schweißen",
+    "WIG/TIG Schweißen",
+    "Heften",
+    "Löten",
+    "Kleben",
+    "Schrauben",
+    "Nieten",
+    "Polieren 1",
+    "Polieren 2",
+    "Nachpolieren",
+    "Entgraten",
+    "Gewinde",
+    "Anpassen",
+    "Abziehen",
+    "Montage",
+    "Zusammenbauen",
+    "Nacharbeiten",
+    "Kommissionieren",
+    "Verpacken/Kontrollieren",
+    "Sonstiges",
+    "Reserve",
+)
+
+# §3/§4 router-support entries with no German-54 counterpart (doc names
+# verbatim; pre-installed ops are renameable, so German polish is a rename).
+# (name, category, calculation_mode, is_outside_service)
+_SUPPORT_OPS: tuple[tuple[str, OpCategory, CalculationMode, bool], ...] = (
+    ("Material | Bar (Round)", OpCategory.material, CalculationMode.machine_plus_operator, False),
+    (
+        "Material | Bar (Rectangular)",
+        OpCategory.material,
+        CalculationMode.machine_plus_operator,
+        False,
+    ),
+    ("Material | Bar (I-Beam)", OpCategory.material, CalculationMode.machine_plus_operator, False),
+    (
+        "Material | Sheet (Nesting)",
+        OpCategory.material,
+        CalculationMode.machine_plus_operator,
+        False,
+    ),
+    ("PC Piece Price", OpCategory.operation, CalculationMode.labour_only, False),
+    ("Assembly | Manufactured", OpCategory.operation, CalculationMode.labour_only, False),
+    ("Generic | Shipping Prep", OpCategory.operation, CalculationMode.labour_only, False),
+    ("Hardware Insert", OpCategory.operation, CalculationMode.labour_only, False),
+    ("Engineering", OpCategory.operation, CalculationMode.labour_only, False),
+    ("Outside Service | General", OpCategory.operation, CalculationMode.outside_process, True),
+)
+
+# ---------------------------------------------------------------------------
+# §4 — processes + routers (op names reference the library above / German 54)
+# ---------------------------------------------------------------------------
+# (process name, family, smart_rfq, default_pc, router rows)
+# router row: (op name, per_setup, is_assembly, root_component_only)
+_RouterRow = tuple[str, bool, bool, bool]
+_PROCESSES: tuple[tuple[str, ProcessFamily, bool, bool, tuple[_RouterRow, ...]], ...] = (
+    (
+        "Milling",
+        ProcessFamily.MILLING,
+        True,
+        False,
+        (
+            ("Material | Bar (Round)", False, False, False),
+            ("Fräsen", True, False, False),
+            ("Entgraten", False, False, False),
+            ("Verpacken/Kontrollieren", False, False, False),
+        ),
+    ),
+    (
+        "Lathe",
+        ProcessFamily.LATHE,
+        True,
+        False,
+        (
+            ("Material | Bar (Round)", False, False, False),
+            ("Drehen", True, False, False),
+            ("Entgraten", False, False, False),
+            ("Verpacken/Kontrollieren", False, False, False),
+        ),
+    ),
+    (
+        "Sheet Metal",
+        ProcessFamily.SHEET_METAL,
+        True,
+        False,
+        (
+            ("Material | Sheet (Nesting)", False, False, False),
+            ("Laserschneiden Blech", False, False, False),
+            ("Kanten", False, False, False),
+            ("Entgraten", False, False, False),
+        ),
+    ),
+    (
+        "Tube Laser",
+        ProcessFamily.TUBE_LASER,
+        True,
+        False,
+        (
+            ("Material | Bar (Round)", False, False, False),
+            ("Laserschneiden Rohr", False, False, False),
+            ("Entgraten", False, False, False),
+        ),
+    ),
+    (
+        "Assembly | Parent-Level",
+        ProcessFamily.ASSEMBLY,
+        False,
+        False,
+        (
+            ("Assembly | Manufactured", False, True, True),
+            ("Generic | Shipping Prep", False, False, True),
+        ),
+    ),
+    (
+        "Purchased Component",
+        ProcessFamily.GENERIC,
+        False,
+        True,
+        (("PC Piece Price", False, False, False),),
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# §6 — pricing defaults (spec #zuschlagskalkulation table; editable defaults)
+# ---------------------------------------------------------------------------
+# Zuschlagskalkulation (spec #zuschlagskalkulation defaults: MGK 10 %, VwGK
+# 8 %, VtGK 6 %, Gewinn 10 %) — Gewinn sits LAST so get_selbstkosten() sees
+# the other Zuschlag amounts ("Selbstkosten = everything before Gewinn").
+# (name, custom category (None = plain markup on `category`), formula, pct, position)
+_ZUSCHLAG_ITEMS: tuple[tuple[str, str | None, str | None, Decimal | None, int], ...] = (
+    ("Materialgemeinkosten (MGK)", None, None, Decimal("10"), 1),
+    (
+        "Verwaltungsgemeinkosten (VwGK)",
+        "Herstellkosten",
+        "set_custom_cost(get_herstellkosten())\nPERCENTAGE = 8",
+        None,
+        2,
+    ),
+    (
+        "Vertriebsgemeinkosten (VtGK)",
+        "Herstellkosten",
+        "set_custom_cost(get_herstellkosten())\nPERCENTAGE = 6",
+        None,
+        3,
+    ),
+    (
+        "Gewinnzuschlag",
+        "Selbstkosten",
+        "set_custom_cost(get_selbstkosten())\nPERCENTAGE = 10",
+        None,
+        4,
+    ),
+)
+
+_DISCOUNT_DEF = (
+    "Mengenrabatt",
+    "PERCENTAGE = 5 if REQUESTED_QUANTITY > 100 else 0",
+)
+
+# The six spec #addons AddOnType entries (dropdown, admin-configurable).
+_ADD_ON_DEFS: tuple[tuple[str, bool], ...] = (
+    ("Manual Add-On", False),
+    ("Certificate of Conformance", False),
+    ("Non-Recurring Engineering (NRE)", True),
+    ("Tooling Charge", True),
+    ("Special Packaging", False),
+    ("First Article Inspection (FAI)", False),
+    ("Minimum Order Charge", True),
+)
+
+# §6 expedite default set — monotonic (faster costs more; the skeleton's
+# inverted pair reads as a typo, noted in the M1.12 PR).
+_DEFAULT_EXPEDITE_TIERS = [
+    {"days_faster": 5, "markup_pct": "7"},
+    {"days_faster": 10, "markup_pct": "15"},
+]
+
+# ---------------------------------------------------------------------------
+# §7 partial — workflow steps, custom tables, email templates
+# ---------------------------------------------------------------------------
+_WORKFLOW_STEPS = ("Not Started", "In Progress", "On Hold", "Completed", "No Quote")
+
+_CUSTOM_TABLES: tuple[tuple[str, list[dict[str, str]]], ...] = (
+    (
+        "material_inventory",
+        [
+            {"name": "material", "type": "string"},
+            {"name": "diameter", "type": "numeric"},
+            {"name": "length", "type": "numeric"},
+            {"name": "bar_cost", "type": "numeric"},
+        ],
+    ),
+    (
+        "laser_cut_rates",
+        [
+            {"name": "material_family", "type": "string"},
+            {"name": "thickness", "type": "numeric"},
+            {"name": "cut_rate", "type": "numeric"},
+            {"name": "pierce_time", "type": "numeric"},
+        ],
+    ),
+    (
+        "punch_tooling",
+        [
+            {"name": "tool_name", "type": "string"},
+            {"name": "setup_time", "type": "numeric"},
+            {"name": "hit_time", "type": "numeric"},
+        ],
+    ),
+)
+
+_EMAIL_TEMPLATES: tuple[tuple[str, str, str], ...] = (
+    ("quote_sent", "de-DE", "Ihr Angebot {{quote_number}}"),
+    ("rfq_received", "de-DE", "Anfrage erhalten"),
+    ("follow_up", "de-DE", "Erinnerung: Ihr Angebot {{quote_number}}"),
+)
+
+
+@dataclass(frozen=True)
+class ConfigureSeedResult:
+    """Created-row counts (zero across the board on a re-run)."""
+
+    classes_created: int
+    materials_created: int
+    operation_defs_created: int
+    processes_created: int
+    router_rows_created: int
+    pricing_item_defs_created: int
+    discount_defs_created: int
+    add_on_defs_created: int
+    workflow_steps_created: int
+    custom_tables_created: int
+    email_templates_created: int
+
+
+async def seed_configure_catalog(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> ConfigureSeedResult:
+    """Seed (or reconcile) the §2-§7 Configure catalog for one org."""
+    org = await session.get(Organization, org_id)
+    assert org is not None  # provisioning always precedes the catalog seed
+
+    # First-ever configure seed? (no library yet). Org-level switches are only
+    # provisioned then — a re-seed must never undo an admin's explicit choice
+    # (spec #dach-costing: turning the mode off is a deliberate user action).
+    is_first_seed = (
+        await session.scalar(select(OperationDef.id).where(OperationDef.org_id == org_id).limit(1))
+    ) is None
+    if is_first_seed:
+        # DACH orgs are provisioned with the mode ON (#dach-costing);
+        # OrgCountry is DE/AT/CH-only, so every seeded org qualifies.
+        org.dach_costing_mode = True
+        if org.default_expedite_tiers is None:
+            org.default_expedite_tiers = _DEFAULT_EXPEDITE_TIERS
+
+    classes_created = await _seed_classes(session, org_id)
+    materials_created = await _seed_polymers(session, org_id)
+    operation_defs_created = await _seed_operation_defs(session, org_id)
+    processes_created, router_rows_created = await _seed_processes(session, org_id)
+    pricing_created = await _seed_pricing_item_defs(session, org_id, org.dach_costing_mode)
+    discount_created = await _seed_discount_defs(session, org_id)
+    add_on_created = await _seed_add_on_defs(session, org_id)
+    steps_created = await _seed_workflow_steps(session, org_id)
+    tables_created = await _seed_custom_tables(session, org_id)
+    templates_created = await _seed_email_templates(session, org_id)
+
+    await session.flush()
+    return ConfigureSeedResult(
+        classes_created=classes_created,
+        materials_created=materials_created,
+        operation_defs_created=operation_defs_created,
+        processes_created=processes_created,
+        router_rows_created=router_rows_created,
+        pricing_item_defs_created=pricing_created,
+        discount_defs_created=discount_created,
+        add_on_defs_created=add_on_created,
+        workflow_steps_created=steps_created,
+        custom_tables_created=tables_created,
+        email_templates_created=templates_created,
+    )
+
+
+async def _seed_classes(session: AsyncSession, org_id: uuid.UUID) -> int:
+    existing = {
+        row.name
+        for row in (
+            await session.scalars(select(MaterialClass).where(MaterialClass.org_id == org_id))
+        ).all()
+    }
+    created = 0
+    for name, position in _EXTRA_CLASSES:
+        if name in existing:
+            continue
+        session.add(MaterialClass(org_id=org_id, name=name, position=position))
+        created += 1
+    await session.flush()
+    return created
+
+
+async def _seed_polymers(session: AsyncSession, org_id: uuid.UUID) -> int:
+    kunststoff = await session.scalar(
+        select(MaterialClass).where(
+            MaterialClass.org_id == org_id, MaterialClass.name == "Kunststoff"
+        )
+    )
+    assert kunststoff is not None  # _seed_classes runs first
+    family_name, family_alias = _POLYMER_FAMILY
+    family = await session.scalar(
+        select(MaterialFamily).where(
+            MaterialFamily.org_id == org_id,
+            MaterialFamily.class_id == kunststoff.id,
+            MaterialFamily.name == family_name,
+        )
+    )
+    if family is None:
+        family = MaterialFamily(
+            org_id=org_id, class_id=kunststoff.id, name=family_name, alias=family_alias, position=0
+        )
+        session.add(family)
+        await session.flush()
+    existing = {
+        material.display_name
+        for material in (
+            await session.scalars(
+                select(Material).where(Material.org_id == org_id, Material.family_id == family.id)
+            )
+        ).all()
+    }
+    created = 0
+    for display_name, density in _POLYMERS:
+        if display_name in existing:
+            continue
+        session.add(
+            Material(
+                org_id=org_id,
+                family_id=family.id,
+                display_name=display_name,
+                density=Decimal(density),
+            )
+        )
+        created += 1
+    return created
+
+
+async def _seed_operation_defs(session: AsyncSession, org_id: uuid.UUID) -> int:
+    existing = {
+        row.name
+        for row in (
+            await session.scalars(select(OperationDef).where(OperationDef.org_id == org_id))
+        ).all()
+    }
+    created = 0
+    sort_order = 0
+    for name in _MACHINE_OPERATOR_OPS:
+        if name not in existing:
+            session.add(
+                OperationDef(
+                    org_id=org_id,
+                    name=name,
+                    category=OpCategory.operation,
+                    calculation_mode=CalculationMode.machine_plus_operator,
+                    is_pre_installed=True,
+                    sort_order=sort_order,
+                )
+            )
+            created += 1
+        sort_order += 1
+    for name in _LABOUR_ONLY_OPS:
+        if name not in existing:
+            session.add(
+                OperationDef(
+                    org_id=org_id,
+                    name=name,
+                    category=OpCategory.operation,
+                    calculation_mode=CalculationMode.labour_only,
+                    is_pre_installed=True,
+                    sort_order=sort_order,
+                )
+            )
+            created += 1
+        sort_order += 1
+    for name, category, mode, outside in _SUPPORT_OPS:
+        if name not in existing:
+            session.add(
+                OperationDef(
+                    org_id=org_id,
+                    name=name,
+                    category=category,
+                    calculation_mode=mode,
+                    is_outside_service=outside,
+                    is_pre_installed=True,
+                    sort_order=sort_order,
+                )
+            )
+            created += 1
+        sort_order += 1
+    await session.flush()
+    return created
+
+
+async def _seed_processes(session: AsyncSession, org_id: uuid.UUID) -> tuple[int, int]:
+    defs_by_name = {
+        row.name: row
+        for row in (
+            await session.scalars(select(OperationDef).where(OperationDef.org_id == org_id))
+        ).all()
+    }
+    processes_by_name = {
+        row.name: row
+        for row in (await session.scalars(select(Process).where(Process.org_id == org_id))).all()
+    }
+    processes_created = 0
+    router_rows_created = 0
+    for name, family, smart_rfq, default_pc, router in _PROCESSES:
+        process = processes_by_name.get(name)
+        if process is None:
+            process = Process(org_id=org_id, name=name)
+            session.add(process)
+            await session.flush()
+            processes_created += 1
+        # reconcile the M1.12 config columns (idempotent; not user-editable yet)
+        process.family = family
+        process.available_in_smart_rfq = smart_rfq
+        process.is_default_purchased_component_process = default_pc
+
+        existing_rows = {
+            (row.operation_def_id, row.position)
+            for row in (
+                await session.scalars(
+                    select(ProcessOperation).where(ProcessOperation.process_id == process.id)
+                )
+            ).all()
+        }
+        if existing_rows:
+            continue  # router already present — never reshape a configured one
+        for position, (op_name, per_setup, is_assembly, root_only) in enumerate(router):
+            op_def = defs_by_name[op_name]
+            session.add(
+                ProcessOperation(
+                    org_id=org_id,
+                    process_id=process.id,
+                    operation_def_id=op_def.id,
+                    position=position,
+                    per_setup=per_setup,
+                    is_assembly=is_assembly,
+                    root_component_only=root_only,
+                )
+            )
+            router_rows_created += 1
+    await session.flush()
+    return processes_created, router_rows_created
+
+
+async def _seed_pricing_item_defs(
+    session: AsyncSession, org_id: uuid.UUID, dach_costing_mode: bool
+) -> int:
+    existing = {
+        row.name
+        for row in (
+            await session.scalars(select(PricingItemDef).where(PricingItemDef.org_id == org_id))
+        ).all()
+    }
+    created = 0
+    if not dach_costing_mode and "Standardaufschlag" not in existing:
+        # §6 standard markup — the NON-DACH default. With DACH Costing Mode on
+        # the Zuschlagskalkulation chain IS the pricing default: its Gewinn
+        # item carries the profit, and a general markup on top would both
+        # double-count profit and pollute get_selbstkosten()'s "everything
+        # before Gewinn" base (the chain must price 261,80 for the spec's
+        # 100 € + 100 € example, not 305,80).
+        session.add(
+            PricingItemDef(
+                org_id=org_id,
+                name="Standardaufschlag",
+                calc_type=CalcType.markup,
+                category=CostCategory.general,
+                default_pct=Decimal("20"),
+                position=0,
+            )
+        )
+        created += 1
+    if dach_costing_mode:
+        for name, custom_category, formula, default_pct, position in _ZUSCHLAG_ITEMS:
+            if name in existing:
+                continue
+            if custom_category is None:
+                # MGK: a plain markup on the material cost category (MEK)
+                session.add(
+                    PricingItemDef(
+                        org_id=org_id,
+                        name=name,
+                        calc_type=CalcType.markup,
+                        category=CostCategory.material,
+                        default_pct=default_pct,
+                        position=position,
+                    )
+                )
+            else:
+                # VwGK/VtGK/Gewinn: custom categories off the Kalk helpers
+                session.add(
+                    PricingItemDef(
+                        org_id=org_id,
+                        name=name,
+                        calc_type=CalcType.markup,
+                        category=CostCategory.general,
+                        is_custom=True,
+                        custom_category_name=custom_category,
+                        formula=formula,
+                        position=position,
+                    )
+                )
+            created += 1
+    await session.flush()
+    return created
+
+
+async def _seed_discount_defs(session: AsyncSession, org_id: uuid.UUID) -> int:
+    name, formula = _DISCOUNT_DEF
+    existing = await session.scalar(
+        select(DiscountDef).where(DiscountDef.org_id == org_id, DiscountDef.name == name)
+    )
+    if existing is not None:
+        return 0
+    session.add(DiscountDef(org_id=org_id, name=name, formula=formula, position=0))
+    return 1
+
+
+async def _seed_add_on_defs(session: AsyncSession, org_id: uuid.UUID) -> int:
+    existing = {
+        row.name
+        for row in (await session.scalars(select(AddOnDef).where(AddOnDef.org_id == org_id))).all()
+    }
+    created = 0
+    for position, (name, required) in enumerate(_ADD_ON_DEFS):
+        if name in existing:
+            continue
+        session.add(
+            AddOnDef(
+                org_id=org_id,
+                name=name,
+                default_is_required=required,
+                position=position,
+            )
+        )
+        created += 1
+    return created
+
+
+async def _seed_workflow_steps(session: AsyncSession, org_id: uuid.UUID) -> int:
+    existing = {
+        row.name
+        for row in (
+            await session.scalars(select(WorkflowStepDef).where(WorkflowStepDef.org_id == org_id))
+        ).all()
+    }
+    created = 0
+    for position, name in enumerate(_WORKFLOW_STEPS):
+        if name in existing:
+            continue
+        session.add(WorkflowStepDef(org_id=org_id, name=name, position=position))
+        created += 1
+    return created
+
+
+async def _seed_custom_tables(session: AsyncSession, org_id: uuid.UUID) -> int:
+    existing = {
+        row.name
+        for row in (
+            await session.scalars(select(CustomTable).where(CustomTable.org_id == org_id))
+        ).all()
+    }
+    created = 0
+    for name, columns in _CUSTOM_TABLES:
+        if name in existing:
+            continue
+        session.add(CustomTable(org_id=org_id, name=name, columns=columns))
+        created += 1
+    return created
+
+
+async def _seed_email_templates(session: AsyncSession, org_id: uuid.UUID) -> int:
+    existing = {
+        (row.key, row.locale)
+        for row in (
+            await session.scalars(select(EmailTemplate).where(EmailTemplate.org_id == org_id))
+        ).all()
+    }
+    created = 0
+    for key, locale, subject in _EMAIL_TEMPLATES:
+        if (key, locale) in existing:
+            continue
+        session.add(EmailTemplate(org_id=org_id, key=key, locale=locale, subject=subject))
+        created += 1
+    return created

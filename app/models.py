@@ -182,6 +182,15 @@ class Organization(Base):
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
     locale: Mapped[str] = mapped_column(String, nullable=False, server_default="de-DE")
+    # DACH Costing Mode (spec #dach-costing): opt-in config switch — default
+    # off, DACH orgs provisioned on. Gates the Zuschlagskalkulation seed and
+    # the get_herstellkosten()/get_selbstkosten() Kalk helpers (M1.12).
+    dach_costing_mode: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # §6 expedite default set — prefills the M1.11 top-of-quote editor:
+    # [{"days_faster": int, "markup_pct": "<decimal string>"}]
+    default_expedite_tiers: Mapped[list[Any] | None] = mapped_column(JSONB)
     # Clerk Organizations mirror (DECISIONS.md 2026-06-24 "Org identity model").
     clerk_org_id: Mapped[str | None] = mapped_column(String, unique=True)
     created_at: Mapped[datetime] = _ts()
@@ -677,7 +686,7 @@ class Quote(Base):
     # M1.11 — the top-of-quote dynamic-lead-time editor state (spec #addons
     # "Expedite: configured at quote level; APPLY TO ALL pushes the tiers to
     # every line item"): {"standard_lead_time_days": int|null, "tiers":
-    # [{"days_faster": int, "markup_pct": number}]}. Staging only — the math
+    # [{"days_faster": int, "markup_pct": "<decimal string>"}]}. Staging only — the math
     # reads the per-component expedite_option rows the apply writes.
     expedite_tiers: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Workflow-tracker + lifecycle timestamps.
@@ -970,9 +979,26 @@ class SetupBasis(enum.StrEnum):
     time = "time"
 
 
+class ProcessFamily(enum.StrEnum):
+    """The interrogation/routing family a process belongs to (DB-SCHEMA
+    ``process_family``; spec ``#geometryservice`` families). M1.12 stores it;
+    family-specific interrogation arrives with M4."""
+
+    SHEET_METAL = "SHEET_METAL"
+    MILLING = "MILLING"
+    LATHE = "LATHE"
+    TUBE_LASER = "TUBE_LASER"
+    WIRE_EDM = "WIRE_EDM"
+    CAST_URETHANE = "CAST_URETHANE"
+    ADDITIVE = "ADDITIVE"
+    ASSEMBLY = "ASSEMBLY"
+    GENERIC = "GENERIC"
+
+
 _op_category_enum = Enum(OpCategory, name="op_category", create_type=False)
 _calculation_mode_enum = Enum(CalculationMode, name="calculation_mode", create_type=False)
 _setup_basis_enum = Enum(SetupBasis, name="setup_basis", create_type=False)
+_process_family_enum = Enum(ProcessFamily, name="process_family", create_type=False)
 
 
 class MaterialClass(Base):
@@ -1079,6 +1105,17 @@ class Process(Base):
     external_name: Mapped[str | None] = mapped_column(String)
     default_lead_time_days: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
+    )
+    # M1.12 forward-ALTER (the deferred M1.7 columns): routing family, the
+    # default purchased-component process flag, Smart-RFQ visibility.
+    family: Mapped[ProcessFamily] = mapped_column(
+        _process_family_enum, nullable=False, server_default=ProcessFamily.GENERIC.value
+    )
+    is_default_purchased_component_process: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    available_in_smart_rfq: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
     deleted_at: Mapped[datetime | None] = _deleted_at()
     created_at: Mapped[datetime] = _ts()
@@ -1769,5 +1806,82 @@ class ExpediteOption(Base):
     days_faster: Mapped[int] = mapped_column(Integer, nullable=False)
     markup_pct: Mapped[Decimal] = mapped_column(Numeric(7, 3), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class ProcessOperation(Base):
+    """One router row: the operation def a process generates when applied to a
+    part, ordered, with the §4 flags (per_setup / is_assembly /
+    root_component_only). Stored as configuration in M1.12 — the auto-routing
+    that instantiates these rows onto components arrives with M4."""
+
+    __tablename__ = "process_operation"
+    __table_args__ = (
+        UniqueConstraint("process_id", "position", name="uq_process_operation_process_position"),
+        ForeignKeyConstraint(
+            ["org_id", "process_id"],
+            ["process.org_id", "process.id"],
+            name="fk_process_operation_process_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "operation_def_id"],
+            ["operation_def.org_id", "operation_def.id"],
+            name="fk_process_operation_def_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_process_operation_org_process", "org_id", "process_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    process_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    operation_def_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    per_setup: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    is_assembly: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    root_component_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class WorkflowStepDef(Base):
+    """An org's custom quote-item workflow step (SEED-AND-FIXTURES §7; folded
+    DDL ``workflow_step_def``). M1.12 seeds the default set; the per-item
+    ``quote_item_workflow_step`` tracking table lands with its consumer."""
+
+    __tablename__ = "workflow_step_def"
+    __table_args__ = (
+        UniqueConstraint("org_id", "name", name="uq_workflow_step_def_org_name"),
+        UniqueConstraint("org_id", "id", name="uq_workflow_step_def_org_id_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class EmailTemplate(Base):
+    """A customer-facing email template (SEED-AND-FIXTURES §7 — German-first,
+    keyed ``quote_sent`` / ``rfq_received`` / …). Seeded in M1.12; the M5 send
+    flow consumes and edits them."""
+
+    __tablename__ = "email_template"
+    __table_args__ = (
+        UniqueConstraint("org_id", "key", "locale", name="uq_email_template_org_key_locale"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    locale: Mapped[str] = mapped_column(String, nullable=False, server_default="de-DE")
+    subject: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()

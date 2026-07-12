@@ -19,6 +19,16 @@
 
 ---
 
+## [2026-07-12] M1.12 Zuschlagskalkulation seed — doc conflicts resolved up the ladder
+
+**Status:** RESOLVED (autonomous, doc-backed; flag for Benjamin's review)
+**Question:** Four spec/fixture contradictions surfaced while seeding the §6 pricing defaults: (1) SEED-AND-FIXTURES §6 wants "standard markup/margin per category **+** the Zuschlagskalkulation seed", but stacking a general profit markup on the Zuschlag chain double-counts profit (Gewinn IS the chain's profit item) and pollutes `get_selbstkosten()`'s "everything before Gewinn" base — the spec's 100 € + 100 € example would price 305,80 instead of 261,80. (2) `#zuschlagskalkulation`'s prose chain folds MGK into Herstellkosten (→ VwGK base 210), while the same section's **"Kalk implementation" table** — explicitly the build instruction ("Two new Kalk helpers to build") — defines `get_herstellkosten() = Material + Inside cost categories` (→ 200). (3) The spec enumerates Selbstkosten as "Material, Inside, Outside, MGK, VwGK, VtGK" but also glosses it "sum of **all** cost categories … i.e. everything before Gewinn" — does purchased-component cost count? (4) `#oplibrary`'s table headers say "31 Machine+Operator / 23 Labour-Only" but its own numbered rows run 1-32 / 33-54.
+**Decision:** Resolve each *up* the ladder: (1) tier-2 `#dach-costing` wins over tier-3 §6 — a DACH-mode org's seeded default is the **pure four-item chain**; `Standardaufschlag` seeds only when the mode is off. (2) The Kalk-implementation table is the build target: `get_herstellkosten() = Material + Inside` (VwGK 8 % of 200 = 16,00). (3) `get_selbstkosten() = TOTAL_COST + all prior pricing items in position order` — "all cost categories" includes purchased components, and "everything before Gewinn" fixes the item semantics (the seed positions Gewinn last). (4) The numbered rows are authoritative: 32 + 22 = 54. Also noted: the seed.skeleton expedite pair (5 d → 15 %, 10 d → 7 %) is non-monotonic and was seeded as 5 d → 7 %, 10 d → 15 % (faster costs more, per the dynamic-lead-times KB).
+**Resolved:** 2026-07-12 (M1.12 autonomous build; verifier + spec review cross-checked)
+**Affects:** M1.12 (configure seed + Kalk helpers), M1.13 (harness asserts 261,80), M5 (margin coach reads the same chain).
+
+---
+
 ## [2026-07-09] M1.10 grill — Demo E golden reproduction + pricing-layer schema (six rulings)
 
 **Status:** RESOLVED
