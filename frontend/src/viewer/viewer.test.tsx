@@ -214,7 +214,7 @@ const NOTE_ANN: Annotation = {
 
 describe('layerReducer', () => {
   it('undo then redo restores the identical layer (AC-exact)', () => {
-    let state = layerReducer(emptyLayer, { kind: 'load', objects: [] });
+    let state = layerReducer(emptyLayer<Annotation>(), { kind: 'load', objects: [] });
     state = layerReducer(state, { kind: 'add', annotation: RECT_ANN });
     state = layerReducer(state, { kind: 'add', annotation: NOTE_ANN });
     const full = state.objects;
@@ -225,7 +225,7 @@ describe('layerReducer', () => {
   });
 
   it('remove + undo restores; redo stack clears on a new edit', () => {
-    let state = layerReducer(emptyLayer, { kind: 'load', objects: [RECT_ANN, NOTE_ANN] });
+    let state = layerReducer(emptyLayer<Annotation>(), { kind: 'load', objects: [RECT_ANN, NOTE_ANN] });
     state = layerReducer(state, { kind: 'remove', id: 'a1' });
     expect(state.objects).toEqual([NOTE_ANN]);
     state = layerReducer(state, { kind: 'undo' });

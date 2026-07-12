@@ -17,6 +17,8 @@ import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import { usePartsApi, type PartFile } from '../parts/api';
 import { AnnotationOverlay } from './AnnotationOverlay';
+import { MeasureOverlay, type MeasureTool } from './MeasureOverlay';
+import { scaleFromCalibration, scaleFromRatio, type Measurement, type Scale } from './measure';
 import {
   PRESETS,
   TOOL_SHORTCUTS,
@@ -117,7 +119,16 @@ export function PdfViewerPage() {
   const [wholeWord, setWholeWord] = useState(false);
   const [hitIndex, setHitIndex] = useState(0);
 
-  const [layer, dispatchLayer] = useReducer(layerReducer, emptyLayer);
+  const [layer, dispatchLayer] = useReducer(layerReducer<Annotation>, emptyLayer<Annotation>());
+  const [measures, dispatchMeasures] = useReducer(
+    layerReducer<Measurement>,
+    emptyLayer<Measurement>(),
+  );
+  const [measureTool, setMeasureTool] = useState<MeasureTool | null>(null);
+  const [drawingScale, setDrawingScale] = useState<Scale | null>(null);
+  const [snapping, setSnapping] = useState(true);
+  const [precision, setPrecision] = useState(1);
+  const [scaleWarning, setScaleWarning] = useState(false);
   const [tool, setTool] = useState<AnnotationType | 'eraser' | null>(null);
   const [presetName, setPresetName] = useState<keyof typeof PRESETS>('standard');
 
@@ -505,7 +516,10 @@ export function PdfViewerPage() {
               type="button"
               aria-pressed={tool === type}
               title={key ? `${t(`viewer.tool_${type}`)} (${key})` : t(`viewer.tool_${type}`)}
-              onClick={() => setTool((current) => (current === type ? null : type))}
+              onClick={() => {
+                setMeasureTool(null);
+                setTool((current) => (current === type ? null : type));
+              }}
             >
               {t(`viewer.tool_${type}`)}
             </button>
@@ -569,6 +583,120 @@ export function PdfViewerPage() {
           <button type="button" disabled title={t('viewer.collab_stub_hint')}>
             {t('viewer.save_to_collaboration')}
           </button>
+        </div>
+        <div className="viewer-annotate" role="toolbar" aria-label={t('viewer.measure_tools')}>
+          <label>
+            {t('viewer.scale')}
+            <select
+              value={drawingScale?.source === 'ratio' ? drawingScale.label : ''}
+              aria-label={t('viewer.scale')}
+              onChange={(e) => {
+                if (!e.target.value) return;
+                const [drawn, real] = e.target.value.split(':').map(Number);
+                setDrawingScale(scaleFromRatio(drawn, real));
+                setScaleWarning(false);
+              }}
+            >
+              <option value="">
+                {drawingScale?.source === 'calibrated'
+                  ? t('viewer.scale_calibrated', { label: drawingScale.label })
+                  : t('viewer.scale_unset')}
+              </option>
+              {['1:1', '1:2', '1:5', '1:10', '2:1'].map((ratio) => (
+                <option key={ratio} value={ratio}>
+                  {ratio}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            aria-pressed={measureTool === 'calibrate'}
+            onClick={() => {
+              setTool(null);
+              setMeasureTool((current) => (current === 'calibrate' ? null : 'calibrate'));
+              setScaleWarning(false);
+            }}
+          >
+            {t('viewer.calibrate')}
+          </button>
+          {(
+            [
+              'distance',
+              'arc',
+              'perimeter',
+              'area_custom',
+              'area_circle',
+              'area_rectangle',
+              'count',
+            ] as MeasureTool[]
+          ).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={measureTool === kind}
+              onClick={() => {
+                // spec: "Set scale first" — measuring without one warns/blocks
+                if (!drawingScale) {
+                  setScaleWarning(true);
+                  return;
+                }
+                setScaleWarning(false);
+                setTool(null);
+                setMeasureTool((current) => (current === kind ? null : kind));
+              }}
+            >
+              {t(`viewer.measure_${kind}`)}
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-pressed={measureTool === 'erase'}
+            onClick={() => setMeasureTool((current) => (current === 'erase' ? null : 'erase'))}
+          >
+            {t('viewer.measure_erase')}
+          </button>
+          <label>
+            <input
+              type="checkbox"
+              checked={snapping}
+              onChange={(e) => setSnapping(e.target.checked)}
+            />
+            {t('viewer.snapping')}
+          </label>
+          <label>
+            {t('viewer.precision')}
+            <select
+              value={precision}
+              aria-label={t('viewer.precision')}
+              onChange={(e) => setPrecision(Number(e.target.value))}
+            >
+              {[0, 1, 2].map((digits) => (
+                <option key={digits} value={digits}>
+                  {digits}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={!measures.undoStack.length}
+            onClick={() => dispatchMeasures({ kind: 'undo' })}
+          >
+            {t('viewer.measure_undo')}
+          </button>
+          <button
+            type="button"
+            disabled={!measures.redoStack.length}
+            onClick={() => dispatchMeasures({ kind: 'redo' })}
+          >
+            {t('viewer.measure_redo')}
+          </button>
+          {scaleWarning && (
+            <span role="alert" className="est-warning-banner">
+              {t('viewer.scale_required')}
+            </span>
+          )}
         </div>
       </header>
 
@@ -682,6 +810,31 @@ export function PdfViewerPage() {
                       kind === 'note' ? t('viewer.note_prompt') : t('viewer.text_prompt'),
                     )
                   }
+                />
+                <MeasureOverlay
+                  ariaLabel={t('viewer.measurements_page', { page })}
+                  page={page}
+                  zoom={zoom}
+                  scale={drawingScale}
+                  measurements={
+                    (docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? measures.objects : []
+                  }
+                  tool={
+                    (docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? measureTool : null
+                  }
+                  snapping={snapping}
+                  precision={precision}
+                  onAdd={(measurement) => dispatchMeasures({ kind: 'add', annotation: measurement })}
+                  onErase={(id) => dispatchMeasures({ kind: 'remove', id })}
+                  onCalibrated={(measuredPts) => {
+                    const known = window.prompt(t('viewer.calibrate_prompt'));
+                    const parsed = known ? Number(known.replace(',', '.')) : NaN;
+                    const next = scaleFromCalibration(measuredPts, parsed);
+                    if (next) {
+                      setDrawingScale(next);
+                      setMeasureTool(null);
+                    }
+                  }}
                 />
               </PageCanvas>
             ))}

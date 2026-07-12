@@ -124,6 +124,9 @@ tr.est-missing-rate td {
 
 /* M2.2 annotation layer */
 .pdf-annotation-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* stacked overlays (annotate + measure): only the ACTIVE layer takes pointer
+   events — an idle top svg must never swallow the gestures of the one below */
+.pdf-annotation-overlay:not([data-active]) { pointer-events: none; }
 .pdf-annotation-overlay[data-active] { cursor: crosshair; }
 .viewer-annotate { display: flex; gap: 0.3rem; flex-wrap: wrap; width: 100%; padding-top: 0.3rem; }
 .viewer-annotate button[aria-pressed='true'] { outline: 2px solid var(--accent, #d6409f); }

@@ -416,6 +416,26 @@
     "preset_standard": "Standard",
     "preset_fein": "Fine",
     "preset_marker": "Marker",
-    "preset_warnung": "Warning"
+    "preset_warnung": "Warning",
+    "measure_tools": "Measure tools",
+    "scale": "Scale",
+    "scale_unset": "Set scale…",
+    "scale_calibrated": "Calibrated ({{label}})",
+    "calibrate": "Calibrate",
+    "calibrate_prompt": "Actual length in mm:",
+    "scale_required": "Set the scale first — pick a ratio or calibrate.",
+    "measure_distance": "Distance",
+    "measure_arc": "Arc",
+    "measure_perimeter": "Perimeter",
+    "measure_area_custom": "Area (custom)",
+    "measure_area_circle": "Area (circle)",
+    "measure_area_rectangle": "Area (rectangle)",
+    "measure_count": "Count",
+    "measure_erase": "Erase measurement",
+    "snapping": "Snapping",
+    "precision": "Decimals",
+    "measurements_page": "Measurements page {{page}}",
+    "measure_undo": "Undo measurement",
+    "measure_redo": "Redo measurement"
   }
 }
