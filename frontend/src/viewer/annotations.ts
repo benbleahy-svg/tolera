@@ -104,30 +104,31 @@ export const TOOL_SHORTCUTS: Record<string, AnnotationType | 'eraser'> = {
   o: 'ellipse',
 };
 
-export interface LayerState {
-  objects: Annotation[];
-  undoStack: Annotation[][];
-  redoStack: Annotation[][];
+export interface LayerState<T extends { id: string } = Annotation> {
+  objects: T[];
+  undoStack: T[][];
+  redoStack: T[][];
   dirty: boolean;
 }
 
-export type LayerAction =
-  | { kind: 'load'; objects: Annotation[] }
-  | { kind: 'add'; annotation: Annotation }
+export type LayerAction<T extends { id: string } = Annotation> =
+  | { kind: 'load'; objects: T[] }
+  | { kind: 'add'; annotation: T }
   | { kind: 'remove'; id: string }
   | { kind: 'undo' }
   | { kind: 'redo' }
   | { kind: 'saved' };
 
-export const emptyLayer: LayerState = {
-  objects: [],
-  undoStack: [],
-  redoStack: [],
-  dirty: false,
-};
+export function emptyLayer<T extends { id: string }>(): LayerState<T> {
+  return { objects: [], undoStack: [], redoStack: [], dirty: false };
+}
 
-/** Snapshot-based reducer: undo/redo restore the exact prior object list. */
-export function layerReducer(state: LayerState, action: LayerAction): LayerState {
+/** Snapshot-based reducer: undo/redo restore the exact prior object list.
+    Generic over any identified object — annotations and M2.3 measurements. */
+export function layerReducer<T extends { id: string }>(
+  state: LayerState<T>,
+  action: LayerAction<T>,
+): LayerState<T> {
   switch (action.kind) {
     case 'load':
       return { objects: action.objects, undoStack: [], redoStack: [], dirty: false };

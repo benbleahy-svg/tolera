@@ -416,6 +416,24 @@
     "preset_standard": "Standard",
     "preset_fein": "Fein",
     "preset_marker": "Marker",
-    "preset_warnung": "Warnung"
+    "preset_warnung": "Warnung",
+    "measure_tools": "Messwerkzeuge",
+    "scale": "Maßstab",
+    "scale_unset": "Maßstab wählen…",
+    "scale_calibrated": "Kalibriert ({{label}})",
+    "calibrate": "Kalibrieren",
+    "calibrate_prompt": "Tatsächliche Länge in mm:",
+    "scale_required": "Zuerst Maßstab setzen — Maßstab wählen oder kalibrieren.",
+    "measure_distance": "Distanz",
+    "measure_arc": "Bogen",
+    "measure_perimeter": "Umfang",
+    "measure_area_custom": "Fläche (frei)",
+    "measure_area_circle": "Fläche (Kreis)",
+    "measure_area_rectangle": "Fläche (Rechteck)",
+    "measure_count": "Zählen",
+    "measure_erase": "Messung löschen",
+    "snapping": "Fangen",
+    "precision": "Nachkommastellen",
+    "measurements_page": "Messungen Seite {{page}}"
   }
 }
