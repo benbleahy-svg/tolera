@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
 from .authz import Permission, require
-from .config_completeness import operation_missing_rate
+from .config_completeness import material_missing_cost, operation_missing_rate
 from .costing import CostBucket, effective_cost, recalculate_component, rollup_inputs
 from .deps import get_session
 from .errors import AppError
@@ -422,6 +422,11 @@ async def _component_costing(session: AsyncSession, component: Component) -> Com
         ).all()
     )
     rows = [_operation_out(op, cells_by_op.get(op.id, [])) for op in operations]
+    material = (
+        await session.get(Material, component.material_id)
+        if component.material_id is not None
+        else None
+    )
     return ComponentCosting(
         component_id=component.id,
         material_id=component.material_id,
@@ -429,7 +434,9 @@ async def _component_costing(session: AsyncSession, component: Component) -> Com
         quantities=list(quantities),
         operations=rows,
         buckets=await rollup_inputs(session, component.id),
-        has_missing_rates=any(row.missing_rate for row in rows),
+        has_missing_rates=(
+            any(row.missing_rate for row in rows) or material_missing_cost(material)
+        ),
     )
 
 

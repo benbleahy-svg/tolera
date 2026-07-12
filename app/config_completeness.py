@@ -70,24 +70,42 @@ async def count_unrated_operation_defs(session: AsyncSession) -> int:
     ) or 0
 
 
-async def quote_items_missing_rates(session: AsyncSession, quote_id: uuid.UUID) -> int:
-    """How many of a quote's line items use an operation with no rate."""
-    from .models import QuoteItem
-
+def material_missing_cost(material: Material | None) -> bool:
+    """A used material with neither volume nor area cost (block scope:
+    "a used op/material resolves to no rate")."""
     return (
-        await session.scalar(
-            select(func.count(func.distinct(QuoteItem.id)))
-            .select_from(QuoteItem)
-            .join(Operation, Operation.component_id == QuoteItem.root_component_id)
-            .where(
-                QuoteItem.quote_id == quote_id,
-                Operation.category != OpCategory.material,
-                Operation.calculation_mode != CalculationMode.outside_process,
-                Operation.cost_formula.is_(None),
-                or_(Operation.run_rate.is_(None), Operation.run_rate == 0),
-            )
+        material is not None and material.cost_per_volume is None and material.cost_per_area is None
+    )
+
+
+async def quote_items_missing_rates(session: AsyncSession, quote_id: uuid.UUID) -> int:
+    """How many line items use an operation — or an assigned material —
+    with no rate."""
+    from .models import Component, QuoteItem
+
+    by_operation = (
+        select(QuoteItem.id)
+        .join(Operation, Operation.component_id == QuoteItem.root_component_id)
+        .where(
+            QuoteItem.quote_id == quote_id,
+            Operation.category != OpCategory.material,
+            Operation.calculation_mode != CalculationMode.outside_process,
+            Operation.cost_formula.is_(None),
+            or_(Operation.run_rate.is_(None), Operation.run_rate == 0),
         )
-    ) or 0
+    )
+    by_material = (
+        select(QuoteItem.id)
+        .join(Component, Component.id == QuoteItem.root_component_id)
+        .join(Material, Material.id == Component.material_id)
+        .where(
+            QuoteItem.quote_id == quote_id,
+            Material.cost_per_volume.is_(None),
+            Material.cost_per_area.is_(None),
+        )
+    )
+    flagged = by_operation.union(by_material).subquery()
+    return (await session.scalar(select(func.count()).select_from(flagged))) or 0
 
 
 @config_completeness_router.get("/config-completeness")

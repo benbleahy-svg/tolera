@@ -136,3 +136,32 @@ def test_counts_are_org_scoped(seeder: Seeder, app_client: TestClient) -> None:
         assert _completeness(client)["unrated_operation_defs"] == 1
     with _as_admin(app_client, org_b, user_b) as client:
         assert _completeness(client)["unrated_operation_defs"] == 0
+
+
+def test_quote_flags_costless_material(seeder: Seeder, app_client: TestClient) -> None:
+    """Block scope: 'a used op/MATERIAL resolves to no rate' — a line item
+    whose assigned material has neither cost flags too; a cost clears it."""
+    org, user = _org_admin(seeder, "m114-material-flag")
+    seeder.catalog(org)  # costs NULL by design
+    with _as_admin(app_client, org, user) as client:
+        qid = client.post("/api/quotes", json={}).json()["id"]
+        item = client.post(f"/api/quotes/{qid}/items").json()["items"][0]
+        component_id = str(item["root_component_id"])
+        material = client.get("/api/materials?q=1.4301").json()[0]
+        res = client.patch(
+            f"/api/components/{component_id}/material", json={"material_id": material["id"]}
+        )
+        assert res.status_code == 200, res.text
+        assert client.get(f"/api/quotes/{qid}").json()["missing_rates_item_count"] == 1
+        assert (
+            client.get(f"/api/components/{component_id}/costing").json()["has_missing_rates"]
+            is True
+        )
+
+        res = client.patch(f"/api/materials/{material['id']}", json={"cost_per_volume": "0.008"})
+        assert res.status_code == 200, res.text
+        assert client.get(f"/api/quotes/{qid}").json()["missing_rates_item_count"] == 0
+        assert (
+            client.get(f"/api/components/{component_id}/costing").json()["has_missing_rates"]
+            is False
+        )
