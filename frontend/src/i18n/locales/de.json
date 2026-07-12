@@ -409,6 +409,8 @@
     "save_to_collaboration": "In Kollaboration speichern",
     "collab_stub_hint": "Kommt mit dem Kollaborations-Block (M2.11)",
     "note_prompt": "Notiztext:",
-    "text_prompt": "Text:"
+    "text_prompt": "Text:",
+    "tool_freehand_highlight": "Freihand-Marker",
+    "tool_shape_rectangle": "Rechteck (Form)"
   }
 }

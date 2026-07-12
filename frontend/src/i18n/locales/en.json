@@ -409,6 +409,8 @@
     "save_to_collaboration": "Save to collaboration",
     "collab_stub_hint": "Arrives with the collaboration block (M2.11)",
     "note_prompt": "Note text:",
-    "text_prompt": "Text:"
+    "text_prompt": "Text:",
+    "tool_freehand_highlight": "Freehand highlight",
+    "tool_shape_rectangle": "Rectangle (shape)"
   }
 }

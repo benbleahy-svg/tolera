@@ -191,9 +191,42 @@ export async function drawAnnotations(
           });
       }
     } else if (points && points.length >= 2) {
-      drawPolyline(pdfPage, points, height, stroke, thickness || 2, opacity);
+      if (annotation.type === 'arc') {
+        // sample the same quadratic the overlay renders
+        const [from, to] = [points[0], points.at(-1)!];
+        const cx = (from.x + to.x) / 2 + (to.y - from.y) / 3;
+        const cy = (from.y + to.y) / 2 - (to.x - from.x) / 3;
+        const sampled = Array.from({ length: 17 }, (_, i) => {
+          const u = i / 16;
+          return {
+            x: (1 - u) ** 2 * from.x + 2 * (1 - u) * u * cx + u ** 2 * to.x,
+            y: (1 - u) ** 2 * from.y + 2 * (1 - u) * u * cy + u ** 2 * to.y,
+          };
+        });
+        drawPolyline(pdfPage, sampled, height, stroke, thickness || 2, opacity);
+      } else {
+        drawPolyline(pdfPage, points, height, stroke, thickness || 2, opacity);
+      }
       if (annotation.type === 'polygon') {
         drawPolyline(pdfPage, [points.at(-1)!, points[0]], height, stroke, thickness || 2, opacity);
+      }
+      if (annotation.type === 'arrow') {
+        // the overlay's arrowhead, mirrored into the export
+        const [from, to] = [points[0], points.at(-1)!];
+        const angle = Math.atan2(to.y - from.y, to.x - from.x);
+        for (const offset of [0.5, -0.5]) {
+          drawPolyline(
+            pdfPage,
+            [
+              { x: to.x - 10 * Math.cos(angle + offset), y: to.y - 10 * Math.sin(angle + offset) },
+              to,
+            ],
+            height,
+            stroke,
+            thickness || 2,
+            opacity,
+          );
+        }
       }
     } else if (at && annotation.text) {
       pdfPage.drawText(annotation.text, {

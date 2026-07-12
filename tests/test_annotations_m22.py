@@ -102,3 +102,61 @@ def test_layer_size_guard(seeder: Seeder, app_client: TestClient) -> None:
             json={"objects": [RECT] * 2001},
         )
         assert res.status_code == 422
+
+
+STYLE = {"stroke": "#d6409f", "strokeWidth": 2, "fill": "none", "opacity": 1}
+RECT_GEOM = {"rect": {"x": 40, "y": 40, "width": 80, "height": 30}}
+LINE_GEOM = {"points": [{"x": 10, "y": 10}, {"x": 90, "y": 60}]}
+MANY_GEOM = {"points": [{"x": 10, "y": 10}, {"x": 50, "y": 30}, {"x": 90, "y": 10}]}
+
+ONE_OF_EACH = [
+    {"id": f"t-{name}", "page": 1, "type": name, "style": STYLE, **geometry}
+    for name, geometry in (
+        ("underline", RECT_GEOM),
+        ("highlight", RECT_GEOM),
+        ("rectangle", RECT_GEOM),
+        ("free_text", {"at": {"x": 30, "y": 30}, "text": "Hinweis"}),
+        ("freehand_highlight", MANY_GEOM),
+        ("freehand", MANY_GEOM),
+        ("note", {"at": {"x": 60, "y": 60}, "text": "Notiz"}),
+        ("squiggly", RECT_GEOM),
+        ("strikeout", RECT_GEOM),
+        ("shape_rectangle", RECT_GEOM),
+        ("line", LINE_GEOM),
+        ("polyline", MANY_GEOM),
+        ("arrow", LINE_GEOM),
+        ("arc", LINE_GEOM),
+        ("ellipse", RECT_GEOM),
+        ("polygon", MANY_GEOM),
+    )
+]
+
+
+def test_one_of_each_type_round_trips(seeder: Seeder, app_client: TestClient) -> None:
+    """The block's test plan verbatim: one of every annotate tool + shape,
+    persisted and read back exactly."""
+    org, user = _org_admin(seeder, "m22-one-of-each")
+    with _as_admin(app_client, org, user) as client:
+        part_id, file_id = _part_with_pdf(client)
+        url = f"/api/parts/{part_id}/files/{file_id}/annotations"
+        res = client.put(url, json={"objects": ONE_OF_EACH})
+        assert res.status_code == 200, res.text
+        assert client.get(url).json() == {"objects": ONE_OF_EACH}
+
+
+def test_oversized_object_rejected(seeder: Seeder, app_client: TestClient) -> None:
+    org, user = _org_admin(seeder, "m22-bytes-guard")
+    with _as_admin(app_client, org, user) as client:
+        part_id, file_id = _part_with_pdf(client)
+        huge = {
+            "id": "x",
+            "page": 1,
+            "type": "free_text",
+            "style": STYLE,
+            "at": {"x": 1, "y": 1},
+            "text": "A" * 30000,
+        }
+        res = client.put(
+            f"/api/parts/{part_id}/files/{file_id}/annotations", json={"objects": [huge]}
+        )
+        assert res.status_code == 422

@@ -28,6 +28,7 @@ is editing the quote's content); reads need only an authenticated org session.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import urllib.parse
 import uuid
@@ -47,7 +48,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -700,6 +701,7 @@ async def download_part_file(
 # Annotation layer (M2.2, spec #pdf-capabilities Annotate/Shapes)
 # --------------------------------------------------------------------------- #
 _MAX_ANNOTATION_OBJECTS = 2000
+_MAX_ANNOTATION_OBJECT_BYTES = 20_000  # bounds freehand point clouds / text blobs
 
 
 class AnnotationLayerPayload(BaseModel):
@@ -708,6 +710,14 @@ class AnnotationLayerPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objects: Annotated[list[dict[str, Any]], Field(max_length=_MAX_ANNOTATION_OBJECTS)]
+
+    @field_validator("objects")
+    @classmethod
+    def _bound_object_size(cls, objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for obj in objects:
+            if len(json.dumps(obj)) > _MAX_ANNOTATION_OBJECT_BYTES:
+                raise ValueError("annotation object exceeds the size bound")
+        return objects
 
 
 @parts_router.get("/{part_id}/files/{file_id}/annotations")

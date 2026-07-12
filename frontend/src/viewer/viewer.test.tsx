@@ -90,7 +90,9 @@ const extractPages = vi.fn((_bytes: Uint8Array, _pages: number[]) =>
   Promise.resolve(new Uint8Array([1])),
 );
 
-const drawAnnotations = vi.fn(() => Promise.resolve(new Uint8Array([2])));
+const drawAnnotations = vi.fn((_bytes: Uint8Array, _objects: unknown[]) =>
+  Promise.resolve(new Uint8Array([2])),
+);
 
 vi.mock('./pdf', () => ({
   loadPdf: vi.fn(() => Promise.resolve(loadedDoc)),

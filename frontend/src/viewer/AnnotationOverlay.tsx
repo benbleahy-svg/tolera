@@ -37,7 +37,8 @@ function Squiggle({ x, width, y, style }: { x: number; width: number; y: number;
   for (let dx = 0; dx < width; dx += step) {
     const mid = x + dx + step / 2;
     const end = Math.min(x + dx + step, x + width);
-    d += ` Q ${mid} ${y + (dx / step) % 2 === 0 ? y + 3 : y - 3} ${end} ${y}`;
+    const wave = (dx / step) % 2 === 0 ? y + 3 : y - 3;
+    d += ` Q ${mid} ${wave} ${end} ${y}`;
   }
   return <path d={d} stroke={style.stroke} strokeWidth={style.strokeWidth} fill="none" />;
 }
