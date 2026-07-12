@@ -1,0 +1,17 @@
+{
+  "currency": "EUR",
+  "breaks": [
+    {
+      "quantity": 1,
+      "unit_price": "261.80",
+      "total_price": "261.80"
+    }
+  ],
+  "totals": {
+    "vat_label": "MwSt.",
+    "vat_rate_pct": "19",
+    "net_minor": 26180,
+    "vat_minor": 4974,
+    "gross_minor": 31154
+  }
+}

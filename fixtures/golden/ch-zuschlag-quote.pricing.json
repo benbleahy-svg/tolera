@@ -1,0 +1,17 @@
+{
+  "currency": "CHF",
+  "breaks": [
+    {
+      "quantity": 1,
+      "unit_price": "261.80",
+      "total_price": "261.80"
+    }
+  ],
+  "totals": {
+    "vat_label": "MWST",
+    "vat_rate_pct": "8.1",
+    "net_minor": 26180,
+    "vat_minor": 2121,
+    "gross_minor": 28301
+  }
+}

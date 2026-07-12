@@ -1,0 +1,53 @@
+{
+  "org": {
+    "country": "DE",
+    "currency": "EUR",
+    "configure_catalog": false
+  },
+  "quantities": [
+    1
+  ],
+  "root_operations": [
+    {
+      "name": "Rohmaterial",
+      "category": "material",
+      "manual_costs": {
+        "1": "566.3340"
+      }
+    },
+    {
+      "name": "Laser Workcenter",
+      "manual_costs": {
+        "1": "178.1690"
+      }
+    },
+    {
+      "name": "CNC Fräsen",
+      "manual_costs": {
+        "1": "841.6395"
+      }
+    }
+  ],
+  "children": [
+    {
+      "obtain_method": "purchased",
+      "piece_price": "8.7800"
+    }
+  ],
+  "pricing_items": [
+    {
+      "name": "Inside Operations Markup",
+      "calc_type": "markup",
+      "category": "inside",
+      "default_pct": "22"
+    },
+    {
+      "name": "Laser Workcenter Markup",
+      "calc_type": "markup",
+      "is_custom": true,
+      "custom_category_name": "Laser Workcenter",
+      "color": "#4b3f72",
+      "formula": "total = 0\nfor component in get_components():\n    for op in get_operations(component):\n        if op.name == 'Laser Workcenter':\n            total += op.cost\nset_custom_cost(total)\nPERCENTAGE = 10\n"
+    }
+  ]
+}

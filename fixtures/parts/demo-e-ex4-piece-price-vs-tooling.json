@@ -1,0 +1,60 @@
+{
+  "org": {
+    "country": "DE",
+    "currency": "EUR",
+    "configure_catalog": false
+  },
+  "quantities": [
+    1
+  ],
+  "root_operations": [
+    {
+      "name": "Rohmaterial",
+      "category": "material",
+      "manual_costs": {
+        "1": "674.2040"
+      }
+    },
+    {
+      "name": "CNC Bearbeitung",
+      "manual_costs": {
+        "1": "929.8050"
+      }
+    },
+    {
+      "name": "Werkzeugbau",
+      "manual_costs": {
+        "1": "90.0000"
+      }
+    }
+  ],
+  "children": [
+    {
+      "obtain_method": "purchased",
+      "piece_price": "8.3700"
+    }
+  ],
+  "pricing_items": [
+    {
+      "name": "General Markup",
+      "calc_type": "markup",
+      "default_pct": "5"
+    },
+    {
+      "name": "Piece Price Markup",
+      "calc_type": "markup",
+      "is_custom": true,
+      "custom_category_name": "Piece Price",
+      "color": "#333333",
+      "formula": "tooling = 0\nfor component in get_components():\n    for op in get_operations(component):\n        if op.name == 'Werkzeugbau':\n            tooling += op.cost\nset_custom_cost(TOTAL_COST - tooling)\nPERCENTAGE = 10\n"
+    },
+    {
+      "name": "Tooling Markup",
+      "calc_type": "markup",
+      "is_custom": true,
+      "custom_category_name": "Tooling",
+      "color": "#1d4ed8",
+      "formula": "total = 0\nfor component in get_components():\n    for op in get_operations(component):\n        if op.name == 'Werkzeugbau':\n            total += op.cost\nset_custom_cost(total)\nPERCENTAGE = 10\n"
+    }
+  ]
+}

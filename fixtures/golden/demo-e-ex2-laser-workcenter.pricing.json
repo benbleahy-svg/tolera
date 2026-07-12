@@ -1,0 +1,10 @@
+{
+  "currency": "EUR",
+  "breaks": [
+    {
+      "quantity": 1,
+      "unit_price": "1837.10",
+      "total_price": "1837.10"
+    }
+  ]
+}
