@@ -47,7 +47,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +71,15 @@ from .file_types import (
     primary_rank,
     sniff_matches_extension,
 )
-from .models import FileRole, Node, ObtainMethod, Part, PartFile, PartGeometry
+from .models import (
+    FileAnnotationLayer,
+    FileRole,
+    Node,
+    ObtainMethod,
+    Part,
+    PartFile,
+    PartGeometry,
+)
 from .storage import ObjectStorage, object_key
 
 parts_router = APIRouter(prefix="/api/parts", tags=["parts", "files"])
@@ -686,6 +694,56 @@ async def download_part_file(
         media_type=pf.content_type or "application/octet-stream",
         headers={"Content-Disposition": _content_disposition(pf.filename)},
     )
+
+
+# --------------------------------------------------------------------------- #
+# Annotation layer (M2.2, spec #pdf-capabilities Annotate/Shapes)
+# --------------------------------------------------------------------------- #
+_MAX_ANNOTATION_OBJECTS = 2000
+
+
+class AnnotationLayerPayload(BaseModel):
+    """The viewer's whole markup layer — replaced atomically on save."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    objects: Annotated[list[dict[str, Any]], Field(max_length=_MAX_ANNOTATION_OBJECTS)]
+
+
+@parts_router.get("/{part_id}/files/{file_id}/annotations")
+async def get_annotation_layer(
+    part_id: uuid.UUID,
+    file_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Any:
+    await _get_part_file_or_404(session, part_id, file_id)
+    layer = await session.scalar(
+        select(FileAnnotationLayer).where(FileAnnotationLayer.part_file_id == file_id)
+    )
+    return layer.data if layer is not None else {"objects": []}
+
+
+@parts_router.put("/{part_id}/files/{file_id}/annotations")
+async def put_annotation_layer(
+    part_id: uuid.UUID,
+    file_id: uuid.UUID,
+    payload: AnnotationLayerPayload,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> Any:
+    """Persist the layer (upsert; the viewer saves the whole document)."""
+    await _get_part_file_or_404(session, part_id, file_id)
+    layer = await session.scalar(
+        select(FileAnnotationLayer).where(FileAnnotationLayer.part_file_id == file_id)
+    )
+    data = {"objects": payload.objects}
+    if layer is None:
+        layer = FileAnnotationLayer(org_id=principal.active_org_id, part_file_id=file_id, data=data)
+        session.add(layer)
+    else:
+        layer.data = data
+    await session.flush()
+    return layer.data
 
 
 @parts_router.post("/{part_id}/files/{file_id}/primary")

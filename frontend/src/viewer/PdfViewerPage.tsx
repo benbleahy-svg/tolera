@@ -10,13 +10,22 @@
  * M2.2-M2.5; the Lens overlay in M3.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
 import { usePartsApi, type PartFile } from '../parts/api';
-import { extractPages, loadPdf, rotatePages, type LoadedPdf } from './pdf';
+import { AnnotationOverlay } from './AnnotationOverlay';
+import {
+  PRESETS,
+  TOOL_SHORTCUTS,
+  emptyLayer,
+  layerReducer,
+  type Annotation,
+  type AnnotationType,
+} from './annotations';
+import { drawAnnotations, extractPages, loadPdf, rotatePages, type LoadedPdf } from './pdf';
 import { diffImageData, nextZoom, parsePageSelection, searchPages, type SearchHit } from './utils';
 
 const SIDEBAR_KEY = 'tolera.viewer.sidebar-collapsed';
@@ -41,12 +50,14 @@ function PageCanvas({
   scale,
   rotation,
   overlay,
+  children,
 }: {
   doc: LoadedPdf;
   page: number;
   scale: number;
   rotation: number;
   overlay: ImageData | null;
+  children?: React.ReactNode;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -68,6 +79,7 @@ function PageCanvas({
     <div className="pdf-page" data-page={page}>
       <canvas ref={canvasRef} aria-label={`Seite ${page}`} />
       {overlay && <canvas ref={overlayRef} className="pdf-compare-overlay" />}
+      {children}
     </div>
   );
 }
@@ -104,6 +116,10 @@ export function PdfViewerPage() {
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
   const [hitIndex, setHitIndex] = useState(0);
+
+  const [layer, dispatchLayer] = useReducer(layerReducer, emptyLayer);
+  const [tool, setTool] = useState<AnnotationType | 'eraser' | null>(null);
+  const [presetName, setPresetName] = useState<keyof typeof PRESETS>('standard');
 
   const [compareDoc, setCompareDoc] = useState<LoadedPdf | null>(null);
   const [compareVisible, setCompareVisible] = useState(true);
@@ -189,6 +205,9 @@ export function PdfViewerPage() {
         setPanMode((p) => !p);
       } else if (e.key === 'z' || e.key === 'Z') {
         setMarqueeMode((m) => !m);
+      } else if (!e.metaKey && !e.ctrlKey && TOOL_SHORTCUTS[e.key.toLowerCase()]) {
+        const next = TOOL_SHORTCUTS[e.key.toLowerCase()];
+        setTool((current) => (current === next ? null : next));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -203,6 +222,10 @@ export function PdfViewerPage() {
       .then(async (data) => {
         setBytes(data);
         const loaded = await loadPdf(data);
+        // the persisted layer must land BEFORE the overlays render — a later
+        // 'load' dispatch would wipe markup placed in the gap
+        const persisted = await api.getAnnotations(partId, fileId);
+        dispatchLayer({ kind: 'load', objects: persisted.objects as Annotation[] });
         setDoc(loaded);
         const texts = await Promise.all(
           Array.from({ length: loaded.pageCount }, (_, i) => loaded.getPageText(i + 1)),
@@ -456,6 +479,95 @@ export function PdfViewerPage() {
             </button>
           )}
         </div>
+        <div className="viewer-annotate" role="toolbar" aria-label={t('viewer.annotate_tools')}>
+          {(
+            [
+              ['underline', 'U'],
+              ['highlight', 'H'],
+              ['rectangle', 'R'],
+              ['free_text', 'T'],
+              ['freehand', 'F'],
+              ['note', 'N'],
+              ['squiggly', 'G'],
+              ['strikeout', 'K'],
+              ['line', 'L'],
+              ['polyline', ''],
+              ['arrow', 'A'],
+              ['arc', ''],
+              ['ellipse', 'O'],
+              ['polygon', ''],
+            ] as [AnnotationType, string][]
+          ).map(([type, key]) => (
+            <button
+              key={type}
+              type="button"
+              aria-pressed={tool === type}
+              title={key ? `${t(`viewer.tool_${type}`)} (${key})` : t(`viewer.tool_${type}`)}
+              onClick={() => setTool((current) => (current === type ? null : type))}
+            >
+              {t(`viewer.tool_${type}`)}
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-pressed={tool === 'eraser'}
+            onClick={() => setTool((current) => (current === 'eraser' ? null : 'eraser'))}
+          >
+            {t('viewer.tool_eraser')}
+          </button>
+          <select
+            value={presetName}
+            aria-label={t('viewer.preset')}
+            onChange={(e) => setPresetName(e.target.value as keyof typeof PRESETS)}
+          >
+            {Object.keys(PRESETS).map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!layer.undoStack.length}
+            onClick={() => dispatchLayer({ kind: 'undo' })}
+          >
+            {t('viewer.undo')}
+          </button>
+          <button
+            type="button"
+            disabled={!layer.redoStack.length}
+            onClick={() => dispatchLayer({ kind: 'redo' })}
+          >
+            {t('viewer.redo')}
+          </button>
+          <button
+            type="button"
+            disabled={!layer.dirty}
+            onClick={() => {
+              api
+                .putAnnotations(partId, fileId, layer.objects)
+                .then(() => dispatchLayer({ kind: 'saved' }))
+                .catch(fail);
+            }}
+          >
+            {t('viewer.save_annotations')}
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              if (!bytes) return;
+              saveBlob(
+                await drawAnnotations(bytes, layer.objects),
+                `${file?.filename?.replace(/\.pdf$/i, '') ?? 'dokument'}-annotiert.pdf`,
+              );
+            }}
+          >
+            {t('viewer.download_with_annotations')}
+          </button>
+          <button type="button" disabled title={t('viewer.collab_stub_hint')}>
+            {t('viewer.save_to_collaboration')}
+          </button>
+        </div>
       </header>
 
       {error && (
@@ -549,7 +661,22 @@ export function PdfViewerPage() {
                 scale={zoom}
                 rotation={(docRotation + (pageRotations[page] ?? 0)) % 360}
                 overlay={compareDoc && compareVisible ? (overlays[page] ?? null) : null}
-              />
+              >
+                <AnnotationOverlay
+                  page={page}
+                  zoom={zoom}
+                  annotations={layer.objects}
+                  tool={tool}
+                  style={PRESETS[presetName]}
+                  onAdd={(annotation) => dispatchLayer({ kind: 'add', annotation })}
+                  onErase={(id) => dispatchLayer({ kind: 'remove', id })}
+                  promptText={(kind) =>
+                    window.prompt(
+                      kind === 'note' ? t('viewer.note_prompt') : t('viewer.text_prompt'),
+                    )
+                  }
+                />
+              </PageCanvas>
             ))}
         </section>
       </div>
