@@ -19,6 +19,16 @@
 
 ---
 
+## [2026-07-12] M2.2 annotation-layer bounds + geometric markup representation
+
+**Status:** RESOLVED (autonomous, low-stakes; flag for Benjamin's review)
+**Question:** (1) The persisted per-file markup layer needs abuse bounds the docs don't specify. (2) The spec's text-markup tools (underline/highlight/squiggly/strikeout) anchor to *text* in PP; Tolera's M2.1 viewer has no text layer yet.
+**Decision:** (1) Bounds: **2000 objects per layer, 20 KB per object** (bounds freehand point clouds and text blobs; the 150-vs-250 MB upload-cap precedent) — org-invisible internals, revisit if a real print exceeds them. (2) v1 stores all tools as **geometric page-space objects** in unrotated pdf.js viewport coordinates; text-anchored refinement rides the future text layer (which M2.1's search-term highlight also wants). Markup is hidden and input blocked while a rotation is applied so exports stay position-honest.
+**Resolved:** 2026-07-12 (M2.2 autonomous build; verifier + two-axis review cross-checked)
+**Affects:** M2.2; M2.11 (collaboration threads reference these objects); M3 (Lens bbox overlay shares the coordinate convention).
+
+---
+
 ## [2026-07-12] M1.14 APPLY-TO-ALL fills only unrated rates; banner is count-based
 
 **Status:** RESOLVED (autonomous, doc-backed; flag for Benjamin's review)

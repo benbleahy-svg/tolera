@@ -1885,3 +1885,32 @@ class EmailTemplate(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+class FileAnnotationLayer(Base):
+    """The persisted markup layer for one part file (M2.2, spec
+    ``#pdf-capabilities`` Annotate/Shapes). ``data`` is one JSONB document:
+    ``{"objects": [{id, page, type, style, geometry…}]}`` in pdf-unit page
+    coordinates — written by the viewer, drawn into a copy on
+    download-with-annotations. One row per file; collaboration threading of
+    individual annotations arrives with M2.11."""
+
+    __tablename__ = "file_annotation_layer"
+    __table_args__ = (
+        UniqueConstraint("part_file_id", name="uq_file_annotation_layer_file"),
+        ForeignKeyConstraint(
+            ["org_id", "part_file_id"],
+            ["part_file.org_id", "part_file.id"],
+            name="fk_file_annotation_layer_file_org",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    data: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{\"objects\": []}'::jsonb")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()

@@ -44,6 +44,12 @@ export interface PartsApi {
   deleteFile: (partId: string, fileId: string) => Promise<void>;
   downloadFile: (partId: string, fileId: string, filename: string) => Promise<void>;
   fetchFileBytes: (partId: string, fileId: string) => Promise<Uint8Array>;
+  getAnnotations: (partId: string, fileId: string) => Promise<{ objects: unknown[] }>;
+  putAnnotations: (
+    partId: string,
+    fileId: string,
+    objects: unknown[],
+  ) => Promise<{ objects: unknown[] }>;
 }
 
 /** Trigger a browser "save as" for a fetched blob (download UX). */
@@ -85,6 +91,13 @@ export function usePartsApi(): PartsApi {
         const blob = await apiDownload(`/api/parts/${partId}/files/${fileId}/download`, token);
         return new Uint8Array(await blob.arrayBuffer());
       },
+      getAnnotations: (partId, fileId) =>
+        apiFetch(`/api/parts/${partId}/files/${fileId}/annotations`, token),
+      putAnnotations: (partId, fileId, objects) =>
+        apiFetch(`/api/parts/${partId}/files/${fileId}/annotations`, token, {
+          method: 'PUT',
+          body: { objects },
+        }),
     };
   }, [getToken]);
 }
