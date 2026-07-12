@@ -9,7 +9,10 @@ import { useRef, useState } from 'react';
 
 import {
   TOOL_KIND,
+  arcControlPoint,
+  arrowHeads,
   buildAnnotation,
+  highlightFill,
   hitTest,
   type Annotation,
   type AnnotationStyle,
@@ -18,6 +21,7 @@ import {
 } from './annotations';
 
 interface Props {
+  ariaLabel: string;
   page: number;
   zoom: number;
   annotations: Annotation[];
@@ -55,8 +59,10 @@ function AnnotationShape({ annotation }: { annotation: Annotation }) {
     const bottom = rect.y + rect.height;
     const middle = rect.y + rect.height / 2;
     switch (type) {
-      case 'highlight':
-        return <rect {...rect} fill={style.fill === 'none' ? '#facc15' : style.fill} opacity={0.4} />;
+      case 'highlight': {
+        const marker = highlightFill(style);
+        return <rect {...rect} fill={marker.fill} opacity={marker.opacity} />;
+      }
       case 'underline':
         return <line x1={rect.x} y1={bottom} x2={rect.x + rect.width} y2={bottom} {...common} />;
       case 'strikeout':
@@ -80,25 +86,41 @@ function AnnotationShape({ annotation }: { annotation: Annotation }) {
   if (points && points.length >= 2) {
     const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
     switch (type) {
-      case 'freehand_highlight':
-        return <path d={path} stroke="#facc15" strokeWidth={12} opacity={0.4} fill="none" strokeLinecap="round" />;
+      case 'freehand_highlight': {
+        const marker = highlightFill(style);
+        return (
+          <path
+            d={path}
+            stroke={marker.fill}
+            strokeWidth={12}
+            opacity={marker.opacity}
+            fill="none"
+            strokeLinecap="round"
+          />
+        );
+      }
       case 'arrow': {
         const [from, to] = [points[0], points.at(-1) as Point];
-        const angle = Math.atan2(to.y - from.y, to.x - from.x);
-        const head = (offset: number) =>
-          `${to.x - 10 * Math.cos(angle + offset)},${to.y - 10 * Math.sin(angle + offset)}`;
+        const heads = arrowHeads(from, to);
         return (
           <g {...common} fill="none">
             <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} />
-            <polyline points={`${head(0.5)} ${to.x},${to.y} ${head(-0.5)}`} />
+            {heads.map(([tail, tip], i) => (
+              <line key={i} x1={tail.x} y1={tail.y} x2={tip.x} y2={tip.y} />
+            ))}
           </g>
         );
       }
       case 'arc': {
         const [from, to] = [points[0], points.at(-1) as Point];
-        const cx = (from.x + to.x) / 2 + (to.y - from.y) / 3;
-        const cy = (from.y + to.y) / 2 - (to.x - from.x) / 3;
-        return <path d={`M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`} {...common} fill="none" />;
+        const control = arcControlPoint(from, to);
+        return (
+          <path
+            d={`M ${from.x} ${from.y} Q ${control.x} ${control.y} ${to.x} ${to.y}`}
+            {...common}
+            fill="none"
+          />
+        );
       }
       case 'polygon':
         return <polygon points={points.map((p) => `${p.x},${p.y}`).join(' ')} {...common} />;
@@ -125,6 +147,7 @@ function AnnotationShape({ annotation }: { annotation: Annotation }) {
 }
 
 export function AnnotationOverlay({
+  ariaLabel,
   page,
   zoom,
   annotations,
@@ -220,7 +243,7 @@ export function AnnotationOverlay({
       className="pdf-annotation-overlay"
       data-active={tool ? '' : undefined}
       role="application"
-      aria-label={`Anmerkungen Seite ${page}`}
+      aria-label={ariaLabel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

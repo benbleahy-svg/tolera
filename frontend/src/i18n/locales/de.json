@@ -411,6 +411,11 @@
     "note_prompt": "Notiztext:",
     "text_prompt": "Text:",
     "tool_freehand_highlight": "Freihand-Marker",
-    "tool_shape_rectangle": "Rechteck (Form)"
+    "tool_shape_rectangle": "Rechteck (Form)",
+    "annotations_page": "Anmerkungen Seite {{page}}",
+    "preset_standard": "Standard",
+    "preset_fein": "Fein",
+    "preset_marker": "Marker",
+    "preset_warnung": "Warnung"
   }
 }

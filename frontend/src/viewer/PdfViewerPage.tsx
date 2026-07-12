@@ -524,7 +524,7 @@ export function PdfViewerPage() {
           >
             {Object.keys(PRESETS).map((name) => (
               <option key={name} value={name}>
-                {name}
+                {t(`viewer.preset_${name}`)}
               </option>
             ))}
           </select>
@@ -665,10 +665,15 @@ export function PdfViewerPage() {
                 overlay={compareDoc && compareVisible ? (overlays[page] ?? null) : null}
               >
                 <AnnotationOverlay
+                  ariaLabel={t('viewer.annotations_page', { page })}
                   page={page}
                   zoom={zoom}
-                  annotations={layer.objects}
-                  tool={tool}
+                  annotations={
+                    // coordinates live in unrotated page space — hide + block
+                    // markup while a rotation is applied (export stays honest)
+                    (docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? layer.objects : []
+                  }
+                  tool={(docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? tool : null}
                   style={PRESETS[presetName]}
                   onAdd={(annotation) => dispatchLayer({ kind: 'add', annotation })}
                   onErase={(id) => dispatchLayer({ kind: 'remove', id })}

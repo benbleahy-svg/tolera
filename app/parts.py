@@ -50,6 +50,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -700,8 +701,53 @@ async def download_part_file(
 # --------------------------------------------------------------------------- #
 # Annotation layer (M2.2, spec #pdf-capabilities Annotate/Shapes)
 # --------------------------------------------------------------------------- #
+# Caps logged in DECISIONS.md 2026-07-12 (annotation-layer bounds).
 _MAX_ANNOTATION_OBJECTS = 2000
 _MAX_ANNOTATION_OBJECT_BYTES = 20_000  # bounds freehand point clouds / text blobs
+
+_ANNOTATION_TYPES = frozenset(
+    {
+        "underline",
+        "highlight",
+        "rectangle",
+        "free_text",
+        "freehand_highlight",
+        "freehand",
+        "note",
+        "squiggly",
+        "strikeout",
+        "shape_rectangle",
+        "line",
+        "polyline",
+        "arrow",
+        "arc",
+        "ellipse",
+        "polygon",
+    }
+)
+
+
+class AnnotationObject(BaseModel):
+    """One markup object, validated at the edge (Pydantic v2 per §5) —
+    the shape mirrors the viewer's Annotation type."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: Annotated[str, Field(min_length=1, max_length=64)]
+    page: Annotated[int, Field(ge=1)]
+    type: str
+    style: dict[str, Any]
+    rect: dict[str, float] | None = None
+    points: list[dict[str, float]] | None = None
+    at: dict[str, float] | None = None
+    text: Annotated[str | None, Field(max_length=10_000)] = None
+
+    @field_validator("type")
+    @classmethod
+    def _known_type(cls, value: str) -> str:
+        if value not in _ANNOTATION_TYPES:
+            raise ValueError(f"unknown annotation type {value!r}")
+        return value
 
 
 class AnnotationLayerPayload(BaseModel):
@@ -709,13 +755,13 @@ class AnnotationLayerPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    objects: Annotated[list[dict[str, Any]], Field(max_length=_MAX_ANNOTATION_OBJECTS)]
+    objects: Annotated[list[AnnotationObject], Field(max_length=_MAX_ANNOTATION_OBJECTS)]
 
     @field_validator("objects")
     @classmethod
-    def _bound_object_size(cls, objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _bound_object_size(cls, objects: list[AnnotationObject]) -> list[AnnotationObject]:
         for obj in objects:
-            if len(json.dumps(obj)) > _MAX_ANNOTATION_OBJECT_BYTES:
+            if len(json.dumps(obj.model_dump(exclude_none=True))) > _MAX_ANNOTATION_OBJECT_BYTES:
                 raise ValueError("annotation object exceeds the size bound")
         return objects
 
@@ -743,17 +789,15 @@ async def put_annotation_layer(
 ) -> Any:
     """Persist the layer (upsert; the viewer saves the whole document)."""
     await _get_part_file_or_404(session, part_id, file_id)
-    layer = await session.scalar(
-        select(FileAnnotationLayer).where(FileAnnotationLayer.part_file_id == file_id)
+    data = {"objects": [obj.model_dump(exclude_none=True) for obj in payload.objects]}
+    # atomic upsert — concurrent first saves must not race the unique key
+    await session.execute(
+        pg_insert(FileAnnotationLayer)
+        .values(org_id=principal.active_org_id, part_file_id=file_id, data=data)
+        .on_conflict_do_update(index_elements=["part_file_id"], set_={"data": data})
     )
-    data = {"objects": payload.objects}
-    if layer is None:
-        layer = FileAnnotationLayer(org_id=principal.active_org_id, part_file_id=file_id, data=data)
-        session.add(layer)
-    else:
-        layer.data = data
     await session.flush()
-    return layer.data
+    return data
 
 
 @parts_router.post("/{part_id}/files/{file_id}/primary")

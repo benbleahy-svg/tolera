@@ -411,6 +411,11 @@
     "note_prompt": "Note text:",
     "text_prompt": "Text:",
     "tool_freehand_highlight": "Freehand highlight",
-    "tool_shape_rectangle": "Rectangle (shape)"
+    "tool_shape_rectangle": "Rectangle (shape)",
+    "annotations_page": "Annotations page {{page}}",
+    "preset_standard": "Standard",
+    "preset_fein": "Fine",
+    "preset_marker": "Marker",
+    "preset_warnung": "Warning"
   }
 }

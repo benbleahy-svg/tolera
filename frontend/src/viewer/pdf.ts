@@ -8,7 +8,7 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { PDFDocument, degrees, rgb, type PDFPage } from 'pdf-lib';
 
-import type { Annotation } from './annotations';
+import { arrowHeads, highlightFill, sampleArc, squigglePoints, type Annotation } from './annotations';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -137,18 +137,19 @@ export async function drawAnnotations(
     if (rect) {
       const yTop = height - rect.y;
       switch (annotation.type) {
-        case 'highlight':
+        case 'highlight': {
+          const marker = highlightFill(annotation.style);
           pdfPage.drawRectangle({
             x: rect.x,
             y: yTop - rect.height,
             width: rect.width,
             height: rect.height,
-            color: hexToRgb(annotation.style.fill === 'none' ? '#facc15' : annotation.style.fill),
-            opacity: 0.4,
+            color: hexToRgb(marker.fill),
+            opacity: marker.opacity,
           });
           break;
+        }
         case 'underline':
-        case 'squiggly':
           pdfPage.drawLine({
             start: { x: rect.x, y: yTop - rect.height },
             end: { x: rect.x + rect.width, y: yTop - rect.height },
@@ -156,6 +157,17 @@ export async function drawAnnotations(
             thickness,
             opacity,
           });
+          break;
+        case 'squiggly':
+          // the same wave the overlay renders, not a straight line
+          drawPolyline(
+            pdfPage,
+            squigglePoints(rect.x, rect.width, rect.y + rect.height),
+            height,
+            stroke,
+            thickness,
+            opacity,
+          );
           break;
         case 'strikeout':
           pdfPage.drawLine({
@@ -192,18 +204,18 @@ export async function drawAnnotations(
       }
     } else if (points && points.length >= 2) {
       if (annotation.type === 'arc') {
-        // sample the same quadratic the overlay renders
-        const [from, to] = [points[0], points.at(-1)!];
-        const cx = (from.x + to.x) / 2 + (to.y - from.y) / 3;
-        const cy = (from.y + to.y) / 2 - (to.x - from.x) / 3;
-        const sampled = Array.from({ length: 17 }, (_, i) => {
-          const u = i / 16;
-          return {
-            x: (1 - u) ** 2 * from.x + 2 * (1 - u) * u * cx + u ** 2 * to.x,
-            y: (1 - u) ** 2 * from.y + 2 * (1 - u) * u * cy + u ** 2 * to.y,
-          };
-        });
-        drawPolyline(pdfPage, sampled, height, stroke, thickness || 2, opacity);
+        // the same quadratic the overlay renders (shared sampler)
+        drawPolyline(
+          pdfPage,
+          sampleArc(points[0], points.at(-1)!),
+          height,
+          stroke,
+          thickness || 2,
+          opacity,
+        );
+      } else if (annotation.type === 'freehand_highlight') {
+        const marker = highlightFill(annotation.style);
+        drawPolyline(pdfPage, points, height, hexToRgb(marker.fill), 12, marker.opacity);
       } else {
         drawPolyline(pdfPage, points, height, stroke, thickness || 2, opacity);
       }
@@ -211,31 +223,40 @@ export async function drawAnnotations(
         drawPolyline(pdfPage, [points.at(-1)!, points[0]], height, stroke, thickness || 2, opacity);
       }
       if (annotation.type === 'arrow') {
-        // the overlay's arrowhead, mirrored into the export
-        const [from, to] = [points[0], points.at(-1)!];
-        const angle = Math.atan2(to.y - from.y, to.x - from.x);
-        for (const offset of [0.5, -0.5]) {
-          drawPolyline(
-            pdfPage,
-            [
-              { x: to.x - 10 * Math.cos(angle + offset), y: to.y - 10 * Math.sin(angle + offset) },
-              to,
-            ],
-            height,
-            stroke,
-            thickness || 2,
-            opacity,
-          );
+        // the overlay's arrowhead, mirrored into the export (shared helper)
+        for (const head of arrowHeads(points[0], points.at(-1)!)) {
+          drawPolyline(pdfPage, head, height, stroke, thickness || 2, opacity);
         }
       }
     } else if (at && annotation.text) {
-      pdfPage.drawText(annotation.text, {
-        x: at.x,
-        y: height - at.y,
-        size: annotation.style.fontSize ?? 12,
-        color: stroke,
-        opacity,
-      });
+      if (annotation.type === 'note') {
+        // keep the sticky-note marker visible in the export
+        pdfPage.drawRectangle({
+          x: at.x - 8,
+          y: height - at.y - 8,
+          width: 16,
+          height: 16,
+          color: hexToRgb('#fde68a'),
+          borderColor: stroke,
+          borderWidth: 1,
+          opacity,
+        });
+        pdfPage.drawText(annotation.text, {
+          x: at.x + 12,
+          y: height - at.y - 4,
+          size: annotation.style.fontSize ?? 10,
+          color: stroke,
+          opacity,
+        });
+      } else {
+        pdfPage.drawText(annotation.text, {
+          x: at.x,
+          y: height - at.y,
+          size: annotation.style.fontSize ?? 12,
+          color: stroke,
+          opacity,
+        });
+      }
     }
   }
   return doc.save();

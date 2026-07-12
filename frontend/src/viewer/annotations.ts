@@ -210,3 +210,48 @@ export function buildAnnotation(
 ): Annotation {
   return { id, page, type, style, ...geometry };
 }
+
+
+/** Highlight visuals honor the preset when it sets a fill (AC: presets apply). */
+export function highlightFill(style: AnnotationStyle): { fill: string; opacity: number } {
+  if (style.fill !== 'none') return { fill: style.fill, opacity: style.opacity };
+  return { fill: '#facc15', opacity: 0.4 };
+}
+
+/** The arc's quadratic control point — one formula for overlay AND export. */
+export function arcControlPoint(from: Point, to: Point): Point {
+  return {
+    x: (from.x + to.x) / 2 + (to.y - from.y) / 3,
+    y: (from.y + to.y) / 2 - (to.x - from.x) / 3,
+  };
+}
+
+/** Sampled points along the arc's quadratic (export rendering). */
+export function sampleArc(from: Point, to: Point, steps = 16): Point[] {
+  const control = arcControlPoint(from, to);
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const u = i / steps;
+    return {
+      x: (1 - u) ** 2 * from.x + 2 * (1 - u) * u * control.x + u ** 2 * to.x,
+      y: (1 - u) ** 2 * from.y + 2 * (1 - u) * u * control.y + u ** 2 * to.y,
+    };
+  });
+}
+
+/** The two arrowhead strokes for a line ending at `to`. */
+export function arrowHeads(from: Point, to: Point): [Point, Point][] {
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  return [0.5, -0.5].map((offset) => [
+    { x: to.x - 10 * Math.cos(angle + offset), y: to.y - 10 * Math.sin(angle + offset) },
+    to,
+  ]) as [Point, Point][];
+}
+
+/** A squiggly wave along a horizontal run (shared by overlay + export). */
+export function squigglePoints(x: number, width: number, y: number, step = 6): Point[] {
+  const points: Point[] = [];
+  for (let dx = 0; dx <= width; dx += step) {
+    points.push({ x: x + Math.min(dx, width), y: (dx / step) % 2 === 0 ? y : y - 3 });
+  }
+  return points;
+}
