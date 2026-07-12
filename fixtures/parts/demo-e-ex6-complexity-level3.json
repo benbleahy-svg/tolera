@@ -1,0 +1,42 @@
+{
+  "org": {
+    "country": "DE",
+    "currency": "EUR",
+    "configure_catalog": false
+  },
+  "quantities": [
+    1
+  ],
+  "root_operations": [
+    {
+      "name": "Rohmaterial",
+      "category": "material",
+      "manual_costs": {
+        "1": "102.0540"
+      }
+    },
+    {
+      "name": "CNC Bearbeitung",
+      "manual_costs": {
+        "1": "612.2820"
+      }
+    },
+    {
+      "name": "PartLevel (Critical Info)",
+      "manual_costs": {
+        "1": "0"
+      },
+      "variable_overrides": {
+        "Part Level": "Level 3"
+      }
+    }
+  ],
+  "children": [],
+  "pricing_items": [
+    {
+      "name": "Part Level Markup",
+      "calc_type": "markup",
+      "formula": "level = 'Level 2'\nfor component in get_components():\n    for op in get_operations(component):\n        if is_a_in_b('PartLevel', op.name):\n            level = op.get_variable('Part Level', 'Level 2')\nPERCENTAGE = 20\nif level == 'Level 3':\n    PERCENTAGE = 30\nset_profit_item_name('{} Markup'.format(level))\n"
+    }
+  ]
+}

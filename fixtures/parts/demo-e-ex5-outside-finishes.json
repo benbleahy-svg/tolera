@@ -1,0 +1,49 @@
+{
+  "org": {
+    "country": "DE",
+    "currency": "EUR",
+    "configure_catalog": false
+  },
+  "quantities": [
+    1
+  ],
+  "root_operations": [
+    {
+      "name": "Rohmaterial",
+      "category": "material",
+      "manual_costs": {
+        "1": "566.3340"
+      }
+    },
+    {
+      "name": "CNC Bearbeitung",
+      "manual_costs": {
+        "1": "1219.8040"
+      }
+    },
+    {
+      "name": "Pulverbeschichten",
+      "manual_costs": {
+        "1": "300.0000"
+      },
+      "is_outside_service": true,
+      "is_finish": true
+    }
+  ],
+  "children": [
+    {
+      "obtain_method": "purchased",
+      "piece_price": "8.3700"
+    }
+  ],
+  "pricing_items": [
+    {
+      "name": "Outside Finishes Markup",
+      "calc_type": "markup",
+      "is_custom": true,
+      "custom_category_name": "Outside Finishes",
+      "color": "#8a6d1d",
+      "formula": "total = 0\nfor component in get_components():\n    for op in get_operations(component):\n        if op.is_outside_service and op.is_finish:\n            total += op.cost\nset_custom_cost(total)\nPERCENTAGE = 10\n"
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "org": {
+    "country": "DE",
+    "currency": "EUR",
+    "configure_catalog": false
+  },
+  "quantities": [
+    1
+  ],
+  "root_operations": [
+    {
+      "name": "Rohmaterial",
+      "category": "material",
+      "manual_costs": {
+        "1": "674.2010"
+      }
+    },
+    {
+      "name": "Montage (Lohn)",
+      "manual_costs": {
+        "1": "632.6790"
+      }
+    },
+    {
+      "name": "Gemeinkosten",
+      "manual_costs": {
+        "1": "387.1290"
+      }
+    }
+  ],
+  "children": [
+    {
+      "obtain_method": "purchased",
+      "piece_price": "8.3700"
+    }
+  ],
+  "pricing_items": [
+    {
+      "name": "Inside Operations Markup",
+      "calc_type": "markup",
+      "category": "inside",
+      "default_pct": "22"
+    },
+    {
+      "name": "Labor Markup (Exclude Overhead)",
+      "calc_type": "markup",
+      "is_custom": true,
+      "custom_category_name": "Inside Labor",
+      "color": "#3d2b56",
+      "formula": "total = 0\nfor component in get_components():\n    for op in get_operations(component):\n        if op.name == 'Montage (Lohn)':\n            total += op.cost\nset_custom_cost(total)\nPERCENTAGE = 10\n"
+    },
+    {
+      "name": "Overhead Markup (Exclude Labor)",
+      "calc_type": "markup",
+      "is_custom": true,
+      "custom_category_name": "Inside Overhead",
+      "color": "#2f5d50",
+      "formula": "total = 0\nfor component in get_components():\n    for op in get_operations(component):\n        if op.name == 'Gemeinkosten':\n            total += op.cost\nset_custom_cost(total)\nPERCENTAGE = 10\n"
+    }
+  ]
+}

@@ -19,6 +19,15 @@
 
 ---
 
+## [2026-07-12] OPEN: Fechner fixture packages — Core-4 coverage + starter rules
+**Status:** OPEN
+**Question:** SEED-AND-FIXTURES Part 2 names two shop-specific open items the M1.13 harness now depends on: (a) **which fixtures cover which Core-4 family** — the anonymised Fechner packages (original target 2026-06-23) should span Sheet Metal / Milling / Lathe / Tube Laser so each family has at least one golden; (b) **the starter rule set Fechner wants** (consumed by the M3 rules engine, seeded via the same harness).
+**Options considered:** wait for the packages (harness ships with synthetic placeholders — done in M1.13); author provisional per-family fixtures from open CAD (risks divergence from real Fechner parts).
+**Recommended default:** keep the synthetic placeholders until the packages land, then author one `/fixtures/parts` recipe + golden per Core-4 family from the real parts; collect the rule list in the same session.
+**Affects:** M1.13 (fixture coverage), M3 (starter rules + extraction goldens), M4 (interrogation goldens).
+
+---
+
 ## [2026-07-12] M1.12 Zuschlagskalkulation seed — doc conflicts resolved up the ladder
 
 **Status:** RESOLVED (autonomous, doc-backed; flag for Benjamin's review)

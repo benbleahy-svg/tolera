@@ -1,0 +1,60 @@
+{
+  "org": {
+    "country": "DE",
+    "currency": "EUR",
+    "configure_catalog": false
+  },
+  "quantities": [
+    1
+  ],
+  "root_operations": [
+    {
+      "name": "CNC Bearbeitung",
+      "manual_costs": {
+        "1": "1019.8000"
+      }
+    }
+  ],
+  "children": [
+    {
+      "material_display": "Titan Grade 5 (3.7165)",
+      "operations": [
+        {
+          "name": "Titan Rohmaterial",
+          "category": "material",
+          "cost_formula": "COST = 539.368\nDAYS = 0\n"
+        }
+      ]
+    },
+    {
+      "material_display": "Aluminium 6061",
+      "operations": [
+        {
+          "name": "Alu Rohmaterial",
+          "category": "material",
+          "cost_formula": "COST = 134.84\nDAYS = 0\n"
+        }
+      ]
+    },
+    {
+      "obtain_method": "purchased",
+      "piece_price": "8.3700"
+    }
+  ],
+  "pricing_items": [
+    {
+      "name": "Raw Material Markup",
+      "calc_type": "markup",
+      "category": "material",
+      "default_pct": "60"
+    },
+    {
+      "name": "Difficult Material Markup",
+      "calc_type": "markup",
+      "is_custom": true,
+      "custom_category_name": "Difficult Material",
+      "color": "#8b1e3f",
+      "formula": "total = 0\nfor component in get_components():\n    m = component.part.material\n    if m and is_a_in_b('Titan', m):\n        for mat in get_material_operations(component):\n            total += mat.cost\nset_custom_cost(total)\nPERCENTAGE = 10\n"
+    }
+  ]
+}

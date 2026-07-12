@@ -1,0 +1,20 @@
+{
+  "currency": "EUR",
+  "breaks": [
+    {
+      "quantity": 1,
+      "unit_price": "240.00",
+      "total_price": "240.00"
+    },
+    {
+      "quantity": 5,
+      "unit_price": "204.00",
+      "total_price": "1020.00"
+    },
+    {
+      "quantity": 20,
+      "unit_price": "168.00",
+      "total_price": "3360.00"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "_comment": "Org template the golden harness clones per fixture (unique slug per run). configure_catalog=true additionally runs the M1.7 material + M1.12 Configure seeds (SEED-AND-FIXTURES Part 1) before pricing.",
+  "organization": {
+    "country": "DE",
+    "currency": "EUR",
+    "locale": "de-DE"
+  }
+}

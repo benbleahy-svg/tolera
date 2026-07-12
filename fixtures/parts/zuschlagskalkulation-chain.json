@@ -1,0 +1,28 @@
+{
+  "org": {
+    "country": "DE",
+    "currency": "EUR",
+    "configure_catalog": true
+  },
+  "quantities": [
+    1
+  ],
+  "root_operations": [
+    {
+      "name": "Rohmaterial",
+      "category": "material",
+      "manual_costs": {
+        "1": "100.0000"
+      }
+    },
+    {
+      "name": "Fräsen",
+      "manual_costs": {
+        "1": "100.0000"
+      }
+    }
+  ],
+  "children": [],
+  "pricing_items": [],
+  "check_totals": true
+}

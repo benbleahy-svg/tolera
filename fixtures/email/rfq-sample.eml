@@ -1,0 +1,37 @@
+From: einkauf@kunde-beispiel.de
+To: fechner@rfq.tolera.eu
+Subject: Anfrage: Fraesteil 1.4301, 1/5/20 Stk.
+Date: Sun, 12 Jul 2026 09:00:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="tolera-fixture-boundary"
+
+--tolera-fixture-boundary
+Content-Type: text/plain; charset=utf-8
+
+Sehr geehrte Damen und Herren,
+
+bitte um Angebot fuer das beiliegende Fraesteil (Werkstoff 1.4301,
+Toleranzen ISO 2768-m) in den Losgroessen 1, 5 und 20 Stueck.
+Lieferzeit bitte angeben. Zeichnung anbei.
+
+Mit freundlichen Gruessen
+Einkauf, Kunde Beispiel GmbH
+
+--tolera-fixture-boundary
+Content-Type: application/pdf; name="cube-20mm-print.pdf"
+Content-Disposition: attachment; filename="cube-20mm-print.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUg
+ODQyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4g
+Pj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA5OSA+PgpzdHJlYW0KQlQgL0YxIDEyIFRm
+IDcyIDc3MCBUZCAoU3ludGhldGljIHByaW50OiBjdWJlIDIwbW0gLSAxLjQzMDEgLSBJU08gMjc2
+OC1tIC0gTTEuMTMgcGxhY2Vob2xkZXIpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8
+PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5k
+b2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAw
+MDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI0MSAwMDAwMCBuIAow
+MDAwMDAwMzkwIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFy
+dHhyZWYKNDYwCiUlRU9GCg==
+--tolera-fixture-boundary--

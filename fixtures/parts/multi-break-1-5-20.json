@@ -1,0 +1,39 @@
+{
+  "org": {
+    "country": "DE",
+    "currency": "EUR",
+    "configure_catalog": false
+  },
+  "quantities": [
+    1,
+    5,
+    20
+  ],
+  "root_operations": [
+    {
+      "name": "Rohmaterial",
+      "category": "material",
+      "manual_costs": {
+        "1": "100.0000",
+        "5": "450.0000",
+        "20": "1600.0000"
+      }
+    },
+    {
+      "name": "CNC Bearbeitung",
+      "manual_costs": {
+        "1": "100.0000",
+        "5": "400.0000",
+        "20": "1200.0000"
+      }
+    }
+  ],
+  "children": [],
+  "pricing_items": [
+    {
+      "name": "General Markup",
+      "calc_type": "markup",
+      "default_pct": "20"
+    }
+  ]
+}
