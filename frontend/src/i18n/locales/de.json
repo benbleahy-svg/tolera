@@ -225,7 +225,10 @@
     "rollup_inside": "Eigenfertigung",
     "rollup_outside": "Fremdleistung",
     "rollup_total": "Gesamtkosten",
-    "unpriced_rows_hint": "Mindestens eine Zeile hat weder Satz noch manuelle Kosten."
+    "unpriced_rows_hint": "Mindestens eine Zeile hat weder Satz noch manuelle Kosten.",
+    "missing_rate": "Satz fehlt",
+    "missing_rates_banner": "Stundensätze nicht gesetzt — Kosten erscheinen als 0,00 € ({{count}} Position(en)).",
+    "configure_rates_link": "Sätze konfigurieren →"
   },
   "kalk": {
     "formula": "Kalk-Formel",
@@ -258,7 +261,20 @@
     "remove_row": "Zeile entfernen",
     "save_rows": "Zeilen speichern",
     "pricing": "Preisbildung",
-    "pricing_hint": "Preispositionen und Rabatte der Organisation — neue Angebotspositionen erhalten beim Anlegen eine Kopie (Konfigurations-Freeze); bestehende Entwürfe nur über „Preise aktualisieren“."
+    "pricing_hint": "Preispositionen und Rabatte der Organisation — neue Angebotspositionen erhalten beim Anlegen eine Kopie (Konfigurations-Freeze); bestehende Entwürfe nur über „Preise aktualisieren“.",
+    "operations": "Arbeitsgänge",
+    "rates_banner": "{{count}} Arbeitsgänge ohne Stundensatz — Kosten erscheinen als 0,00 €.",
+    "rates_banner_materials": "{{count}} Werkstoffe ohne Kostensatz.",
+    "quick_rate_label": "Schnellstart: ein Satz für alle (€/Std.)",
+    "apply_to_all": "AUF ALLE ANWENDEN",
+    "search_operations": "Arbeitsgang suchen…",
+    "op_name": "Arbeitsgang",
+    "op_mode": "Modus",
+    "op_run_rate": "Satz (€/Std.)",
+    "rate_input_label": "Satz für {{name}}",
+    "mode_machine_plus_operator": "Maschine + Bediener",
+    "mode_labour_only": "Nur Lohn",
+    "mode_outside_process": "Fremdvergabe"
   },
   "pricing": {
     "refresh_pricing": "Preise aktualisieren",

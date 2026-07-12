@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
@@ -248,6 +248,13 @@ export function EstimatingPage() {
       </header>
 
       {error && <p className="est-error" role="alert">{error}</p>}
+
+      {quote.missing_rates_item_count > 0 && (
+        <p className="est-warning-banner" role="status">
+          {t('estimating.missing_rates_banner', { count: quote.missing_rates_item_count })}{' '}
+          <Link to="/configure/operations">{t('estimating.configure_rates_link')}</Link>
+        </p>
+      )}
 
       {costing && (
         <>

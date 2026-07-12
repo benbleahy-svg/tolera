@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
 from .authz import Permission, require
+from .config_completeness import operation_missing_rate
 from .costing import CostBucket, effective_cost, recalculate_component, rollup_inputs
 from .deps import get_session
 from .errors import AppError
@@ -102,13 +103,24 @@ class OperationDefCreate(BaseModel):
     cost_formula: Annotated[str | None, Field(max_length=100_000)] = None
 
 
-class OperationDefFormulaUpdate(BaseModel):
-    """Configure-side Kalk editor save. ``null`` clears the formula (the op
-    falls back to its mode arithmetic on future attaches)."""
+class OperationDefUpdate(BaseModel):
+    """Configure-side def edit — the M1.14 per-operation rate table plus the
+    M1.9 Kalk editor. Absent fields stay unchanged (``exclude_unset``); an
+    explicit ``null`` clears the nullable ones (``cost_formula: null`` falls
+    the op back to its mode arithmetic on future attaches). Existing quote
+    operations keep their snapshot (E4-d config-freeze)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    cost_formula: Annotated[str | None, Field(max_length=100_000)]
+    name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
+    calculation_mode: CalculationMode | None = None
+    run_rate: Annotated[Decimal | None, Field(ge=0)] = None
+    labour_rate: Annotated[Decimal | None, Field(ge=0)] = None
+    setup_basis: SetupBasis | None = None
+    setup_cost: Annotated[Decimal | None, Field(ge=0)] = None
+    setup_time_mins: Annotated[Decimal | None, Field(ge=0)] = None
+    surcharge_pct: Annotated[Decimal | None, Field(ge=0, le=100)] = None
+    cost_formula: Annotated[str | None, Field(max_length=100_000)] = None
 
 
 class QuoteCellOut(BaseModel):
@@ -143,6 +155,10 @@ class OperationOut(BaseModel):
     notes: str | None
     cost_formula: str | None
     variable_overrides: dict[str, Any]
+    # M1.14 #missing-rates-warning: this row's rate resolves to nothing — the
+    # amber inline highlight (deterministic, computed from the same rule as
+    # the Configure banner)
+    missing_rate: bool
     cells: list[QuoteCellOut]
 
 
@@ -249,6 +265,8 @@ class ComponentCosting(BaseModel):
     quantities: list[int]
     operations: list[OperationOut]
     buckets: list[CostBucket]
+    # M1.14: any router row on this component resolves to no rate
+    has_missing_rates: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -375,6 +393,7 @@ def _operation_out(op: Operation, cells: list[QuoteCell]) -> OperationOut:
         notes=op.notes,
         cost_formula=op.cost_formula,
         variable_overrides=op.variable_overrides,
+        missing_rate=operation_missing_rate(op),
         cells=cell_out,
     )
 
@@ -402,13 +421,15 @@ async def _component_costing(session: AsyncSession, component: Component) -> Com
             )
         ).all()
     )
+    rows = [_operation_out(op, cells_by_op.get(op.id, [])) for op in operations]
     return ComponentCosting(
         component_id=component.id,
         material_id=component.material_id,
         process_id=component.process_id,
         quantities=list(quantities),
-        operations=[_operation_out(op, cells_by_op.get(op.id, [])) for op in operations],
+        operations=rows,
         buckets=await rollup_inputs(session, component.id),
+        has_missing_rates=any(row.missing_rate for row in rows),
     )
 
 
@@ -473,14 +494,15 @@ async def create_operation_def(
 
 
 @operations_router.patch("/operation-defs/{def_id}")
-async def update_operation_def_formula(
+async def update_operation_def(
     def_id: uuid.UUID,
-    payload: OperationDefFormulaUpdate,
+    payload: OperationDefUpdate,
     session: Annotated[AsyncSession, Depends(get_session)],
     _: Annotated[Principal, Depends(require(Permission.config_edit))],
 ) -> OperationDefOut:
-    """The Configure-side Kalk editor save. Existing quote operations keep their
-    snapshot (E4-d config-freeze) — only future attaches see the new formula."""
+    """The Configure-side def edit (rates table + Kalk editor). Existing quote
+    operations keep their snapshot (E4-d config-freeze) — only future attaches
+    see the change."""
     op_def = await session.get(OperationDef, def_id)
     if op_def is None or op_def.deleted_at is not None:
         raise AppError(
@@ -488,9 +510,13 @@ async def update_operation_def_formula(
             "Operation definition not found.",
             status_code=status.HTTP_404_NOT_FOUND,
         )
-    if payload.cost_formula is not None:
-        _validate_formula(payload.cost_formula)
-    op_def.cost_formula = payload.cost_formula
+    updates = payload.model_dump(exclude_unset=True)
+    if updates.get("cost_formula") is not None:
+        _validate_formula(updates["cost_formula"])
+    if updates.get("name") is None:
+        updates.pop("name", None)  # the name column is NOT NULL; null = no-op
+    for key, value in updates.items():
+        setattr(op_def, key, value)
     await session.flush()
     return _def_out(op_def)
 

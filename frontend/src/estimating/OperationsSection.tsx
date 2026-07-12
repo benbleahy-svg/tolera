@@ -153,13 +153,18 @@ export function OperationsSection({
           </thead>
           <tbody>
             {rows.map((op, index) => (
-              <tr key={op.id}>
+              <tr key={op.id} className={op.missing_rate ? 'est-missing-rate' : undefined}>
                 <td>
                   <button type="button" className="est-row-name" onClick={() => onOpen(op)}>
                     {op.name}
                   </button>
                   {op.is_outside_service && (
                     <span className="est-chip">{t('estimating.outside_service')}</span>
+                  )}
+                  {op.missing_rate && (
+                    <span className="est-chip est-chip-warning">
+                      {t('estimating.missing_rate')}
+                    </span>
                   )}
                 </td>
                 {quantities.map((quantity) => {

@@ -158,6 +158,7 @@ export function PricingDefsPage() {
       <nav className="est-subnav">
         <Link to="/configure">{t('configure.custom_tables')}</Link>
         <span aria-current="page">{t('configure.pricing')}</span>
+        <Link to="/configure/operations">{t('configure.operations')}</Link>
       </nav>
       <header className="est-header">
         <h2>{t('configure.pricing')}</h2>

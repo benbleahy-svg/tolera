@@ -42,6 +42,7 @@ export interface OperationOut {
   notes: string | null;
   cost_formula: string | null;
   variable_overrides: Record<string, VariableOverrideValue>;
+  missing_rate: boolean;
   cells: QuoteCellOut[];
 }
 
@@ -111,6 +112,7 @@ export interface ComponentCosting {
   quantities: number[];
   operations: OperationOut[];
   buckets: CostBucket[];
+  has_missing_rates: boolean;
 }
 
 export interface MaterialOut {
@@ -182,6 +184,7 @@ export interface QuoteSummary {
   number: string;
   status: string;
   currency: string;
+  missing_rates_item_count: number;
   items: QuoteItemSummary[];
 }
 
