@@ -43,6 +43,7 @@ export interface PartsApi {
   setPrimary: (partId: string, fileId: string) => Promise<PartFile>;
   deleteFile: (partId: string, fileId: string) => Promise<void>;
   downloadFile: (partId: string, fileId: string, filename: string) => Promise<void>;
+  fetchFileBytes: (partId: string, fileId: string) => Promise<Uint8Array>;
 }
 
 /** Trigger a browser "save as" for a fetched blob (download UX). */
@@ -79,6 +80,10 @@ export function usePartsApi(): PartsApi {
       downloadFile: async (partId, fileId, filename) => {
         const blob = await apiDownload(`/api/parts/${partId}/files/${fileId}/download`, token);
         saveBlob(blob, filename);
+      },
+      fetchFileBytes: async (partId, fileId) => {
+        const blob = await apiDownload(`/api/parts/${partId}/files/${fileId}/download`, token);
+        return new Uint8Array(await blob.arrayBuffer());
       },
     };
   }, [getToken]);

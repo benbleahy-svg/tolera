@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
@@ -154,6 +155,11 @@ export function FilesPanel({
                     >
                       {t('parts.files.make_primary')}
                     </button>
+                  )}
+                  {file.filename.toLowerCase().endsWith('.pdf') && (
+                    <Link className="btn btn-link" to={`/parts/${partId}/files/${file.id}/view`}>
+                      {t('viewer.view_file')}
+                    </Link>
                   )}
                   {canEdit && (
                     <button
