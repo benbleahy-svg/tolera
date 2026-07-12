@@ -16,6 +16,7 @@ import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
 import { EstimatingPage } from './estimating/EstimatingPage';
 import { PartsPage } from './parts/PartsPage';
+import { PdfViewerPage } from './viewer/PdfViewerPage';
 import { QuotesPage } from './quotes/QuotesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { AppShell } from './shell/AppShell';
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/contacts/:accountId" element={<AccountDetailPage />} />
         <Route path="/contacts/:accountId/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/parts" element={<PartsPage />} />
+        <Route path="/parts/:partId/files/:fileId/view" element={<PdfViewerPage />} />
         <Route path="/quotes" element={<QuotesPage />} />
         {/* Line-item estimating view — the M1.7 Materials & Operations slice. */}
         <Route path="/quotes/:quoteId" element={<EstimatingPage />} />
