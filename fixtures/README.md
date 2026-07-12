@@ -40,7 +40,8 @@ quote → line → material/ops → costing → pricing → VAT totals).
 | demo-e-ex5-outside-finishes | only outside finishes marked up | 2.124,51 € |
 | demo-e-ex6-complexity-level3 / -level2 | PartLevel-driven % | 928,64 € / 857,20 € |
 | zuschlagskalkulation-chain | seeded MGK/VwGK/VtGK/Gewinn + 19 % MwSt. | 261,80 € netto |
-| ch-zuschlag-quote | the CH region path (CHF, 8.1 % MWST) | CHF 261.80 netto |
+| ch-zuschlag-quote | the CH region path (CHF, 8.1 % MWST; the QR-bill half of the CH line is buyer-facing invoicing → M5) | CHF 261.80 netto |
+| multi-break-1-5-20 | per-quantity breaks (the .eml's Losgrößen) | 240,00 / 204,00 / 168,00 € |
 
 ## On delivery of the anonymised Fechner packages (target was 2026-06-23)
 

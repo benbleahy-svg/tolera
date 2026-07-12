@@ -40,6 +40,13 @@ def load_fixture(name: str) -> dict[str, Any]:
     )
 
 
+def load_seed_template() -> dict[str, Any]:
+    """The Part-1 org template (fixtures/seed.json) the harness clones per
+    fixture; a fixture's own ``org`` block overrides individual fields."""
+    seed = json.loads((FIXTURES_DIR / "seed.json").read_text(encoding="utf-8"))
+    return cast(dict[str, Any], seed["organization"])
+
+
 def load_golden(name: str) -> dict[str, Any]:
     return cast(
         dict[str, Any],
@@ -104,14 +111,15 @@ def _build_root_operations(
 def run_pricing_fixture(app_client: TestClient, seeder: Seeder, name: str) -> dict[str, Any]:
     """Build one fixture on a clean org; return the observed golden document."""
     fixture = load_fixture(name)
-    org_spec = fixture.get("org", {})
+    org_spec = load_seed_template() | fixture.get("org", {})
     # a CLEAN org per run: unique slug so re-runs and the determinism test
     # never collide — the figures must not depend on org identity
     run_id = uuid.uuid4().hex[:8]
     org = seeder.org(
         f"golden-{name[:40]}-{run_id}",
-        country=org_spec.get("country", "DE"),
-        currency=org_spec.get("currency", "EUR"),
+        country=org_spec["country"],
+        currency=org_spec["currency"],
+        locale=org_spec.get("locale", "de-DE"),
     )
     user = seeder.user(f"harness-{run_id}@{name[:40]}.example")
     seeder.membership(user, org, ADMIN)
