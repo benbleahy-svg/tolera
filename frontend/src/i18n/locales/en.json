@@ -383,6 +383,7 @@
     "rotate_pages": "Rotate",
     "extract_pages": "Extract",
     "delete_pages": "Delete",
-    "view_file": "View"
+    "view_file": "View",
+    "restore_pages": "Restore pages"
   }
 }

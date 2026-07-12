@@ -65,7 +65,8 @@ describe('nextZoom', () => {
   it('steps through the preset ladder and clamps at the ends', () => {
     expect(nextZoom(1, 1)).toBe(1.25);
     expect(nextZoom(1, -1)).toBe(0.75);
-    expect(nextZoom(4, 1)).toBe(4);
+    expect(nextZoom(4, 1)).toBe(6);
+    expect(nextZoom(8, 1)).toBe(8);
     expect(nextZoom(0.5, -1)).toBe(0.5);
   });
 });
@@ -78,6 +79,7 @@ const PAGE_TEXTS = [
 
 const loadedDoc = {
   pageCount: 2,
+  getPageSize: vi.fn(() => Promise.resolve({ width: 595, height: 842 })),
   getPageText: vi.fn((page: number) => Promise.resolve(PAGE_TEXTS[page - 1] ?? '')),
   renderPage: vi.fn(() => Promise.resolve()),
   renderPagePixels: vi.fn(() =>

@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
 import { usePartsApi, type PartFile } from '../parts/api';
-import { extractPages, loadPdf, type LoadedPdf } from './pdf';
+import { extractPages, loadPdf, rotatePages, type LoadedPdf } from './pdf';
 import { diffImageData, nextZoom, parsePageSelection, searchPages, type SearchHit } from './utils';
 
 const SIDEBAR_KEY = 'tolera.viewer.sidebar-collapsed';
@@ -82,6 +82,7 @@ export function PdfViewerPage() {
   const [file, setFile] = useState<PartFile | null>(null);
   const [siblings, setSiblings] = useState<PartFile[]>([]);
   const [pageTexts, setPageTexts] = useState<string[]>([]);
+  const [pageSize, setPageSize] = useState<{ width: number; height: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [layout, setLayout] = useState<PageLayout>('continuous');
@@ -152,6 +153,49 @@ export function PdfViewerPage() {
     setError(e instanceof ApiError ? e.message : String(e));
   }, []);
 
+  // real fits, computed from the container and the page's unscaled size
+  const fitWidth = useCallback(() => {
+    const container = pagesRef.current;
+    if (!container || !pageSize) return;
+    setZoom(Math.max(0.1, (container.clientWidth - 48) / pageSize.width));
+  }, [pageSize]);
+
+  const fitPage = useCallback(() => {
+    const container = pagesRef.current;
+    if (!container || !pageSize) return;
+    setZoom(
+      Math.max(
+        0.1,
+        Math.min(
+          (container.clientWidth - 48) / pageSize.width,
+          (container.clientHeight - 48) / pageSize.height,
+        ),
+      ),
+    );
+  }, [pageSize]);
+
+  // keyboard shortcuts (spec: P pan, Z marquee, Cmd± zoom)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      if ((e.metaKey || e.ctrlKey) && (e.key === '+' || e.key === '=')) {
+        e.preventDefault();
+        setZoom((z) => nextZoom(z, 1));
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault();
+        setZoom((z) => nextZoom(z, -1));
+      } else if (e.key === 'p' || e.key === 'P') {
+        setPanMode((p) => !p);
+      } else if (e.key === 'z' || e.key === 'Z') {
+        setMarqueeMode((m) => !m);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+
   useEffect(() => {
     if (!partId || !fileId) return;
     api
@@ -164,6 +208,7 @@ export function PdfViewerPage() {
           Array.from({ length: loaded.pageCount }, (_, i) => loaded.getPageText(i + 1)),
         );
         setPageTexts(texts);
+        setPageSize(await loaded.getPageSize(1));
       })
       .catch(fail);
     api
@@ -181,6 +226,18 @@ export function PdfViewerPage() {
   );
   useEffect(() => setHitIndex(0), [query, caseSensitive, wholeWord]);
 
+  // hit navigation scrolls the hit's page into view (paged: jumps to it)
+  useEffect(() => {
+    const hit = hits[hitIndex];
+    if (!hit) return;
+    setCurrentPage(hit.page);
+    const target = pagesRef.current?.querySelector(`[data-page="${hit.page}"]`);
+    // jsdom has no scrollIntoView — guard so tests and odd embeds stay safe
+    if (target instanceof HTMLElement && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'start' });
+    }
+  }, [hits, hitIndex]);
+
   const visiblePages = useMemo(() => {
     if (!doc) return [];
     const all = Array.from({ length: doc.pageCount }, (_, i) => i + 1).filter(
@@ -189,8 +246,12 @@ export function PdfViewerPage() {
     if (layout === 'continuous') return all;
     if (spread === 'single') return all.slice(currentPage - 1, currentPage);
     if (spread === 'cover' && currentPage === 1) return all.slice(0, 1);
-    const start = spread === 'cover' ? currentPage - ((currentPage - 1) % 2 || 1) : currentPage - 1;
-    return all.slice(start, start + 2);
+    if (spread === 'cover') {
+      // booklet pairs after the lone cover: (2,3), (4,5), …
+      const pairFirst = currentPage % 2 === 0 ? currentPage : currentPage - 1;
+      return all.slice(pairFirst - 1, pairFirst + 1);
+    }
+    return all.slice(currentPage - 1, currentPage + 1);
   }, [doc, layout, spread, currentPage, hiddenPages]);
 
   const runCompare = useCallback(
@@ -230,8 +291,13 @@ export function PdfViewerPage() {
     if (!bytes) return;
     const pages = parsePageSelection(selectionInput, doc?.pageCount ?? 0);
     if (!pages.length) return;
+    // Extract matches the view: apply any per-page rotations first
+    const rotated = Object.fromEntries(
+      pages.filter((page) => pageRotations[page]).map((page) => [page, pageRotations[page]]),
+    );
+    const source = Object.keys(rotated).length ? await rotatePages(bytes, rotated) : bytes;
     saveBlob(
-      await extractPages(bytes, pages),
+      await extractPages(source, pages),
       `${file?.filename?.replace(/\.pdf$/i, '') ?? 'seiten'}-${pages.join('-')}.pdf`,
     );
   };
@@ -290,10 +356,10 @@ export function PdfViewerPage() {
           <button type="button" onClick={() => setZoom((z) => nextZoom(z, 1))} aria-label="Zoom +">
             +
           </button>
-          <button type="button" onClick={() => setZoom(1)}>
+          <button type="button" onClick={fitPage}>
             {t('viewer.fit_page')}
           </button>
-          <button type="button" onClick={() => setZoom(1.5)}>
+          <button type="button" onClick={fitWidth}>
             {t('viewer.fit_width')}
           </button>
           <button
@@ -430,6 +496,8 @@ export function PdfViewerPage() {
                 </button>
                 <button
                   type="button"
+                  // view-session removal only — the stored file is untouched;
+                  // persisted page splits are M2.5's Split PDF
                   onClick={() =>
                     setHiddenPages(
                       (prev) =>
@@ -439,6 +507,11 @@ export function PdfViewerPage() {
                 >
                   {t('viewer.delete_pages')}
                 </button>
+                {hiddenPages.size > 0 && (
+                  <button type="button" onClick={() => setHiddenPages(new Set())}>
+                    {t('viewer.restore_pages')}
+                  </button>
+                )}
               </div>
               <ol className="viewer-thumbs">
                 {Array.from({ length: doc.pageCount }, (_, i) => i + 1)

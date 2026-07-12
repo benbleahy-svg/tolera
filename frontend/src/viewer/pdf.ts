@@ -12,6 +12,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export interface LoadedPdf {
   pageCount: number;
+  /** Unscaled page dimensions (pdf units ≈ CSS px at scale 1). */
+  getPageSize: (page: number) => Promise<{ width: number; height: number }>;
   /** Extracted text per page (1-based), for search. */
   getPageText: (page: number) => Promise<string>;
   /** Render one page into a canvas at the given scale/rotation (degrees). */
@@ -32,6 +34,11 @@ export async function loadPdf(bytes: Uint8Array): Promise<LoadedPdf> {
   const doc = await pdfjs.getDocument({ data: bytes }).promise;
   return {
     pageCount: doc.numPages,
+    getPageSize: async (page) => {
+      const pdfPage = await doc.getPage(page);
+      const viewport = pdfPage.getViewport({ scale: 1 });
+      return { width: viewport.width, height: viewport.height };
+    },
     getPageText: async (page) => {
       const pdfPage = await doc.getPage(page);
       const content = await pdfPage.getTextContent();
@@ -75,12 +82,16 @@ export async function extractPages(bytes: Uint8Array, pages: number[]): Promise<
   return target.save();
 }
 
-/** Rotate selected 1-based pages by +90° and return the new bytes. */
-export async function rotatePages(bytes: Uint8Array, pages: number[]): Promise<Uint8Array> {
+/** Apply the viewer's per-page rotations (degrees) so Extract matches the view. */
+export async function rotatePages(
+  bytes: Uint8Array,
+  rotations: Record<number, number>,
+): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes);
-  for (const pageNumber of pages) {
-    const page = doc.getPage(pageNumber - 1);
-    page.setRotation(degrees((page.getRotation().angle + 90) % 360));
+  for (const [pageNumber, rotation] of Object.entries(rotations)) {
+    if (!rotation) continue;
+    const page = doc.getPage(Number(pageNumber) - 1);
+    page.setRotation(degrees((page.getRotation().angle + rotation) % 360));
   }
   return doc.save();
 }

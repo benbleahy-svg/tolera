@@ -94,7 +94,7 @@ export function diffImageData(
 }
 
 /** The zoom presets the toolbar dropdown offers. */
-export const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4] as const;
+export const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8] as const;
 
 export function nextZoom(current: number, direction: 1 | -1): number {
   const sorted = [...ZOOM_STEPS];
