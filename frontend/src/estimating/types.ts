@@ -168,6 +168,7 @@ export interface OperationDefOut {
   is_finish: boolean;
   is_pre_installed: boolean;
   sort_order: number;
+  cost_formula: string | null;
 }
 
 /** The subset of the quote-detail response the estimating page reads (M1.4/M1.6). */

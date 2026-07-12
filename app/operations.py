@@ -112,14 +112,17 @@ class OperationDefUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
-    calculation_mode: CalculationMode | None = None
+    # NOT NULL columns exclude None (explicit null = clean 422, the M1.7
+    # OperationUpdate precedent); their defaults are inert placeholders under
+    # exclude_unset. Nullable columns accept an explicit null to clear.
+    name: Annotated[str, Field(min_length=1, max_length=200)] = "unset"
+    calculation_mode: CalculationMode = CalculationMode.machine_plus_operator
     run_rate: Annotated[Decimal | None, Field(ge=0)] = None
     labour_rate: Annotated[Decimal | None, Field(ge=0)] = None
-    setup_basis: SetupBasis | None = None
+    setup_basis: SetupBasis = SetupBasis.flat
     setup_cost: Annotated[Decimal | None, Field(ge=0)] = None
     setup_time_mins: Annotated[Decimal | None, Field(ge=0)] = None
-    surcharge_pct: Annotated[Decimal | None, Field(ge=0, le=100)] = None
+    surcharge_pct: Annotated[Decimal, Field(ge=0, le=100)] = Decimal(0)
     cost_formula: Annotated[str | None, Field(max_length=100_000)] = None
 
 
@@ -520,8 +523,6 @@ async def update_operation_def(
     updates = payload.model_dump(exclude_unset=True)
     if updates.get("cost_formula") is not None:
         _validate_formula(updates["cost_formula"])
-    if updates.get("name") is None:
-        updates.pop("name", None)  # the name column is NOT NULL; null = no-op
     for key, value in updates.items():
         setattr(op_def, key, value)
     await session.flush()

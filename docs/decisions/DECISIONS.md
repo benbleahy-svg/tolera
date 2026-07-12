@@ -19,6 +19,16 @@
 
 ---
 
+## [2026-07-12] M1.14 APPLY-TO-ALL fills only unrated rates; banner is count-based
+
+**Status:** RESOLVED (autonomous, doc-backed; flag for Benjamin's review)
+**Question:** Spec `#operation-rates-banner` says the quick-start "APPLY TO ALL sets the run rate on **every** process in the org's catalog in one write" and calls the banner "dismissible … until at least one rate is saved". Filling *every* def would silently overwrite rates an admin already configured, and a dismiss-on-first-rate banner stops guarding long before the catalog is actually rated (the block AC wants the **count** of unrated ops/materials).
+**Decision:** APPLY TO ALL fills only defs whose rate is still NULL/0 — the CLAUDE.md §5 never-destroy-human-input reading; in the banner's real use case (fresh org, nothing rated) the two are identical. The banner is count-based and non-dismissible until nothing is unrated (block AC over spec prose). The quote-side warning additionally flags **costless materials** (block scope "op/material"), beyond the spec's operation-only wording.
+**Resolved:** 2026-07-12 (M1.14 autonomous build; verifier + two-axis review cross-checked)
+**Affects:** M1.14; M6 Quick-Setup wizard (reuses the same apply-rate endpoint).
+
+---
+
 ## [2026-07-12] OPEN: Fechner fixture packages — Core-4 coverage + starter rules
 **Status:** OPEN
 **Question:** SEED-AND-FIXTURES Part 2 names two shop-specific open items the M1.13 harness now depends on: (a) **which fixtures cover which Core-4 family** — the anonymised Fechner packages (original target 2026-06-23) should span Sheet Metal / Milling / Lathe / Tube Laser so each family has at least one golden; (b) **the starter rule set Fechner wants** (consumed by the M3 rules engine, seeded via the same harness).

@@ -14,6 +14,16 @@ import { ApiError } from '../api/client';
 import type { OperationDefOut } from '../estimating/types';
 import { useConfigureApi } from './api';
 
+/** Mirrors the backend rule: rate-bearing defs only, NULL or 0 = missing. */
+function defNeedsRate(def: OperationDefOut): boolean {
+  return (
+    def.category !== 'material' &&
+    def.calculation_mode !== 'outside_process' &&
+    def.cost_formula == null &&
+    (def.run_rate == null || Number(def.run_rate) === 0)
+  );
+}
+
 export function OperationsPage() {
   const { t } = useTranslation();
   const api = useConfigureApi();
@@ -64,7 +74,7 @@ export function OperationsPage() {
       <h1>{t('configure.operations')}</h1>
       {error && <p role="alert">{error}</p>}
 
-      {unratedOps > 0 && (
+      {(unratedOps > 0 || unratedMaterials > 0) && (
         <section className="est-warning-banner" role="status">
           <p>
             {t('configure.rates_banner', { count: unratedOps })}
@@ -119,7 +129,7 @@ export function OperationsPage() {
         </thead>
         <tbody>
           {defs.map((def) => (
-            <tr key={def.id} className={def.run_rate == null ? 'est-missing-rate' : undefined}>
+            <tr key={def.id} className={defNeedsRate(def) ? 'est-missing-rate' : undefined}>
               <td>{def.name}</td>
               <td>{t(`configure.mode_${def.calculation_mode}`)}</td>
               <td className="est-num">

@@ -43,6 +43,7 @@ function def(name: string, runRate: string | null): OperationDefOut {
     is_finish: false,
     is_pre_installed: true,
     sort_order: 0,
+    cost_formula: null,
   };
 }
 

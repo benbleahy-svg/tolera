@@ -36,7 +36,15 @@ from sqlalchemy.sql.elements import ColumnElement
 from .auth import Principal
 from .authz import Permission, require
 from .deps import get_session
-from .models import CalculationMode, Material, OpCategory, Operation, OperationDef
+from .models import (
+    CalculationMode,
+    Component,
+    Material,
+    OpCategory,
+    Operation,
+    OperationDef,
+    QuoteItem,
+)
 
 config_completeness_router = APIRouter(prefix="/api", tags=["config-completeness"])
 
@@ -81,8 +89,6 @@ def material_missing_cost(material: Material | None) -> bool:
 async def quote_items_missing_rates(session: AsyncSession, quote_id: uuid.UUID) -> int:
     """How many line items use an operation — or an assigned material —
     with no rate."""
-    from .models import Component, QuoteItem
-
     by_operation = (
         select(QuoteItem.id)
         .join(Operation, Operation.component_id == QuoteItem.root_component_id)

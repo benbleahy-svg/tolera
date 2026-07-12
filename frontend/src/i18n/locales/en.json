@@ -227,8 +227,9 @@
     "rollup_total": "Total cost",
     "unpriced_rows_hint": "At least one row has neither a rate nor a manual cost.",
     "missing_rate": "No rate",
-    "missing_rates_banner": "Operation rates not set — costs will show as €0.00 ({{count}} line item(s)).",
-    "configure_rates_link": "Configure rates →"
+    "configure_rates_link": "Configure rates →",
+    "missing_rates_banner_one": "Operation rates not set — costs will show as €0.00 (1 line item).",
+    "missing_rates_banner_other": "Operation rates not set — costs will show as €0.00 ({{count}} line items)."
   },
   "kalk": {
     "formula": "Kalk formula",
@@ -263,8 +264,6 @@
     "pricing": "Pricing",
     "pricing_hint": "The org's pricing items and discounts — new quote lines receive a copy at creation (config freeze); existing drafts only via Refresh Pricing.",
     "operations": "Operations",
-    "rates_banner": "{{count}} operations need rates — costs will show as €0.00.",
-    "rates_banner_materials": "{{count}} materials have no cost rate.",
     "quick_rate_label": "Quick start: one rate for all (€/hr)",
     "apply_to_all": "APPLY TO ALL",
     "search_operations": "Search operations…",
@@ -274,7 +273,11 @@
     "rate_input_label": "Rate for {{name}}",
     "mode_machine_plus_operator": "Machine + operator",
     "mode_labour_only": "Labour only",
-    "mode_outside_process": "Outside process"
+    "mode_outside_process": "Outside process",
+    "rates_banner_one": "1 operation needs a rate — costs will show as €0.00.",
+    "rates_banner_other": "{{count}} operations need rates — costs will show as €0.00.",
+    "rates_banner_materials_one": "1 material has no cost rate.",
+    "rates_banner_materials_other": "{{count}} materials have no cost rate."
   },
   "pricing": {
     "refresh_pricing": "Refresh Pricing",

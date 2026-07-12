@@ -227,8 +227,9 @@
     "rollup_total": "Gesamtkosten",
     "unpriced_rows_hint": "Mindestens eine Zeile hat weder Satz noch manuelle Kosten.",
     "missing_rate": "Satz fehlt",
-    "missing_rates_banner": "Stundensätze nicht gesetzt — Kosten erscheinen als 0,00 € ({{count}} Position(en)).",
-    "configure_rates_link": "Sätze konfigurieren →"
+    "configure_rates_link": "Sätze konfigurieren →",
+    "missing_rates_banner_one": "Stundensätze nicht gesetzt — Kosten erscheinen als 0,00 € (1 Position).",
+    "missing_rates_banner_other": "Stundensätze nicht gesetzt — Kosten erscheinen als 0,00 € ({{count}} Positionen)."
   },
   "kalk": {
     "formula": "Kalk-Formel",
@@ -263,8 +264,6 @@
     "pricing": "Preisbildung",
     "pricing_hint": "Preispositionen und Rabatte der Organisation — neue Angebotspositionen erhalten beim Anlegen eine Kopie (Konfigurations-Freeze); bestehende Entwürfe nur über „Preise aktualisieren“.",
     "operations": "Arbeitsgänge",
-    "rates_banner": "{{count}} Arbeitsgänge ohne Stundensatz — Kosten erscheinen als 0,00 €.",
-    "rates_banner_materials": "{{count}} Werkstoffe ohne Kostensatz.",
     "quick_rate_label": "Schnellstart: ein Satz für alle (€/Std.)",
     "apply_to_all": "AUF ALLE ANWENDEN",
     "search_operations": "Arbeitsgang suchen…",
@@ -274,7 +273,11 @@
     "rate_input_label": "Satz für {{name}}",
     "mode_machine_plus_operator": "Maschine + Bediener",
     "mode_labour_only": "Nur Lohn",
-    "mode_outside_process": "Fremdvergabe"
+    "mode_outside_process": "Fremdvergabe",
+    "rates_banner_one": "1 Arbeitsgang ohne Stundensatz — Kosten erscheinen als 0,00 €.",
+    "rates_banner_other": "{{count}} Arbeitsgänge ohne Stundensatz — Kosten erscheinen als 0,00 €.",
+    "rates_banner_materials_one": "1 Werkstoff ohne Kostensatz.",
+    "rates_banner_materials_other": "{{count}} Werkstoffe ohne Kostensatz."
   },
   "pricing": {
     "refresh_pricing": "Preise aktualisieren",
