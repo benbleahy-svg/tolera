@@ -5,8 +5,8 @@ Spec ``#oplibrary`` + ``#zuschlagskalkulation``; SEED-AND-FIXTURES Part 1
 decisions in the M1.12 PR:
 
 * ``process_family`` enum + the deferred M1.7 process columns (family,
-  ``is_default_purchased_component_process``, ``available_in_smart_rfq``,
-  ``deleted_at``) land by forward ALTER (the stub-then-extend precedent).
+  ``is_default_purchased_component_process``, ``available_in_smart_rfq``)
+  land by forward ALTER (``deleted_at`` already exists from 0011).
 * ``process_operation`` — router membership (which op defs a process
   generates, ordered, with per_setup / is_assembly / root_component_only
   flags). Stored as data; auto-routing application is M4's.

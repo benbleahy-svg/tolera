@@ -52,7 +52,7 @@ def test_seed_counts_and_content(seeder: Seeder, app_client: TestClient) -> None
     result = seeder.configure_catalog(org)
     assert result.operation_defs_created == GERMAN_OPS + SUPPORT_OPS
     assert result.classes_created == 7  # Metall is M1.7's; §2 adds the rest
-    assert result.materials_created == 3  # POM-C / PA6 / PEEK
+    assert result.materials_created == 3  # POM / PA6 / PEEK
     assert result.processes_created == 2  # Assembly + PC; Core-4 exist from M1.7
     assert result.router_rows_created == 18
     # DACH orgs get the pure Zuschlagskalkulation chain — no Standardaufschlag
@@ -60,10 +60,10 @@ def test_seed_counts_and_content(seeder: Seeder, app_client: TestClient) -> None
     # double-count and pollute get_selbstkosten())
     assert result.pricing_item_defs_created == 4
     assert result.discount_defs_created == 1
-    assert result.add_on_defs_created == 6  # the #addons AddOnType dropdown
+    assert result.add_on_defs_created == 7  # #addons types + Minimum Order Charge
     assert result.workflow_steps_created == 5  # incl. "No Quote" (§7)
     assert result.custom_tables_created == 3
-    assert result.email_templates_created == 2
+    assert result.email_templates_created == 3  # incl. follow-up (§7)
 
     with _as_admin(app_client, org, user) as client:
 

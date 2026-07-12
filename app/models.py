@@ -189,7 +189,7 @@ class Organization(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     # §6 expedite default set — prefills the M1.11 top-of-quote editor:
-    # [{"days_faster": int, "markup_pct": number}]
+    # [{"days_faster": int, "markup_pct": "<decimal string>"}]
     default_expedite_tiers: Mapped[list[Any] | None] = mapped_column(JSONB)
     # Clerk Organizations mirror (DECISIONS.md 2026-06-24 "Org identity model").
     clerk_org_id: Mapped[str | None] = mapped_column(String, unique=True)
@@ -686,7 +686,7 @@ class Quote(Base):
     # M1.11 — the top-of-quote dynamic-lead-time editor state (spec #addons
     # "Expedite: configured at quote level; APPLY TO ALL pushes the tiers to
     # every line item"): {"standard_lead_time_days": int|null, "tiers":
-    # [{"days_faster": int, "markup_pct": number}]}. Staging only — the math
+    # [{"days_faster": int, "markup_pct": "<decimal string>"}]}. Staging only — the math
     # reads the per-component expedite_option rows the apply writes.
     expedite_tiers: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Workflow-tracker + lifecycle timestamps.

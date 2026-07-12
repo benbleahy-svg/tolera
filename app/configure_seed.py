@@ -288,6 +288,7 @@ _ADD_ON_DEFS: tuple[tuple[str, bool], ...] = (
     ("Tooling Charge", True),
     ("Special Packaging", False),
     ("First Article Inspection (FAI)", False),
+    ("Minimum Order Charge", True),
 )
 
 # §6 expedite default set — monotonic (faster costs more; the skeleton's
@@ -334,6 +335,7 @@ _CUSTOM_TABLES: tuple[tuple[str, list[dict[str, str]]], ...] = (
 _EMAIL_TEMPLATES: tuple[tuple[str, str, str], ...] = (
     ("quote_sent", "de-DE", "Ihr Angebot {{quote_number}}"),
     ("rfq_received", "de-DE", "Anfrage erhalten"),
+    ("follow_up", "de-DE", "Erinnerung: Ihr Angebot {{quote_number}}"),
 )
 
 
