@@ -718,3 +718,22 @@ The check runs through the org-pinned session, so it reads only the active org's
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*
+
+---
+
+## [2026-07-13] M2.5 Split-PDF policy — async Celery split, provenance column, edge bundle, naming
+
+**Status:** RESOLVED (Benjamin, M2.5 grill)
+**Question:** Four expensive-to-reverse choices for the server-side Split PDF: (1) synchronous request vs Celery job (no job-status API pattern existed yet); (2) whether derived files carry a DB provenance link; (3) rejection policy for unsplittable PDFs; (4) page-file naming + re-run behaviour.
+**Decision:** (1) **Celery + status polling** — `POST …/files/{id}/split` validates at the edge and returns 202 + task id (CLAUDE.md §5: long work never blocks a request); a *feature-scoped* `GET …/split/{task_id}` maps task state/progress for the viewer. (2) **`part_file.source_file_id`** (nullable self-FK, composite same-org, `SET NULL (source_file_id)` on source delete — migration 0017); M2.4 redacted copies and M2.12 merges reuse it. (3) 1-page → 422 `nothing_to_split`; non-PDF/corrupt → 422 `invalid_pdf`; encrypted → 422 `encrypted_pdf`; **200-page ceiling** → 422 `too_many_pages`; **all-or-nothing** persistence (any failure discards written blobs, commits no rows). (4) **`<stem>-p<N>.pdf`**, language-neutral; re-running a split is allowed and adds another set (the user acted twice; deterministic task *retries* are guarded separately).
+**Resolved:** 2026-07-13 (M2.5 grill; Benjamin picked the recommended option on all four).
+**Affects:** M2.5; M2.4 + M2.12 (source_file_id reuse); M3/M4 (the async-task + status-polling pattern).
+
+---
+
+## [2026-07-13] OPEN: Generic job-status API vs per-feature scoped polling endpoints
+**Status:** OPEN
+**Question:** M2.5's split status lives at `GET /api/parts/{part_id}/files/{file_id}/split/{task_id}` — deliberately feature-scoped, tenancy-checked through the org-scoped file lookup plus task-meta binding. M3 (Lens extraction) and M4 (GeometryService interrogation) also run long Celery jobs the UI must poll: do they each get a scoped endpoint, or does a generic `/api/jobs/{id}` contract (with its own org-binding story) replace them?
+**Options considered:** keep per-feature scoped endpoints (simple tenancy story, some duplication); introduce a generic jobs resource once a second consumer exists (one polling client, but needs a durable org-scoped job table rather than Celery result meta).
+**Recommended default:** keep the scoped pattern until M3 lands, then decide with the second consumer's real shape on the table; if a generic resource wins, back it with a durable `job` table (org-scoped, RLS) instead of raw Celery meta.
+**Affects:** M2.5 (unchanged either way), M3, M4, frontend polling helpers.
