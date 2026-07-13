@@ -143,14 +143,7 @@ def _run_on_own_loop(coro: Any) -> Any:
         return pool.submit(asyncio.run, coro).result()
 
 
-@celery_app.task(
-    base=BaseTask,
-    name="app.split_pdf",
-    bind=True,
-    # Deterministic rejections must fail once, not burn 5 retries; transient
-    # DB/storage errors keep BaseTask's retry-with-backoff.
-    dont_autoretry_for=(PdfSplitError, SourceFileGoneError),
-)
+@celery_app.task(base=BaseTask, name="app.split_pdf", bind=True)
 def split_pdf_task(self: Any, org_id: str, part_id: str, file_id: str) -> dict[str, Any]:
     """Celery wrapper around :func:`run_split` with progress in the task meta."""
     binding = {"org_id": org_id, "file_id": file_id}
@@ -172,15 +165,34 @@ def split_pdf_task(self: Any, org_id: str, part_id: str, file_id: str) -> dict[s
             task_id=task_id, state="PROGRESS", meta={"done": done, "total": total, **binding}
         )
 
-    result = _run_on_own_loop(
-        run_split(
-            *resolve_task_resources(),
-            org_id=uuid.UUID(org_id),
-            part_id=uuid.UUID(part_id),
-            file_id=uuid.UUID(file_id),
-            progress=progress,
+    try:
+        result = _run_on_own_loop(
+            run_split(
+                *resolve_task_resources(),
+                org_id=uuid.UUID(org_id),
+                part_id=uuid.UUID(part_id),
+                file_id=uuid.UUID(file_id),
+                progress=progress,
+            )
         )
-    )
+    except (PdfSplitError, SourceFileGoneError) as exc:
+        # Deterministic rejections neither retry nor raise: they RETURN a
+        # failure dict that carries the org/file binding, so the status GET can
+        # enforce task→file binding on failures too. Celery's FAILURE state
+        # (whose payload is just the exception, unbindable) stays reserved for
+        # transient/infra deaths that exhaust BaseTask's retries.
+        code = exc.code if isinstance(exc, PdfSplitError) else "source_file_gone"
+        logger.info(
+            "pdf_split_rejected",
+            extra={
+                "org_id": org_id,
+                "part_id": part_id,
+                "source_file_id": file_id,
+                "code": code,
+                "task_id": task_id,
+            },
+        )
+        return {"failed": True, "error_code": code, **binding}
     out = cast("dict[str, Any]", result)
     # Structured completion log (request-id lives on the enqueuing request; the
     # task carries the tenant ids). No filenames — they can carry customer data.
@@ -256,16 +268,27 @@ def _status_from_result(result: AsyncResult, file_id: uuid.UUID) -> SplitStatusO
         # answer as an unknown id — no cross-file/cross-org reads.
         raise AppError("not_found", "Task not found.", status_code=status.HTTP_404_NOT_FOUND)
     if state == "SUCCESS":
+        if info.get("failed"):
+            # A deterministic rejection, returned as a bound dict by the task —
+            # the file-binding check above already vetted it.
+            return SplitStatusOut(
+                state="failed",
+                error=SplitError(
+                    code=info.get("error_code", "split_failed"), message="Split failed."
+                ),
+            )
         return SplitStatusOut(
             state="succeeded",
             progress=SplitProgress(done=info["done"], total=info["total"]),
             file_ids=list(info["file_ids"]),
         )
     if state == "FAILURE":
-        exc = result.result
-        code = exc.code if isinstance(exc, PdfSplitError) else "split_failed"
-        # Never echo raw exception text (may carry internals) — code + generic text.
-        return SplitStatusOut(state="failed", error=SplitError(code=code, message="Split failed."))
+        # Only transient/infra deaths land here (deterministic rejections return
+        # bound dicts). The exception payload can't carry the file binding, so
+        # expose nothing beyond a generic failure — no code, no exception text.
+        return SplitStatusOut(
+            state="failed", error=SplitError(code="split_failed", message="Split failed.")
+        )
     if state in ("STARTED", "PROGRESS", "RETRY"):
         progress = (
             SplitProgress(done=info["done"], total=info["total"])

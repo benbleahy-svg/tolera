@@ -102,7 +102,12 @@ def eager_celery() -> Iterator[None]:
     """Run split tasks inline and store results in an in-process backend."""
     saved = {
         key: celery_app.conf[key]
-        for key in ("task_always_eager", "task_store_eager_result", "task_eager_propagates")
+        for key in (
+            "task_always_eager",
+            "task_store_eager_result",
+            "task_eager_propagates",
+            "result_backend",
+        )
     }
     celery_app.conf.update(
         task_always_eager=True,
@@ -111,8 +116,12 @@ def eager_celery() -> Iterator[None]:
         task_eager_propagates=False,
         result_backend="cache+memory://",
     )
+    # The backend is a cached property — drop any cached instance so the config
+    # change takes effect now and can't leak into later tests after restore.
+    celery_app.__dict__.pop("backend", None)
     yield
     celery_app.conf.update(saved)
+    celery_app.__dict__.pop("backend", None)
 
 
 def _org_with_admin(seeder: Seeder, slug: str) -> tuple[uuid.UUID, uuid.UUID]:
@@ -353,6 +362,77 @@ class TestSplitEndpoint:
             args=(str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())),
         )
         assert result.result == stored
+
+    def test_deleted_source_surfaces_as_bound_failure(
+        self, app_client: TestClient, seeder: Seeder, eager_celery: None
+    ) -> None:
+        """A deterministic task-side rejection (file gone by run time) returns a
+        *bound* failure dict — the status GET reports failed with its code."""
+        from app.file_split import split_pdf_task
+
+        org, admin = _org_with_admin(seeder, "org-a")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            file_id = _upload_pdf(app_client, part_id, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+            # Run the task against a file id that doesn't exist (deleted between
+            # enqueue and run); resources are the test app's (registered).
+            ghost = str(uuid.uuid4())
+            result = split_pdf_task.apply(args=(str(org), part_id, ghost))
+            assert result.result["failed"] is True
+            assert result.result["error_code"] == "source_file_gone"
+
+            # Mapped through the status endpoint (bound to the ghost's id via
+            # meta, so poll with the real file path + this task id → 404, and
+            # with a synthetic bound-to-this-file failure → failed + code).
+            tid = str(uuid.uuid4())
+            celery_app.backend.store_result(
+                tid,
+                {
+                    "failed": True,
+                    "error_code": "source_file_gone",
+                    "org_id": str(org),
+                    "file_id": file_id,
+                },
+                "SUCCESS",
+            )
+            resp = app_client.get(f"/api/parts/{part_id}/files/{file_id}/split/{tid}")
+            assert resp.status_code == 200
+            assert resp.json()["state"] == "failed"
+            assert resp.json()["error"]["code"] == "source_file_gone"
+
+            # A failure dict bound to ANOTHER file must not be readable here.
+            other = str(uuid.uuid4())
+            celery_app.backend.store_result(
+                tid + "x",
+                {
+                    "failed": True,
+                    "error_code": "source_file_gone",
+                    "org_id": str(org),
+                    "file_id": other,
+                },
+                "SUCCESS",
+            )
+            hijack = app_client.get(f"/api/parts/{part_id}/files/{file_id}/split/{tid}x")
+            assert hijack.status_code == 404
+
+    def test_infra_failure_state_is_generic(
+        self, app_client: TestClient, seeder: Seeder, eager_celery: None
+    ) -> None:
+        """Celery FAILURE (transient/infra death) carries no binding, so the
+        status GET exposes nothing beyond a generic failure — no exception
+        text, no specific code."""
+        org, admin = _org_with_admin(seeder, "org-a")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            file_id = _upload_pdf(app_client, part_id, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+            tid = str(uuid.uuid4())
+            celery_app.backend.store_result(tid, ValueError("boom secret"), "FAILURE")
+            resp = app_client.get(f"/api/parts/{part_id}/files/{file_id}/split/{tid}")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["state"] == "failed"
+            assert body["error"] == {"code": "split_failed", "message": "Split failed."}
+            assert "boom" not in resp.text
 
     def test_unknown_task_id_reads_as_queued(
         self, app_client: TestClient, seeder: Seeder, eager_celery: None
