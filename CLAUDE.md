@@ -159,13 +159,13 @@ The execution map is in `build-plan/`: `README.md` (the spine — sizing rubric,
 
 ## 9. Operating procedure — the per-block loop (hook-enforced)
 
-Every build block runs this loop. The **start and end are human-gated** (per the build plan); the **middle is automated**. Local hooks in `.claude/hooks/` make parts fire on their own — they stay inert until the Python project exists (M0.1), and the test gate is bypassable with `CLAUDE_SKIP_TEST_GATE=1`.
+Every build block runs this loop **in a fresh session — one block = one session, no exceptions**. A session that has finished a block does not start the next one: end it (or `/clear`) and open the next block fresh. Rationale: context is the scarce resource — compaction silently drops spec anchors and invariants, and the previous block's assumptions bleed into the next. All durable state lives in git + `DECISIONS.md` + the PR (+ `HANDOFF.md` via `/handoff` when a session must end mid-block), so a fresh session loses nothing. The **start and end are human-gated** (per the build plan); the **middle is automated**. Local hooks in `.claude/hooks/` make parts fire on their own — they stay inert until the Python project exists (M0.1), and the test gate is bypassable with `CLAUDE_SKIP_TEST_GATE=1`.
 
-1. **`/block <id>`** — loads only the block's sources, branches off `develop`, then **grills** you before any code. *(human: you answer the grill.)*
+1. **`/block <id>`** — refuses a used session, loads only the block's sources (+ `HANDOFF.md` if resuming), branches off `develop`, then **grills** you before any code. *(human: you answer the grill.)*
 2. **Build test-first** — red → green → refactor; the fixture is the target. Mandatory for pricing/geometry math.
 3. **Diagnose, don't guess** — when something breaks, run the diagnosis loop.
 4. After each edit the **PostToolUse hook** lints the changed file (ruff); fix what it reports.
-5. **`/ship`** — runs ruff + mypy + pytest + CodeRabbit + `/code-review`, then opens the PR. The **Stop hook** won't let a turn end with red lint/tests when Python changed.
+5. **`/ship`** — runs ruff + mypy + pytest + CodeRabbit + `/code-review`, opens the PR, cleans up (`HANDOFF.md`, stale worktrees), then **ends the session**. The **Stop hook** won't let a turn end with red lint/tests when Python changed (scoped to the changed files' tests for speed; the full suite gates `/ship` + CI).
 6. **Human gate:** a teammate clicks the demo and approves the PR; the Code Owner signs off money/tax/schema/auth — never self-merged, never bot-only.
 
 Tier-1 invariants (§5) hold throughout: money = integer minor units + currency; every table org-scoped (RLS); Lens never auto-fed into Kalk; reversible migrations only. Full workflow: `build-plan/WORKFLOW-PLAYBOOK.html` + `CONTRIBUTING.md`.

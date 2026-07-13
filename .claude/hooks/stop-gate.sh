@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Stop hook — enforce "green or it's not done". When Python files changed since HEAD, run ruff +
-# a quick pytest and block the turn from ending if they fail (Claude then keeps fixing).
+# pytest and block the turn from ending if they fail (Claude then keeps fixing).
+# SCOPED for speed: ruff checks only the changed files; pytest runs only the tests that plausibly
+# cover them (changed test files + tests/test_<stem>*.py per changed app module). If no matching
+# tests are found, it falls back to the full quick suite. The FULL suite still gates /ship and CI.
 # Bypass: export CLAUDE_SKIP_TEST_GATE=1. Inert until the Python project exists (pre-M0.1);
 # never blocks merely because a tool isn't installed.
 set -uo pipefail
@@ -9,8 +12,13 @@ set -uo pipefail
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 [ -f pyproject.toml ] || exit 0
 
-changed="$( { git diff --name-only -- '*.py'; git diff --cached --name-only -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } 2>/dev/null )"
+changed="$( { git diff --name-only -- '*.py'; git diff --cached --name-only -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } 2>/dev/null | sort -u )"
 [ -n "$changed" ] || exit 0
+
+# Only files that still exist (a deleted file can't be linted).
+existing=()
+while IFS= read -r f; do [ -f "$f" ] && existing+=("$f"); done <<< "$changed"
+[ ${#existing[@]} -gt 0 ] || exit 0
 
 fail() { printf 'Stop gate: %s\n' "$1" >&2; exit 2; }
 
@@ -26,17 +34,37 @@ if [ -x .venv/bin/pytest ]; then PYTEST=(.venv/bin/pytest)
 elif command -v uv >/dev/null 2>&1 && uv run pytest --version >/dev/null 2>&1; then PYTEST=(uv run pytest)
 elif command -v pytest >/dev/null 2>&1; then PYTEST=(pytest); fi
 
-# 1) ruff (fast) — block on lint failures.
+# 1) ruff (fast) — changed files only; block on lint failures.
 if [ ${#RUFF[@]} -gt 0 ]; then
-  out="$("${RUFF[@]}" check . 2>&1)" || fail "ruff failed — fix lint before finishing:
+  out="$("${RUFF[@]}" check "${existing[@]}" 2>&1)" || fail "ruff failed — fix lint before finishing:
 $out"
 fi
 
-# 2) pytest (quick, stop at first failure). Skip if no tests dir. Exit 5 = "no tests collected" = OK.
+# 2) pytest — scoped to the tests covering the changed files; fall back to the full
+#    quick suite when nothing matches. Exit 5 = "no tests collected" = OK.
 if [ ${#PYTEST[@]} -gt 0 ] && [ -d tests ]; then
-  out="$("${PYTEST[@]}" -q -x 2>&1)"; status=$?
+  targets=()
+  for f in "${existing[@]}"; do
+    case "$f" in
+      tests/*) targets+=("$f") ;;
+      *)
+        stem="$(basename "$f" .py)"
+        while IFS= read -r t; do targets+=("$t"); done \
+          < <(find tests -name "test_*${stem}*.py" -o -name "test_${stem}.py" 2>/dev/null)
+        ;;
+    esac
+  done
+  # De-duplicate.
+  if [ ${#targets[@]} -gt 0 ]; then
+    mapfile -t targets < <(printf '%s\n' "${targets[@]}" | sort -u)
+    out="$("${PYTEST[@]}" -q -x "${targets[@]}" 2>&1)"; status=$?
+    scope="scoped tests (${#targets[@]} file(s))"
+  else
+    out="$("${PYTEST[@]}" -q -x 2>&1)"; status=$?
+    scope="full quick suite (no matching scoped tests)"
+  fi
   if [ "$status" -ne 0 ] && [ "$status" -ne 5 ]; then
-    fail "tests are red — fix before finishing (bypass: CLAUDE_SKIP_TEST_GATE=1):
+    fail "tests are red [$scope] — fix before finishing (bypass: CLAUDE_SKIP_TEST_GATE=1):
 $out"
   fi
 fi
