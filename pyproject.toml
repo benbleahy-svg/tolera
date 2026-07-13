@@ -19,6 +19,8 @@ dependencies = [
     # M1.2 — file upload & storage
     "python-multipart>=0.0.12",  # FastAPI multipart/UploadFile parsing
     "aioboto3>=13.0.0",  # async S3-compatible object storage (MinIO / EU bucket)
+    "pypdf>=6.14.2",
+    "greenlet>=3.5.2",
 ]
 
 [dependency-groups]
