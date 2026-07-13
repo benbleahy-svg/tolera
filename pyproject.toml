@@ -19,6 +19,9 @@ dependencies = [
     # M1.2 — file upload & storage
     "python-multipart>=0.0.12",  # FastAPI multipart/UploadFile parsing
     "aioboto3>=13.0.0",  # async S3-compatible object storage (MinIO / EU bucket)
+    "pypdf>=6.14.2",
+    # Explicit: SQLAlchemy's greenlet marker misses arm64 macOS, breaking fresh venvs.
+    "greenlet>=3.5.2",
 ]
 
 [dependency-groups]
@@ -70,7 +73,7 @@ ignore_missing_imports = true
 
 # Celery is untyped; its decorator + base class would otherwise trip strict mode.
 [[tool.mypy.overrides]]
-module = ["app.tasks", "app.celery_app"]
+module = ["app.tasks", "app.celery_app", "app.file_split"]
 disallow_untyped_decorators = false
 disallow_subclassing_any = false
 

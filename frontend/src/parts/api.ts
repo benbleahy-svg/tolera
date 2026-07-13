@@ -31,7 +31,17 @@ export interface PartFile {
   size_bytes: number;
   role: FileRole;
   is_redacted: boolean;
+  /** The file this one was derived from (M2.5 split pages), if any. */
+  source_file_id: string | null;
   created_at: string;
+}
+
+/** Task state for a server-side PDF split, as the viewer's toasts consume it. */
+export interface SplitStatus {
+  state: 'queued' | 'in_progress' | 'succeeded' | 'failed';
+  progress: { done: number; total: number } | null;
+  file_ids: string[] | null;
+  error: { code: string; message: string } | null;
 }
 
 export interface PartsApi {
@@ -50,6 +60,8 @@ export interface PartsApi {
     bytes: Uint8Array,
     filename: string,
   ) => Promise<PartFile>;
+  splitFile: (partId: string, fileId: string) => Promise<{ task_id: string }>;
+  splitStatus: (partId: string, fileId: string, taskId: string) => Promise<SplitStatus>;
   getAnnotations: (partId: string, fileId: string) => Promise<{ objects: unknown[] }>;
   putAnnotations: (
     partId: string,
@@ -102,6 +114,10 @@ export function usePartsApi(): PartsApi {
         form.append('file', new File([bytes as BlobPart], filename, { type: 'application/pdf' }));
         return apiUpload(`/api/parts/${partId}/files/${fileId}/redacted-copy`, token, form);
       },
+      splitFile: (partId, fileId) =>
+        apiFetch(`/api/parts/${partId}/files/${fileId}/split`, token, { method: 'POST' }),
+      splitStatus: (partId, fileId, taskId) =>
+        apiFetch(`/api/parts/${partId}/files/${fileId}/split/${taskId}`, token),
       getAnnotations: (partId, fileId) =>
         apiFetch(`/api/parts/${partId}/files/${fileId}/annotations`, token),
       putAnnotations: (partId, fileId, objects) =>

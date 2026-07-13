@@ -199,6 +199,8 @@ class PartFileOut(BaseModel):
     size_bytes: int
     role: FileRole
     is_redacted: bool
+    # The file this one was derived from (M2.5 split pages), if any.
+    source_file_id: uuid.UUID | None
     created_at: datetime
 
 
@@ -265,6 +267,7 @@ def _part_file_out(pf: PartFile) -> PartFileOut:
         size_bytes=pf.size_bytes,
         role=FileRole(pf.role),
         is_redacted=pf.is_redacted,
+        source_file_id=pf.source_file_id,
         created_at=pf.created_at,
     )
 
