@@ -16,12 +16,15 @@ Seams under test (agreed in the grill):
 
 from __future__ import annotations
 
+import asyncio
 import io
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pypdf import PdfReader, PdfWriter
 
@@ -172,3 +175,166 @@ class TestSplitEndpoint:
                 reader = PdfReader(io.BytesIO(dl.content))
                 assert len(reader.pages) == 1
                 assert f"BLATT {n}" in reader.pages[0].extract_text()
+
+    def test_rerun_creates_a_second_set(
+        self, app_client: TestClient, seeder: Seeder, eager_celery: None
+    ) -> None:
+        """Re-splitting is allowed and simply adds another set (DECISIONS.md
+        2026-07-13) — the user acted twice, they can delete extras."""
+        org, admin = _org_with_admin(seeder, "org-a")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            file_id = _upload_pdf(app_client, part_id, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+            for _ in range(2):
+                resp = app_client.post(f"/api/parts/{part_id}/files/{file_id}/split")
+                assert resp.status_code == 202, resp.text
+            listed = app_client.get(f"/api/parts/{part_id}/files").json()
+            assert len(listed) == 7  # original + 2 x 3 pages
+            assert sum(f["source_file_id"] == file_id for f in listed) == 6
+
+    @pytest.mark.parametrize(
+        ("name", "data", "expected_code"),
+        [
+            ("cube-20mm-print.pdf", ONE_PAGE_PDF, "nothing_to_split"),
+            ("truncated.pdf", THREE_PAGE_PDF[:120], "invalid_pdf"),
+        ],
+    )
+    def test_unsplittable_pdf_is_a_422_and_persists_nothing(
+        self,
+        app_client: TestClient,
+        seeder: Seeder,
+        eager_celery: None,
+        name: str,
+        data: bytes,
+        expected_code: str,
+    ) -> None:
+        org, admin = _org_with_admin(seeder, "org-a")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            file_id = _upload_pdf(app_client, part_id, name, data)
+            resp = app_client.post(f"/api/parts/{part_id}/files/{file_id}/split")
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["code"] == expected_code
+            # Nothing was persisted — the original is still the only file.
+            assert len(app_client.get(f"/api/parts/{part_id}/files").json()) == 1
+
+    def test_non_pdf_file_is_a_422(
+        self, app_client: TestClient, seeder: Seeder, eager_celery: None
+    ) -> None:
+        step = b"ISO-10303-21;\nHEADER;\nFILE_NAME('bracket.step');\nENDSEC;\nEND-ISO-10303-21;\n"
+        org, admin = _org_with_admin(seeder, "org-a")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            resp = app_client.post(
+                f"/api/parts/{part_id}/files",
+                files=[("files", ("bracket.step", step, "application/step"))],
+            )
+            file_id = resp.json()[0]["id"]
+            split = app_client.post(f"/api/parts/{part_id}/files/{file_id}/split")
+            assert split.status_code == 422
+            assert split.json()["code"] == "invalid_pdf"
+
+    def test_viewer_role_cannot_split(
+        self, app_client: TestClient, seeder: Seeder, eager_celery: None
+    ) -> None:
+        org, admin = _org_with_admin(seeder, "org-a")
+        viewer = seeder.user("viewer@org-a.example")
+        seeder.membership(viewer, org, [MembershipRole.viewer])
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            file_id = _upload_pdf(app_client, part_id, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+        with authed(app_client, user_id=viewer, org_id=org, roles=[MembershipRole.viewer]):
+            resp = app_client.post(f"/api/parts/{part_id}/files/{file_id}/split")
+            assert resp.status_code == 403
+
+    def test_cross_org_split_and_status_are_404(
+        self, app_client: TestClient, seeder: Seeder, eager_celery: None
+    ) -> None:
+        """Tenancy: neither the split action, the status of another org's task,
+        nor its very existence is visible across orgs."""
+        org_a, admin_a = _org_with_admin(seeder, "org-a")
+        org_b, admin_b = _org_with_admin(seeder, "org-b")
+        with authed(app_client, user_id=admin_a, org_id=org_a, roles=ADMIN):
+            part_a = _create_part(app_client)
+            file_a = _upload_pdf(app_client, part_a, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+            task_a = app_client.post(f"/api/parts/{part_a}/files/{file_a}/split").json()["task_id"]
+        with authed(app_client, user_id=admin_b, org_id=org_b, roles=ADMIN):
+            # Org B can't split A's file (RLS: the file doesn't exist for B) …
+            assert app_client.post(f"/api/parts/{part_a}/files/{file_a}/split").status_code == 404
+            # … nor read A's task status via A's paths …
+            status = app_client.get(f"/api/parts/{part_a}/files/{file_a}/split/{task_a}")
+            assert status.status_code == 404
+            # … nor bind A's task id to a file of their own (meta names A's file).
+            part_b = _create_part(app_client)
+            file_b = _upload_pdf(app_client, part_b, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+            hijack = app_client.get(f"/api/parts/{part_b}/files/{file_b}/split/{task_a}")
+            assert hijack.status_code == 404
+
+    def test_mid_split_failure_persists_nothing(
+        self, app_client: TestClient, seeder: Seeder, tenancy_db: str
+    ) -> None:
+        """All-or-nothing (DECISIONS.md 2026-07-13): if page 3 of 3 fails, no
+        rows are committed and the blobs written for pages 1-2 are discarded."""
+        from app.file_split import run_split
+        from app.storage import MemoryStorage
+        from tests.conftest import app_role_url
+
+        org, admin = _org_with_admin(seeder, "org-a")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            file_id = _upload_pdf(app_client, part_id, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+
+        storage = cast(MemoryStorage, cast(FastAPI, app_client.app).state.storage)
+        blobs_before = dict(storage._objects)
+
+        class ThirdPutFails:
+            """Delegates to the real storage; the 3rd put blows up mid-split."""
+
+            def __init__(self) -> None:
+                self.puts = 0
+
+            async def put(self, key: str, fileobj: Any, *, content_type: str | None = None) -> int:
+                self.puts += 1
+                if self.puts == 3:
+                    raise OSError("object store went away")
+                return await storage.put(key, fileobj, content_type=content_type)
+
+            def stream(self, key: str) -> Any:
+                return storage.stream(key)
+
+            async def delete(self, key: str) -> None:
+                await storage.delete(key)
+
+        with pytest.raises(OSError):
+            asyncio.run(
+                run_split(
+                    app_role_url(tenancy_db),
+                    ThirdPutFails(),
+                    org_id=org,
+                    part_id=uuid.UUID(part_id),
+                    file_id=uuid.UUID(file_id),
+                )
+            )
+
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            listed = app_client.get(f"/api/parts/{part_id}/files").json()
+        assert len(listed) == 1  # no rows committed
+        assert storage._objects == blobs_before  # pages 1-2 blobs discarded
+
+    def test_unknown_task_id_reads_as_queued(
+        self, app_client: TestClient, seeder: Seeder, eager_celery: None
+    ) -> None:
+        """Celery can't distinguish 'not yet started' from 'never existed' —
+        an unknown id reads as queued (documented contract)."""
+        org, admin = _org_with_admin(seeder, "org-a")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            file_id = _upload_pdf(app_client, part_id, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+            resp = app_client.get(f"/api/parts/{part_id}/files/{file_id}/split/{uuid.uuid4()}")
+            assert resp.status_code == 200
+            assert resp.json() == {
+                "state": "queued",
+                "progress": None,
+                "file_ids": None,
+                "error": None,
+            }
