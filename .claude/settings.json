@@ -16,7 +16,7 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git switch *)",
-      "Bash(git checkout *)",
+      "Bash(git checkout -b *)",
       "Bash(git branch *)",
       "Bash(gh pr *)",
       "Bash(gh issue *)"
@@ -34,13 +34,59 @@
   },
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": ".claude/hooks/session-start.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start.sh"
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": ".claude/hooks/post-edit-lint.sh" } ] }
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-edit-lint.sh"
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": ".claude/hooks/stop-gate.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/stop-gate.sh"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-compact.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-end.sh"
+          }
+        ]
+      }
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": ".claude/hooks/statusline.sh"
   }
 }

@@ -160,3 +160,48 @@ def test_oversized_object_rejected(seeder: Seeder, app_client: TestClient) -> No
             f"/api/parts/{part_id}/files/{file_id}/annotations", json={"objects": [huge]}
         )
         assert res.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# M2.4 — redacted-copy generation (spec #pdf-capabilities Redact)
+# --------------------------------------------------------------------------- #
+REDACTED_PDF = b"%PDF-1.7\n1 0 obj<</Redacted true>>endobj\ntrailer<<>>\n%%EOF\n"
+
+
+def test_redacted_copy_is_a_new_supporting_file(seeder: Seeder, app_client: TestClient) -> None:
+    """M2 exit check 'redact + save a copy': the original stays byte-identical,
+    the copy lands as a SUPPORTING file flagged is_redacted."""
+    org, user = _org_admin(seeder, "m24-redact")
+    with _as_admin(app_client, org, user) as client:
+        part_id, file_id = _part_with_pdf(client)
+        res = client.post(
+            f"/api/parts/{part_id}/files/{file_id}/redacted-copy",
+            files=[("file", ("ignored.pdf", REDACTED_PDF, "application/pdf"))],
+        )
+        assert res.status_code == 201, res.text
+        copy = res.json()
+        assert copy["filename"] == "drawing-redacted.pdf"
+        assert copy["role"] == "supporting"
+        assert copy["is_redacted"] is True
+
+        # the original is byte-unchanged; the copy carries the rendered bytes
+        original = client.get(f"/api/parts/{part_id}/files/{file_id}/download")
+        assert original.content == PDF_BYTES
+        rendered = client.get(f"/api/parts/{part_id}/files/{copy['id']}/download")
+        assert rendered.content == REDACTED_PDF
+
+        # both files now in the part's list; PRIMARY untouched
+        files = client.get(f"/api/parts/{part_id}/files").json()
+        assert {f["filename"] for f in files} == {"drawing.pdf", "drawing-redacted.pdf"}
+        assert next(f for f in files if f["id"] == file_id)["role"] == "primary"
+
+
+def test_redacted_copy_validates_pdf(seeder: Seeder, app_client: TestClient) -> None:
+    org, user = _org_admin(seeder, "m24-redact-guard")
+    with _as_admin(app_client, org, user) as client:
+        part_id, file_id = _part_with_pdf(client)
+        res = client.post(
+            f"/api/parts/{part_id}/files/{file_id}/redacted-copy",
+            files=[("file", ("x.pdf", b"not a pdf at all", "application/pdf"))],
+        )
+        assert res.status_code == 415

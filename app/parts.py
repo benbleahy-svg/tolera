@@ -701,6 +701,71 @@ async def download_part_file(
     )
 
 
+@parts_router.post("/{part_id}/files/{file_id}/redacted-copy", status_code=status.HTTP_201_CREATED)
+async def create_redacted_copy(
+    part_id: uuid.UUID,
+    file_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    storage: Annotated[ObjectStorage, Depends(get_storage)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+    file: Annotated[UploadFile, File()],
+) -> PartFileOut:
+    """Store the viewer-rendered redacted copy of a PDF (M2.4, spec
+    #pdf-capabilities Redact: "saves a NEW supporting file — original
+    retained"). The client rasterizes affected pages so redacted content is
+    irrecoverable in the copy; this endpoint never touches the source blob
+    or the PRIMARY assignment, and flags the copy ``is_redacted`` so the M6
+    external-share scoping can key on it."""
+    await _get_part_or_404(session, part_id, for_update=True)
+    source = await _get_part_file_or_404(session, part_id, file_id)
+    if not source.filename.lower().endswith(".pdf"):
+        raise AppError(
+            "unsupported_file_type",
+            "Redacted copies exist for PDF prints only.",
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        )
+    if _received_size(file) > settings.max_upload_bytes:
+        raise AppError(
+            "file_too_large",
+            f"File exceeds the {settings.max_upload_mb} MB limit.",
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+        )
+    header = await file.read(MAGIC_SNIFF_BYTES)
+    await file.seek(0)
+    if not header.startswith(b"%PDF-"):
+        raise AppError(
+            "file_type_mismatch",
+            "The redacted copy is not a valid PDF.",
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        )
+
+    stem = source.filename[: -len(".pdf")]
+    name = _safe_filename(f"{stem}-redacted.pdf")
+    new_id = uuid.uuid4()
+    key = object_key(principal.active_org_id, part_id, new_id, name)
+    size = await storage.put(key, file.file, content_type="application/pdf")
+    try:
+        row = PartFile(
+            id=new_id,
+            org_id=principal.active_org_id,
+            part_id=part_id,
+            storage_key=key,
+            filename=name,
+            file_type=source.file_type,
+            content_type="application/pdf",
+            size_bytes=size,
+            role=FileRole.supporting,
+            is_redacted=True,
+        )
+        session.add(row)
+        await session.flush()
+    except Exception:
+        await _discard_blobs(storage, [key])
+        raise
+    return _part_file_out(row)
+
+
 # --------------------------------------------------------------------------- #
 # Annotation layer (M2.2, spec #pdf-capabilities Annotate/Shapes)
 # --------------------------------------------------------------------------- #

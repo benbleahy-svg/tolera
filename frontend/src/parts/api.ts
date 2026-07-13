@@ -54,6 +54,12 @@ export interface PartsApi {
   deleteFile: (partId: string, fileId: string) => Promise<void>;
   downloadFile: (partId: string, fileId: string, filename: string) => Promise<void>;
   fetchFileBytes: (partId: string, fileId: string) => Promise<Uint8Array>;
+  saveRedactedCopy: (
+    partId: string,
+    fileId: string,
+    bytes: Uint8Array,
+    filename: string,
+  ) => Promise<PartFile>;
   splitFile: (partId: string, fileId: string) => Promise<{ task_id: string }>;
   splitStatus: (partId: string, fileId: string, taskId: string) => Promise<SplitStatus>;
   getAnnotations: (partId: string, fileId: string) => Promise<{ objects: unknown[] }>;
@@ -102,6 +108,11 @@ export function usePartsApi(): PartsApi {
       fetchFileBytes: async (partId, fileId) => {
         const blob = await apiDownload(`/api/parts/${partId}/files/${fileId}/download`, token);
         return new Uint8Array(await blob.arrayBuffer());
+      },
+      saveRedactedCopy: (partId, fileId, bytes, filename) => {
+        const form = new FormData();
+        form.append('file', new File([bytes as BlobPart], filename, { type: 'application/pdf' }));
+        return apiUpload(`/api/parts/${partId}/files/${fileId}/redacted-copy`, token, form);
       },
       splitFile: (partId, fileId) =>
         apiFetch(`/api/parts/${partId}/files/${fileId}/split`, token, { method: 'POST' }),
