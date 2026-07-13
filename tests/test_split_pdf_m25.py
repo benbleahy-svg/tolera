@@ -44,6 +44,14 @@ THREE_PAGE_PDF = (FIXTURES / "halter-4711-blaetter.pdf").read_bytes()
 ONE_PAGE_PDF = (FIXTURES / "cube-20mm-print.pdf").read_bytes()
 
 
+def _encrypted_pdf() -> bytes:
+    writer = PdfWriter(clone_from=io.BytesIO(THREE_PAGE_PDF))
+    writer.encrypt("geheim")
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
 # --------------------------------------------------------------------------- #
 # Pure splitter
 # --------------------------------------------------------------------------- #
@@ -197,6 +205,7 @@ class TestSplitEndpoint:
         [
             ("cube-20mm-print.pdf", ONE_PAGE_PDF, "nothing_to_split"),
             ("truncated.pdf", THREE_PAGE_PDF[:120], "invalid_pdf"),
+            ("geheim.pdf", _encrypted_pdf(), "encrypted_pdf"),
         ],
     )
     def test_unsplittable_pdf_is_a_422_and_persists_nothing(
@@ -320,6 +329,30 @@ class TestSplitEndpoint:
             listed = app_client.get(f"/api/parts/{part_id}/files").json()
         assert len(listed) == 1  # no rows committed
         assert storage._objects == blobs_before  # pages 1-2 blobs discarded
+
+    def test_redelivered_task_returns_stored_result_without_rerunning(
+        self, eager_celery: None
+    ) -> None:
+        """Idempotency net (CLAUDE.md §5): with acks_late, a worker crash after
+        commit-before-ack redelivers the task under the SAME id — the guard
+        returns the stored result instead of splitting again."""
+        from app.file_split import split_pdf_task
+
+        stored = {
+            "file_ids": ["a", "b", "c"],
+            "done": 3,
+            "total": 3,
+            "org_id": str(uuid.uuid4()),
+            "file_id": str(uuid.uuid4()),
+        }
+        task_id = str(uuid.uuid4())
+        celery_app.backend.store_result(task_id, stored, "SUCCESS")
+        # Would blow up in run_split (no such org/part/file) if it re-ran.
+        result = split_pdf_task.apply(
+            task_id=task_id,
+            args=(str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())),
+        )
+        assert result.result == stored
 
     def test_unknown_task_id_reads_as_queued(
         self, app_client: TestClient, seeder: Seeder, eager_celery: None

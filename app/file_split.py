@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, Any, cast
 
@@ -41,6 +43,8 @@ from .pdf_split import PdfSplitError, split_pdf_pages, validate_pdf_split
 from .storage import ObjectStorage, object_key
 from .task_resources import resolve as resolve_task_resources
 from .tasks import BaseTask
+
+logger = logging.getLogger("app.file_split")
 
 split_router = APIRouter(prefix="/api/parts", tags=["files"])
 
@@ -66,7 +70,7 @@ async def run_split(
     org_id: uuid.UUID,
     part_id: uuid.UUID,
     file_id: uuid.UUID,
-    progress: Any = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Split the stored PDF into per-page supporting files — the task's core.
 
@@ -153,6 +157,15 @@ def split_pdf_task(self: Any, org_id: str, part_id: str, file_id: str) -> dict[s
     # Captured up front: ``self.request`` is thread-local, and progress() may run
     # on another thread (eager mode hands the coroutine its own loop/thread).
     task_id = self.request.id
+    # Redelivery guard (CLAUDE.md §5: tasks idempotent). With acks_late +
+    # reject_on_worker_lost, a worker dying after the DB commit but before the
+    # ack redelivers this task — if our own SUCCESS is already stored, return it
+    # instead of minting a duplicate page set. (User re-runs get a fresh task id,
+    # so DECISIONS.md 2026-07-13 "re-run adds another set" is unaffected.)
+    if task_id is not None:
+        prior = AsyncResult(task_id, app=celery_app)
+        if prior.state == "SUCCESS" and isinstance(prior.result, dict):
+            return cast("dict[str, Any]", prior.result)
 
     def progress(done: int, total: int) -> None:
         self.update_state(
@@ -168,7 +181,20 @@ def split_pdf_task(self: Any, org_id: str, part_id: str, file_id: str) -> dict[s
             progress=progress,
         )
     )
-    return cast("dict[str, Any]", result)
+    out = cast("dict[str, Any]", result)
+    # Structured completion log (request-id lives on the enqueuing request; the
+    # task carries the tenant ids). No filenames — they can carry customer data.
+    logger.info(
+        "pdf_split_completed",
+        extra={
+            "org_id": org_id,
+            "part_id": part_id,
+            "source_file_id": file_id,
+            "pages": out["total"],
+            "task_id": task_id,
+        },
+    )
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -186,6 +212,10 @@ class SplitProgress(BaseModel):
 
 
 class SplitError(BaseModel):
+    """Terminal task failure as *state*, not an HTTP error — the GET itself is a
+    200. Mirrors the §5 envelope's code/message fields so clients map it the
+    same way; ``details`` is deliberately absent (nothing safe to carry)."""
+
     code: str
     message: str
 
@@ -253,6 +283,10 @@ async def split_status(
     task_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SplitStatusOut:
-    """Poll a split task — drives the viewer's progress/success toasts."""
+    """Poll a split task — drives the viewer's progress/success toasts.
+
+    Deliberately session-only (no ``require``): reading split *status* matches
+    the read semantics of file list/download, which any org member has; only
+    the mutating POST needs ``quote_edit``."""
     await _get_part_file_or_404(session, part_id, file_id)  # org/file gate (404 cross-org)
     return _status_from_result(AsyncResult(task_id, app=celery_app), file_id)

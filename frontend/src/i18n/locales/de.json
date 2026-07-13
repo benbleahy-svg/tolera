@@ -441,6 +441,11 @@
     "split_running": "PDF wird aufgeteilt …",
     "split_progress": "Seite {{done}} von {{total}} gespeichert …",
     "split_success": "{{n}} Seiten als neue Dateien gespeichert",
-    "split_failed": "Aufteilen fehlgeschlagen"
+    "split_failed": "Aufteilen fehlgeschlagen",
+    "split_error_nothing_to_split": "PDF hat nur eine Seite – nichts aufzuteilen",
+    "split_error_invalid_pdf": "Datei ist kein lesbares PDF",
+    "split_error_encrypted_pdf": "PDF ist passwortgeschützt",
+    "split_error_too_many_pages": "PDF hat zu viele Seiten (Limit 200)",
+    "split_still_running": "Aufteilen läuft noch – Dateiliste später prüfen"
   }
 }
