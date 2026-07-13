@@ -31,6 +31,16 @@ import { drawAnnotations, extractPages, loadPdf, rotatePages, type LoadedPdf } f
 import { diffImageData, nextZoom, parsePageSelection, searchPages, type SearchHit } from './utils';
 
 const SIDEBAR_KEY = 'tolera.viewer.sidebar-collapsed';
+// Split-status polling: cadence + cap (the task also hard-times-out server-side)
+const SPLIT_POLL_MS = 500;
+const SPLIT_POLL_LIMIT = 240;
+// 422 codes from the split POST, mapped to user-actionable German-first copy
+const SPLIT_ERROR_KEYS: Record<string, string> = {
+  nothing_to_split: 'viewer.split_error_nothing_to_split',
+  invalid_pdf: 'viewer.split_error_invalid_pdf',
+  encrypted_pdf: 'viewer.split_error_encrypted_pdf',
+  too_many_pages: 'viewer.split_error_too_many_pages',
+};
 
 type PageLayout = 'continuous' | 'paged';
 type SpreadMode = 'single' | 'double' | 'cover';
@@ -88,6 +98,17 @@ function PageCanvas({
 
 export function PdfViewerPage() {
   const { partId, fileId } = useParams<{ partId: string; fileId: string }>();
+  const [splitting, setSplitting] = useState(false);
+  const [splitMessage, setSplitMessage] = useState<string | null>(null);
+  // Guards the split poll loop: once the viewer unmounts, stop scheduling
+  // timers, firing status requests, or setting state on a dead component.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const { t } = useTranslation();
   const api = usePartsApi();
 
@@ -334,6 +355,52 @@ export function PdfViewerPage() {
       await extractPages(source, pages),
       `${file?.filename?.replace(/\.pdf$/i, '') ?? 'seiten'}-${pages.join('-')}.pdf`,
     );
+  };
+
+  const splitPdf = async () => {
+    // Server-side split (M2.5): unlike Extract's local download, this persists
+    // one supporting file per page on the part; poll the task for progress.
+    if (splitting) return;
+    setSplitting(true);
+    setSplitMessage(t('viewer.split_running'));
+    try {
+      const { task_id: taskId } = await api.splitFile(partId, fileId);
+      if (!mountedRef.current) return;
+      for (let i = 0; i < SPLIT_POLL_LIMIT; i += 1) {
+        if (!mountedRef.current) return;
+        const status = await api.splitStatus(partId, fileId, taskId);
+        if (!mountedRef.current) return;
+        if (status.state === 'succeeded') {
+          setSplitMessage(t('viewer.split_success', { n: status.file_ids?.length ?? 0 }));
+          return;
+        }
+        if (status.state === 'failed') {
+          setSplitMessage(t('viewer.split_failed'));
+          return;
+        }
+        if (status.progress) {
+          setSplitMessage(
+            t('viewer.split_progress', {
+              done: status.progress.done,
+              total: status.progress.total,
+            }),
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, SPLIT_POLL_MS));
+      }
+      if (!mountedRef.current) return;
+      // Poll cap reached — the task may still finish server-side; say so
+      // honestly instead of a false "failed".
+      setSplitMessage(t('viewer.split_still_running'));
+    } catch (err) {
+      if (!mountedRef.current) return;
+      // Map known 422 codes to localized copy; never surface the raw (English)
+      // server message inside a German toast.
+      const key = err instanceof ApiError ? SPLIT_ERROR_KEYS[err.code] : undefined;
+      setSplitMessage(t(key ?? 'viewer.split_failed'));
+    } finally {
+      if (mountedRef.current) setSplitting(false);
+    }
   };
 
   const toggleSidebar = () => {
@@ -736,6 +803,9 @@ export function PdfViewerPage() {
                 <button type="button" onClick={() => void extractSelection()}>
                   {t('viewer.extract_pages')}
                 </button>
+                <button type="button" disabled={splitting} onClick={() => void splitPdf()}>
+                  {t('viewer.split_pdf')}
+                </button>
                 <button
                   type="button"
                   // view-session removal only — the stored file is untouched;
@@ -755,6 +825,11 @@ export function PdfViewerPage() {
                   </button>
                 )}
               </div>
+              {splitMessage && (
+                <p role="status" className="viewer-split-status">
+                  {splitMessage}
+                </p>
+              )}
               <ol className="viewer-thumbs">
                 {Array.from({ length: doc.pageCount }, (_, i) => i + 1)
                   .filter((page) => !hiddenPages.has(page))

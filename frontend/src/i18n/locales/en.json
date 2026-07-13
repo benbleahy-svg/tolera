@@ -436,6 +436,16 @@
     "precision": "Decimals",
     "measurements_page": "Measurements page {{page}}",
     "measure_undo": "Undo measurement",
-    "measure_redo": "Redo measurement"
+    "measure_redo": "Redo measurement",
+    "split_pdf": "Split PDF",
+    "split_running": "Splitting PDF …",
+    "split_progress": "Saved page {{done}} of {{total}} …",
+    "split_success": "{{n}} pages saved as new files",
+    "split_failed": "Split failed",
+    "split_error_nothing_to_split": "PDF has a single page — nothing to split",
+    "split_error_invalid_pdf": "File is not a readable PDF",
+    "split_error_encrypted_pdf": "PDF is password-protected",
+    "split_error_too_many_pages": "PDF has too many pages (limit 200)",
+    "split_still_running": "Still splitting — check the file list shortly"
   }
 }
