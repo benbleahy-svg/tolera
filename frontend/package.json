@@ -15,12 +15,14 @@
     "@clerk/clerk-react": "^5.61.3",
     "@tanstack/react-table": "^8.21.3",
     "i18next": "^26.3.2",
+    "occt-import-js": "^0.0.23",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.1.200",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-i18next": "^17.0.8",
-    "react-router-dom": "^7.18.0"
+    "react-router-dom": "^7.18.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
@@ -29,6 +31,7 @@
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^6.0.2",
     "jsdom": "^29.1.1",
     "oxlint": "^1.69.0",
