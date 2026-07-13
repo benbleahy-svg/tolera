@@ -23,7 +23,7 @@ const overlayProps = {
   redactions: [] as Redaction[],
   whiteouts: [] as WhiteoutSection[],
   tool: null as React.ComponentProps<typeof RedactOverlay>['tool'],
-  fill: REDACTION_PRESETS.schwarz,
+  style: REDACTION_PRESETS.schwarz,
   whiteoutActive: false,
   spotlightId: null as string | null,
   onAddRedaction: () => {},
@@ -40,7 +40,7 @@ describe('RedactOverlay', () => {
       <RedactOverlay
         {...overlayProps}
         tool="region"
-        fill={REDACTION_PRESETS.weiss}
+        style={REDACTION_PRESETS.weiss}
         onAddRedaction={onAddRedaction}
       />,
     );
@@ -60,6 +60,20 @@ describe('RedactOverlay', () => {
     fireEvent.pointerDown(screen.getByRole('application'), { clientX: 5, clientY: 5 });
     expect(onAddRedaction).toHaveBeenCalledTimes(1);
     expect(onAddRedaction.mock.calls[0][0].rect).toBeUndefined();
+  });
+
+  it('repeat page-tool clicks do not stack duplicate whole-page redactions', () => {
+    const onAddRedaction = vi.fn();
+    render(
+      <RedactOverlay
+        {...overlayProps}
+        tool="page"
+        redactions={[{ id: 'whole', page: 1, ...REDACTION_PRESETS.schwarz }]}
+        onAddRedaction={onAddRedaction}
+      />,
+    );
+    fireEvent.pointerDown(screen.getByRole('application'), { clientX: 5, clientY: 5 });
+    expect(onAddRedaction).not.toHaveBeenCalled();
   });
 
   it('drag with the whiteout tool adds a section', () => {
@@ -279,6 +293,17 @@ describe('PdfViewerPage redact flow', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Geschwärzte Kopie speichern' }));
     await waitFor(() => expect(stableApi.saveRedactedCopy).toHaveBeenCalledTimes(1));
     confirm.mockRestore();
+  });
+
+  it('blocks saving while a view rotation is applied (coords are unrotated)', async () => {
+    await renderViewer();
+    await dragRegion();
+    const save = screen.getByRole('button', { name: 'Geschwärzte Kopie speichern' });
+    expect(save).toBeEnabled();
+    // rotate page 1 via the sidebar → redactions hide, save must lock
+    await userEvent.type(screen.getByLabelText('Seitenauswahl'), '1');
+    await userEvent.click(screen.getByRole('button', { name: 'Drehen' }));
+    expect(save).toBeDisabled();
   });
 
   it('whiteout toggle + spotlight drive the overlay view state', async () => {

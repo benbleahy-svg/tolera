@@ -206,6 +206,21 @@ describe('renderRedactedCopy', () => {
     expect(pageOps(copy, 1)).toMatch(/Tj|TJ/);
   });
 
+  it('solid pages keep the source page’s inherent rotation (exact copy)', async () => {
+    const { renderRedactedCopy } = await import('./pdf');
+    const { degrees } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    const rotated = doc.addPage([600, 400]);
+    rotated.setRotation(degrees(90));
+    const bytes = await doc.save();
+    const out = await renderRedactedCopy(bytes, fakeDoc, [
+      { id: 'p1', page: 1, ...REDACTION_PRESETS.schwarz },
+    ]);
+    const copy = await PDFDocument.load(out);
+    expect(copy.getPage(0).getRotation().angle).toBe(90);
+    expect(copy.getPage(0).getSize()).toEqual({ width: 600, height: 400 });
+  });
+
   it('untouched pages are copied and the original bytes are never mutated', async () => {
     const { renderRedactedCopy } = await import('./pdf');
     const bytes = await makeSourcePdf();

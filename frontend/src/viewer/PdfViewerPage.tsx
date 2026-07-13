@@ -360,6 +360,12 @@ export function PdfViewerPage() {
     );
   };
 
+  // markup coords live in unrotated page space, so redactions are hidden and
+  // blocked while any view rotation is applied — saving then would write marks
+  // the user can't see; gate the save on the same condition
+  const rotationApplied =
+    docRotation % 360 !== 0 || Object.values(pageRotations).some((r) => r % 360 !== 0);
+
   // Redact → NEW supporting file (spec #collab "exact redacted copy"): the
   // affected pages are re-rendered client-side (renderRedactedCopy) so the
   // redacted content is irrecoverable in the copy; the original is untouched.
@@ -800,7 +806,8 @@ export function PdfViewerPage() {
           </label>
           <button
             type="button"
-            disabled={!redactions.length}
+            disabled={!redactions.length || rotationApplied}
+            title={rotationApplied ? t('viewer.redact_rotation_hint') : undefined}
             onClick={() => void saveRedactedCopy()}
           >
             {t('viewer.save_redacted_copy')}
@@ -960,7 +967,7 @@ export function PdfViewerPage() {
                   tool={
                     (docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? redactTool : null
                   }
-                  fill={REDACTION_PRESETS[redactPreset]}
+                  style={REDACTION_PRESETS[redactPreset]}
                   whiteoutActive={whiteoutActive}
                   spotlightId={spotlightId}
                   onAddRedaction={(redaction) => setRedactions((prev) => [...prev, redaction])}

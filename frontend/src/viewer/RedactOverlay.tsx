@@ -23,7 +23,8 @@ interface Props {
   redactions: Redaction[];
   whiteouts: WhiteoutSection[];
   tool: RedactTool | null;
-  fill: { fill: string; stroke: string };
+  /** the active fill preset new redactions are stamped with */
+  style: { fill: string; stroke: string };
   whiteoutActive: boolean;
   spotlightId: string | null;
   onAddRedaction: (redaction: Redaction) => void;
@@ -49,7 +50,7 @@ export function RedactOverlay({
   redactions,
   whiteouts,
   tool,
-  fill,
+  style,
   whiteoutActive,
   spotlightId,
   onAddRedaction,
@@ -76,7 +77,10 @@ export function RedactOverlay({
     e.stopPropagation();
     const point = toPoint(e);
     if (tool === 'page') {
-      onAddRedaction({ id: nextId('red'), page, ...fill });
+      // one whole-page redaction per page — repeat clicks must not stack
+      if (!pageRedactions.some((r) => !r.rect)) {
+        onAddRedaction({ id: nextId('red'), page, ...style });
+      }
       return;
     }
     if (tool === 'spotlight') {
@@ -112,7 +116,7 @@ export function RedactOverlay({
       height: Math.abs(end.y - start.y),
     };
     if (rect.width < 2 || rect.height < 2) return;
-    if (tool === 'region') onAddRedaction({ id: nextId('red'), page, rect, ...fill });
+    if (tool === 'region') onAddRedaction({ id: nextId('red'), page, rect, ...style });
     else if (tool === 'whiteout') onAddWhiteout({ id: nextId('wht'), page, rect });
   };
 

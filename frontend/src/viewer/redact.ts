@@ -63,7 +63,8 @@ export interface PagePixels {
   height: number;
 }
 
-function hexChannels(hex: string): [number, number, number] {
+/** `#rrggbb` → 0–255 channels (shared with pdf.ts's pdf-lib colours). */
+export function hexChannels(hex: string): [number, number, number] {
   const value = /^#?([\da-f]{6})$/i.exec(hex)?.[1];
   if (!value) return [0, 0, 0];
   return [

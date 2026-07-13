@@ -450,6 +450,7 @@
     "save_redacted_copy": "Save redacted copy",
     "redact_exists_confirm": "A redacted copy already exists — save another?",
     "redact_saved": "Redacted copy saved: {{filename}}",
+    "redact_rotation_hint": "Redaction is locked while the view is rotated — reset the rotation.",
     "redactions_page": "Redactions page {{page}}"
   }
 }

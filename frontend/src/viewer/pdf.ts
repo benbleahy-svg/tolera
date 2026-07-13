@@ -13,6 +13,7 @@ import {
   REDACTION_RENDER_SCALE,
   buildRedactionPlan,
   fillRedactionsInPixels,
+  hexChannels,
   type Redaction,
 } from './redact';
 
@@ -126,11 +127,13 @@ export async function renderRedactedCopy(
   const raster = new Set(plan.rasterPages);
   for (let page = 1; page <= source.getPageCount(); page += 1) {
     if (solid.has(page)) {
-      const { width, height } = source.getPage(page - 1).getSize();
+      const sourcePage = source.getPage(page - 1);
+      const { width, height } = sourcePage.getSize();
       const fill = redactions.find((r) => r.page === page && !r.rect)?.fill ?? '#000000';
-      target
-        .addPage([width, height])
-        .drawRectangle({ x: 0, y: 0, width, height, color: hexToRgb(fill) });
+      const added = target.addPage([width, height]);
+      // keep the source page's inherent /Rotate — the copy must view identically
+      added.setRotation(sourcePage.getRotation());
+      added.drawRectangle({ x: 0, y: 0, width, height, color: hexToRgb(fill) });
     } else if (raster.has(page)) {
       const pixels = await doc.renderPagePixels(page, REDACTION_RENDER_SCALE);
       fillRedactionsInPixels(
@@ -162,13 +165,8 @@ export async function renderRedactedCopy(
 }
 
 function hexToRgb(hex: string) {
-  const value = /^#?([\da-f]{6})$/i.exec(hex)?.[1];
-  if (!value) return rgb(0, 0, 0);
-  return rgb(
-    parseInt(value.slice(0, 2), 16) / 255,
-    parseInt(value.slice(2, 4), 16) / 255,
-    parseInt(value.slice(4, 6), 16) / 255,
-  );
+  const [r, g, b] = hexChannels(hex);
+  return rgb(r / 255, g / 255, b / 255);
 }
 
 function drawPolyline(pdfPage: PDFPage, points: { x: number; y: number }[], height: number, color: ReturnType<typeof rgb>, thickness: number, opacity: number) {

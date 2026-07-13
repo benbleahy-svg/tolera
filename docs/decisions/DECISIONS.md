@@ -715,6 +715,20 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Recommended default:** **(b)** — `numeric(14,4)` for unit-level/intermediate cost & price columns (as the folded schema specifies), with money **rounded to integer minor units + `currency` at the quote/total boundary** (display + any persisted total). This honors the schema's precision where the math needs it and §5's representation where money is stored/shown. Confirm at the M1.7 grill before the first money column ships.
 **Affects:** M1.7 (`component_quantity` cost cells, `quote_cell`), M1.10 (roll-up + pricing items + golden figures), M1.11 (VAT/add-ons), `purchased_component.piece_price`, and the §5 money invariant's exact reading.
 
+## [2026-07-13] M2.4 redaction scope — text-selection deferred; raster fidelity; whiteout semantics (M2.4 grill)
+**Status:** RESOLVED
+**Question:** The spec's Redact bullet names "text / sections / pages" and "recolourable fill/stroke"; whiteout's specced targets (Lens callouts, Part-Setup sections) don't exist until M3+. What ships in M2.4?
+**Decision:** (a) **Text-selection redaction is deferred** — rect-drag + whole-page cover the redact-text use functionally (the acceptance test redacts a title-block region); the pdf.js text-layer selection flow can follow without any API change. (b) Region-redacted pages rasterize at **renderScale 3** (≈216 DPI) — irrecoverability requires rasterization (a rect overlay leaves text extractable); the knob is one constant (`REDACTION_RENDER_SCALE`). (c) **Whiteout = user-drawn white rects over the drawing, session view-state only, never baked into the saved copy** (the persistent white case is the `weiss` *redaction* preset); global toggle + spotlight lifts exactly one section; M3 Lens callouts plug into the same state. (d) Fill recolour ships as the two spec-named **presets (schwarz/weiss)**, no free picker; `Redaction.stroke` is modelled but not yet rendered (follows with text-selection). (e) Duplicate saves stay allowed server-side; the client **confirms** when a `<stem>-redacted.pdf` already exists.
+**Resolved:** 2026-07-13 (M2.4 grill, Benjamin)
+**Affects:** M2.4 (viewer redact UI + renderer), M3 (Lens whiteout targets), M6 (share the redacted file).
+
+## [2026-07-13] OPEN: `part_file.redacted_from` FK + persisted redaction regions (M2.4 → M6)
+**Status:** OPEN
+**Question:** The spec's model section lists `PartFile — redaction is_primary (bool) redacted_from (FK source file) + redaction regions`. M2.4 stores only `is_redacted=TRUE` on the copy — no FK to the source file, no region payload. M6's external-share scoping ("share the redacted file *instead of* the original") may need the provenance link; regions would also enable re-editing a redaction instead of redoing it.
+**Options considered:** (1) add `redacted_from` + a regions JSONB now (migration in M2.4, unused until M6); (2) add both in the M6 Vendor-RFQ block when share-scoping actually consumes them; (3) FK only, regions never (a saved copy is final; re-redact from the original).
+**Recommended default:** **(2)** — schema changes ride with the block that consumes them; nothing in M2.4/M2.5 reads the link, and the filename convention (`<stem>-redacted.pdf`) plus `is_redacted` carries the demo until then. Decide at the M6 grill.
+**Affects:** `part_file` schema (future migration), M6 external-share scoping, GDPR provenance reporting.
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*

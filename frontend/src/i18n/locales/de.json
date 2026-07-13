@@ -450,6 +450,7 @@
     "save_redacted_copy": "Geschwärzte Kopie speichern",
     "redact_exists_confirm": "Geschwärzte Kopie existiert bereits — weitere speichern?",
     "redact_saved": "Geschwärzte Kopie gespeichert: {{filename}}",
+    "redact_rotation_hint": "Schwärzen ist bei gedrehter Ansicht gesperrt — Drehung zurücksetzen.",
     "redactions_page": "Schwärzungen Seite {{page}}"
   }
 }
