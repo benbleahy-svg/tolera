@@ -1,6 +1,10 @@
 # --- OS junk ---
 .DS_Store
 **/.DS_Store
+# macOS/Finder duplicate artifacts ("file 2.ext") — delete on sight, never commit
+* 2
+* 2.*
+** 2/
 
 # --- Large binary reference: kept on disk, NOT in git (git-lfs unavailable) ---
 # 125 MB of PP screenshots. To version them later:
@@ -53,3 +57,6 @@ htmlcov/
 .claude/credentials/
 .claude/cache/
 .claude/todos/
+
+# Auto-generated session-end handoff net (local only; /handoff writes the real HANDOFF.md)
+HANDOFF.autogen.md
