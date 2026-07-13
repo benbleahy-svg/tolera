@@ -31,6 +31,9 @@ import { drawAnnotations, extractPages, loadPdf, rotatePages, type LoadedPdf } f
 import { diffImageData, nextZoom, parsePageSelection, searchPages, type SearchHit } from './utils';
 
 const SIDEBAR_KEY = 'tolera.viewer.sidebar-collapsed';
+// Split-status polling: cadence + cap (the task also hard-times-out server-side)
+const SPLIT_POLL_MS = 500;
+const SPLIT_POLL_LIMIT = 240;
 
 type PageLayout = 'continuous' | 'paged';
 type SpreadMode = 'single' | 'double' | 'cover';
@@ -88,6 +91,8 @@ function PageCanvas({
 
 export function PdfViewerPage() {
   const { partId, fileId } = useParams<{ partId: string; fileId: string }>();
+  const [splitting, setSplitting] = useState(false);
+  const [splitMessage, setSplitMessage] = useState<string | null>(null);
   const { t } = useTranslation();
   const api = usePartsApi();
 
@@ -334,6 +339,46 @@ export function PdfViewerPage() {
       await extractPages(source, pages),
       `${file?.filename?.replace(/\.pdf$/i, '') ?? 'seiten'}-${pages.join('-')}.pdf`,
     );
+  };
+
+  const splitPdf = async () => {
+    // Server-side split (M2.5): unlike Extract's local download, this persists
+    // one supporting file per page on the part; poll the task for progress.
+    if (splitting) return;
+    setSplitting(true);
+    setSplitMessage(t('viewer.split_running'));
+    try {
+      const { task_id: taskId } = await api.splitFile(partId, fileId);
+      for (let i = 0; i < SPLIT_POLL_LIMIT; i += 1) {
+        const status = await api.splitStatus(partId, fileId, taskId);
+        if (status.state === 'succeeded') {
+          setSplitMessage(t('viewer.split_success', { n: status.file_ids?.length ?? 0 }));
+          return;
+        }
+        if (status.state === 'failed') {
+          setSplitMessage(t('viewer.split_failed'));
+          return;
+        }
+        if (status.progress) {
+          setSplitMessage(
+            t('viewer.split_progress', {
+              done: status.progress.done,
+              total: status.progress.total,
+            }),
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, SPLIT_POLL_MS));
+      }
+      setSplitMessage(t('viewer.split_failed'));
+    } catch (err) {
+      setSplitMessage(
+        err instanceof ApiError
+          ? `${t('viewer.split_failed')}: ${err.message}`
+          : t('viewer.split_failed'),
+      );
+    } finally {
+      setSplitting(false);
+    }
   };
 
   const toggleSidebar = () => {
@@ -736,6 +781,9 @@ export function PdfViewerPage() {
                 <button type="button" onClick={() => void extractSelection()}>
                   {t('viewer.extract_pages')}
                 </button>
+                <button type="button" disabled={splitting} onClick={() => void splitPdf()}>
+                  {t('viewer.split_pdf')}
+                </button>
                 <button
                   type="button"
                   // view-session removal only — the stored file is untouched;
@@ -755,6 +803,11 @@ export function PdfViewerPage() {
                   </button>
                 )}
               </div>
+              {splitMessage && (
+                <p role="status" className="viewer-split-status">
+                  {splitMessage}
+                </p>
+              )}
               <ol className="viewer-thumbs">
                 {Array.from({ length: doc.pageCount }, (_, i) => i + 1)
                   .filter((page) => !hiddenPages.has(page))

@@ -436,6 +436,11 @@
     "precision": "Decimals",
     "measurements_page": "Measurements page {{page}}",
     "measure_undo": "Undo measurement",
-    "measure_redo": "Redo measurement"
+    "measure_redo": "Redo measurement",
+    "split_pdf": "Split PDF",
+    "split_running": "Splitting PDF …",
+    "split_progress": "Saved page {{done}} of {{total}} …",
+    "split_success": "{{n}} pages saved as new files",
+    "split_failed": "Split failed"
   }
 }

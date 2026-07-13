@@ -436,6 +436,11 @@
     "precision": "Nachkommastellen",
     "measurements_page": "Messungen Seite {{page}}",
     "measure_undo": "Messung rückgängig",
-    "measure_redo": "Messung wiederholen"
+    "measure_redo": "Messung wiederholen",
+    "split_pdf": "PDF aufteilen",
+    "split_running": "PDF wird aufgeteilt …",
+    "split_progress": "Seite {{done}} von {{total}} gespeichert …",
+    "split_success": "{{n}} Seiten als neue Dateien gespeichert",
+    "split_failed": "Aufteilen fehlgeschlagen"
   }
 }
