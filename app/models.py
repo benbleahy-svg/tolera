@@ -458,6 +458,10 @@ class PartFile(Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False, server_default=FileRole.supporting)
     is_redacted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # Provenance for derived files (M2.5 split pages; later redacted copies/merges).
+    # DDL (0017): composite same-org FK → part_file(org_id, id) with column-list
+    # SET NULL (source_file_id) — PG15+ form the ORM can't express, so authored raw.
+    source_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
 
 

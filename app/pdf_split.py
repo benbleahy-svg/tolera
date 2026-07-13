@@ -48,12 +48,8 @@ class TooManyPagesError(PdfSplitError):
     code = "too_many_pages"
 
 
-def split_pdf_pages(data: bytes, max_pages: int = MAX_SPLIT_PAGES) -> list[bytes]:
-    """Split ``data`` into one single-page PDF per page, in page order.
-
-    Raises a :class:`PdfSplitError` subclass instead of persisting anything —
-    callers map ``.code`` onto the 422 envelope.
-    """
+def _read_for_split(data: bytes, max_pages: int) -> PdfReader:
+    """Parse ``data`` and enforce the split policy; the shared validation core."""
     try:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
@@ -67,7 +63,24 @@ def split_pdf_pages(data: bytes, max_pages: int = MAX_SPLIT_PAGES) -> list[bytes
         raise SinglePageError("PDF has a single page — nothing to split")
     if page_count > max_pages:
         raise TooManyPagesError(f"PDF has {page_count} pages (ceiling {max_pages})")
+    return reader
 
+
+def validate_pdf_split(data: bytes, max_pages: int = MAX_SPLIT_PAGES) -> int:
+    """Validate ``data`` as splittable and return its page count.
+
+    The request-time check behind the 202: rejections must be a 422 on the POST,
+    not a failed task (DECISIONS.md 2026-07-13)."""
+    return len(_read_for_split(data, max_pages).pages)
+
+
+def split_pdf_pages(data: bytes, max_pages: int = MAX_SPLIT_PAGES) -> list[bytes]:
+    """Split ``data`` into one single-page PDF per page, in page order.
+
+    Raises a :class:`PdfSplitError` subclass instead of persisting anything —
+    callers map ``.code`` onto the 422 envelope.
+    """
+    reader = _read_for_split(data, max_pages)
     pages: list[bytes] = []
     for page in reader.pages:
         writer = PdfWriter()

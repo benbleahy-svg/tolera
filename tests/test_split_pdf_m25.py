@@ -17,11 +17,16 @@ Seams under test (agreed in the grill):
 from __future__ import annotations
 
 import io
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from pypdf import PdfReader, PdfWriter
 
+from app.celery_app import celery_app
+from app.models import MembershipRole
 from app.pdf_split import (
     EncryptedPdfError,
     InvalidPdfError,
@@ -29,6 +34,7 @@ from app.pdf_split import (
     TooManyPagesError,
     split_pdf_pages,
 )
+from tests.conftest import Seeder, authed
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "drawings"
 THREE_PAGE_PDF = (FIXTURES / "halter-4711-blaetter.pdf").read_bytes()
@@ -71,3 +77,98 @@ class TestSplitPdfPages:
     def test_page_ceiling_is_enforced(self) -> None:
         with pytest.raises(TooManyPagesError):
             split_pdf_pages(THREE_PAGE_PDF, max_pages=2)
+
+
+# --------------------------------------------------------------------------- #
+# HTTP contract (Celery runs eagerly in-process; results land in a memory
+# backend so the status endpoint reads real task state)
+# --------------------------------------------------------------------------- #
+ADMIN = [MembershipRole.admin]
+
+
+@pytest.fixture
+def eager_celery() -> Iterator[None]:
+    """Run split tasks inline and store results in an in-process backend."""
+    saved = {
+        key: celery_app.conf[key]
+        for key in ("task_always_eager", "task_store_eager_result", "task_eager_propagates")
+    }
+    celery_app.conf.update(
+        task_always_eager=True,
+        task_store_eager_result=True,
+        # Task errors must surface via the status endpoint, not blow up the POST.
+        task_eager_propagates=False,
+        result_backend="cache+memory://",
+    )
+    yield
+    celery_app.conf.update(saved)
+
+
+def _org_with_admin(seeder: Seeder, slug: str) -> tuple[uuid.UUID, uuid.UUID]:
+    org = seeder.org(slug)
+    admin = seeder.user(f"admin@{slug}.example")
+    seeder.membership(admin, org, ADMIN)
+    return org, admin
+
+
+def _create_part(client: TestClient) -> str:
+    created = client.post("/api/parts")
+    assert created.status_code == 201, created.text
+    return str(created.json()["id"])
+
+
+def _upload_pdf(client: TestClient, part_id: str, name: str, data: bytes) -> str:
+    resp = client.post(
+        f"/api/parts/{part_id}/files", files=[("files", (name, data, "application/pdf"))]
+    )
+    assert resp.status_code == 201, resp.text
+    return str(resp.json()[0]["id"])
+
+
+class TestSplitEndpoint:
+    def test_split_creates_one_supporting_file_per_page(
+        self, app_client: TestClient, seeder: Seeder, eager_celery: None
+    ) -> None:
+        """The headline acceptance: 3-page fixture → 3 single-page supporting
+        files with provenance; the original stays byte-identical and primary."""
+        org, admin = _org_with_admin(seeder, "org-a")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part_id = _create_part(app_client)
+            file_id = _upload_pdf(app_client, part_id, "halter-4711-blaetter.pdf", THREE_PAGE_PDF)
+
+            resp = app_client.post(f"/api/parts/{part_id}/files/{file_id}/split")
+            assert resp.status_code == 202, resp.text
+            task_id = resp.json()["task_id"]
+
+            status = app_client.get(f"/api/parts/{part_id}/files/{file_id}/split/{task_id}")
+            assert status.status_code == 200, status.text
+            body = status.json()
+            assert body["state"] == "succeeded"
+            assert body["progress"] == {"done": 3, "total": 3}
+            assert len(body["file_ids"]) == 3
+
+            listed = app_client.get(f"/api/parts/{part_id}/files").json()
+            assert len(listed) == 4
+            pages = [f for f in listed if f["id"] in body["file_ids"]]
+            # Page files: named <stem>-p<N>.pdf, supporting, provenance-linked.
+            assert sorted(f["filename"] for f in pages) == [
+                f"halter-4711-blaetter-p{n}.pdf" for n in (1, 2, 3)
+            ]
+            assert all(f["role"] == "supporting" for f in pages)
+            assert all(f["source_file_id"] == file_id for f in pages)
+
+            # The original is untouched: still listed, still primary, byte-identical.
+            original = next(f for f in listed if f["id"] == file_id)
+            assert original["role"] == "primary"
+            assert original["source_file_id"] is None
+            download = app_client.get(f"/api/parts/{part_id}/files/{file_id}/download")
+            assert download.content == THREE_PAGE_PDF
+
+            # Each page file is a 1-page PDF holding exactly its sheet.
+            by_name = {f["filename"]: f["id"] for f in pages}
+            for n in (1, 2, 3):
+                page_id = by_name[f"halter-4711-blaetter-p{n}.pdf"]
+                dl = app_client.get(f"/api/parts/{part_id}/files/{page_id}/download")
+                reader = PdfReader(io.BytesIO(dl.content))
+                assert len(reader.pages) == 1
+                assert f"BLATT {n}" in reader.pages[0].extract_text()

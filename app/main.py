@@ -19,6 +19,7 @@ from .config_completeness import config_completeness_router
 from .custom_tables import custom_tables_router
 from .db import make_engine, make_sessionmaker
 from .errors import register_exception_handlers
+from .file_split import split_router
 from .health import router as health_router
 from .logging import configure_logging
 from .materials import materials_router
@@ -32,6 +33,7 @@ from .pricing import pricing_router
 from .quotes import quotes_router
 from .saved_views import saved_views_router
 from .storage import make_storage
+from .task_resources import register as register_task_resources
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -47,6 +49,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.engine = make_engine(settings.effective_app_database_url)
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
         app.state.storage = make_storage(settings)  # object store for part files (M1.2)
+        # Eagerly-run Celery tasks (tests) share the app's storage + restricted DSN (M2.5).
+        register_task_resources(settings.effective_app_database_url, app.state.storage)
         try:
             yield
         finally:
@@ -67,6 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(accounts_router)
     app.include_router(contacts_router)
     app.include_router(parts_router)
+    app.include_router(split_router)
     app.include_router(quotes_router)
     app.include_router(saved_views_router)
     app.include_router(materials_router)

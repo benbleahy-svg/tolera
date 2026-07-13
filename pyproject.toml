@@ -72,7 +72,7 @@ ignore_missing_imports = true
 
 # Celery is untyped; its decorator + base class would otherwise trip strict mode.
 [[tool.mypy.overrides]]
-module = ["app.tasks", "app.celery_app"]
+module = ["app.tasks", "app.celery_app", "app.file_split"]
 disallow_untyped_decorators = false
 disallow_subclassing_any = false
 
