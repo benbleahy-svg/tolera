@@ -715,9 +715,6 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Recommended default:** **(b)** — `numeric(14,4)` for unit-level/intermediate cost & price columns (as the folded schema specifies), with money **rounded to integer minor units + `currency` at the quote/total boundary** (display + any persisted total). This honors the schema's precision where the math needs it and §5's representation where money is stored/shown. Confirm at the M1.7 grill before the first money column ships.
 **Affects:** M1.7 (`component_quantity` cost cells, `quote_cell`), M1.10 (roll-up + pricing items + golden figures), M1.11 (VAT/add-ons), `purchased_component.piece_price`, and the §5 money invariant's exact reading.
 
----
-
-*Add new entries above this line as ambiguities arise during the build.*
 
 ---
 
@@ -737,3 +734,7 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Options considered:** keep per-feature scoped endpoints (simple tenancy story, some duplication); introduce a generic jobs resource once a second consumer exists (one polling client, but needs a durable org-scoped job table rather than Celery result meta).
 **Recommended default:** keep the scoped pattern until M3 lands, then decide with the second consumer's real shape on the table; if a generic resource wins, back it with a durable `job` table (org-scoped, RLS) instead of raw Celery meta.
 **Affects:** M2.5 (unchanged either way), M3, M4, frontend polling helpers.
+
+---
+
+*Add new entries above this line as ambiguities arise during the build.*
