@@ -100,6 +100,15 @@ export function PdfViewerPage() {
   const { partId, fileId } = useParams<{ partId: string; fileId: string }>();
   const [splitting, setSplitting] = useState(false);
   const [splitMessage, setSplitMessage] = useState<string | null>(null);
+  // Guards the split poll loop: once the viewer unmounts, stop scheduling
+  // timers, firing status requests, or setting state on a dead component.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const { t } = useTranslation();
   const api = usePartsApi();
 
@@ -356,8 +365,11 @@ export function PdfViewerPage() {
     setSplitMessage(t('viewer.split_running'));
     try {
       const { task_id: taskId } = await api.splitFile(partId, fileId);
+      if (!mountedRef.current) return;
       for (let i = 0; i < SPLIT_POLL_LIMIT; i += 1) {
+        if (!mountedRef.current) return;
         const status = await api.splitStatus(partId, fileId, taskId);
+        if (!mountedRef.current) return;
         if (status.state === 'succeeded') {
           setSplitMessage(t('viewer.split_success', { n: status.file_ids?.length ?? 0 }));
           return;
@@ -376,16 +388,18 @@ export function PdfViewerPage() {
         }
         await new Promise((resolve) => setTimeout(resolve, SPLIT_POLL_MS));
       }
+      if (!mountedRef.current) return;
       // Poll cap reached — the task may still finish server-side; say so
       // honestly instead of a false "failed".
       setSplitMessage(t('viewer.split_still_running'));
     } catch (err) {
+      if (!mountedRef.current) return;
       // Map known 422 codes to localized copy; never surface the raw (English)
       // server message inside a German toast.
       const key = err instanceof ApiError ? SPLIT_ERROR_KEYS[err.code] : undefined;
       setSplitMessage(t(key ?? 'viewer.split_failed'));
     } finally {
-      setSplitting(false);
+      if (mountedRef.current) setSplitting(false);
     }
   };
 

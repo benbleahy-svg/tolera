@@ -381,6 +381,12 @@ class TestSplitEndpoint:
             assert result.result["failed"] is True
             assert result.result["error_code"] == "source_file_gone"
 
+            # The REAL ghost task's failure dict is bound to `ghost`, not
+            # `file_id`, so polling it under the real file path 404s — exercising
+            # the binding on an actual task, not just synthetic store_result dicts.
+            ghost_poll = app_client.get(f"/api/parts/{part_id}/files/{file_id}/split/{result.id}")
+            assert ghost_poll.status_code == 404
+
             # Mapped through the status endpoint (bound to the ghost's id via
             # meta, so poll with the real file path + this task id → 404, and
             # with a synthetic bound-to-this-file failure → failed + code).

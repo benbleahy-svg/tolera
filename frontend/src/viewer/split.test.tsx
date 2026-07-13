@@ -132,4 +132,35 @@ describe('Split PDF (M2.5)', () => {
       { timeout: 4000 },
     );
   });
+
+  it('stops polling once the viewer unmounts', async () => {
+    splitFile.mockResolvedValueOnce({ task_id: 't3' });
+    splitStatus.mockReset();
+    // Never resolves to a terminal state — the loop would poll forever if the
+    // component kept running after unmount.
+    splitStatus.mockResolvedValue({
+      state: 'in_progress',
+      progress: { done: 1, total: 3 },
+      file_ids: null,
+      error: null,
+    });
+
+    window.history.pushState({}, '', '/parts/p1/files/f1/view');
+    const { unmount } = await renderWithProviders(<PdfViewerPage />, {
+      route: '/parts/p1/files/f1/view',
+    });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'PDF aufteilen' }));
+    await waitFor(() => expect(splitStatus).toHaveBeenCalled());
+
+    unmount();
+    const callsAtUnmount = splitStatus.mock.calls.length;
+
+    // Well past two poll intervals — without the mounted-ref guard the loop
+    // would fire several more requests; with it, at most one in-flight call
+    // can land before the loop bails.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(splitStatus.mock.calls.length).toBeLessThanOrEqual(callsAtUnmount + 1);
+  });
 });
