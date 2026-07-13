@@ -436,6 +436,20 @@
     "precision": "Nachkommastellen",
     "measurements_page": "Messungen Seite {{page}}",
     "measure_undo": "Messung rückgängig",
-    "measure_redo": "Messung wiederholen"
+    "measure_redo": "Messung wiederholen",
+    "redact_tools": "Schwärzungswerkzeuge",
+    "redact_region": "Bereich schwärzen",
+    "redact_page": "Ganze Seite schwärzen",
+    "redact_fill": "Füllung",
+    "redact_fill_schwarz": "Schwarz",
+    "redact_fill_weiss": "Weiß (verdeckt)",
+    "redact_erase": "Schwärzung löschen",
+    "whiteout_draw": "Whiteout-Bereich",
+    "whiteout_toggle": "Whiteout",
+    "spotlight": "Spotlight",
+    "save_redacted_copy": "Geschwärzte Kopie speichern",
+    "redact_exists_confirm": "Geschwärzte Kopie existiert bereits — weitere speichern?",
+    "redact_saved": "Geschwärzte Kopie gespeichert: {{filename}}",
+    "redactions_page": "Schwärzungen Seite {{page}}"
   }
 }

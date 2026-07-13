@@ -27,7 +27,21 @@ import {
   type Annotation,
   type AnnotationType,
 } from './annotations';
-import { drawAnnotations, extractPages, loadPdf, rotatePages, type LoadedPdf } from './pdf';
+import { RedactOverlay, type RedactTool } from './RedactOverlay';
+import {
+  REDACTION_PRESETS,
+  redactedFilename,
+  type Redaction,
+  type WhiteoutSection,
+} from './redact';
+import {
+  drawAnnotations,
+  extractPages,
+  loadPdf,
+  renderRedactedCopy,
+  rotatePages,
+  type LoadedPdf,
+} from './pdf';
 import { diffImageData, nextZoom, parsePageSelection, searchPages, type SearchHit } from './utils';
 
 const SIDEBAR_KEY = 'tolera.viewer.sidebar-collapsed';
@@ -132,6 +146,14 @@ export function PdfViewerPage() {
   const [tool, setTool] = useState<AnnotationType | 'eraser' | null>(null);
   const [presetName, setPresetName] = useState<keyof typeof PRESETS>('standard');
 
+  const [redactions, setRedactions] = useState<Redaction[]>([]);
+  const [whiteouts, setWhiteouts] = useState<WhiteoutSection[]>([]);
+  const [redactTool, setRedactTool] = useState<RedactTool | null>(null);
+  const [redactPreset, setRedactPreset] = useState<keyof typeof REDACTION_PRESETS>('schwarz');
+  const [whiteoutActive, setWhiteoutActive] = useState(false);
+  const [spotlightId, setSpotlightId] = useState<string | null>(null);
+  const [redactNotice, setRedactNotice] = useState<string | null>(null);
+
   const [compareDoc, setCompareDoc] = useState<LoadedPdf | null>(null);
   const [compareVisible, setCompareVisible] = useState(true);
   const [overlays, setOverlays] = useState<Record<number, ImageData>>({});
@@ -218,6 +240,8 @@ export function PdfViewerPage() {
         setMarqueeMode((m) => !m);
       } else if (!e.metaKey && !e.ctrlKey && TOOL_SHORTCUTS[e.key.toLowerCase()]) {
         const next = TOOL_SHORTCUTS[e.key.toLowerCase()];
+        setMeasureTool(null);
+        setRedactTool(null);
         setTool((current) => (current === next ? null : next));
       }
     };
@@ -334,6 +358,29 @@ export function PdfViewerPage() {
       await extractPages(source, pages),
       `${file?.filename?.replace(/\.pdf$/i, '') ?? 'seiten'}-${pages.join('-')}.pdf`,
     );
+  };
+
+  // Redact → NEW supporting file (spec #collab "exact redacted copy"): the
+  // affected pages are re-rendered client-side (renderRedactedCopy) so the
+  // redacted content is irrecoverable in the copy; the original is untouched.
+  const saveRedactedCopy = async () => {
+    if (!bytes || !doc || !file || !redactions.length) return;
+    const name = redactedFilename(file.filename);
+    if (
+      siblings.some((sibling) => sibling.filename === name) &&
+      !window.confirm(t('viewer.redact_exists_confirm'))
+    ) {
+      return;
+    }
+    try {
+      const rendered = await renderRedactedCopy(bytes, doc, redactions);
+      await api.saveRedactedCopy(partId, fileId, rendered, name);
+      const files = await api.listFiles(partId);
+      setSiblings(files.filter((f) => f.id !== fileId && f.filename.endsWith('.pdf')));
+      setRedactNotice(t('viewer.redact_saved', { filename: name }));
+    } catch (e) {
+      fail(e);
+    }
   };
 
   const toggleSidebar = () => {
@@ -518,6 +565,7 @@ export function PdfViewerPage() {
               title={key ? `${t(`viewer.tool_${type}`)} (${key})` : t(`viewer.tool_${type}`)}
               onClick={() => {
                 setMeasureTool(null);
+                setRedactTool(null);
                 setTool((current) => (current === type ? null : type));
               }}
             >
@@ -527,7 +575,11 @@ export function PdfViewerPage() {
           <button
             type="button"
             aria-pressed={tool === 'eraser'}
-            onClick={() => setTool((current) => (current === 'eraser' ? null : 'eraser'))}
+            onClick={() => {
+              setMeasureTool(null);
+              setRedactTool(null);
+              setTool((current) => (current === 'eraser' ? null : 'eraser'));
+            }}
           >
             {t('viewer.tool_eraser')}
           </button>
@@ -614,6 +666,7 @@ export function PdfViewerPage() {
             aria-pressed={measureTool === 'calibrate'}
             onClick={() => {
               setTool(null);
+              setRedactTool(null);
               setMeasureTool((current) => (current === 'calibrate' ? null : 'calibrate'));
               setScaleWarning(false);
             }}
@@ -643,6 +696,7 @@ export function PdfViewerPage() {
                 }
                 setScaleWarning(false);
                 setTool(null);
+                setRedactTool(null);
                 setMeasureTool((current) => (current === kind ? null : kind));
               }}
             >
@@ -652,7 +706,11 @@ export function PdfViewerPage() {
           <button
             type="button"
             aria-pressed={measureTool === 'erase'}
-            onClick={() => setMeasureTool((current) => (current === 'erase' ? null : 'erase'))}
+            onClick={() => {
+              setTool(null);
+              setRedactTool(null);
+              setMeasureTool((current) => (current === 'erase' ? null : 'erase'));
+            }}
           >
             {t('viewer.measure_erase')}
           </button>
@@ -697,6 +755,57 @@ export function PdfViewerPage() {
               {t('viewer.scale_required')}
             </span>
           )}
+        </div>
+        <div className="viewer-annotate" role="toolbar" aria-label={t('viewer.redact_tools')}>
+          {(
+            [
+              ['region', 'redact_region'],
+              ['page', 'redact_page'],
+              ['whiteout', 'whiteout_draw'],
+              ['spotlight', 'spotlight'],
+              ['erase', 'redact_erase'],
+            ] as [RedactTool, string][]
+          ).map(([kind, label]) => (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={redactTool === kind}
+              onClick={() => {
+                setTool(null);
+                setMeasureTool(null);
+                setRedactTool((current) => (current === kind ? null : kind));
+              }}
+            >
+              {t(`viewer.${label}`)}
+            </button>
+          ))}
+          <span>{t('viewer.redact_fill')}</span>
+          {(Object.keys(REDACTION_PRESETS) as (keyof typeof REDACTION_PRESETS)[]).map((name) => (
+            <button
+              key={name}
+              type="button"
+              aria-pressed={redactPreset === name}
+              onClick={() => setRedactPreset(name)}
+            >
+              {t(`viewer.redact_fill_${name}`)}
+            </button>
+          ))}
+          <label>
+            <input
+              type="checkbox"
+              checked={whiteoutActive}
+              onChange={(e) => setWhiteoutActive(e.target.checked)}
+            />
+            {t('viewer.whiteout_toggle')}
+          </label>
+          <button
+            type="button"
+            disabled={!redactions.length}
+            onClick={() => void saveRedactedCopy()}
+          >
+            {t('viewer.save_redacted_copy')}
+          </button>
+          {redactNotice && <span role="status">{redactNotice}</span>}
         </div>
       </header>
 
@@ -835,6 +944,37 @@ export function PdfViewerPage() {
                       setMeasureTool(null);
                     }
                   }}
+                />
+                <RedactOverlay
+                  ariaLabel={t('viewer.redactions_page', { page })}
+                  page={page}
+                  zoom={zoom}
+                  redactions={
+                    (docRotation + (pageRotations[page] ?? 0)) % 360 === 0
+                      ? redactions
+                      : []
+                  }
+                  whiteouts={
+                    (docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? whiteouts : []
+                  }
+                  tool={
+                    (docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? redactTool : null
+                  }
+                  fill={REDACTION_PRESETS[redactPreset]}
+                  whiteoutActive={whiteoutActive}
+                  spotlightId={spotlightId}
+                  onAddRedaction={(redaction) => setRedactions((prev) => [...prev, redaction])}
+                  onAddWhiteout={(section) => setWhiteouts((prev) => [...prev, section])}
+                  onEraseRedaction={(id) =>
+                    setRedactions((prev) => prev.filter((r) => r.id !== id))
+                  }
+                  onEraseWhiteout={(id) => {
+                    setWhiteouts((prev) => prev.filter((w) => w.id !== id));
+                    setSpotlightId((current) => (current === id ? null : current));
+                  }}
+                  onSpotlight={(id) =>
+                    setSpotlightId((current) => (current === id ? null : id))
+                  }
                 />
               </PageCanvas>
             ))}

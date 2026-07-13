@@ -436,6 +436,20 @@
     "precision": "Decimals",
     "measurements_page": "Measurements page {{page}}",
     "measure_undo": "Undo measurement",
-    "measure_redo": "Redo measurement"
+    "measure_redo": "Redo measurement",
+    "redact_tools": "Redaction tools",
+    "redact_region": "Redact region",
+    "redact_page": "Redact whole page",
+    "redact_fill": "Fill",
+    "redact_fill_schwarz": "Black",
+    "redact_fill_weiss": "White (hidden)",
+    "redact_erase": "Remove redaction",
+    "whiteout_draw": "Whiteout section",
+    "whiteout_toggle": "Whiteout",
+    "spotlight": "Spotlight",
+    "save_redacted_copy": "Save redacted copy",
+    "redact_exists_confirm": "A redacted copy already exists — save another?",
+    "redact_saved": "Redacted copy saved: {{filename}}",
+    "redactions_page": "Redactions page {{page}}"
   }
 }

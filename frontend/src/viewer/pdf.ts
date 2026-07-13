@@ -9,6 +9,12 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { PDFDocument, degrees, rgb, type PDFPage } from 'pdf-lib';
 
 import { arrowHeads, highlightFill, sampleArc, squigglePoints, type Annotation } from './annotations';
+import {
+  REDACTION_RENDER_SCALE,
+  buildRedactionPlan,
+  fillRedactionsInPixels,
+  type Redaction,
+} from './redact';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -96,6 +102,63 @@ export async function rotatePages(
     page.setRotation(degrees((page.getRotation().angle + rotation) % 360));
   }
   return doc.save();
+}
+
+/**
+ * Render the redacted copy (M2.4, spec #pdf-capabilities Redact / #collab
+ * "exact redacted copy"). Untouched pages are copied vector-identical;
+ * fully-redacted pages become a fresh page under a solid fill; pages with
+ * region redactions are RASTERIZED — rendered to pixels, regions filled in
+ * the buffer, re-embedded as a full-page image — so the content underneath
+ * is irrecoverable in the copy (a rect overlay would leave it extractable;
+ * the M2 exit check greps the copy's extracted text). The source bytes are
+ * never mutated.
+ */
+export async function renderRedactedCopy(
+  bytes: Uint8Array,
+  doc: Pick<LoadedPdf, 'renderPagePixels'>,
+  redactions: Redaction[],
+): Promise<Uint8Array> {
+  const source = await PDFDocument.load(bytes);
+  const target = await PDFDocument.create();
+  const plan = buildRedactionPlan(source.getPageCount(), redactions);
+  const solid = new Set(plan.solidPages);
+  const raster = new Set(plan.rasterPages);
+  for (let page = 1; page <= source.getPageCount(); page += 1) {
+    if (solid.has(page)) {
+      const { width, height } = source.getPage(page - 1).getSize();
+      const fill = redactions.find((r) => r.page === page && !r.rect)?.fill ?? '#000000';
+      target
+        .addPage([width, height])
+        .drawRectangle({ x: 0, y: 0, width, height, color: hexToRgb(fill) });
+    } else if (raster.has(page)) {
+      const pixels = await doc.renderPagePixels(page, REDACTION_RENDER_SCALE);
+      fillRedactionsInPixels(
+        pixels,
+        redactions.filter((r) => r.page === page && r.rect),
+        REDACTION_RENDER_SCALE,
+      );
+      const canvas = document.createElement('canvas');
+      canvas.width = pixels.width;
+      canvas.height = pixels.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Canvas 2D ist für geschwärzte Seiten erforderlich.');
+      context.putImageData(
+        new ImageData(pixels.data as Uint8ClampedArray<ArrayBuffer>, pixels.width, pixels.height),
+        0,
+        0,
+      );
+      const png = await target.embedPng(canvas.toDataURL('image/png'));
+      // page size = what was rendered, ÷ scale — follows any inherent rotation
+      const width = pixels.width / REDACTION_RENDER_SCALE;
+      const height = pixels.height / REDACTION_RENDER_SCALE;
+      target.addPage([width, height]).drawImage(png, { x: 0, y: 0, width, height });
+    } else {
+      const [copied] = await target.copyPages(source, [page - 1]);
+      target.addPage(copied);
+    }
+  }
+  return target.save();
 }
 
 function hexToRgb(hex: string) {
