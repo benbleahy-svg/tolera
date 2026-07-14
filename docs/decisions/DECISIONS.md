@@ -750,4 +750,13 @@ The check runs through the org-pinned session, so it reads only the active org's
 
 ---
 
+## [2026-07-14] OPEN: Viewer-mesh provenance & face-ID correlation (M2.6 → M4)
+**Status:** OPEN
+**Question:** M2.6 renders a **client-side** occt-import-js tessellation (browser WASM parse of the stored STEP), while DECISIONS [2026-06] fixes GeometryService on **server-side** OCCT (pythonocc) and the spec (`#viewer3d-tools`) says the viewer "renders what GeometryService tessellates". M2.7 exposes a stable face/entity id that M2.11 **persists** with chat annotations, and M4 must paint interrogation features onto whatever mesh the viewer displays. If display mesh ≠ interrogation mesh, persisted face ids and feature→face maps don't correlate.
+**Options considered:** (a) keep the client-side display mesh permanently and define a correlation contract between the two tessellations (stable face ordering or geometric matching — both OCCT-kernel-based, which helps but is uncontractual in occt-import-js); (b) switch the viewer to fetch GeometryService's server tessellation in M4 and delete the client parse path.
+**Recommended default:** **(b)** — the sub-spec's "renders what GeometryService tessellates" already points there. M2.6 therefore keeps the mesh source behind an async `MeshProvider` seam (worker-based occt-import-js today, swappable without touching scene/UI code), and nothing occt-import-js-specific is persisted. Decide at the M4 grill, before M2.11 face-bound annotations ship if M2.11 lands first.
+**Affects:** M2.6 (seam only), M2.7 (face/entity id shape), M2.11 (persisted annotation binding), M4 (tessellation endpoint + feature→face map).
+
+---
+
 *Add new entries above this line as ambiguities arise during the build.*
