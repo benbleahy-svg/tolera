@@ -10,6 +10,8 @@
 import * as THREE from 'three';
 
 import type { BodySummary, CadModel, EntityRef, Vec3 } from './model';
+import type { BodySummary, CadBody, CadModel, EntityRef } from './model';
+import type { RepColor } from './renderBudget';
 import { faceRefForHit, findBody } from './selection';
 
 export type RenderMode = 'shaded' | 'xray' | 'wireframe';
@@ -19,6 +21,14 @@ export type CubeFace = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 export interface PickHit {
   ref: EntityRef;
   point: Vec3;
+/**
+ * Per-body display decision the viewer pushes each time the display state
+ * changes (M2.9): `hidden` isolates a body out entirely; `repColor` replaces it
+ * with a bounding-box simplified rep in that colour (null = full detail).
+ */
+export interface BodyDisplayState {
+  hidden: boolean;
+  repColor: RepColor | null;
 }
 
 const FACE_DIRECTIONS: Record<CubeFace, THREE.Vector3> = {
@@ -36,6 +46,8 @@ const DEFAULT_BODY_COLOR = 0x8896a5;
 const SELECTION_COLOR = 0x7ac142;
 /** Measure leader line colour. */
 const MEASURE_COLOR = 0xffb020;
+/** Simplified-rep colours: blue = collection over budget, orange = body over budget. */
+const REP_COLORS: Record<RepColor, number> = { blue: 0x3b82f6, orange: 0xf59e0b };
 /** Isometric-ish default view direction (from front-right-above). */
 const DEFAULT_VIEW_DIR = new THREE.Vector3(1, -1, 0.75).normalize();
 
@@ -53,6 +65,12 @@ export class CadSceneController {
   private bodyList: BodySummary[] = [];
   private defaultPose: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private fitDistance = 100;
+  /** Full-detail mesh per body id, for colour/visibility/rep swaps (M2.9). */
+  private bodyMeshes = new Map<string, THREE.Mesh>();
+  /** Lazily-built bounding-box simplified reps per body id (M2.9). */
+  private boxMeshes = new Map<string, THREE.Mesh>();
+  private boxGroup: THREE.Group | null = null;
+  private nativeColors = true;
 
   constructor() {
     this.camera.up.set(0, 0, 1);
@@ -72,14 +90,20 @@ export class CadSceneController {
     return this.bodyList;
   }
 
+  get nativeColorsEnabled(): boolean {
+    return this.nativeColors;
+  }
+
   loadModel(model: CadModel): void {
     if (this.modelGroup) {
       this.scene.remove(this.modelGroup);
       this.disposeGroup(this.modelGroup);
     }
+    this.clearSimplifiedReps();
     this.setSelection([]);
     this.setMeasure(null);
     this.model = model;
+    this.bodyMeshes.clear();
     const group = new THREE.Group();
     for (const body of model.bodies) {
       const geometry = new THREE.BufferGeometry();
@@ -91,9 +115,7 @@ export class CadSceneController {
       }
       geometry.setIndex(new THREE.BufferAttribute(body.indices, 1));
       const material = new THREE.MeshStandardMaterial({
-        color: body.color
-          ? new THREE.Color(body.color[0], body.color[1], body.color[2])
-          : DEFAULT_BODY_COLOR,
+        color: this.bodyColor(body),
         roughness: 0.6,
         metalness: 0.15,
         side: THREE.DoubleSide,
@@ -101,9 +123,12 @@ export class CadSceneController {
       const mesh = new THREE.Mesh(geometry, material);
       mesh.userData.bodyId = body.id;
       group.add(mesh);
+      this.bodyMeshes.set(body.id, mesh);
     }
     this.scene.add(group);
     this.modelGroup = group;
+    this.boxGroup = new THREE.Group();
+    this.scene.add(this.boxGroup);
     this.bodyList = model.bodies.map(({ id, name }) => ({ id, name }));
 
     const min = new THREE.Vector3(...model.bbox.min);
@@ -128,6 +153,46 @@ export class CadSceneController {
     this.applyRenderMode();
   }
 
+  /**
+   * Toggle native model colours (M2.9 display option). When off, every body
+   * shows Tolera's default colour so feature callouts stay legible against
+   * export colours that clash. Bodies with no native colour always show the
+   * default.
+   */
+  setNativeColors(enabled: boolean): void {
+    this.nativeColors = enabled;
+    if (!this.model) return;
+    for (const body of this.model.bodies) {
+      const mesh = this.bodyMeshes.get(body.id);
+      if (mesh) (mesh.material as THREE.MeshStandardMaterial).color.set(this.bodyColor(body));
+    }
+  }
+
+  /**
+   * Apply the per-body display decision (M2.9 rendering limits + isolate).
+   * A `hidden` body is removed from view entirely (isolate); a body with a
+   * `repColor` is drawn as a bounding-box simplified rep in that colour and its
+   * full mesh hidden; otherwise the full mesh renders and any prior rep clears.
+   */
+  setBodyDisplayStates(states: Map<string, BodyDisplayState>): void {
+    if (!this.model) return;
+    for (const body of this.model.bodies) {
+      const mesh = this.bodyMeshes.get(body.id);
+      if (!mesh) continue;
+      const state = states.get(body.id) ?? { hidden: false, repColor: null };
+      if (state.hidden) {
+        mesh.visible = false;
+        this.hideRep(body.id);
+      } else if (state.repColor) {
+        mesh.visible = false;
+        this.showRep(body, state.repColor);
+      } else {
+        mesh.visible = true;
+        this.hideRep(body.id);
+      }
+    }
+  }
+
   snapToFace(face: CubeFace): void {
     this.camera.position
       .copy(this.target)
@@ -143,6 +208,7 @@ export class CadSceneController {
     if (!this.modelGroup || !this.model) return null;
     const hits = raycaster.intersectObjects(this.modelGroup.children, false);
     for (const hit of hits) {
+      if (hit.object.visible === false) continue; // hidden (isolated) or boxed body
       const bodyId = hit.object.userData.bodyId;
       if (typeof bodyId === 'string' && hit.faceIndex != null) {
         const ref = faceRefForHit(this.model, bodyId, hit.faceIndex);
@@ -256,6 +322,66 @@ export class CadSceneController {
     if (this.modelGroup) this.disposeGroup(this.modelGroup);
     if (this.selectionGroup) this.disposeGroup(this.selectionGroup);
     this.setMeasure(null);
+    if (this.boxGroup) this.disposeGroup(this.boxGroup);
+  }
+
+  /** Resolve a body's material colour honouring the native-colour toggle. */
+  private bodyColor(body: CadBody): THREE.ColorRepresentation {
+    return this.nativeColors && body.color
+      ? new THREE.Color(body.color[0], body.color[1], body.color[2])
+      : DEFAULT_BODY_COLOR;
+  }
+
+  /** Show (building on first use) the bounding-box simplified rep for a body. */
+  private showRep(body: CadBody, color: RepColor): void {
+    if (!this.boxGroup) return;
+    let mesh = this.boxMeshes.get(body.id);
+    if (!mesh) {
+      mesh = this.buildBox(body);
+      this.boxMeshes.set(body.id, mesh);
+      this.boxGroup.add(mesh);
+    }
+    (mesh.material as THREE.MeshStandardMaterial).color.set(REP_COLORS[color]);
+    mesh.visible = true;
+  }
+
+  private hideRep(bodyId: string): void {
+    const mesh = this.boxMeshes.get(bodyId);
+    if (mesh) mesh.visible = false;
+  }
+
+  /** A body's axis-aligned bounding box as a solid mesh, sized and centred to it. */
+  private buildBox(body: CadBody): THREE.Mesh {
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < body.positions.length; i += 3) {
+      for (let a = 0; a < 3; a += 1) {
+        const v = body.positions[i + a];
+        if (v < lo[a]) lo[a] = v;
+        if (v > hi[a]) hi[a] = v;
+      }
+    }
+    // guard a degenerate (planar) extent so the box is still visible
+    const size = [0, 1, 2].map((a) => Math.max(hi[a] - lo[a], 1e-3));
+    const geometry = new THREE.BoxGeometry(size[0], size[1], size[2]);
+    geometry.translate((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
+    const material = new THREE.MeshStandardMaterial({
+      roughness: 0.7,
+      metalness: 0.1,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.boxFor = body.id;
+    return mesh;
+  }
+
+  private clearSimplifiedReps(): void {
+    if (this.boxGroup) {
+      this.scene.remove(this.boxGroup);
+      this.disposeGroup(this.boxGroup);
+      this.boxGroup = null;
+    }
+    this.boxMeshes.clear();
   }
 
   private applyRenderMode(): void {
