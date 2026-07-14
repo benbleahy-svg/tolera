@@ -13,6 +13,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
+import { PartMatchesChip } from '../parts/MatchingParts';
 import { useHasPermission } from '../session/session';
 import { AddOnsSection } from './AddOnsSection';
 import { useEstimatingApi } from './api';
@@ -52,6 +53,7 @@ export function EstimatingPage() {
   const [error, setError] = useState<string | null>(null);
 
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
+  const partId = quote?.items[itemIndex]?.part_id ?? null;
 
   const fail = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : String(e));
@@ -208,6 +210,17 @@ export function EstimatingPage() {
               ))}
             </select>
           </label>
+        )}
+        {partId && (
+          <PartMatchesChip
+            key={partId}
+            partId={partId}
+            componentId={componentId ?? undefined}
+            editable={editable}
+            onImported={() => {
+              if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+            }}
+          />
         )}
         <div className="est-assignments">
           <span className="est-field-label">{t('estimating.process')}</span>
