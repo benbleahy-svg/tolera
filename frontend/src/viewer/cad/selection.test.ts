@@ -11,6 +11,7 @@ import {
   axisDims,
   cumulativeArea,
   faceArea,
+  facePrimitive,
   faceProps,
   faceRefForHit,
   optimalBoundingBox,
@@ -294,5 +295,41 @@ describe('faceProps — sphere', () => {
     expect(props.diameter).toBeCloseTo(10, 0);
     expect(props.height).toBeNull();
     expect(props.angle).toBeNull();
+  });
+});
+
+describe('facePrimitive — geometric placement for measure (M2.8)', () => {
+  it('gives a plane its unit normal and a point on the plane', () => {
+    const cube = unitCube(); // face 0 = bottom (z=0), outward normal −z
+    const prim = facePrimitive(cube, 0);
+    expect(prim.type).toBe('plane');
+    if (prim.type !== 'plane') return;
+    expect(Math.abs(prim.normal[2])).toBeCloseTo(1, 6);
+    expect(prim.normal[0]).toBeCloseTo(0, 6);
+    expect(prim.normal[1]).toBeCloseTo(0, 6);
+    expect(prim.point[2]).toBeCloseTo(0, 6); // lies on the z=0 plane
+  });
+
+  it('gives a cylinder its axis, parametric center and radius', () => {
+    const cyl = cylinderSide(4, 10, 64); // Z axis, z∈[0,10], R=4
+    const prim = facePrimitive(cyl, 0);
+    expect(prim.type).toBe('cylinder');
+    if (prim.type !== 'cylinder') return;
+    expect(Math.abs(prim.axis[2])).toBeCloseTo(1, 3); // axis ≈ ±Z
+    expect(prim.radius).toBeCloseTo(4, 1);
+    // parametric center on the axis, mid-height
+    expect(prim.center[0]).toBeCloseTo(0, 2);
+    expect(prim.center[1]).toBeCloseTo(0, 2);
+    expect(prim.center[2]).toBeCloseTo(5, 2);
+  });
+
+  it('gives a sphere its center and radius', () => {
+    const prim = facePrimitive(sphere(5, [1, 2, 3]), 0);
+    expect(prim.type).toBe('sphere');
+    if (prim.type !== 'sphere') return;
+    expect(prim.radius).toBeCloseTo(5, 0);
+    expect(prim.center[0]).toBeCloseTo(1, 1);
+    expect(prim.center[1]).toBeCloseTo(2, 1);
+    expect(prim.center[2]).toBeCloseTo(3, 1);
   });
 });

@@ -291,6 +291,16 @@ describe('CadSceneController — picking & selection highlight', () => {
     expect(controller.pick(rc)).toEqual({ kind: 'face', bodyId: 'body-0', index: 0 });
   });
 
+  it('pickHit also returns the exact surface point (for measure)', () => {
+    const rc = new THREE.Raycaster();
+    rc.set(new THREE.Vector3(2, 2, 10), new THREE.Vector3(0, 0, -1));
+    const hit = controller.pickHit(rc);
+    expect(hit?.ref).toEqual({ kind: 'face', bodyId: 'body-0', index: 0 });
+    expect(hit?.point[0]).toBeCloseTo(2, 6);
+    expect(hit?.point[1]).toBeCloseTo(2, 6);
+    expect(hit?.point[2]).toBeCloseTo(0, 6);
+  });
+
   it('returns null when the ray misses all geometry', () => {
     const rc = new THREE.Raycaster();
     rc.set(new THREE.Vector3(500, 500, 10), new THREE.Vector3(0, 0, -1));
@@ -309,5 +319,60 @@ describe('CadSceneController — picking & selection highlight', () => {
     controller.setSelection([{ kind: 'face', bodyId: 'body-0', index: 0 }]);
     controller.loadModel(syntheticModel(1));
     expect(highlightTriangleCount(controller)).toBe(0);
+  });
+});
+
+describe('CadSceneController — measure leader (M2.8)', () => {
+  let controller: CadSceneController;
+
+  const measureLines = (c: CadSceneController): THREE.Line[] => {
+    const lines: THREE.Line[] = [];
+    c.scene.traverse((o) => {
+      if (o instanceof THREE.Line && o.userData.measure) lines.push(o);
+    });
+    return lines;
+  };
+  const leaderPositions = (c: CadSceneController): number[] => {
+    const lines = measureLines(c);
+    expect(lines).toHaveLength(1);
+    return Array.from((lines[0].geometry.getAttribute('position') as THREE.BufferAttribute).array);
+  };
+
+  beforeEach(() => {
+    controller = new CadSceneController();
+    controller.loadModel(syntheticModel(1));
+  });
+
+  it('draws a leader along the two endpoints and clears on null', () => {
+    expect(measureLines(controller)).toHaveLength(0);
+    controller.setMeasure([
+      [0, 0, 0],
+      [0, 0, 10],
+    ]);
+    expect(leaderPositions(controller)).toEqual([0, 0, 0, 0, 0, 10]);
+    controller.setMeasure(null);
+    expect(measureLines(controller)).toHaveLength(0);
+  });
+
+  it('replaces the prior leader with the new coordinates rather than stacking', () => {
+    controller.setMeasure([
+      [0, 0, 0],
+      [1, 0, 0],
+    ]);
+    controller.setMeasure([
+      [0, 0, 0],
+      [2, 0, 0],
+    ]);
+    // exactly one leader, and it carries the NEW endpoints (not the stale ones)
+    expect(leaderPositions(controller)).toEqual([0, 0, 0, 2, 0, 0]);
+  });
+
+  it('clears the leader when a new model loads', () => {
+    controller.setMeasure([
+      [0, 0, 0],
+      [0, 0, 10],
+    ]);
+    controller.loadModel(syntheticModel(1));
+    expect(measureLines(controller)).toHaveLength(0);
   });
 });

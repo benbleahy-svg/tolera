@@ -24,11 +24,13 @@ import { Link } from 'react-router-dom';
 import type { Annotation } from '../../collab/api';
 import { type BoundSelection, CollaborationPanel } from '../../collab/CollaborationPanel';
 import { usePartsApi, type PartFile } from '../../parts/api';
+import { measure, type MeasurePick, type MeasureResult } from './measure';
 import {
   formatAngle,
   formatArea,
   formatLength,
   formatMass,
+  formatMeasureDistance,
   formatVolume,
   type DisplayOptions,
   type UnitSystem,
@@ -45,17 +47,25 @@ import {
 import {
   axisDims,
   cumulativeArea,
+  facePrimitiveForRef,
   facePropsForRef,
   optimalBoundingBox,
   wholeFileStats,
 } from './selection';
 import {
   CadSceneController,
-  type BodyDisplayState,
   type CubeFace,
+  type PickHit,
+  type BodyDisplayState,
   type RenderMode,
 } from './sceneController';
 import { createViewerGl, type ViewerGl } from './viewerGl';
+
+type ViewerTool = 'select' | 'measure';
+/** A {@link MeasurePick} plus the face ref, so the scene can highlight it. */
+interface MeasurePickUi extends MeasurePick {
+  ref: EntityRef;
+}
 
 const RENDER_MODES: { mode: RenderMode; labelKey: string }[] = [
   { mode: 'shaded', labelKey: 'viewer.cad_render_shaded' },
@@ -109,8 +119,18 @@ export function CadViewerPage({
   const [renderMode, setRenderModeState] = useState<RenderMode>('shaded');
   const [model, setModel] = useState<CadModel | null>(null);
   const [selection, setSelection] = useState<EntityRef[]>([]);
+  const [tool, setTool] = useState<ViewerTool>('select');
+  const [measurePicks, setMeasurePicks] = useState<MeasurePickUi[]>([]);
   const [panelTab, setPanelTab] = useState<'tree' | 'features'>('tree');
 
+  // The pick callback is wired into the GL layer once (mount effect below), so
+  // it must read the live tool + model through refs, not stale closure state.
+  const toolRef = useRef<ViewerTool>(tool);
+  toolRef.current = tool;
+  const modelRef = useRef<CadModel | null>(null);
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
   // Display options (ephemeral; DACH default = metric, precision 2, native colours on).
   const [gearOpen, setGearOpen] = useState(false);
   const [unitSystem, setUnitSystem] = useState<UnitSystem>('metric');
@@ -137,8 +157,10 @@ export function CadViewerPage({
       .then((loaded) => {
         if (abort.signal.aborted) return;
         controller.loadModel(loaded);
+        modelRef.current = loaded;
         setModel(loaded);
         setSelection([]);
+        setMeasurePicks([]);
         setIsolatedBodyId(null);
         setState('ready');
       })
@@ -164,9 +186,24 @@ export function CadViewerPage({
     if (state !== 'ready' || !host || !controller || glRef.current) return;
 
     const gl = createViewerGl(controller, {
-      onPick: (ref, additive) => {
+      onPick: (hit: PickHit | null, additive) => {
+        if (toolRef.current === 'measure') {
+          setMeasurePicks((prev) => {
+            if (!hit) return []; // click empty space → clear the measurement
+            const m = modelRef.current;
+            const primitive = m ? facePrimitiveForRef(m, hit.ref) : null;
+            if (!primitive) return prev;
+            const next: MeasurePickUi = { ref: hit.ref, primitive, hitPoint: hit.point };
+            // ignore re-picking the same face (would read a degenerate 0 mm)
+            if (prev.some((p) => entityKey(p.ref) === entityKey(next.ref))) return prev;
+            // two picks define a measurement; a third click starts a fresh one
+            return prev.length >= 2 ? [next] : [...prev, next];
+          });
+          return;
+        }
         setSelection((prev) => {
-          if (!ref) return [];
+          if (!hit) return [];
+          const ref = hit.ref;
           if (!additive) return [ref];
           const key = entityKey(ref);
           return prev.some((r) => entityKey(r) === key)
@@ -193,10 +230,29 @@ export function CadViewerPage({
     };
   }, [state]);
 
-  // Keep the scene highlight in sync with the selection set.
+  // The measurement: two picks → distance / exact flag / angle / leader points.
+  const measureResult: MeasureResult | null = useMemo(
+    () => (measurePicks.length === 2 ? measure(measurePicks[0], measurePicks[1]) : null),
+    [measurePicks],
+  );
+
+  // Keep the scene face-highlight in sync with whichever tool is active: the
+  // select set, or the faces being measured.
   useEffect(() => {
-    controllerRef.current?.setSelection(selection);
-  }, [selection]);
+    const refs = tool === 'measure' ? measurePicks.map((p) => p.ref) : selection;
+    controllerRef.current?.setSelection(refs);
+  }, [selection, measurePicks, tool]);
+
+  // Draw / clear the in-scene measure leader.
+  useEffect(() => {
+    controllerRef.current?.setMeasure(measureResult?.endpoints ?? null);
+  }, [measureResult]);
+
+  const changeTool = (next: ViewerTool) => {
+    setTool(next);
+    setSelection([]);
+    setMeasurePicks([]);
+  };
 
   // The last-picked face, offered to the collaboration composer to pin a
   // message to (M2.11). The stored locator carries the M2.7 EntityRef so a
@@ -320,6 +376,24 @@ export function CadViewerPage({
               {t(labelKey)}
             </button>
           ))}
+        </div>
+        <div className="cad-tools" role="group" aria-label={t('viewer.cad_tools')}>
+          <button
+            type="button"
+            aria-pressed={tool === 'select'}
+            disabled={state !== 'ready'}
+            onClick={() => changeTool('select')}
+          >
+            {t('viewer.cad_tool_select')}
+          </button>
+          <button
+            type="button"
+            aria-pressed={tool === 'measure'}
+            disabled={state !== 'ready'}
+            onClick={() => changeTool('measure')}
+          >
+            {t('viewer.cad_tool_measure')}
+          </button>
         </div>
         <button type="button" disabled={state !== 'ready'} onClick={resetView}>
           {t('viewer.cad_reset_view')}
@@ -491,6 +565,34 @@ export function CadViewerPage({
               </div>
 
               <div className="cad-readout">
+                {tool === 'measure' && (
+                  <section className="cad-readout-block cad-measure-data">
+                    <h3>{t('viewer.cad_measure')}</h3>
+                    {measureResult ? (
+                      <dl>
+                        <div>
+                          <dt>{t('viewer.cad_measure_distance')}</dt>
+                          <dd>
+                            {formatMeasureDistance(
+                              measureResult.distanceMm,
+                              measureResult.exact,
+                              displayOpts,
+                            )}
+                          </dd>
+                        </div>
+                        {measureResult.angleDeg != null && (
+                          <div>
+                            <dt>{t('viewer.cad_measure_angle')}</dt>
+                            <dd>{formatAngle(measureResult.angleDeg, displayOpts)}</dd>
+                          </div>
+                        )}
+                      </dl>
+                    ) : (
+                      <p className="cad-measure-hint">{t('viewer.cad_measure_hint')}</p>
+                    )}
+                  </section>
+                )}
+
                 {active && (
                   <section className="cad-readout-block cad-selection-data">
                     <h3>{t('viewer.cad_selection_data')}</h3>
