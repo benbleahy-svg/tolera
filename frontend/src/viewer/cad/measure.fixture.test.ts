@@ -7,10 +7,11 @@
 // plan: "parallel-plane distance is unprefixed and within tight tolerance, and
 // a skew measurement carries the ~ prefix." The plate also witnesses the
 // perpendicular cylinder+plane exact case (hole axis ⟂ the 20×20 faces). The
-// concentric-cylinder exact case is covered by synthetic primitives in
-// measure.test.ts (no concentric pair exists in this single-hole fixture; per
-// DECISIONS.md [2026-07-14] the classification is fit-based, so a synthetic
-// witness exercises the same code path).
+// concentric-cylinder exact case has no pair in this single-hole solid, so it
+// is proven on real *tessellated* coaxial-cylinder meshes (facePrimitive fits
+// the axes/centers from triangle soup) in measure.test.ts — the same fit-based
+// code path (DECISIONS.md [2026-07-14]); hand-authoring a curved-surface tube
+// STEP was judged not worth the B-rep-authoring risk for one extra witness.
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';

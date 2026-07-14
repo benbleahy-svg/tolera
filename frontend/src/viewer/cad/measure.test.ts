@@ -11,7 +11,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { classifyRelationship, measure, type MeasurePick } from './measure';
-import type { FacePrimitive, Vec3 } from './selection';
+import type { CadBody } from './model';
+import { facePrimitive, type FacePrimitive, type Vec3 } from './selection';
 
 const plane = (point: Vec3, normal: Vec3): FacePrimitive => ({
   type: 'plane',
@@ -141,6 +142,63 @@ describe('measure — approximate (~) everything else', () => {
     );
     expect(r.exact).toBe(false);
     expect(r.angleDeg).toBeCloseTo(90, 6);
+  });
+});
+
+/**
+ * A Z-axis cylindrical side surface (R, z∈[z0,z0+H]) as a single-face body —
+ * real tessellated triangle soup, so facePrimitive must recover axis/center by
+ * fitting (not read them off a synthetic primitive). Mirrors the builder in
+ * selection.test.ts.
+ */
+function cylinderBody(R: number, z0: number, H: number, segments = 64): CadBody {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const ring = (z: number, k: number): number => {
+    const a = (k / segments) * 2 * Math.PI;
+    const base = positions.length / 3;
+    positions.push(R * Math.cos(a), R * Math.sin(a), z);
+    return base;
+  };
+  for (let k = 0; k < segments; k += 1) {
+    const b0 = ring(z0, k);
+    const t0 = ring(z0 + H, k);
+    const b1 = ring(z0, k + 1);
+    const t1 = ring(z0 + H, k + 1);
+    indices.push(b0, b1, t1, b0, t1, t0);
+  }
+  return {
+    id: 'body',
+    name: 'cyl',
+    positions: Float32Array.from(positions),
+    normals: null,
+    indices: Uint32Array.from(indices),
+    faces: [{ first: 0, last: indices.length / 3 - 1 }],
+    color: null,
+  };
+}
+
+describe('measure — concentric cylinders on real tessellated meshes', () => {
+  const pickFace = (body: CadBody): MeasurePick => {
+    const primitive = facePrimitive(body, 0);
+    const hitPoint: Vec3 = primitive.type === 'cylinder' ? primitive.center : [0, 0, 0];
+    return { primitive, hitPoint };
+  };
+
+  it('classifies two coaxial fitted cylinders as concentric (exact), coincident → 0', () => {
+    // outer R=8 and inner R=4 tube walls, same axis + extent → centers coincide
+    const r = measure(pickFace(cylinderBody(8, 0, 10)), pickFace(cylinderBody(4, 0, 10)));
+    expect(r.relationship).toBe('concentric-cylinders');
+    expect(r.exact).toBe(true);
+    expect(r.distanceMm).toBeCloseTo(0, 1);
+  });
+
+  it('coaxial cylinders with offset extents → exact center-to-center along the axis', () => {
+    // outer z∈[0,10] (center z=5); inner counterbore z∈[0,4] (center z=2) → 3 mm apart
+    const r = measure(pickFace(cylinderBody(8, 0, 10)), pickFace(cylinderBody(4, 0, 4)));
+    expect(r.relationship).toBe('concentric-cylinders');
+    expect(r.exact).toBe(true);
+    expect(r.distanceMm).toBeCloseTo(3, 1);
   });
 });
 
