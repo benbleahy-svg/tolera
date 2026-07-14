@@ -26,10 +26,12 @@ vi.mock('./meshProvider', () => ({
   workerMeshProvider: (bytes: Uint8Array) => loadMesh(bytes),
 }));
 
+type PickHit = { ref: EntityRef; point: [number, number, number] };
+
 // Capture the pick callback the page hands the (mocked) GL layer so tests can
 // simulate a canvas click without a real WebGL raycast.
 const gl = vi.hoisted(() => ({
-  onPick: undefined as ((ref: EntityRef | null, additive: boolean) => void) | undefined,
+  onPick: undefined as ((hit: PickHit | null, additive: boolean) => void) | undefined,
 }));
 vi.mock('./viewerGl', () => ({
   createViewerGl: (_controller: unknown, opts?: { onPick?: typeof gl.onPick }) => {
@@ -44,8 +46,13 @@ vi.mock('./viewerGl', () => ({
   },
 }));
 
-function pick(ref: EntityRef | null, additive = false): void {
-  act(() => gl.onPick?.(ref, additive));
+/** Simulate a canvas click on a face (or empty space when ref is null). */
+function pick(
+  ref: EntityRef | null,
+  additive = false,
+  point: [number, number, number] = [0, 0, 0],
+): void {
+  act(() => gl.onPick?.(ref ? { ref, point } : null, additive));
 }
 
 import { CadViewerPage } from './CadViewerPage';
@@ -213,6 +220,76 @@ describe('CadViewerPage', () => {
     expect(screen.getByText('Kumulierte Auswahl').parentElement?.textContent).toContain(
       '200,00 mm²',
     );
+  });
+
+  it('measure tool: shows the hint until two faces are picked', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Messen' }));
+    expect(screen.getByText('Messung')).toBeInTheDocument();
+    expect(screen.getByText(/Zwei Flächen wählen/)).toBeInTheDocument();
+    // measure mode does not show the M2.7 selection-data block
+    expect(screen.queryByText('Auswahldaten')).not.toBeInTheDocument();
+  });
+
+  it('measure tool: parallel faces read an EXACT distance (no ~) + 0° angle', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Messen' }));
+    // face 0 = bottom (z=0), face 1 = top (z=10) → parallel planes, 10 mm apart
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 });
+    pick({ kind: 'face', bodyId: 'body-0', index: 1 });
+
+    const distance = screen.getByText('Abstand').parentElement?.textContent ?? '';
+    expect(distance).toContain('10,00 mm');
+    expect(distance).not.toContain('~'); // exact — the estimator-trust signal
+    expect(screen.getByText('Winkel zwischen Flächen').parentElement?.textContent).toContain('0°');
+  });
+
+  it('measure tool: skew faces read an APPROXIMATE (~) distance + 90° angle', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Messen' }));
+    // face 0 = bottom (−z), face 2 = −y side → perpendicular, not a special pair
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 }, false, [5, 5, 0]);
+    pick({ kind: 'face', bodyId: 'body-0', index: 2 }, false, [5, 0, 5]);
+
+    expect(screen.getByText('Abstand').parentElement?.textContent).toContain('~');
+    expect(screen.getByText('Winkel zwischen Flächen').parentElement?.textContent).toContain('90°');
+  });
+
+  it('measure tool: re-picking the same face is ignored (no degenerate 0 mm)', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Messen' }));
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 });
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 }); // same face again → ignored
+    // still only one pick → no measurement, the hint remains
+    expect(screen.queryByText('Abstand')).not.toBeInTheDocument();
+    expect(screen.getByText(/Zwei Flächen wählen/)).toBeInTheDocument();
+  });
+
+  it('measure tool: clicking empty space clears the measurement', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Messen' }));
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 });
+    pick({ kind: 'face', bodyId: 'body-0', index: 1 });
+    expect(screen.getByText('Abstand')).toBeInTheDocument();
+
+    pick(null);
+    expect(screen.queryByText('Abstand')).not.toBeInTheDocument();
+    expect(screen.getByText(/Zwei Flächen wählen/)).toBeInTheDocument();
   });
 
   it('switches render modes via the toolbar (pressed state follows)', async () => {
