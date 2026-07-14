@@ -45,9 +45,9 @@ describe('measure formatting (de — DACH metric default)', () => {
 
   it('measure distance carries a leading ~ only when approximate', () => {
     // exact (special orientation) → no prefix, the estimator-trust signal
-    expect(formatMeasureDistance(10, true, 'de')).toBe('10,00 mm');
+    expect(formatMeasureDistance(10, true, { language: 'de' })).toBe('10,00 mm');
     // approximate → leading ~
-    expect(formatMeasureDistance(14.28, false, 'de')).toBe('~14,28 mm');
+    expect(formatMeasureDistance(14.28, false, { language: 'de' })).toBe('~14,28 mm');
   });
 
   it('renders an em-dash for null / non-finite values', () => {

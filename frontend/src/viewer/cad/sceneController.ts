@@ -9,8 +9,7 @@
  */
 import * as THREE from 'three';
 
-import type { BodySummary, CadModel, EntityRef, Vec3 } from './model';
-import type { BodySummary, CadBody, CadModel, EntityRef } from './model';
+import type { BodySummary, CadBody, CadModel, EntityRef, Vec3 } from './model';
 import type { RepColor } from './renderBudget';
 import { faceRefForHit, findBody } from './selection';
 
@@ -21,6 +20,8 @@ export type CubeFace = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 export interface PickHit {
   ref: EntityRef;
   point: Vec3;
+}
+
 /**
  * Per-body display decision the viewer pushes each time the display state
  * changes (M2.9): `hidden` isolates a body out entirely; `repColor` replaces it

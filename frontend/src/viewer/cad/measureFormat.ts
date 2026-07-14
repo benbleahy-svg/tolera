@@ -113,8 +113,12 @@ export function formatAngle(deg: number | null, opts: DisplayOptions): string {
  * perpendicular cyl+plane) prints bare; anything else gets a leading `~` to
  * flag it as approximate. See `measure.ts` and DECISIONS.md [2026-07-14].
  */
-export function formatMeasureDistance(mm: number | null, exact: boolean, language: string): string {
-  const value = formatLength(mm, language);
+export function formatMeasureDistance(
+  mm: number | null,
+  exact: boolean,
+  opts: DisplayOptions,
+): string {
+  const value = formatLength(mm, opts);
   if (value === EM_DASH) return value;
   return exact ? value : `~${value}`;
 }

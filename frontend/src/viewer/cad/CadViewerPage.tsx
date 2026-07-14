@@ -55,7 +55,6 @@ import {
   type CubeFace,
   type PickHit,
   type BodyDisplayState,
-  type CubeFace,
   type RenderMode,
 } from './sceneController';
 import { createViewerGl, type ViewerGl } from './viewerGl';
@@ -548,14 +547,14 @@ export function CadViewerPage({
                             {formatMeasureDistance(
                               measureResult.distanceMm,
                               measureResult.exact,
-                              lang,
+                              displayOpts,
                             )}
                           </dd>
                         </div>
                         {measureResult.angleDeg != null && (
                           <div>
                             <dt>{t('viewer.cad_measure_angle')}</dt>
-                            <dd>{formatAngle(measureResult.angleDeg, lang)}</dd>
+                            <dd>{formatAngle(measureResult.angleDeg, displayOpts)}</dd>
                           </div>
                         )}
                       </dl>
