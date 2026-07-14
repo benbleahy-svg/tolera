@@ -151,9 +151,13 @@ tr.est-missing-rate td {
 .cad-face-right { grid-area: right; }
 .cad-face-bottom { grid-area: bottom; }
 /* whole-file readout, bottom-right (SS 10: File Volume/Area/Weight) */
-.cad-readout { position: absolute; right: 0.75rem; bottom: 0.75rem; margin: 0; text-align: right; font-size: 0.8rem; color: var(--muted, #667085); }
-.cad-readout div { display: flex; gap: 0.4rem; justify-content: flex-end; }
+.cad-readout { position: absolute; right: 0.75rem; bottom: 0.75rem; display: grid; gap: 0.6rem; text-align: right; font-size: 0.8rem; color: var(--muted, #667085); max-width: 15rem; pointer-events: none; }
+.cad-readout-block { margin: 0; }
+.cad-readout-block h3 { margin: 0 0 0.15rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted, #667085); }
+.cad-readout dl { margin: 0; display: grid; gap: 0.1rem; }
+.cad-readout dl div { display: flex; gap: 0.4rem; justify-content: flex-end; }
 .cad-readout dt::after { content: ':'; }
-.cad-readout dd { margin: 0; }
+.cad-readout dd { margin: 0; font-variant-numeric: tabular-nums; }
+.cad-selection-data dd { color: var(--text, #1a1f27); }
 .cad-render-modes { display: flex; gap: 0.25rem; }
 .cad-render-modes button[aria-pressed='true'] { outline: 2px solid var(--accent, #d6409f); }

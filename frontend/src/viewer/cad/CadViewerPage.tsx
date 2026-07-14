@@ -1,17 +1,35 @@
 /**
- * 3D viewer core (M2.6) — SS 10/13 chrome, M2.6 subset: toolbar with the
- * three render modes + reset, left Struktur/Merkmale panel (features =
- * M4 empty state), orientation faces, whole-file readout shell (values are
- * M2.7). Select/measure/section tools are deliberately absent (M2.7/M2.8);
- * display-options gear + rendering limits are M2.9.
+ * 3D viewer (M2.6 core + M2.7 selection & readout). Toolbar with the three
+ * render modes + reset, left Struktur/Merkmale panel (features = M4 empty
+ * state), orientation faces. M2.7 adds: click a face → selection-data overlay
+ * (Type / Area / Height / Diameter / Angle), cumulative area across a
+ * multi-pick, and the whole-file Volume / Surface / Weight readout filled from
+ * the tessellation. Weight needs a material density (optional prop); without it
+ * the row shows an em-dash + tooltip (the quote-item context that supplies it
+ * arrives in M2.10). Measure = M2.8; display-options gear + limits = M2.9.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 import { usePartsApi, type PartFile } from '../../parts/api';
+import {
+  formatAngle,
+  formatArea,
+  formatLength,
+  formatMass,
+  formatVolume,
+} from './measureFormat';
 import { workerMeshProvider } from './meshProvider';
-import type { BodySummary } from './model';
+import type { CadModel, EntityRef } from './model';
+import { entityKey } from './model';
+import {
+  axisDims,
+  cumulativeArea,
+  facePropsForRef,
+  optimalBoundingBox,
+  wholeFileStats,
+} from './selection';
 import { CadSceneController, type CubeFace, type RenderMode } from './sceneController';
 import { createViewerGl, type ViewerGl } from './viewerGl';
 
@@ -32,16 +50,31 @@ const CUBE_FACES: { face: CubeFace; labelKey: string }[] = [
 
 type LoadState = 'loading' | 'ready' | 'failed';
 
-export function CadViewerPage({ file }: { file: PartFile }) {
+/** "x × y × z" with each extent formatted as a length. */
+function formatTriple(v: readonly [number, number, number] | null, lang: string): string {
+  if (!v) return '—';
+  return `${formatLength(v[0], lang)} × ${formatLength(v[1], lang)} × ${formatLength(v[2], lang)}`;
+}
+
+export function CadViewerPage({
+  file,
+  densityGCm3,
+}: {
+  file: PartFile;
+  /** Material density in g/cm³ for the Weight readout; omitted → em-dash. */
+  densityGCm3?: number | null;
+}) {
   const api = usePartsApi();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<CadSceneController | null>(null);
   const glRef = useRef<ViewerGl | null>(null);
 
   const [state, setState] = useState<LoadState>('loading');
   const [renderMode, setRenderModeState] = useState<RenderMode>('shaded');
-  const [bodies, setBodies] = useState<BodySummary[]>([]);
+  const [model, setModel] = useState<CadModel | null>(null);
+  const [selection, setSelection] = useState<EntityRef[]>([]);
   const [panelTab, setPanelTab] = useState<'tree' | 'features'>('tree');
 
   useEffect(() => {
@@ -54,10 +87,11 @@ export function CadViewerPage({ file }: { file: PartFile }) {
     api
       .fetchFileBytes(file.part_id, file.id)
       .then((bytes) => workerMeshProvider(bytes, abort.signal))
-      .then((model) => {
+      .then((loaded) => {
         if (abort.signal.aborted) return;
-        controller.loadModel(model);
-        setBodies(controller.bodies);
+        controller.loadModel(loaded);
+        setModel(loaded);
+        setSelection([]);
         setState('ready');
       })
       .catch((err: unknown) => {
@@ -81,7 +115,18 @@ export function CadViewerPage({ file }: { file: PartFile }) {
     const controller = controllerRef.current;
     if (state !== 'ready' || !host || !controller || glRef.current) return;
 
-    const gl = createViewerGl(controller);
+    const gl = createViewerGl(controller, {
+      onPick: (ref, additive) => {
+        setSelection((prev) => {
+          if (!ref) return [];
+          if (!additive) return [ref];
+          const key = entityKey(ref);
+          return prev.some((r) => entityKey(r) === key)
+            ? prev.filter((r) => entityKey(r) !== key)
+            : [...prev, ref];
+        });
+      },
+    });
     glRef.current = gl;
     host.appendChild(gl.domElement);
     const resize = () => gl.resize(host.clientWidth, host.clientHeight);
@@ -100,6 +145,11 @@ export function CadViewerPage({ file }: { file: PartFile }) {
     };
   }, [state]);
 
+  // Keep the scene highlight in sync with the selection set.
+  useEffect(() => {
+    controllerRef.current?.setSelection(selection);
+  }, [selection]);
+
   const setRenderMode = (mode: RenderMode) => {
     controllerRef.current?.setRenderMode(mode);
     setRenderModeState(mode);
@@ -114,6 +164,23 @@ export function CadViewerPage({ file }: { file: PartFile }) {
     controllerRef.current?.resetView();
     glRef.current?.syncTarget();
   };
+
+  const stats = useMemo(
+    () => (model ? wholeFileStats(model, densityGCm3 ?? null) : null),
+    [model, densityGCm3],
+  );
+  const dims = useMemo(() => (model ? axisDims(model) : null), [model]);
+  const obb = useMemo(() => (model ? optimalBoundingBox(model) : null), [model]);
+  const active = useMemo(
+    () => (model ? facePropsForRef(model, selection[selection.length - 1]) : null),
+    [model, selection],
+  );
+  const cumulative = useMemo(
+    () => (model && selection.length > 0 ? cumulativeArea(model, selection) : null),
+    [model, selection],
+  );
+
+  const bodies = model?.bodies ?? [];
 
   return (
     <main className="viewer-page">
@@ -187,20 +254,80 @@ export function CadViewerPage({ file }: { file: PartFile }) {
                   </button>
                 ))}
               </div>
-              <dl className="cad-readout">
-                <div>
-                  <dt>{t('viewer.cad_readout_volume')}</dt>
-                  <dd>—</dd>
-                </div>
-                <div>
-                  <dt>{t('viewer.cad_readout_surface')}</dt>
-                  <dd>—</dd>
-                </div>
-                <div>
-                  <dt>{t('viewer.cad_readout_weight')}</dt>
-                  <dd>—</dd>
-                </div>
-              </dl>
+
+              <div className="cad-readout">
+                {active && (
+                  <section className="cad-readout-block cad-selection-data">
+                    <h3>{t('viewer.cad_selection_data')}</h3>
+                    <dl>
+                      <div>
+                        <dt>{t('viewer.cad_selection_type')}</dt>
+                        <dd>{t(`viewer.cad_facetype_${active.type}`)}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('viewer.cad_selection_area')}</dt>
+                        <dd>{formatArea(active.area, lang)}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('viewer.cad_selection_height')}</dt>
+                        <dd>{formatLength(active.height, lang)}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('viewer.cad_selection_diameter')}</dt>
+                        <dd>{formatLength(active.diameter, lang)}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('viewer.cad_selection_angle')}</dt>
+                        <dd>{formatAngle(active.angle, lang)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                )}
+
+                {cumulative != null && (
+                  <section className="cad-readout-block cad-cumulative">
+                    <h3>{t('viewer.cad_cumulative')}</h3>
+                    <dl>
+                      <div>
+                        <dt>{t('viewer.cad_cumulative_area')}</dt>
+                        <dd>{formatArea(cumulative, lang)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                )}
+
+                <section className="cad-readout-block cad-file-readout">
+                  <h3>{t('viewer.cad_readout_file')}</h3>
+                  <dl>
+                    <div>
+                      <dt>{t('viewer.cad_readout_volume')}</dt>
+                      <dd>{formatVolume(stats?.volumeMm3 ?? null, lang)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('viewer.cad_readout_surface')}</dt>
+                      <dd>{formatArea(stats?.surfaceAreaMm2 ?? null, lang)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('viewer.cad_readout_weight')}</dt>
+                      <dd>
+                        {stats?.massKg != null ? (
+                          formatMass(stats.massKg, lang)
+                        ) : (
+                          <span title={t('viewer.cad_weight_no_material')}>—</span>
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('viewer.cad_axis_dims')}</dt>
+                      <dd>{formatTriple(dims, lang)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('viewer.cad_bbox_optimal')}</dt>
+                      <dd>{formatTriple(obb, lang)}</dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
             </>
           )}
         </section>

@@ -4,13 +4,13 @@
  * parseStep.test.ts against the real fixture) and the WebGL layer
  * (scene-state correctness is covered by sceneController.test.ts).
  */
-import { screen } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/render';
 import type { PartFile } from '../../parts/api';
-import type { CadModel } from './model';
+import type { CadModel, EntityRef } from './model';
 
 const fetchFileBytes = vi.fn();
 vi.mock('../../parts/api', () => ({
@@ -22,15 +22,27 @@ vi.mock('./meshProvider', () => ({
   workerMeshProvider: (bytes: Uint8Array) => loadMesh(bytes),
 }));
 
-vi.mock('./viewerGl', () => ({
-  createViewerGl: () => ({
-    domElement: document.createElement('canvas'),
-    start: () => {},
-    resize: () => {},
-    dispose: () => {},
-    syncTarget: () => {},
-  }),
+// Capture the pick callback the page hands the (mocked) GL layer so tests can
+// simulate a canvas click without a real WebGL raycast.
+const gl = vi.hoisted(() => ({
+  onPick: undefined as ((ref: EntityRef | null, additive: boolean) => void) | undefined,
 }));
+vi.mock('./viewerGl', () => ({
+  createViewerGl: (_controller: unknown, opts?: { onPick?: typeof gl.onPick }) => {
+    gl.onPick = opts?.onPick;
+    return {
+      domElement: document.createElement('canvas'),
+      start: () => {},
+      resize: () => {},
+      dispose: () => {},
+      syncTarget: () => {},
+    };
+  },
+}));
+
+function pick(ref: EntityRef | null, additive = false): void {
+  act(() => gl.onPick?.(ref, additive));
+}
 
 import { CadViewerPage } from './CadViewerPage';
 
@@ -55,9 +67,46 @@ function model(names: string[]): CadModel {
       positions: new Float32Array([0, 0, 0, 10, 0, 0, 0, 10, 0]),
       normals: null,
       indices: new Uint32Array([0, 1, 2]),
+      faces: [{ first: 0, last: 0 }],
       color: null,
     })),
     bbox: { min: [0, 0, 0], max: [10, 10, 0] },
+  };
+}
+
+/** A closed 10 mm cube (volume 1000 mm³ = 1 cm³, each side 100 mm²). */
+function cube10(): CadModel {
+  const p = [
+    [0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0],
+    [0, 0, 10], [10, 0, 10], [10, 10, 10], [0, 10, 10],
+  ];
+  const quads = [
+    [0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [1, 2, 6, 5], [3, 0, 4, 7],
+  ];
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const faces: { first: number; last: number }[] = [];
+  let tri = 0;
+  for (const [a, b, c, d] of quads) {
+    const base = positions.length / 3;
+    positions.push(...p[a], ...p[b], ...p[c], ...p[d]);
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    faces.push({ first: tri, last: tri + 1 });
+    tri += 2;
+  }
+  return {
+    bodies: [
+      {
+        id: 'body-0',
+        name: 'Würfel',
+        positions: Float32Array.from(positions),
+        normals: null,
+        indices: Uint32Array.from(indices),
+        faces,
+        color: null,
+      },
+    ],
+    bbox: { min: [0, 0, 0], max: [10, 10, 10] },
   };
 }
 
@@ -107,14 +156,59 @@ describe('CadViewerPage', () => {
     expect(screen.getByText('Geometrische Analyse steht noch aus (M4).')).toBeInTheDocument();
   });
 
-  it('renders the readout shell with placeholder dashes', async () => {
-    loadMesh.mockResolvedValue(model(['Deckel']));
+  it('fills the whole-file readout from the loaded model', async () => {
+    loadMesh.mockResolvedValue(cube10());
     await renderWithProviders(<CadViewerPage file={file} />);
-    await screen.findByText('Deckel');
-    for (const label of ['Volumen', 'Oberfläche', 'Gewicht']) {
-      const term = screen.getByText(label);
-      expect(term.parentElement?.textContent).toContain('—');
-    }
+    await screen.findByText('Würfel');
+    // 1000 mm³ = 1,00 cm³ ; surface 600 mm²
+    expect(screen.getByText('Volumen').parentElement?.textContent).toContain('1,00 cm³');
+    expect(screen.getByText('Oberfläche').parentElement?.textContent).toContain('600,00 mm²');
+  });
+
+  it('shows an em-dash weight with a tooltip when no material density is known', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+    const weight = screen.getByText('Gewicht').parentElement;
+    expect(weight?.textContent).toContain('—');
+    expect(weight?.querySelector('[title]')?.getAttribute('title')).toMatch(/Material/);
+  });
+
+  it('computes weight when a material density is supplied', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} densityGCm3={7.85} />);
+    await screen.findByText('Würfel');
+    // 7.85 g/cm³ × 1 cm³ = 7.85 g = 0,008 kg
+    expect(screen.getByText('Gewicht').parentElement?.textContent).toContain('0,008 kg');
+  });
+
+  it('shows selection data when a face is picked, then clears on empty-space click', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+
+    expect(screen.queryByText('Auswahldaten')).not.toBeInTheDocument();
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 });
+    expect(screen.getByText('Auswahldaten')).toBeInTheDocument();
+    // a cube side is a plane of 100 mm²
+    expect(screen.getByText('Typ').parentElement?.textContent).toContain('Ebene');
+    expect(screen.getByText('Fläche').parentElement?.textContent).toContain('100,00 mm²');
+
+    pick(null);
+    expect(screen.queryByText('Auswahldaten')).not.toBeInTheDocument();
+  });
+
+  it('sums face area across an additive multi-pick', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 });
+    pick({ kind: 'face', bodyId: 'body-0', index: 1 }, true);
+    // two 100 mm² sides → 200 mm²
+    expect(screen.getByText('Kumulierte Auswahl').parentElement?.textContent).toContain(
+      '200,00 mm²',
+    );
   });
 
   it('switches render modes via the toolbar (pressed state follows)', async () => {

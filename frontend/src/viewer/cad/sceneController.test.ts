@@ -15,6 +15,7 @@ function syntheticModel(bodyCount = 1): CadModel {
     positions: new Float32Array([0, 0, 0, 10, 0, 0, 0, 10, 0]),
     normals: null,
     indices: new Uint32Array([0, 1, 2]),
+    faces: [{ first: 0, last: 0 }],
     color: i === 0 ? ([0.5, 0.5, 0.5] as [number, number, number]) : null,
   }));
   return { bodies, bbox: { min: [0, 0, 0], max: [10, 10, 0] } };
@@ -124,5 +125,52 @@ describe('CadSceneController', () => {
     expect(first.color.r).toBeCloseTo(0.5, 5);
     expect(first.color.g).toBeCloseTo(0.5, 5);
     expect(first.color.b).toBeCloseTo(0.5, 5);
+  });
+});
+
+function highlightTriangleCount(controller: CadSceneController): number {
+  let triangles = 0;
+  controller.scene.traverse((obj) => {
+    if (obj instanceof THREE.Mesh && obj.userData.selection === true) {
+      const geom = obj.geometry as THREE.BufferGeometry;
+      triangles += geom.getAttribute('position').count / 3;
+    }
+  });
+  return triangles;
+}
+
+describe('CadSceneController — picking & selection highlight', () => {
+  let controller: CadSceneController;
+
+  beforeEach(() => {
+    controller = new CadSceneController();
+    controller.loadModel(syntheticModel(1));
+  });
+
+  it('maps a ray hit to the face EntityRef', () => {
+    const rc = new THREE.Raycaster();
+    // the body's single triangle lies in z=0; shoot straight down at (2,2)
+    rc.set(new THREE.Vector3(2, 2, 10), new THREE.Vector3(0, 0, -1));
+    expect(controller.pick(rc)).toEqual({ kind: 'face', bodyId: 'body-0', index: 0 });
+  });
+
+  it('returns null when the ray misses all geometry', () => {
+    const rc = new THREE.Raycaster();
+    rc.set(new THREE.Vector3(500, 500, 10), new THREE.Vector3(0, 0, -1));
+    expect(controller.pick(rc)).toBeNull();
+  });
+
+  it('renders a highlight mesh for the selected faces and clears it', () => {
+    expect(highlightTriangleCount(controller)).toBe(0);
+    controller.setSelection([{ kind: 'face', bodyId: 'body-0', index: 0 }]);
+    expect(highlightTriangleCount(controller)).toBe(1); // the face's one triangle
+    controller.setSelection([]);
+    expect(highlightTriangleCount(controller)).toBe(0);
+  });
+
+  it('clears any selection highlight when a new model loads', () => {
+    controller.setSelection([{ kind: 'face', bodyId: 'body-0', index: 0 }]);
+    controller.loadModel(syntheticModel(1));
+    expect(highlightTriangleCount(controller)).toBe(0);
   });
 });

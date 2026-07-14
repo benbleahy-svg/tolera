@@ -42,6 +42,7 @@ export async function parseStep(
       positions,
       normals: mesh.attributes.normal ? Float32Array.from(mesh.attributes.normal.array) : null,
       indices: Uint32Array.from(mesh.index.array),
+      faces: (mesh.brep_faces ?? []).map((f) => ({ first: f.first, last: f.last })),
       color: mesh.color ?? null,
     };
   });

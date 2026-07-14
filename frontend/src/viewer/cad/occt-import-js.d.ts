@@ -1,5 +1,12 @@
 // occt-import-js ships no typings; this covers the surface parseStep uses.
 declare module 'occt-import-js' {
+  interface OcctBrepFace {
+    /** first/last triangle index (inclusive) of this face within `index`. */
+    first: number;
+    last: number;
+    color: [number, number, number] | null;
+  }
+
   interface OcctMesh {
     name?: string;
     color?: [number, number, number];
@@ -8,6 +15,7 @@ declare module 'occt-import-js' {
       normal?: { array: number[] };
     };
     index: { array: number[] };
+    brep_faces?: OcctBrepFace[];
   }
 
   interface OcctReadResult {
