@@ -14,6 +14,7 @@ import { PricingDefsPage } from './configure/PricingDefsPage';
 import { AccountDetailPage } from './contacts/AccountDetailPage';
 import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
+import { DashboardPage } from './dashboard/DashboardPage';
 import { EstimatingPage } from './estimating/EstimatingPage';
 import { PartsPage } from './parts/PartsPage';
 import { FileViewerPage } from './viewer/FileViewerPage';
@@ -23,7 +24,7 @@ import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
 /** Nav destinations that have a real screen; the rest render a placeholder. */
-const REAL_ROUTES = new Set(['/contacts', '/parts', '/quotes', '/configure']);
+const REAL_ROUTES = new Set(['/', '/contacts', '/parts', '/quotes', '/configure']);
 
 export default function App() {
   const { signOut } = useClerk();
@@ -36,6 +37,7 @@ export default function App() {
         {NAV_ITEMS.filter((item) => !REAL_ROUTES.has(item.to)).map(({ to, labelKey }) => (
           <Route key={to} path={to} element={<PlaceholderPage titleKey={labelKey} />} />
         ))}
+        <Route path="/" element={<DashboardPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/contacts/:accountId" element={<AccountDetailPage />} />
         <Route path="/contacts/:accountId/contacts/:contactId" element={<ContactDetailPage />} />

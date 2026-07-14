@@ -17,10 +17,12 @@
  *
  * Display state is ephemeral (per-viewer session), not persisted. Measure = M2.8.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
+import type { Annotation } from '../../collab/api';
+import { type BoundSelection, CollaborationPanel } from '../../collab/CollaborationPanel';
 import { usePartsApi, type PartFile } from '../../parts/api';
 import {
   formatAngle,
@@ -195,6 +197,33 @@ export function CadViewerPage({
   useEffect(() => {
     controllerRef.current?.setSelection(selection);
   }, [selection]);
+
+  // The last-picked face, offered to the collaboration composer to pin a
+  // message to (M2.11). The stored locator carries the M2.7 EntityRef so a
+  // teammate clicking the message re-selects the exact same face.
+  const boundSelection = useMemo<BoundSelection | null>(() => {
+    const ref = selection[selection.length - 1];
+    if (!ref) return null;
+    return {
+      kind: 'face',
+      geometry_ref: {
+        file_id: file.id,
+        entity: { bodyId: ref.bodyId, kind: ref.kind, index: ref.index },
+      },
+      label: t('viewer.cad_face_ordinal', { n: ref.index }),
+    };
+  }, [selection, file.id, t]);
+
+  const focusAnnotation = useCallback(
+    (annotation: Annotation) => {
+      const entity = annotation.geometry_ref.entity;
+      if (annotation.kind !== 'face' || !entity || annotation.geometry_ref.file_id !== file.id) {
+        return;
+      }
+      setSelection([{ kind: 'face', bodyId: entity.bodyId, index: entity.index }]);
+    },
+    [file.id],
+  );
 
   const stats = useMemo(
     () => (model ? wholeFileStats(model, densityGCm3 ?? null) : null),
@@ -537,6 +566,12 @@ export function CadViewerPage({
             </>
           )}
         </section>
+
+        <CollaborationPanel
+          partId={file.part_id}
+          selection={boundSelection}
+          onFocusAnnotation={focusAnnotation}
+        />
       </div>
     </main>
   );

@@ -75,6 +75,11 @@ const stableApi = {
   splitStatus,
 };
 
+vi.mock('../collab/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../collab/api')>()),
+  useCollabApi: () => new Proxy({}, { get: () => () => Promise.resolve([]) }),
+}));
+
 vi.mock('../parts/api', () => ({
   usePartsApi: () => stableApi,
 }));
