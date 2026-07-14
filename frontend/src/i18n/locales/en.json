@@ -484,7 +484,6 @@
     "cad_readout_file": "File",
     "cad_weight_no_material": "No material assigned – weight cannot be computed",
     "cad_selection_data": "Selection data",
-    "cad_selection_hint": "Click a face for details",
     "cad_selection_type": "Type",
     "cad_selection_area": "Area",
     "cad_selection_height": "Height",

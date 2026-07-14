@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 
 import type { BodySummary, CadModel, EntityRef } from './model';
-import { faceRefForHit } from './selection';
+import { faceRefForHit, findBody } from './selection';
 
 export type RenderMode = 'shaded' | 'xray' | 'wireframe';
 export type CubeFace = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
@@ -165,7 +165,7 @@ export class CadSceneController {
     const group = new THREE.Group();
     for (const ref of refs) {
       if (ref.kind !== 'face') continue;
-      const body = this.model.bodies.find((b) => b.id === ref.bodyId);
+      const body = findBody(this.model, ref.bodyId);
       const face = body?.faces[ref.index];
       if (!body || !face) continue;
 

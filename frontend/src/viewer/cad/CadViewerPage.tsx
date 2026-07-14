@@ -26,10 +26,9 @@ import { entityKey } from './model';
 import {
   axisDims,
   cumulativeArea,
-  faceProps,
+  facePropsForRef,
   optimalBoundingBox,
   wholeFileStats,
-  type FaceProps,
 } from './selection';
 import { CadSceneController, type CubeFace, type RenderMode } from './sceneController';
 import { createViewerGl, type ViewerGl } from './viewerGl';
@@ -51,12 +50,10 @@ const CUBE_FACES: { face: CubeFace; labelKey: string }[] = [
 
 type LoadState = 'loading' | 'ready' | 'failed';
 
-/** FaceProps for the most-recently-picked face, or null. */
-function activeFaceProps(model: CadModel | null, ref: EntityRef | undefined): FaceProps | null {
-  if (!model || !ref || ref.kind !== 'face') return null;
-  const body = model.bodies.find((b) => b.id === ref.bodyId);
-  if (!body || !body.faces[ref.index]) return null;
-  return faceProps(body, ref.index);
+/** "x × y × z" with each extent formatted as a length. */
+function formatTriple(v: readonly [number, number, number] | null, lang: string): string {
+  if (!v) return '—';
+  return `${formatLength(v[0], lang)} × ${formatLength(v[1], lang)} × ${formatLength(v[2], lang)}`;
 }
 
 export function CadViewerPage({
@@ -174,8 +171,14 @@ export function CadViewerPage({
   );
   const dims = useMemo(() => (model ? axisDims(model) : null), [model]);
   const obb = useMemo(() => (model ? optimalBoundingBox(model) : null), [model]);
-  const active = activeFaceProps(model, selection[selection.length - 1]);
-  const cumulative = model && selection.length > 0 ? cumulativeArea(model, selection) : null;
+  const active = useMemo(
+    () => (model ? facePropsForRef(model, selection[selection.length - 1]) : null),
+    [model, selection],
+  );
+  const cumulative = useMemo(
+    () => (model && selection.length > 0 ? cumulativeArea(model, selection) : null),
+    [model, selection],
+  );
 
   const bodies = model?.bodies ?? [];
 
@@ -316,19 +319,11 @@ export function CadViewerPage({
                     </div>
                     <div>
                       <dt>{t('viewer.cad_axis_dims')}</dt>
-                      <dd>
-                        {dims
-                          ? `${formatLength(dims[0], lang)} × ${formatLength(dims[1], lang)} × ${formatLength(dims[2], lang)}`
-                          : '—'}
-                      </dd>
+                      <dd>{formatTriple(dims, lang)}</dd>
                     </div>
                     <div>
                       <dt>{t('viewer.cad_bbox_optimal')}</dt>
-                      <dd>
-                        {obb
-                          ? `${formatLength(obb[0], lang)} × ${formatLength(obb[1], lang)} × ${formatLength(obb[2], lang)}`
-                          : '—'}
-                      </dd>
+                      <dd>{formatTriple(obb, lang)}</dd>
                     </div>
                   </dl>
                 </section>

@@ -39,6 +39,16 @@
 
 ---
 
+## [2026-07-14] M2.7 axis-dims / OBB shown as readout values (not in-scene dimension graphics); "wireframe-feature mapping" scope
+
+**Status:** RESOLVED (autonomous, low-stakes; flag for Benjamin's review)
+**Question:** (1) The acceptance line "axis dims + **OBB render**" and sub-spec's Axis-aligned-dimensions / Optimal-bounding-box are PP *toolbar tools* that draw dimension lines / a box wireframe onto the model. Does M2.7 draw in-scene dimension graphics, or display the numbers? (2) The scope phrase "…+ **wireframe-feature mapping**" is undefined.
+**Decision:** (1) M2.7 shows axis-aligned X/Y/Z **and** optimal-bounding-box extents as **numeric values in the File readout** (comma-decimal mm), satisfying "display". In-scene dimension lines / OBB wireframe overlays are deferred — they are dimension-annotation graphics that pair naturally with the **M2.8** measure/annotate tooling; drawing them now would duplicate that work. (2) "wireframe-feature mapping" is read as **the selection highlight remaining visible across all render modes** — the green face-highlight overlay is a solid `MeshBasicMaterial` patch, so a picked face stays visible even in wireframe render. Both are reversible presentation choices behind the existing viewer seams. OBB/axis-dims are computed **whole-model** (matching the whole-file readout framing); per-active-body scoping arrives with body isolation (M2.9) / assembly (M4).
+**Resolved:** 2026-07-14 (M2.7 autonomous build; two-axis /code-review flagged the ambiguity)
+**Affects:** M2.7 (readout), M2.8 (in-scene dimension/measure graphics), M2.9 (per-body isolation), M4 (assembly OBB).
+
+---
+
 ## [2026-07-12] M2.2 annotation-layer bounds + geometric markup representation
 
 **Status:** RESOLVED (autonomous, low-stakes; flag for Benjamin's review)

@@ -78,8 +78,8 @@ export function wholeFileStats(model: CadModel, densityGCm3: number | null): Who
     for (let t = 0; t < triangles; t += 1) {
       const a = triAreaVector(body, t);
       surface += len(a) / 2;
-      // signed volume of the tetrahedron (origin, v0, v1, v2) = v0 · (v1 × v2)/6;
-      // equals (v0 · areaVector)/2 / ... use the standard divergence form:
+      // signed volume of the tetrahedron (origin, v0, v1, v2) = v0·(v1×v2)/6;
+      // summed over a closed mesh this is the enclosed volume (divergence theorem).
       const v0 = vertex(body, body.indices[3 * t]);
       const v1 = vertex(body, body.indices[3 * t + 1]);
       const v2 = vertex(body, body.indices[3 * t + 2]);
@@ -87,15 +87,17 @@ export function wholeFileStats(model: CadModel, densityGCm3: number | null): Who
     }
   }
   const volumeMm3 = Math.abs(volume);
+  // density g/cm³ × volume mm³ × (1e-3 cm³/mm³) = grams; ÷1000 → kg
   const massKg =
-    densityGCm3 && densityGCm3 > 0
-      ? // g/cm³ × mm³·(1e-3 cm³/mm³) = mg? → g; then g→kg (÷1000)
-        (densityGCm3 * volumeMm3 * 1e-3) / 1000
-      : null;
+    densityGCm3 && densityGCm3 > 0 ? (densityGCm3 * volumeMm3 * 1e-3) / 1000 : null;
   return { volumeMm3, surfaceAreaMm2: surface, massKg };
 }
 
-/** Axis-aligned X/Y/Z extents of the whole model, in model units. */
+/**
+ * Axis-aligned X/Y/Z extents of the whole model, in model units. Whole-model
+ * (matching the "whole-file" readout framing); per-active-body scoping arrives
+ * with body isolation (M2.9) / assembly handling (M4).
+ */
 export function axisDims(model: CadModel): [number, number, number] {
   const { min, max } = model.bbox;
   return [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
@@ -108,6 +110,8 @@ export function axisDims(model: CadModel): [number, number, number] {
  * covariance); it is not guaranteed to be the true minimum-volume box, hence
  * "optimal" is approximate — good enough for the readout, refined by
  * GeometryService in M4. Returns extents along the three principal axes.
+ * Whole-model (union point cloud); like axisDims, per-active-body scoping is
+ * M2.9/M4 — correct for the single-body parts M2.7 targets.
  */
 export function optimalBoundingBox(model: CadModel): [number, number, number] {
   let n = 0;
@@ -154,7 +158,7 @@ export function optimalBoundingBox(model: CadModel): [number, number, number] {
   return [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
 }
 
-function findBody(model: CadModel, bodyId: string): CadBody | undefined {
+export function findBody(model: CadModel, bodyId: string): CadBody | undefined {
   return model.bodies.find((b) => b.id === bodyId);
 }
 
@@ -473,6 +477,14 @@ function fitSphere(body: CadBody, face: CadFace): { center: Vec3; radius: number
   const variance = dists.reduce((s, d) => s + (d - radius) ** 2, 0) / (dists.length || 1);
   const residual = radius > 0 ? Math.sqrt(variance) / radius : Infinity;
   return { center, radius, residual };
+}
+
+/** FaceProps for a face EntityRef, or null if it doesn't resolve. */
+export function facePropsForRef(model: CadModel, ref: EntityRef | undefined): FaceProps | null {
+  if (!ref || ref.kind !== 'face') return null;
+  const body = findBody(model, ref.bodyId);
+  if (!body || !body.faces[ref.index]) return null;
+  return faceProps(body, ref.index);
 }
 
 export function faceProps(body: CadBody, faceIndex: number): FaceProps {
