@@ -1,0 +1,6 @@
+# Model routing overrides for scripts/autobuild.sh — one per line:
+#   <block-id> frontier   → force Fable 5
+#   <block-id> default    → force Opus 4.8
+# Lines not matching that shape (like these comments) are ignored.
+# See the routing rules in scripts/autobuild.sh; inspect the live table with:
+#   scripts/autobuild.sh --dry-run

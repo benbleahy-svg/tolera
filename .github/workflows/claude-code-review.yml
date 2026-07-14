@@ -1,23 +1,16 @@
+# Cross-model PR review. Builds are routed by scripts/autobuild.sh (Opus 4.8 for
+# routine blocks, Fable 5 for risky ones); the REVIEW runs on the frontier model
+# whenever the diff touches a tier-1 path (money/pricing/schema/auth/tax), and on
+# Opus 4.8 otherwise — strongest scrutiny exactly where mistakes are irreversible,
+# and a different model from the author on most routine blocks (diverse blind spots).
 name: Claude Code Review
 
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,7 +22,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      - name: Pick review model by risk of the diff
+        id: risk
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=50 || true
+          CHANGED="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD || true)"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qiE '(alembic/|migrations/|models/|pricing/|kalk|auth|tenanc|tax|billing|lens)'; then
+            echo "model=claude-fable-5" >> "$GITHUB_OUTPUT"
+            echo "Tier-1 path touched → reviewing with Fable 5."
+          else
+            echo "model=opus" >> "$GITHUB_OUTPUT"
+            echo "Routine diff → reviewing with Opus 4.8."
+          fi
 
       - name: Run Claude Code Review
         id: claude-review
@@ -39,6 +46,4 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-
+          claude_args: '--model ${{ steps.risk.outputs.model }}'
