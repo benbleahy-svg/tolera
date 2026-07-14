@@ -9,7 +9,8 @@
  */
 import * as THREE from 'three';
 
-import type { BodySummary, CadModel } from './model';
+import type { BodySummary, CadModel, EntityRef } from './model';
+import { faceRefForHit } from './selection';
 
 export type RenderMode = 'shaded' | 'xray' | 'wireframe';
 export type CubeFace = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
@@ -25,6 +26,8 @@ const FACE_DIRECTIONS: Record<CubeFace, THREE.Vector3> = {
 
 const XRAY_OPACITY = 0.35;
 const DEFAULT_BODY_COLOR = 0x8896a5;
+/** Selection highlight — the PP viewer's green face tint. */
+const SELECTION_COLOR = 0x7ac142;
 /** Isometric-ish default view direction (from front-right-above). */
 const DEFAULT_VIEW_DIR = new THREE.Vector3(1, -1, 0.75).normalize();
 
@@ -36,6 +39,8 @@ export class CadSceneController {
 
   private mode: RenderMode = 'shaded';
   private modelGroup: THREE.Group | null = null;
+  private model: CadModel | null = null;
+  private selectionGroup: THREE.Group | null = null;
   private bodyList: BodySummary[] = [];
   private defaultPose: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private fitDistance = 100;
@@ -63,6 +68,8 @@ export class CadSceneController {
       this.scene.remove(this.modelGroup);
       this.disposeGroup(this.modelGroup);
     }
+    this.setSelection([]);
+    this.model = model;
     const group = new THREE.Group();
     for (const body of model.bodies) {
       const geometry = new THREE.BufferGeometry();
@@ -121,6 +128,79 @@ export class CadSceneController {
     this.camera.lookAt(this.target);
   }
 
+  /** Return the EntityRef of the first face a pre-configured ray hits, else null. */
+  pick(raycaster: THREE.Raycaster): EntityRef | null {
+    if (!this.modelGroup || !this.model) return null;
+    const hits = raycaster.intersectObjects(this.modelGroup.children, false);
+    for (const hit of hits) {
+      const bodyId = hit.object.userData.bodyId;
+      if (typeof bodyId === 'string' && hit.faceIndex != null) {
+        const ref = faceRefForHit(this.model, bodyId, hit.faceIndex);
+        if (ref) return ref;
+      }
+    }
+    return null;
+  }
+
+  /** Pick from a normalized device coordinate (−1..1) via the current camera. */
+  pickAt(ndcX: number, ndcY: number): EntityRef | null {
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+    return this.pick(raycaster);
+  }
+
+  /**
+   * Highlight the given faces with a translucent overlay mesh built from just
+   * those triangles (drawn slightly in front to avoid z-fighting). Replaces any
+   * previous selection; an empty list clears it.
+   */
+  setSelection(refs: readonly EntityRef[]): void {
+    if (this.selectionGroup) {
+      this.scene.remove(this.selectionGroup);
+      this.disposeGroup(this.selectionGroup);
+      this.selectionGroup = null;
+    }
+    if (refs.length === 0 || !this.model) return;
+
+    const group = new THREE.Group();
+    for (const ref of refs) {
+      if (ref.kind !== 'face') continue;
+      const body = this.model.bodies.find((b) => b.id === ref.bodyId);
+      const face = body?.faces[ref.index];
+      if (!body || !face) continue;
+
+      const triCount = face.last - face.first + 1;
+      const positions = new Float32Array(triCount * 9);
+      let w = 0;
+      for (let t = face.first; t <= face.last; t += 1) {
+        for (let k = 0; k < 3; k += 1) {
+          const vi = body.indices[3 * t + k];
+          positions[w++] = body.positions[3 * vi];
+          positions[w++] = body.positions[3 * vi + 1];
+          positions[w++] = body.positions[3 * vi + 2];
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.computeVertexNormals();
+      const material = new THREE.MeshBasicMaterial({
+        color: SELECTION_COLOR,
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+        depthTest: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.selection = true;
+      group.add(mesh);
+    }
+    this.scene.add(group);
+    this.selectionGroup = group;
+  }
+
   resetView(): void {
     if (!this.defaultPose) return;
     this.camera.up.set(0, 0, 1);
@@ -131,6 +211,7 @@ export class CadSceneController {
 
   dispose(): void {
     if (this.modelGroup) this.disposeGroup(this.modelGroup);
+    if (this.selectionGroup) this.disposeGroup(this.selectionGroup);
   }
 
   private applyRenderMode(): void {
