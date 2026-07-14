@@ -154,6 +154,16 @@ describe('CadSceneController — picking & selection highlight', () => {
     expect(controller.pick(rc)).toEqual({ kind: 'face', bodyId: 'body-0', index: 0 });
   });
 
+  it('pickHit also returns the exact surface point (for measure)', () => {
+    const rc = new THREE.Raycaster();
+    rc.set(new THREE.Vector3(2, 2, 10), new THREE.Vector3(0, 0, -1));
+    const hit = controller.pickHit(rc);
+    expect(hit?.ref).toEqual({ kind: 'face', bodyId: 'body-0', index: 0 });
+    expect(hit?.point[0]).toBeCloseTo(2, 6);
+    expect(hit?.point[1]).toBeCloseTo(2, 6);
+    expect(hit?.point[2]).toBeCloseTo(0, 6);
+  });
+
   it('returns null when the ray misses all geometry', () => {
     const rc = new THREE.Raycaster();
     rc.set(new THREE.Vector3(500, 500, 10), new THREE.Vector3(0, 0, -1));
@@ -172,5 +182,54 @@ describe('CadSceneController — picking & selection highlight', () => {
     controller.setSelection([{ kind: 'face', bodyId: 'body-0', index: 0 }]);
     controller.loadModel(syntheticModel(1));
     expect(highlightTriangleCount(controller)).toBe(0);
+  });
+});
+
+describe('CadSceneController — measure leader (M2.8)', () => {
+  let controller: CadSceneController;
+
+  const measureLineCount = (c: CadSceneController): number => {
+    let n = 0;
+    c.scene.traverse((o) => {
+      if (o instanceof THREE.Line && o.userData.measure) n += 1;
+    });
+    return n;
+  };
+
+  beforeEach(() => {
+    controller = new CadSceneController();
+    controller.loadModel(syntheticModel(1));
+  });
+
+  it('draws a leader between the two endpoints and clears on null', () => {
+    expect(measureLineCount(controller)).toBe(0);
+    controller.setMeasure([
+      [0, 0, 0],
+      [0, 0, 10],
+    ]);
+    expect(measureLineCount(controller)).toBe(1);
+    controller.setMeasure(null);
+    expect(measureLineCount(controller)).toBe(0);
+  });
+
+  it('replaces the prior leader rather than stacking them', () => {
+    controller.setMeasure([
+      [0, 0, 0],
+      [1, 0, 0],
+    ]);
+    controller.setMeasure([
+      [0, 0, 0],
+      [2, 0, 0],
+    ]);
+    expect(measureLineCount(controller)).toBe(1);
+  });
+
+  it('clears the leader when a new model loads', () => {
+    controller.setMeasure([
+      [0, 0, 0],
+      [0, 0, 10],
+    ]);
+    controller.loadModel(syntheticModel(1));
+    expect(measureLineCount(controller)).toBe(0);
   });
 });

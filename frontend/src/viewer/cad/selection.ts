@@ -9,7 +9,9 @@
  * [2026-07-14]), authoritative face types can replace these fits without any
  * caller change. Units are model units (mm for STEP) throughout.
  */
-import type { CadBody, CadFace, CadModel, EntityRef } from './model';
+import type { CadBody, CadFace, CadModel, EntityRef, Vec3 } from './model';
+
+export type { Vec3 };
 
 export type FaceType = 'plane' | 'cylinder' | 'cone' | 'sphere' | 'freeform';
 
@@ -32,8 +34,31 @@ export interface WholeFileStats {
   massKg: number | null;
 }
 
-type Vec3 = readonly [number, number, number];
 type MutVec3 = [number, number, number];
+
+/**
+ * A face's geometric *placement* (not just its scalar props) — the analytic
+ * primitive fitted to the face, carrying the data the M2.8 measure tool needs
+ * to classify special relationships (parallel planes, concentric cylinders,
+ * perpendicular cyl+plane) and to measure from a circular face's parametric
+ * center. Like {@link FaceProps} these are mesh-only fits (never persisted);
+ * GeometryService supplies authoritative B-rep placements in M4. All positions
+ * are in model units (mm for STEP).
+ */
+export type FacePrimitive =
+  | { type: 'plane'; area: number; point: Vec3; normal: Vec3 }
+  | {
+      type: 'cylinder';
+      area: number;
+      /** parametric center: on the axis, at the mid-point of the axial extent. */
+      center: Vec3;
+      axis: Vec3;
+      radius: number;
+      height: number;
+      sweepDeg: number;
+    }
+  | { type: 'sphere'; area: number; center: Vec3; radius: number }
+  | { type: 'freeform'; area: number; centroid: Vec3 };
 
 function vertex(body: CadBody, i: number): Vec3 {
   return [body.positions[3 * i], body.positions[3 * i + 1], body.positions[3 * i + 2]];
@@ -396,6 +421,8 @@ function angularSweep(angles: number[]): number {
 
 interface CurvedFit {
   axis: Vec3;
+  /** parametric center: on the axis line, at the mid-point of the axial extent. */
+  center: Vec3;
   diameter: number;
   height: number;
   sweepDeg: number;
@@ -417,7 +444,18 @@ function fitCurved(body: CadBody, face: CadFace): CurvedFit {
   const { cx, cy, r } = fitCircle(projected);
 
   const axials = verts.map((v) => dot(v, axis));
-  const height = Math.max(...axials) - Math.min(...axials);
+  const aMin = Math.min(...axials);
+  const aMax = Math.max(...axials);
+  const height = aMax - aMin;
+
+  // parametric center = circle center (in the e1/e2 plane) lifted onto the axis
+  // at the mid-point of the axial extent
+  const aMid = (aMin + aMax) / 2;
+  const center: Vec3 = [
+    cx * e1[0] + cy * e2[0] + aMid * axis[0],
+    cx * e1[1] + cy * e2[1] + aMid * axis[1],
+    cx * e1[2] + cy * e2[2] + aMid * axis[2],
+  ];
 
   const angles = projected.map(([u, v]) => Math.atan2(v - cy, u - cx));
   const sweepDeg = angularSweep(angles);
@@ -431,7 +469,29 @@ function fitCurved(body: CadBody, face: CadFace): CurvedFit {
     axisNormalAlignment = Math.max(axisNormalAlignment, Math.abs(dot([av[0] / l, av[1] / l, av[2] / l], axis)));
   }
 
-  return { axis, diameter: 2 * r, height, sweepDeg, axisNormalAlignment };
+  return { axis, center, diameter: 2 * r, height, sweepDeg, axisNormalAlignment };
+}
+
+/** Area-weighted centroid of a face's triangles — a representative point that
+ * lies on a planar face (and inside a curved one). */
+function faceCentroid(body: CadBody, face: CadFace): Vec3 {
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  let area = 0;
+  for (let t = face.first; t <= face.last; t += 1) {
+    const av = triAreaVector(body, t);
+    const a = len(av) / 2;
+    if (a === 0) continue;
+    const v0 = vertex(body, body.indices[3 * t]);
+    const v1 = vertex(body, body.indices[3 * t + 1]);
+    const v2 = vertex(body, body.indices[3 * t + 2]);
+    cx += (a * (v0[0] + v1[0] + v2[0])) / 3;
+    cy += (a * (v0[1] + v1[1] + v2[1])) / 3;
+    cz += (a * (v0[2] + v1[2] + v2[2])) / 3;
+    area += a;
+  }
+  return area > 0 ? [cx / area, cy / area, cz / area] : vertex(body, body.indices[3 * face.first]);
 }
 
 /** Triangle centroid and unit normal, for surface-of-revolution/sphere fits. */
@@ -487,13 +547,50 @@ export function facePropsForRef(model: CadModel, ref: EntityRef | undefined): Fa
   return faceProps(body, ref.index);
 }
 
+/** FacePrimitive for a face EntityRef, or null if it doesn't resolve. */
+export function facePrimitiveForRef(
+  model: CadModel,
+  ref: EntityRef | undefined,
+): FacePrimitive | null {
+  if (!ref || ref.kind !== 'face') return null;
+  const body = findBody(model, ref.bodyId);
+  if (!body || !body.faces[ref.index]) return null;
+  return facePrimitive(body, ref.index);
+}
+
 export function faceProps(body: CadBody, faceIndex: number): FaceProps {
+  const prim = facePrimitive(body, faceIndex);
+  switch (prim.type) {
+    case 'plane':
+      return { type: 'plane', area: prim.area, height: null, diameter: null, angle: null };
+    case 'cylinder':
+      return {
+        type: 'cylinder',
+        area: prim.area,
+        height: prim.height,
+        diameter: 2 * prim.radius,
+        angle: Math.round(prim.sweepDeg),
+      };
+    case 'sphere':
+      return { type: 'sphere', area: prim.area, height: null, diameter: 2 * prim.radius, angle: null };
+    case 'freeform':
+      return { type: 'freeform', area: prim.area, height: null, diameter: null, angle: null };
+  }
+}
+
+/**
+ * The analytic {@link FacePrimitive} fitted to a face — the same mesh fits that
+ * back {@link faceProps}, but carrying geometric placement (normal / axis /
+ * center) for the M2.8 measure tool. Single classification path: `faceProps`
+ * derives its scalars from this.
+ */
+export function facePrimitive(body: CadBody, faceIndex: number): FacePrimitive {
   const face = body.faces[faceIndex];
   const area = faceArea(body, face);
-  const { planarity } = faceNormalSpread(body, face);
+  const { mean, planarity } = faceNormalSpread(body, face);
 
   if (planarity > 0.999) {
-    return { type: 'plane', area, height: null, diameter: null, angle: null };
+    return { type: 'plane', area, point: faceCentroid(body, face), normal: mean };
   }
 
   const fit = fitCurved(body, face);
@@ -502,19 +599,21 @@ export function faceProps(body: CadBody, faceIndex: number): FaceProps {
     return {
       type: 'cylinder',
       area,
+      center: fit.center,
+      axis: fit.axis,
+      radius: fit.diameter / 2,
       height: fit.height,
-      diameter: fit.diameter,
-      angle: Math.round(fit.sweepDeg),
+      sweepDeg: fit.sweepDeg,
     };
   }
 
   // Sphere: all surface points equidistant from a single fitted center.
   const s = fitSphere(body, face);
   if (s.residual < 0.02 && s.radius > 0) {
-    return { type: 'sphere', area, height: null, diameter: 2 * s.radius, angle: null };
+    return { type: 'sphere', area, center: s.center, radius: s.radius };
   }
 
   // Cone and other surfaces of revolution: authoritative typing is
   // GeometryService's job (M4); mesh-only fits here stop at 'freeform'.
-  return { type: 'freeform', area, height: null, diameter: null, angle: null };
+  return { type: 'freeform', area, centroid: faceCentroid(body, face) };
 }

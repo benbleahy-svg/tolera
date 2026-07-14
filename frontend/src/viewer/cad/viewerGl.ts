@@ -6,8 +6,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-import type { EntityRef } from './model';
-import type { CadSceneController } from './sceneController';
+import type { CadSceneController, PickHit } from './sceneController';
 
 export interface ViewerGl {
   domElement: HTMLCanvasElement;
@@ -20,11 +19,12 @@ export interface ViewerGl {
 
 export interface ViewerGlOptions {
   /**
-   * Called when the user clicks (not drags) the canvas: `ref` is the picked
-   * face or null (empty space); `additive` is true when a modifier key is held
-   * (accumulate into the selection set rather than replace it).
+   * Called when the user clicks (not drags) the canvas: `hit` is the picked
+   * face + surface point, or null (empty space); `additive` is true when a
+   * modifier key is held (accumulate into the selection set rather than
+   * replace it). The page routes it to selection or measure by active tool.
    */
-  onPick?: (ref: EntityRef | null, additive: boolean) => void;
+  onPick?: (hit: PickHit | null, additive: boolean) => void;
 }
 
 /** A drag beyond this many pixels is an orbit, not a click-to-pick. */
@@ -51,7 +51,7 @@ export function createViewerGl(controller: CadSceneController, opts: ViewerGlOpt
     if (rect.width === 0 || rect.height === 0) return;
     const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    opts.onPick(controller.pickAt(ndcX, ndcY), e.shiftKey || e.metaKey || e.ctrlKey);
+    opts.onPick(controller.pickHitAt(ndcX, ndcY), e.shiftKey || e.metaKey || e.ctrlKey);
   };
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointerup', onPointerUp);

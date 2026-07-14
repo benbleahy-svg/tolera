@@ -11,6 +11,7 @@ import {
   formatArea,
   formatLength,
   formatMass,
+  formatMeasureDistance,
   formatVolume,
 } from './measureFormat';
 
@@ -38,6 +39,13 @@ describe('measure formatting (de — DACH default)', () => {
   it('angles in whole degrees', () => {
     expect(formatAngle(360, 'de')).toBe('360°');
     expect(formatAngle(90, 'de')).toBe('90°');
+  });
+
+  it('measure distance carries a leading ~ only when approximate', () => {
+    // exact (special orientation) → no prefix, the estimator-trust signal
+    expect(formatMeasureDistance(10, true, 'de')).toBe('10,00 mm');
+    // approximate → leading ~
+    expect(formatMeasureDistance(14.28, false, 'de')).toBe('~14,28 mm');
   });
 
   it('renders an em-dash for null / non-finite values', () => {

@@ -9,11 +9,17 @@
  */
 import * as THREE from 'three';
 
-import type { BodySummary, CadModel, EntityRef } from './model';
+import type { BodySummary, CadModel, EntityRef, Vec3 } from './model';
 import { faceRefForHit, findBody } from './selection';
 
 export type RenderMode = 'shaded' | 'xray' | 'wireframe';
 export type CubeFace = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
+
+/** A ray pick: the face it hit plus the exact surface point (for measure). */
+export interface PickHit {
+  ref: EntityRef;
+  point: Vec3;
+}
 
 const FACE_DIRECTIONS: Record<CubeFace, THREE.Vector3> = {
   front: new THREE.Vector3(0, -1, 0),
@@ -28,6 +34,8 @@ const XRAY_OPACITY = 0.35;
 const DEFAULT_BODY_COLOR = 0x8896a5;
 /** Selection highlight — the PP viewer's green face tint. */
 const SELECTION_COLOR = 0x7ac142;
+/** Measure leader line colour. */
+const MEASURE_COLOR = 0xffb020;
 /** Isometric-ish default view direction (from front-right-above). */
 const DEFAULT_VIEW_DIR = new THREE.Vector3(1, -1, 0.75).normalize();
 
@@ -41,6 +49,7 @@ export class CadSceneController {
   private modelGroup: THREE.Group | null = null;
   private model: CadModel | null = null;
   private selectionGroup: THREE.Group | null = null;
+  private measureLine: THREE.Line | null = null;
   private bodyList: BodySummary[] = [];
   private defaultPose: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private fitDistance = 100;
@@ -69,6 +78,7 @@ export class CadSceneController {
       this.disposeGroup(this.modelGroup);
     }
     this.setSelection([]);
+    this.setMeasure(null);
     this.model = model;
     const group = new THREE.Group();
     for (const body of model.bodies) {
@@ -128,25 +138,35 @@ export class CadSceneController {
     this.camera.lookAt(this.target);
   }
 
-  /** Return the EntityRef of the first face a pre-configured ray hits, else null. */
-  pick(raycaster: THREE.Raycaster): EntityRef | null {
+  /** First face a ray hits, with the exact surface point, else null. */
+  pickHit(raycaster: THREE.Raycaster): PickHit | null {
     if (!this.modelGroup || !this.model) return null;
     const hits = raycaster.intersectObjects(this.modelGroup.children, false);
     for (const hit of hits) {
       const bodyId = hit.object.userData.bodyId;
       if (typeof bodyId === 'string' && hit.faceIndex != null) {
         const ref = faceRefForHit(this.model, bodyId, hit.faceIndex);
-        if (ref) return ref;
+        if (ref) return { ref, point: [hit.point.x, hit.point.y, hit.point.z] };
       }
     }
     return null;
   }
 
+  /** Return the EntityRef of the first face a pre-configured ray hits, else null. */
+  pick(raycaster: THREE.Raycaster): EntityRef | null {
+    return this.pickHit(raycaster)?.ref ?? null;
+  }
+
   /** Pick from a normalized device coordinate (−1..1) via the current camera. */
   pickAt(ndcX: number, ndcY: number): EntityRef | null {
+    return this.pickHitAt(ndcX, ndcY)?.ref ?? null;
+  }
+
+  /** Pick-with-point from a normalized device coordinate (−1..1). */
+  pickHitAt(ndcX: number, ndcY: number): PickHit | null {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
-    return this.pick(raycaster);
+    return this.pickHit(raycaster);
   }
 
   /**
@@ -201,6 +221,34 @@ export class CadSceneController {
     this.selectionGroup = group;
   }
 
+  /**
+   * Draw (or clear) the measure leader — a straight line between the two points
+   * the M2.8 measure tool measured (its length equals the reported distance).
+   * Passing null clears it. Kept as scene state (a THREE.Line) so it is asserted
+   * in jsdom without pixels, matching the M2.6/M2.7 test strategy.
+   */
+  setMeasure(endpoints: readonly [Vec3, Vec3] | null): void {
+    if (this.measureLine) {
+      this.scene.remove(this.measureLine);
+      this.measureLine.geometry.dispose();
+      (this.measureLine.material as THREE.Material).dispose();
+      this.measureLine = null;
+    }
+    if (!endpoints) return;
+    const [a, b] = endpoints;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(Float32Array.from([a[0], a[1], a[2], b[0], b[1], b[2]]), 3),
+    );
+    const material = new THREE.LineBasicMaterial({ color: MEASURE_COLOR, depthTest: false });
+    const line = new THREE.Line(geometry, material);
+    line.userData.measure = true;
+    line.renderOrder = 999; // draw over the model so the leader is always visible
+    this.scene.add(line);
+    this.measureLine = line;
+  }
+
   resetView(): void {
     if (!this.defaultPose) return;
     this.camera.up.set(0, 0, 1);
@@ -212,6 +260,7 @@ export class CadSceneController {
   dispose(): void {
     if (this.modelGroup) this.disposeGroup(this.modelGroup);
     if (this.selectionGroup) this.disposeGroup(this.selectionGroup);
+    this.setMeasure(null);
   }
 
   private applyRenderMode(): void {
