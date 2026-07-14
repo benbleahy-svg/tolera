@@ -15,8 +15,15 @@ declare module 'occt-import-js' {
     meshes: OcctMesh[];
   }
 
+  interface OcctReadParams {
+    linearUnit?: 'millimeter' | 'centimeter' | 'meter' | 'inch' | 'foot';
+    linearDeflectionType?: 'bounding_box_ratio' | 'absolute_value';
+    linearDeflection?: number;
+    angularDeflection?: number;
+  }
+
   interface OcctModule {
-    ReadStepFile(content: Uint8Array, params: null): OcctReadResult;
+    ReadStepFile(content: Uint8Array, params: OcctReadParams | null): OcctReadResult;
   }
 
   interface OcctInitOptions {

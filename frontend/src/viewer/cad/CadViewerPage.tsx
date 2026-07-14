@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom';
 
 import { usePartsApi, type PartFile } from '../../parts/api';
 import { workerMeshProvider } from './meshProvider';
+import type { BodySummary } from './model';
 import { CadSceneController, type CubeFace, type RenderMode } from './sceneController';
 import { createViewerGl, type ViewerGl } from './viewerGl';
 
@@ -40,29 +41,33 @@ export function CadViewerPage({ file }: { file: PartFile }) {
 
   const [state, setState] = useState<LoadState>('loading');
   const [renderMode, setRenderModeState] = useState<RenderMode>('shaded');
-  const [bodies, setBodies] = useState<{ id: string; name: string }[]>([]);
+  const [bodies, setBodies] = useState<BodySummary[]>([]);
   const [panelTab, setPanelTab] = useState<'tree' | 'features'>('tree');
 
   useEffect(() => {
     const controller = new CadSceneController();
     controllerRef.current = controller;
-    let cancelled = false;
+    // aborting terminates a parse worker mid-flight — a navigation away must
+    // not leave a WASM instance chewing on a 200 MB STEP
+    const abort = new AbortController();
 
     api
       .fetchFileBytes(file.part_id, file.id)
-      .then((bytes) => workerMeshProvider(bytes))
+      .then((bytes) => workerMeshProvider(bytes, abort.signal))
       .then((model) => {
-        if (cancelled) return;
+        if (abort.signal.aborted) return;
         controller.loadModel(model);
         setBodies(controller.bodies);
         setState('ready');
       })
-      .catch(() => {
-        if (!cancelled) setState('failed');
+      .catch((err: unknown) => {
+        if (abort.signal.aborted) return;
+        console.error('CAD model load failed', err);
+        setState('failed');
       });
 
     return () => {
-      cancelled = true;
+      abort.abort();
       glRef.current?.dispose();
       glRef.current = null;
       controller.dispose();
@@ -115,7 +120,7 @@ export function CadViewerPage({ file }: { file: PartFile }) {
       <header className="viewer-toolbar">
         <Link to="/parts">{t('viewer.back_to_parts')}</Link>
         <strong>{file.filename}</strong>
-        <div className="cad-render-modes" role="group" aria-label={t('viewer.cad_render_shaded')}>
+        <div className="cad-render-modes" role="group" aria-label={t('viewer.cad_render_modes')}>
           {RENDER_MODES.map(({ mode, labelKey }) => (
             <button
               key={mode}
@@ -170,7 +175,7 @@ export function CadViewerPage({ file }: { file: PartFile }) {
 
           {state === 'ready' && (
             <>
-              <div className="cad-orientation" role="group" aria-label={t('viewer.cad_reset_view')}>
+              <div className="cad-orientation" role="group" aria-label={t('viewer.cad_orientation')}>
                 {CUBE_FACES.map(({ face, labelKey }) => (
                   <button
                     key={face}

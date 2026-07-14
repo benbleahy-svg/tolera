@@ -21,8 +21,11 @@ fail() { printf 'Stop gate: %s\n' "$1" >&2; exit 2; }
 # reddens every test that transitively loads it. Inert without node_modules.
 if [ -f frontend/package.json ] && [ -d frontend/node_modules ]; then
   fe_changed="$( { git diff --name-only -- 'frontend/src'; git diff --cached --name-only -- 'frontend/src'; git ls-files --others --exclude-standard -- 'frontend/src'; } 2>/dev/null | sort -u )"
-  fe_existing=()
-  while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && fe_existing+=("${f#frontend/}"); done <<< "$fe_changed"
+  fe_existing=(); fe_deleted=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ -f "$f" ]; then fe_existing+=("${f#frontend/}"); else fe_deleted=1; fi
+  done <<< "$fe_changed"
   if [ ${#fe_existing[@]} -gt 0 ]; then
     fe_lintable=()
     for f in "${fe_existing[@]}"; do case "$f" in *.ts|*.tsx) fe_lintable+=("$f") ;; esac; done
@@ -31,6 +34,14 @@ if [ -f frontend/package.json ] && [ -d frontend/node_modules ]; then
         || fail "oxlint failed — fix lint before finishing:
 $out"
     fi
+  fi
+  # a deletion can redden tests `related` can't map to a surviving file —
+  # fall back to the full (fast) suite when one is present
+  if [ "$fe_deleted" -eq 1 ]; then
+    out="$(cd frontend && npx vitest run --passWithNoTests 2>&1)" \
+      || fail "frontend tests are red [full suite — a frontend source was deleted] — fix before finishing (bypass: CLAUDE_SKIP_TEST_GATE=1):
+$out"
+  elif [ ${#fe_existing[@]} -gt 0 ]; then
     out="$(cd frontend && npx vitest related --run --passWithNoTests "${fe_existing[@]}" 2>&1)" \
       || fail "frontend tests are red [vitest related, ${#fe_existing[@]} changed file(s)] — fix before finishing (bypass: CLAUDE_SKIP_TEST_GATE=1):
 $out"

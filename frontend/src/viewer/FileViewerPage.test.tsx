@@ -81,6 +81,14 @@ describe('FileViewerPage dispatch', () => {
     ).toBeInTheDocument();
   });
 
+  it('falls back to no-preview when category and extension disagree (misfiled record)', async () => {
+    await renderViewer(record('halter.step', 'document'));
+    expect(
+      await screen.findByText('Für diesen Dateityp ist keine Vorschau verfügbar.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('cad-viewer')).not.toBeInTheDocument();
+  });
+
   it('shows a not-found state when the file id is not on the part', async () => {
     listFiles.mockResolvedValue([]);
     await renderWithProviders(

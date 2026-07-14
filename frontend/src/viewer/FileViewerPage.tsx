@@ -22,10 +22,20 @@ type Surface =
 
 function surfaceFor(file: PartFile): Surface {
   const ext = file.filename.split('.').pop()?.toLowerCase() ?? '';
-  if (ext === 'pdf') return { kind: 'pdf' };
-  if (ext === 'step' || ext === 'stp') return { kind: 'cad', file };
+  // category AND extension must agree — a misfiled record gets the honest
+  // fallback rather than a viewer that will choke on the bytes
+  if (file.file_type === 'document' && ext === 'pdf') return { kind: 'pdf' };
+  if (file.file_type === 'brep_cad' && (ext === 'step' || ext === 'stp')) {
+    return { kind: 'cad', file };
+  }
   return { kind: 'no_preview', file };
 }
+
+const FALLBACK_MESSAGE_KEYS = {
+  no_preview: 'viewer.no_preview',
+  not_found: 'viewer.file_not_found',
+  error: 'viewer.file_load_failed',
+} as const;
 
 export function FileViewerPage() {
   const { partId = '', fileId = '' } = useParams<{ partId: string; fileId: string }>();
@@ -42,7 +52,8 @@ export function FileViewerPage() {
         const file = files.find((f) => f.id === fileId);
         setSurface(file ? surfaceFor(file) : { kind: 'not_found' });
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        console.error('file record load failed', err);
         if (!cancelled) setSurface({ kind: 'error' });
       });
     return () => {
@@ -70,15 +81,7 @@ export function FileViewerPage() {
             <Link to="/parts">{t('viewer.back_to_parts')}</Link>
             {surface.kind === 'no_preview' && <strong>{surface.file.filename}</strong>}
           </header>
-          <p role="status">
-            {t(
-              surface.kind === 'no_preview'
-                ? 'viewer.no_preview'
-                : surface.kind === 'not_found'
-                  ? 'viewer.file_not_found'
-                  : 'viewer.file_load_failed',
-            )}
-          </p>
+          <p role="status">{t(FALLBACK_MESSAGE_KEYS[surface.kind])}</p>
         </main>
       );
   }

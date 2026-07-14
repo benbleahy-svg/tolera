@@ -80,6 +80,18 @@ describe('CadViewerPage', () => {
     expect(await screen.findByText('Modell konnte nicht geladen werden.')).toBeInTheDocument();
   });
 
+  it('shows the loading state while the download itself is pending', async () => {
+    fetchFileBytes.mockReturnValue(new Promise(() => {}));
+    await renderWithProviders(<CadViewerPage file={file} />);
+    expect(await screen.findByText('Modell wird geladen …')).toBeInTheDocument();
+  });
+
+  it('shows the failure state when the download fails', async () => {
+    fetchFileBytes.mockRejectedValue(new Error('download failed'));
+    await renderWithProviders(<CadViewerPage file={file} />);
+    expect(await screen.findByText('Modell konnte nicht geladen werden.')).toBeInTheDocument();
+  });
+
   it('lists bodies in the tree, with the German fallback for unnamed bodies', async () => {
     loadMesh.mockResolvedValue(model(['Deckel', '']));
     await renderWithProviders(<CadViewerPage file={file} />);
@@ -92,9 +104,7 @@ describe('CadViewerPage', () => {
     await renderWithProviders(<CadViewerPage file={file} />);
     await screen.findByText('Deckel');
     await userEvent.click(screen.getByRole('tab', { name: 'Geometrische Merkmale' }));
-    expect(
-      screen.getByText('Geometrische Analyse folgt (Interrogation, M4).'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Geometrische Analyse steht noch aus (M4).')).toBeInTheDocument();
   });
 
   it('renders the readout shell with placeholder dashes', async () => {

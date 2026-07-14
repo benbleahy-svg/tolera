@@ -9,7 +9,7 @@
  */
 import * as THREE from 'three';
 
-import type { CadModel } from './model';
+import type { BodySummary, CadModel } from './model';
 
 export type RenderMode = 'shaded' | 'xray' | 'wireframe';
 export type CubeFace = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
@@ -36,7 +36,7 @@ export class CadSceneController {
 
   private mode: RenderMode = 'shaded';
   private modelGroup: THREE.Group | null = null;
-  private bodyList: { id: string; name: string }[] = [];
+  private bodyList: BodySummary[] = [];
   private defaultPose: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private fitDistance = 100;
 
@@ -54,7 +54,7 @@ export class CadSceneController {
     return this.mode;
   }
 
-  get bodies(): { id: string; name: string }[] {
+  get bodies(): BodySummary[] {
     return this.bodyList;
   }
 
@@ -96,6 +96,8 @@ export class CadSceneController {
     this.fitDistance = (diagonal / 2 / Math.tan((this.camera.fov * Math.PI) / 360)) * 1.4;
 
     this.target.copy(center);
+    // a prior top/bottom snap leaves Y-up; the default pose must be Z-up
+    this.camera.up.set(0, 0, 1);
     this.camera.position
       .copy(center)
       .add(DEFAULT_VIEW_DIR.clone().multiplyScalar(this.fitDistance));

@@ -25,5 +25,14 @@ export interface CadModel {
   bbox: { min: [number, number, number]; max: [number, number, number] };
 }
 
-/** The seam the viewer loads meshes through (worker-backed in production). */
-export type MeshProvider = (bytes: Uint8Array) => Promise<CadModel>;
+/** What the tree panel shows per body — display identity only (see CadBody.id). */
+export interface BodySummary {
+  id: string;
+  name: string;
+}
+
+/**
+ * The seam the viewer loads meshes through (worker-backed in production).
+ * Abort the signal to cancel a parse in flight (terminates the worker).
+ */
+export type MeshProvider = (bytes: Uint8Array, signal?: AbortSignal) => Promise<CadModel>;

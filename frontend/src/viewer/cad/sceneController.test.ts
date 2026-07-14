@@ -112,4 +112,17 @@ describe('CadSceneController', () => {
   it('uses Z-up world orientation', () => {
     expect(controller.camera.up.z).toBe(1);
   });
+
+  it('restores Z-up when a new model loads after a top/bottom snap', () => {
+    controller.snapToFace('top'); // leaves Y-up (degenerate up on the Z axis)
+    controller.loadModel(syntheticModel(1));
+    expect(controller.camera.up.z).toBe(1);
+  });
+
+  it('applies the native body color to the material when present', () => {
+    const [first] = bodyMaterials(controller);
+    expect(first.color.r).toBeCloseTo(0.5, 5);
+    expect(first.color.g).toBeCloseTo(0.5, 5);
+    expect(first.color.b).toBeCloseTo(0.5, 5);
+  });
 });
