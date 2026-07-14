@@ -33,7 +33,7 @@ import json
 import os
 import urllib.parse
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from functools import partial
 from typing import Annotated, Any, Literal
@@ -50,6 +50,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -223,7 +224,7 @@ def _part_out(part: Part) -> PartOut:
         is_assembly=part.is_assembly,
         obtain_method=part.obtain_method,
         export_controlled=part.export_controlled,
-        archived=part.deleted_at is not None,
+        archived=part.archived_at is not None,
         created_at=part.created_at,
         updated_at=part.updated_at,
     )
@@ -324,7 +325,11 @@ async def _get_part_or_404(
     supporting files with a NULL primary, or racing swaps could surface a raw
     unique-index error (CodeRabbit PR #8)."""
     part = await session.get(Part, part_id, with_for_update=for_update or None)
-    if part is None:
+    # A DELETED part is gone from the library and its files are purged — every
+    # part-scoped route 404s. (Archived parts stay reachable: they can be
+    # restored or re-quoted.) Quotes keep their costing; they reference the
+    # component/operation rows, not these routes (spec#partlib lifecycle).
+    if part is None or part.deleted_at is not None:
         raise AppError("not_found", "Part not found.", status_code=status.HTTP_404_NOT_FOUND)
     return part
 
@@ -429,10 +434,11 @@ async def list_parts(
     limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PartOut]:
-    """List the active org's parts (RLS-scoped)."""
-    stmt = select(Part)
+    """List the active org's parts (RLS-scoped). Deleted parts never list;
+    archived ones only with ``include_archived`` (the Archived tab)."""
+    stmt = select(Part).where(Part.deleted_at.is_(None))
     if not include_archived:
-        stmt = stmt.where(Part.deleted_at.is_(None))
+        stmt = stmt.where(Part.archived_at.is_(None))
     stmt = stmt.order_by(Part.created_at.desc()).limit(limit).offset(offset)
     result = await session.execute(stmt)
     return [_part_out(p) for p in result.scalars()]
@@ -520,6 +526,74 @@ async def update_part(
         setattr(part, field, value)
     await session.flush()
     return _part_out(part)
+
+
+# --------------------------------------------------------------------------- #
+# Lifecycle: Active → Archived → Deleted (M2.12, spec#partlib "Part lifecycle")
+# --------------------------------------------------------------------------- #
+@parts_router.post("/{part_id}/archive")
+async def archive_part(
+    part_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> PartOut:
+    """Move a part to the Archived tab. Quotes retain all data; the part can be
+    restored or added to new quotes from there. Idempotent."""
+    part = await _get_part_or_404(session, part_id, for_update=True)
+    if part.archived_at is None:
+        part.archived_at = datetime.now(UTC)
+        await session.flush()
+    return _part_out(part)
+
+
+@parts_router.post("/{part_id}/restore")
+async def restore_part(
+    part_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> PartOut:
+    """Return an archived part to Team Parts. Idempotent."""
+    part = await _get_part_or_404(session, part_id, for_update=True)
+    part.archived_at = None
+    await session.flush()
+    return _part_out(part)
+
+
+@parts_router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_part(
+    part_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    storage: Annotated[ObjectStorage, Depends(get_storage)],
+    background: BackgroundTasks,
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> Response:
+    """Irreversibly delete an archived part (spec#partlib lifecycle: Deleted is
+    entered from Archived only).
+
+    Files are purged — rows now, blobs post-commit — while the part row stays
+    (soft ``deleted_at``): quotes keep every dimension and costing, showing a
+    "File Deleted" placeholder instead of downloads. There is no restore."""
+    part = await _get_part_or_404(session, part_id, for_update=True)
+    if part.archived_at is None:
+        raise AppError(
+            "not_archived",
+            "Archive the part before deleting it.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    keys = list(
+        (
+            await session.scalars(select(PartFile.storage_key).where(PartFile.part_id == part_id))
+        ).all()
+    )
+    # Clear the pointer first so the composite FK doesn't block the row deletes.
+    part.primary_file_id = None
+    await session.flush()
+    await session.execute(sa_delete(PartFile).where(PartFile.part_id == part_id))
+    part.deleted_at = datetime.now(UTC)
+    await session.flush()
+    for key in keys:
+        background.add_task(storage.delete, key)  # purge blobs post-commit
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --------------------------------------------------------------------------- #
