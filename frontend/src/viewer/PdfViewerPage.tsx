@@ -407,6 +407,9 @@ export function PdfViewerPage() {
       setRedactNotice(t('viewer.redact_saved', { filename: name }));
     } catch (e) {
       fail(e);
+    }
+  };
+
   const splitPdf = async () => {
     // Server-side split (M2.5): unlike Extract's local download, this persists
     // one supporting file per page on the part; poll the task for progress.
