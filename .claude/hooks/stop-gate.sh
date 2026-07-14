@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Stop hook — enforce "green or it's not done". When Python files changed since HEAD, run ruff +
-# pytest and block the turn from ending if they fail (Claude then keeps fixing).
+# pytest and block the turn from ending if they fail (Claude then keeps fixing). When frontend
+# files changed, run oxlint + the vitest tests whose import graph touches them (M2.6 addition —
+# the M2.4 merge damage shipped through the Python-only gate).
 # SCOPED for speed: ruff checks only the changed files; pytest runs only the tests that plausibly
 # cover them (changed test files + tests/test_<stem>*.py per changed app module). If no matching
 # tests are found, it falls back to the full quick suite. The FULL suite still gates /ship and CI.
@@ -10,6 +12,32 @@ set -uo pipefail
 
 [ "${CLAUDE_SKIP_TEST_GATE:-0}" = "1" ] && exit 0
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+
+fail() { printf 'Stop gate: %s\n' "$1" >&2; exit 2; }
+
+# ---------------------------------------------------------------- frontend
+# Gate changed frontend sources: oxlint on the .ts/.tsx among them, then
+# `vitest related` so a broken shared import (i18n JSON, a page component)
+# reddens every test that transitively loads it. Inert without node_modules.
+if [ -f frontend/package.json ] && [ -d frontend/node_modules ]; then
+  fe_changed="$( { git diff --name-only -- 'frontend/src'; git diff --cached --name-only -- 'frontend/src'; git ls-files --others --exclude-standard -- 'frontend/src'; } 2>/dev/null | sort -u )"
+  fe_existing=()
+  while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && fe_existing+=("${f#frontend/}"); done <<< "$fe_changed"
+  if [ ${#fe_existing[@]} -gt 0 ]; then
+    fe_lintable=()
+    for f in "${fe_existing[@]}"; do case "$f" in *.ts|*.tsx) fe_lintable+=("$f") ;; esac; done
+    if [ ${#fe_lintable[@]} -gt 0 ]; then
+      out="$(cd frontend && npx oxlint "${fe_lintable[@]}" 2>&1)" \
+        || fail "oxlint failed — fix lint before finishing:
+$out"
+    fi
+    out="$(cd frontend && npx vitest related --run --passWithNoTests "${fe_existing[@]}" 2>&1)" \
+      || fail "frontend tests are red [vitest related, ${#fe_existing[@]} changed file(s)] — fix before finishing (bypass: CLAUDE_SKIP_TEST_GATE=1):
+$out"
+  fi
+fi
+
+# ---------------------------------------------------------------- backend
 [ -f pyproject.toml ] || exit 0
 
 changed="$( { git diff --name-only -- '*.py'; git diff --cached --name-only -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } 2>/dev/null | sort -u )"
@@ -19,8 +47,6 @@ changed="$( { git diff --name-only -- '*.py'; git diff --cached --name-only -- '
 existing=()
 while IFS= read -r f; do [ -f "$f" ] && existing+=("$f"); done <<< "$changed"
 [ ${#existing[@]} -gt 0 ] || exit 0
-
-fail() { printf 'Stop gate: %s\n' "$1" >&2; exit 2; }
 
 # Resolve ruff / pytest only if they genuinely run. Prefer the project's own
 # environment (the uv-managed .venv, then `uv run`) over a bare tool on PATH:
