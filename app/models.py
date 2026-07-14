@@ -406,6 +406,9 @@ class Part(Base):
     )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+    # Lifecycle (spec#partlib, M2.12): Active → archived_at (restorable, Archived
+    # tab) → deleted_at (irreversible; files purged, quote costing preserved).
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = _deleted_at()
 
 
@@ -462,6 +465,13 @@ class PartFile(Base):
     # DDL (0017): composite same-org FK → part_file(org_id, id) with column-list
     # SET NULL (source_file_id) — PG15+ form the ORM can't express, so authored raw.
     source_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Match-index fields (M2.12, spec#partlib "How matching works") — computed
+    # deterministically at ingest by app.part_index; geometry signature/vector
+    # land with GeometryService (M4). pdf_text is filled async (Celery).
+    file_hash: Mapped[str | None] = mapped_column(Text)  # SHA-256 hex of raw bytes
+    filename_normalized: Mapped[str | None] = mapped_column(Text)
+    part_number_extracted: Mapped[str | None] = mapped_column(Text)
+    pdf_text: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _ts()
 
 

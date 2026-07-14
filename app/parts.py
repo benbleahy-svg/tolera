@@ -28,6 +28,7 @@ is editing the quote's content); reads need only an authenticated org session.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import urllib.parse
@@ -57,6 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal
 from .authz import Permission, require
 from .config import Settings
+from .db import run_after_commit
 from .deps import get_app_settings, get_session, get_storage
 from .dimensions import (
     DimensionError,
@@ -81,6 +83,12 @@ from .models import (
     Part,
     PartFile,
     PartGeometry,
+)
+from .part_index import (
+    STEP_SCAN_BYTES,
+    extract_pdf_text_task,
+    extract_step_part_number,
+    normalize_filename,
 )
 from .storage import ObjectStorage, object_key
 
@@ -430,6 +438,60 @@ async def list_parts(
     return [_part_out(p) for p in result.scalars()]
 
 
+# Registered BEFORE the /{part_id} routes so "upload" is never parsed as a UUID.
+@parts_router.post("/upload", status_code=status.HTTP_201_CREATED)
+async def upload_library_parts(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    storage: Annotated[ObjectStorage, Depends(get_storage)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+    files: Annotated[list[UploadFile], File()],
+) -> list[PartOut]:
+    """Upload files straight to the Part Library, creating parts (M2.12).
+
+    Auto-bundling (KB `uploading-parts-to-your-part-library`): files whose
+    normalized stems match (``Bracket.stp`` + ``Bracket.pdf``) become ONE part,
+    the CAD file its PRIMARY; non-matching names come in as separate parts (a
+    mismatched print is merged manually later). Each new part takes the primary
+    file's stem as its display name.
+    """
+    validated = await _validate_upload_batch(files, settings)
+
+    # Group by the normalized stem — the auto-bundling key. A degenerate stem
+    # (normalize → None) never bundles: each such file gets its own part.
+    groups: dict[str, list[tuple[UploadFile, str, str]]] = {}
+    for item in validated:
+        key = normalize_filename(item[1]) or f"\x00{id(item[0])}"
+        groups.setdefault(key, []).append(item)
+
+    stored_keys: list[str] = []
+    created: list[Part] = []
+    try:
+        for batch in groups.values():
+            part = await create_root_part(session, principal.active_org_id)
+            rows = await _store_files_on_part(
+                session,
+                storage,
+                org_id=principal.active_org_id,
+                part=part,
+                validated=batch,
+                stored_keys=stored_keys,
+            )
+            primary = next((r for r in rows if r.role == FileRole.primary), rows[0])
+            stem, _, _ = primary.filename.rpartition(".")
+            part.name = stem or primary.filename
+            created.append(part)
+        await session.flush()
+    except AppError:
+        await _discard_blobs(storage, stored_keys)
+        raise
+    except IntegrityError:
+        await _discard_blobs(storage, stored_keys)
+        raise
+
+    return [_part_out(p) for p in created]
+
+
 @parts_router.get("/{part_id}")
 async def get_part(
     part_id: uuid.UUID,
@@ -581,11 +643,45 @@ async def upload_part_files(
     leaving orphan blobs. If the part has no PRIMARY, the highest-geometric-rank
     uploaded file becomes PRIMARY (ties → first uploaded)."""
     part = await _get_part_or_404(session, part_id, for_update=True)
+    validated = await _validate_upload_batch(files, settings)
+
+    # --- Phase 2: store blobs + create rows (clean up blobs on any failure) ---
+    stored_keys: list[str] = []
+    try:
+        rows = await _store_files_on_part(
+            session,
+            storage,
+            org_id=principal.active_org_id,
+            part=part,
+            validated=validated,
+            stored_keys=stored_keys,
+        )
+    except AppError:
+        await _discard_blobs(storage, stored_keys)
+        raise
+    except IntegrityError as exc:
+        await _discard_blobs(storage, stored_keys)
+        if "uq_part_file_one_primary" in str(exc.orig):
+            raise AppError(
+                "primary_conflict",
+                "Another file became the PRIMARY for this part; retry.",
+                status_code=status.HTTP_409_CONFLICT,
+            ) from exc
+        raise
+
+    return [_part_file_out(row) for row in rows]
+
+
+async def _validate_upload_batch(
+    files: list[UploadFile], settings: Settings
+) -> list[tuple[UploadFile, str, str]]:
+    """Phase 1: validate every file at the edge (no storage writes yet).
+
+    Returns ``(file, safe_name, category_value)`` triples; raises on the first
+    bad file so a bad batch rejects wholesale without leaving orphan blobs."""
     if not files:
         raise AppError("no_files", "No files were provided.", status_code=422)
-
-    # --- Phase 1: validate every file (no storage writes yet) ---
-    validated: list[tuple[UploadFile, str, str]] = []  # (file, safe_name, category_value)
+    validated: list[tuple[UploadFile, str, str]] = []
     for upload in files:
         # Filenames are not echoed in error bodies — they can carry customer/part
         # identifiers (CLAUDE.md §5: no PII in errors).
@@ -615,52 +711,82 @@ async def upload_part_files(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             )
         validated.append((upload, name, category.value))
+    return validated
 
-    # --- Phase 2: store blobs + create rows (clean up blobs on any failure) ---
-    stored_keys: list[str] = []
+
+_HASH_CHUNK_BYTES = 1024 * 1024
+
+
+async def _hash_and_head(upload: UploadFile) -> tuple[str, bytes]:
+    """One streaming pass over the spooled body: SHA-256 of the raw bytes (the
+    Exact-File-Match key — computed before any processing, spec#partlib) plus
+    the head bytes the STEP part-number scan reads. Rewinds the file after."""
+    hasher = hashlib.sha256()
+    head = b""
+    while chunk := await upload.read(_HASH_CHUNK_BYTES):
+        if len(head) < STEP_SCAN_BYTES:
+            head += chunk[: STEP_SCAN_BYTES - len(head)]
+        hasher.update(chunk)
+    await upload.seek(0)
+    return hasher.hexdigest(), head
+
+
+async def _store_files_on_part(
+    session: AsyncSession,
+    storage: ObjectStorage,
+    *,
+    org_id: uuid.UUID,
+    part: Part,
+    validated: list[tuple[UploadFile, str, str]],
+    stored_keys: list[str],
+) -> list[PartFile]:
+    """Phase 2 for one part: store blobs, create indexed rows, assign PRIMARY.
+
+    Appends every written blob key to ``stored_keys`` as it goes so the caller
+    can discard them all on failure (the rows roll back with the session).
+    PDF files get their ``pdf_text`` extracted on Celery post-commit (§5)."""
     rows: list[PartFile] = []
-    try:
-        for upload, name, category_value in validated:
-            file_id = uuid.uuid4()
-            key = object_key(principal.active_org_id, part_id, file_id, name)
-            # Cap already enforced pre-store in Phase 1; ``size`` here is the
-            # authoritative byte count actually written.
-            size = await storage.put(key, upload.file, content_type=upload.content_type)
-            stored_keys.append(key)
-            row = PartFile(
-                id=file_id,
-                org_id=principal.active_org_id,
-                part_id=part_id,
-                storage_key=key,
-                filename=name,
-                file_type=category_value,
-                content_type=upload.content_type,
-                size_bytes=size,
-                role=FileRole.supporting,
-            )
-            session.add(row)
-            rows.append(row)
+    for upload, name, category_value in validated:
+        file_id = uuid.uuid4()
+        key = object_key(org_id, part.id, file_id, name)
+        digest, head = await _hash_and_head(upload)
+        # Cap already enforced pre-store in Phase 1; ``size`` here is the
+        # authoritative byte count actually written.
+        size = await storage.put(key, upload.file, content_type=upload.content_type)
+        stored_keys.append(key)
+        row = PartFile(
+            id=file_id,
+            org_id=org_id,
+            part_id=part.id,
+            storage_key=key,
+            filename=name,
+            file_type=category_value,
+            content_type=upload.content_type,
+            size_bytes=size,
+            role=FileRole.supporting,
+            # Match-index fields (M2.12 spec#partlib): deterministic, at ingest.
+            file_hash=digest,
+            filename_normalized=normalize_filename(name),
+            part_number_extracted=extract_step_part_number(head),
+        )
+        session.add(row)
+        rows.append(row)
+        if name.lower().endswith(".pdf"):
+            # Post-commit only (run_after_commit): the worker re-reads the
+            # committed row; a failed/rolled-back request enqueues nothing.
+            run_after_commit(session, partial(_enqueue_pdf_text, org_id, file_id))
 
-        # Insert the part_file rows BEFORE pointing part.primary_file_id at one of
-        # them: that FK is a plain column (no ORM relationship), so the unit of work
-        # doesn't know to order the INSERTs ahead of the part UPDATE on its own.
-        await session.flush()
-        _assign_primary_if_absent(part, rows)
-        await session.flush()
-    except AppError:
-        await _discard_blobs(storage, stored_keys)
-        raise
-    except IntegrityError as exc:
-        await _discard_blobs(storage, stored_keys)
-        if "uq_part_file_one_primary" in str(exc.orig):
-            raise AppError(
-                "primary_conflict",
-                "Another file became the PRIMARY for this part; retry.",
-                status_code=status.HTTP_409_CONFLICT,
-            ) from exc
-        raise
+    # Insert the part_file rows BEFORE pointing part.primary_file_id at one of
+    # them: that FK is a plain column (no ORM relationship), so the unit of work
+    # doesn't know to order the INSERTs ahead of the part UPDATE on its own.
+    await session.flush()
+    _assign_primary_if_absent(part, rows)
+    await session.flush()
+    return rows
 
-    return [_part_file_out(row) for row in rows]
+
+def _enqueue_pdf_text(org_id: uuid.UUID, file_id: uuid.UUID) -> None:
+    extract_pdf_text_task.delay(str(org_id), str(file_id))
 
 
 def _assign_primary_if_absent(part: Part, rows: list[PartFile]) -> None:
@@ -744,6 +870,7 @@ async def create_redacted_copy(
     name = _safe_filename(f"{stem}-redacted.pdf")
     new_id = uuid.uuid4()
     key = object_key(principal.active_org_id, part_id, new_id, name)
+    digest, _head = await _hash_and_head(file)
     size = await storage.put(key, file.file, content_type="application/pdf")
     try:
         row = PartFile(
@@ -757,12 +884,17 @@ async def create_redacted_copy(
             size_bytes=size,
             role=FileRole.supporting,
             is_redacted=True,
+            # Index the redacted copy like any upload (M2.12) — its own hash and
+            # its own (redaction-stripped) text, never the source's.
+            file_hash=digest,
+            filename_normalized=normalize_filename(name),
         )
         session.add(row)
         await session.flush()
     except Exception:
         await _discard_blobs(storage, [key])
         raise
+    run_after_commit(session, partial(_enqueue_pdf_text, principal.active_org_id, new_id))
     return _part_file_out(row)
 
 
