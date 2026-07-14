@@ -19,6 +19,26 @@
 
 ---
 
+## [2026-07-14] M2.7 face-only selection; edge picking deferred to M2.8
+
+**Status:** RESOLVED (autonomous, scoping; flag for Benjamin's review)
+**Question:** The M2.7 build-plan line says "ray-pick a **face/edge**", but occt-import-js emits only face triangulations — no B-rep edges. Deriving pickable edges (boundary-polyline extraction between face groups + line/circle classification) is ~⅓ of the block and widens the persisted-nothing entity-id shape. M2.8 (measure) is the first block that genuinely consumes edge entities.
+**Decision:** M2.7 ships **face picking only**. The `EntityRef` shape already reserves `kind: 'face' | 'edge'` so M2.8 adds edges without reshaping it or the M2.11 annotation binding. PP's own selection-tool screenshot (DemoB/11) shows a *face* pick with the Selection-Data overlay, so the demo ground truth is satisfied. Edge derivation lands in M2.8 where the measure tool needs edge/vertex entities anyway. Face ids remain session-transient and unpersisted per the 2026-07-14 viewer-mesh-provenance OPEN (below).
+**Resolved:** 2026-07-14 (M2.7 autonomous build; grill + fixture oracle cross-checked)
+**Affects:** M2.7 (face pick), M2.8 (edge/vertex entities + measure), M2.11 (annotation binding reuses `EntityRef`).
+
+---
+
+## [2026-07-14] M2.7 Weight readout — density plumbed as an optional viewer prop
+
+**Status:** RESOLVED (autonomous, low-stakes; flag for Benjamin's review)
+**Question:** The File readout shows Weight = mesh-volume × density, but density lives on `component.material_id` (nullable), while the 3D viewer is opened **per file**. From the Parts library there is no component/quote context, and a part reused by several components could resolve to several materials — so "which density?" is undefined there.
+**Decision:** `CadViewerPage` takes an **optional `densityGCm3` prop** (frontend seam only — no API/schema change, no invented multi-component resolution rule). The Parts-library route passes nothing → Weight renders an em-dash with a "no material assigned" tooltip (never a silent default, per CLAUDE.md AI/never-hallucinate spirit for derived numbers). When the viewer gains quote-item context (**M2.10** Part Setup panel), that block passes the component's material density and Weight lights up. Volume (cm³) and Surface Area (mm²) are always shown; the DACH default is mm / mm² / cm³ / kg / deg, comma-decimal, never imperial. Face type/diameter/OBB are **mesh-only fits** behind the `MeshProvider` seam — authoritative typing arrives with GeometryService in M4.
+**Resolved:** 2026-07-14 (M2.7 autonomous build; grill-confirmed)
+**Affects:** M2.7 (Weight readout), M2.10 (supplies density from component material), M4 (authoritative face types / true OBB from GeometryService).
+
+---
+
 ## [2026-07-12] M2.2 annotation-layer bounds + geometric markup representation
 
 **Status:** RESOLVED (autonomous, low-stakes; flag for Benjamin's review)

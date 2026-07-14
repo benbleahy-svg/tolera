@@ -33,6 +33,7 @@ export interface WholeFileStats {
 }
 
 type Vec3 = readonly [number, number, number];
+type MutVec3 = [number, number, number];
 
 function vertex(body: CadBody, i: number): Vec3 {
   return [body.positions[3 * i], body.positions[3 * i + 1], body.positions[3 * i + 2]];
@@ -110,7 +111,7 @@ export function axisDims(model: CadModel): [number, number, number] {
  */
 export function optimalBoundingBox(model: CadModel): [number, number, number] {
   let n = 0;
-  const mean: Vec3 = [0, 0, 0];
+  const mean: MutVec3 = [0, 0, 0];
   for (const body of model.bodies) {
     for (let i = 0; i < body.positions.length; i += 3) {
       mean[0] += body.positions[i];
@@ -138,8 +139,8 @@ export function optimalBoundingBox(model: CadModel): [number, number, number] {
   for (let k = 0; k < 9; k += 1) cov[k] /= n;
 
   const { vectors } = jacobiEigen(cov);
-  const lo: Vec3 = [Infinity, Infinity, Infinity];
-  const hi: Vec3 = [-Infinity, -Infinity, -Infinity];
+  const lo: MutVec3 = [Infinity, Infinity, Infinity];
+  const hi: MutVec3 = [-Infinity, -Infinity, -Infinity];
   for (const body of model.bodies) {
     for (let i = 0; i < body.positions.length; i += 3) {
       const v: Vec3 = [body.positions[i], body.positions[i + 1], body.positions[i + 2]];
@@ -449,7 +450,7 @@ function triCentroidNormal(body: CadBody, tri: number): { g: Vec3; n: Vec3 } | n
 function fitSphere(body: CadBody, face: CadFace): { center: Vec3; radius: number; residual: number } {
   // Normal equations Σ(I − n̂n̂ᵀ) c = Σ(I − n̂n̂ᵀ) gᵢ.
   const m: Mat3 = [0, 0, 0, 0, 0, 0, 0, 0, 0];
-  const rhs: Vec3 = [0, 0, 0];
+  const rhs: MutVec3 = [0, 0, 0];
   const tris: { g: Vec3; n: Vec3 }[] = [];
   for (let t = face.first; t <= face.last; t += 1) {
     const cn = triCentroidNormal(body, t);
