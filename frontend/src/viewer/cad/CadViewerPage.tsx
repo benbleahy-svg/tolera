@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 import { usePartsApi, type PartFile } from '../../parts/api';
-import { measure, type MeasureResult } from './measure';
+import { measure, type MeasurePick, type MeasureResult } from './measure';
 import {
   formatAngle,
   formatArea,
@@ -23,12 +23,11 @@ import {
   formatVolume,
 } from './measureFormat';
 import { workerMeshProvider } from './meshProvider';
-import type { CadModel, EntityRef, Vec3 } from './model';
+import type { CadModel, EntityRef } from './model';
 import { entityKey } from './model';
 import {
   axisDims,
   cumulativeArea,
-  type FacePrimitive,
   facePrimitiveForRef,
   facePropsForRef,
   optimalBoundingBox,
@@ -43,11 +42,9 @@ import {
 import { createViewerGl, type ViewerGl } from './viewerGl';
 
 type ViewerTool = 'select' | 'measure';
-/** A picked face for measuring: its primitive + the exact clicked point. */
-interface MeasurePickUi {
+/** A {@link MeasurePick} plus the face ref, so the scene can highlight it. */
+interface MeasurePickUi extends MeasurePick {
   ref: EntityRef;
-  primitive: FacePrimitive;
-  hitPoint: Vec3;
 }
 
 const RENDER_MODES: { mode: RenderMode; labelKey: string }[] = [
@@ -154,6 +151,8 @@ export function CadViewerPage({
             const primitive = m ? facePrimitiveForRef(m, hit.ref) : null;
             if (!primitive) return prev;
             const next: MeasurePickUi = { ref: hit.ref, primitive, hitPoint: hit.point };
+            // ignore re-picking the same face (would read a degenerate 0 mm)
+            if (prev.some((p) => entityKey(p.ref) === entityKey(next.ref))) return prev;
             // two picks define a measurement; a third click starts a fresh one
             return prev.length >= 2 ? [next] : [...prev, next];
           });

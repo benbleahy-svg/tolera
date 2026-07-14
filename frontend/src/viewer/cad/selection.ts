@@ -10,6 +10,7 @@
  * caller change. Units are model units (mm for STEP) throughout.
  */
 import type { CadBody, CadFace, CadModel, EntityRef, Vec3 } from './model';
+import { cross, dot, len, sub } from './vec3';
 
 export type { Vec3 };
 
@@ -62,22 +63,6 @@ export type FacePrimitive =
 
 function vertex(body: CadBody, i: number): Vec3 {
   return [body.positions[3 * i], body.positions[3 * i + 1], body.positions[3 * i + 2]];
-}
-
-function sub(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-}
-
-function cross(a: Vec3, b: Vec3): Vec3 {
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-}
-
-function dot(a: Vec3, b: Vec3): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-function len(a: Vec3): number {
-  return Math.sqrt(dot(a, a));
 }
 
 /** Cross product of a triangle's edges: direction = normal, magnitude = 2·area. */

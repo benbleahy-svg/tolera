@@ -16,6 +16,7 @@
  * back to the actual ray-hit point for the approximate point-to-point case.
  */
 import type { FacePrimitive, Vec3 } from './selection';
+import { add, dot, len, scale, sub } from './vec3';
 
 /** A picked face plus the exact ray-hit point on its surface. */
 export interface MeasurePick {
@@ -50,21 +51,7 @@ const PARALLEL_DOT = Math.cos((PARALLEL_ANGLE_DEG * Math.PI) / 180);
 /** Two parallel cylinder axes are coaxial when their lines are within this gap. */
 const COAXIAL_GAP_MM = 0.25;
 
-function sub(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-}
-function dot(a: Vec3, b: Vec3): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-function len(a: Vec3): number {
-  return Math.sqrt(dot(a, a));
-}
-function add(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-function scale(a: Vec3, s: number): Vec3 {
-  return [a[0] * s, a[1] * s, a[2] * s];
-}
+/** Unit vector; a zero-length input normalizes to zero → "not collinear". */
 function normalize(a: Vec3): Vec3 {
   const l = len(a);
   return l > 0 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0];
@@ -83,6 +70,18 @@ function lineGap(p: Vec3, dir: Vec3, q: Vec3): number {
   return len(perp);
 }
 
+type Plane = Extract<FacePrimitive, { type: 'plane' }>;
+type Cylinder = Extract<FacePrimitive, { type: 'cylinder' }>;
+
+/** Order a mixed pair into { plane, cyl }, or null if it isn't one of each.
+ * Single source of the plane/cylinder discrimination, shared by classify +
+ * measure so the two can't drift (and to drop the `as Extract` casts). */
+function splitPlaneAndCylinder(a: FacePrimitive, b: FacePrimitive): { plane: Plane; cyl: Cylinder } | null {
+  const plane = a.type === 'plane' ? a : b.type === 'plane' ? b : null;
+  const cyl = a.type === 'cylinder' ? a : b.type === 'cylinder' ? b : null;
+  return plane && cyl ? { plane, cyl } : null;
+}
+
 export function classifyRelationship(a: FacePrimitive, b: FacePrimitive): MeasureRelationship {
   if (a.type === 'plane' && b.type === 'plane') {
     return isCollinear(a.normal, b.normal) ? 'parallel-planes' : 'none';
@@ -92,11 +91,10 @@ export function classifyRelationship(a: FacePrimitive, b: FacePrimitive): Measur
       ? 'concentric-cylinders'
       : 'none';
   }
-  const plane = a.type === 'plane' ? a : b.type === 'plane' ? b : null;
-  const cyl = a.type === 'cylinder' ? a : b.type === 'cylinder' ? b : null;
-  if (plane && cyl) {
+  const split = splitPlaneAndCylinder(a, b);
+  if (split) {
     // cylinder ⊥ plane ⟺ its axis is parallel to the plane normal
-    return isCollinear(cyl.axis, plane.normal) ? 'perpendicular-cyl-plane' : 'none';
+    return isCollinear(split.cyl.axis, split.plane.normal) ? 'perpendicular-cyl-plane' : 'none';
   }
   return 'none';
 }
@@ -122,8 +120,8 @@ export function measure(a: MeasurePick, b: MeasurePick): MeasureResult {
   let endpoints: readonly [Vec3, Vec3];
   switch (relationship) {
     case 'parallel-planes': {
-      const pa = a.primitive as Extract<FacePrimitive, { type: 'plane' }>;
-      const pb = b.primitive as Extract<FacePrimitive, { type: 'plane' }>;
+      const pa = a.primitive as Plane;
+      const pb = b.primitive as Plane;
       const n = normalize(pa.normal);
       const signed = dot(sub(pb.point, pa.point), n); // perpendicular gap (signed)
       // caliper segment: from a point on plane A, straight along the normal to plane B
@@ -131,24 +129,22 @@ export function measure(a: MeasurePick, b: MeasurePick): MeasureResult {
       break;
     }
     case 'concentric-cylinders': {
-      const ca = a.primitive as Extract<FacePrimitive, { type: 'cylinder' }>;
-      const cb = b.primitive as Extract<FacePrimitive, { type: 'cylinder' }>;
+      const ca = a.primitive as Cylinder;
+      const cb = b.primitive as Cylinder;
       endpoints = [ca.center, cb.center];
       break;
     }
     case 'perpendicular-cyl-plane': {
-      const plane = (a.primitive.type === 'plane' ? a.primitive : b.primitive) as Extract<
-        FacePrimitive,
-        { type: 'plane' }
-      >;
-      const cyl = (a.primitive.type === 'cylinder' ? a.primitive : b.primitive) as Extract<
-        FacePrimitive,
-        { type: 'cylinder' }
-      >;
-      const n = normalize(plane.normal);
-      const signed = dot(sub(cyl.center, plane.point), n);
+      // never null in this branch, but fall through defensively if it were
+      const split = splitPlaneAndCylinder(a.primitive, b.primitive);
+      if (!split) {
+        endpoints = [referencePoint(a), referencePoint(b)];
+        break;
+      }
+      const n = normalize(split.plane.normal);
+      const signed = dot(sub(split.cyl.center, split.plane.point), n);
       // from the cylinder's parametric center, perpendicular onto the plane
-      endpoints = [cyl.center, add(cyl.center, scale(n, -signed))];
+      endpoints = [split.cyl.center, add(split.cyl.center, scale(n, -signed))];
       break;
     }
     default:

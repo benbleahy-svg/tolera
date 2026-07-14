@@ -260,6 +260,19 @@ describe('CadViewerPage', () => {
     expect(screen.getByText('Winkel zwischen Flächen').parentElement?.textContent).toContain('90°');
   });
 
+  it('measure tool: re-picking the same face is ignored (no degenerate 0 mm)', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Messen' }));
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 });
+    pick({ kind: 'face', bodyId: 'body-0', index: 0 }); // same face again → ignored
+    // still only one pick → no measurement, the hint remains
+    expect(screen.queryByText('Abstand')).not.toBeInTheDocument();
+    expect(screen.getByText(/Zwei Flächen wählen/)).toBeInTheDocument();
+  });
+
   it('measure tool: clicking empty space clears the measurement', async () => {
     loadMesh.mockResolvedValue(cube10());
     await renderWithProviders(<CadViewerPage file={file} />);

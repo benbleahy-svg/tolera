@@ -157,11 +157,6 @@ export class CadSceneController {
     return this.pickHit(raycaster)?.ref ?? null;
   }
 
-  /** Pick from a normalized device coordinate (−1..1) via the current camera. */
-  pickAt(ndcX: number, ndcY: number): EntityRef | null {
-    return this.pickHitAt(ndcX, ndcY)?.ref ?? null;
-  }
-
   /** Pick-with-point from a normalized device coordinate (−1..1). */
   pickHitAt(ndcX: number, ndcY: number): PickHit | null {
     const raycaster = new THREE.Raycaster();

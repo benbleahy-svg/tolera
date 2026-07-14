@@ -30,6 +30,7 @@ const cylinder = (center: Vec3, axis: Vec3, radius = 4, height = 10): FacePrimit
   sweepDeg: 360,
 });
 const freeform = (centroid: Vec3): FacePrimitive => ({ type: 'freeform', area: 1, centroid });
+const sphere = (center: Vec3, radius = 5): FacePrimitive => ({ type: 'sphere', area: 1, center, radius });
 const pick = (primitive: FacePrimitive, hitPoint: Vec3): MeasurePick => ({ primitive, hitPoint });
 
 describe('classifyRelationship', () => {
@@ -133,6 +134,14 @@ describe('measure — approximate (~) everything else', () => {
     expect(r.exact).toBe(false);
     // circular entities measure from the parametric center, not the hit point
     expect(r.distanceMm).toBeCloseTo(10, 6);
+  });
+
+  it('a sphere is a circular entity → measured from its center, not the hit point', () => {
+    // sphere R=5 centred at origin; the click lands on the surface at (5,0,0),
+    // but the measurement must run from the parametric center (the spec rule)
+    const r = measure(pick(sphere([0, 0, 0], 5), [5, 0, 0]), pick(freeform([0, 3, 4]), [0, 3, 4]));
+    expect(r.exact).toBe(false);
+    expect(r.distanceMm).toBeCloseTo(5, 6); // |center(0,0,0) → point(0,3,4)| = 5
   });
 
   it('skew (non-parallel) planes → approximate distance between clicked points', () => {

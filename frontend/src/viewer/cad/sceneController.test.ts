@@ -188,12 +188,17 @@ describe('CadSceneController — picking & selection highlight', () => {
 describe('CadSceneController — measure leader (M2.8)', () => {
   let controller: CadSceneController;
 
-  const measureLineCount = (c: CadSceneController): number => {
-    let n = 0;
+  const measureLines = (c: CadSceneController): THREE.Line[] => {
+    const lines: THREE.Line[] = [];
     c.scene.traverse((o) => {
-      if (o instanceof THREE.Line && o.userData.measure) n += 1;
+      if (o instanceof THREE.Line && o.userData.measure) lines.push(o);
     });
-    return n;
+    return lines;
+  };
+  const leaderPositions = (c: CadSceneController): number[] => {
+    const lines = measureLines(c);
+    expect(lines).toHaveLength(1);
+    return Array.from((lines[0].geometry.getAttribute('position') as THREE.BufferAttribute).array);
   };
 
   beforeEach(() => {
@@ -201,18 +206,18 @@ describe('CadSceneController — measure leader (M2.8)', () => {
     controller.loadModel(syntheticModel(1));
   });
 
-  it('draws a leader between the two endpoints and clears on null', () => {
-    expect(measureLineCount(controller)).toBe(0);
+  it('draws a leader along the two endpoints and clears on null', () => {
+    expect(measureLines(controller)).toHaveLength(0);
     controller.setMeasure([
       [0, 0, 0],
       [0, 0, 10],
     ]);
-    expect(measureLineCount(controller)).toBe(1);
+    expect(leaderPositions(controller)).toEqual([0, 0, 0, 0, 0, 10]);
     controller.setMeasure(null);
-    expect(measureLineCount(controller)).toBe(0);
+    expect(measureLines(controller)).toHaveLength(0);
   });
 
-  it('replaces the prior leader rather than stacking them', () => {
+  it('replaces the prior leader with the new coordinates rather than stacking', () => {
     controller.setMeasure([
       [0, 0, 0],
       [1, 0, 0],
@@ -221,7 +226,8 @@ describe('CadSceneController — measure leader (M2.8)', () => {
       [0, 0, 0],
       [2, 0, 0],
     ]);
-    expect(measureLineCount(controller)).toBe(1);
+    // exactly one leader, and it carries the NEW endpoints (not the stale ones)
+    expect(leaderPositions(controller)).toEqual([0, 0, 0, 2, 0, 0]);
   });
 
   it('clears the leader when a new model loads', () => {
@@ -230,6 +236,6 @@ describe('CadSceneController — measure leader (M2.8)', () => {
       [0, 0, 10],
     ]);
     controller.loadModel(syntheticModel(1));
-    expect(measureLineCount(controller)).toBe(0);
+    expect(measureLines(controller)).toHaveLength(0);
   });
 });

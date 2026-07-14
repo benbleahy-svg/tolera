@@ -14,12 +14,11 @@
 // STEP was judged not worth the B-rep-authoring risk for one extra witness.
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { measure, type MeasurePick } from './measure';
 import { parseStep } from './parseStep';
 import { facePrimitive, type FacePrimitive } from './selection';
-import type { CadBody } from './model';
 
 const FIXTURE = fileURLToPath(
   new URL('../../../../fixtures/cad/plate-hole-20x20x10-d8.step', import.meta.url),
@@ -33,15 +32,15 @@ function pickOf(prim: FacePrimitive): MeasurePick {
   return { primitive: prim, hitPoint };
 }
 
-async function loadPlate(): Promise<{ body: CadBody; prims: FacePrimitive[] }> {
-  const model = await parseStep(new Uint8Array(await readFile(FIXTURE)));
-  const body = model.bodies[0];
-  return { body, prims: body.faces.map((_, i) => facePrimitive(body, i)) };
-}
-
 describe('measure on the real tessellated fixture (M2.8)', () => {
-  it('parallel plate faces → EXACT thickness (no ~), within tight tolerance', async () => {
-    const { prims } = await loadPlate();
+  // parse the STEP once (real occt-import-js WASM tessellation is not cheap)
+  let prims: FacePrimitive[];
+  beforeAll(async () => {
+    const model = await parseStep(new Uint8Array(await readFile(FIXTURE)));
+    prims = model.bodies[0].faces.map((_, i) => facePrimitive(model.bodies[0], i));
+  });
+
+  it('parallel plate faces → EXACT thickness (no ~), within tight tolerance', () => {
     // the two 20×20 faces (largest planes) are the parallel top/bottom, 10 mm apart
     const bigPlanes = prims
       .filter((p): p is Extract<FacePrimitive, { type: 'plane' }> => p.type === 'plane')
@@ -55,8 +54,7 @@ describe('measure on the real tessellated fixture (M2.8)', () => {
     expect(r.distanceMm).toBeCloseTo(10, 2); // plate thickness, tight tolerance
   });
 
-  it('skew (perpendicular) plate faces → APPROXIMATE (~) + ~90° angle', async () => {
-    const { prims } = await loadPlate();
+  it('skew (perpendicular) plate faces → APPROXIMATE (~) + ~90° angle', () => {
     const planes = prims.filter(
       (p): p is Extract<FacePrimitive, { type: 'plane' }> => p.type === 'plane',
     );
@@ -69,8 +67,7 @@ describe('measure on the real tessellated fixture (M2.8)', () => {
     expect(r.angleDeg).toBeCloseTo(90, 0);
   });
 
-  it('hole cylinder ⟂ plate face → EXACT center-to-plane distance', async () => {
-    const { prims } = await loadPlate();
+  it('hole cylinder ⟂ plate face → EXACT center-to-plane distance', () => {
     const cyl = prims.find(
       (p): p is Extract<FacePrimitive, { type: 'cylinder' }> => p.type === 'cylinder',
     );
