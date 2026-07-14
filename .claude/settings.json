@@ -19,7 +19,10 @@
       "Bash(git checkout -b *)",
       "Bash(git branch *)",
       "Bash(gh pr *)",
-      "Bash(gh issue *)"
+      "Bash(gh issue *)",
+      "Bash(gh run *)",
+      "Bash(git push *)",
+      "Bash(semgrep *)"
     ],
     "deny": [
       "Bash(git push --force *)",
