@@ -1,12 +1,21 @@
 /**
- * 3D viewer (M2.6 core + M2.7 selection & readout). Toolbar with the three
- * render modes + reset, left Struktur/Merkmale panel (features = M4 empty
- * state), orientation faces. M2.7 adds: click a face → selection-data overlay
- * (Type / Area / Height / Diameter / Angle), cumulative area across a
- * multi-pick, and the whole-file Volume / Surface / Weight readout filled from
- * the tessellation. Weight needs a material density (optional prop); without it
- * the row shows an em-dash + tooltip (the quote-item context that supplies it
- * arrives in M2.10). Measure = M2.8; display-options gear + limits = M2.9.
+ * 3D viewer (M2.6 core + M2.7 selection & readout + M2.9 display options &
+ * rendering limits). Toolbar with the three render modes + reset + the
+ * display-options gear, left Struktur/Merkmale panel (features = M4 empty
+ * state), orientation faces. M2.7 adds the selection-data overlay and the
+ * whole-file Volume / Surface / Weight readout.
+ *
+ * M2.9 adds:
+ *  - the display-options gear popover: a metric↔imperial unit toggle
+ *    (Tolera default = metric mm/kg, never imperial by default — DACH §6), a
+ *    live decimal-precision, and a native-model-colours toggle;
+ *  - vertex-budget rendering limits: bodies past the 25 M-vertex budget drop to
+ *    blue (collection over budget) / orange (single body over budget)
+ *    bounding-box simplified reps with matching tree icons, restored by
+ *    isolating a body (which re-plans over the smaller visible set). An orange
+ *    body also suppresses its (future-M4) interrogation results.
+ *
+ * Display state is ephemeral (per-viewer session), not persisted. Measure = M2.8.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -19,10 +28,18 @@ import {
   formatLength,
   formatMass,
   formatVolume,
+  type DisplayOptions,
+  type UnitSystem,
 } from './measureFormat';
 import { workerMeshProvider } from './meshProvider';
 import type { CadModel, EntityRef } from './model';
 import { entityKey } from './model';
+import {
+  DEFAULT_VERTEX_BUDGET,
+  bodyVertexCounts,
+  planRenderBudget,
+  type RepColor,
+} from './renderBudget';
 import {
   axisDims,
   cumulativeArea,
@@ -30,7 +47,12 @@ import {
   optimalBoundingBox,
   wholeFileStats,
 } from './selection';
-import { CadSceneController, type CubeFace, type RenderMode } from './sceneController';
+import {
+  CadSceneController,
+  type BodyDisplayState,
+  type CubeFace,
+  type RenderMode,
+} from './sceneController';
 import { createViewerGl, type ViewerGl } from './viewerGl';
 
 const RENDER_MODES: { mode: RenderMode; labelKey: string }[] = [
@@ -48,21 +70,31 @@ const CUBE_FACES: { face: CubeFace; labelKey: string }[] = [
   { face: 'bottom', labelKey: 'viewer.cad_face_bottom' },
 ];
 
+const MIN_PRECISION = 0;
+const MAX_PRECISION = 6;
+
 type LoadState = 'loading' | 'ready' | 'failed';
 
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(Math.max(n, lo), hi);
+}
+
 /** "x × y × z" with each extent formatted as a length. */
-function formatTriple(v: readonly [number, number, number] | null, lang: string): string {
+function formatTriple(v: readonly [number, number, number] | null, opts: DisplayOptions): string {
   if (!v) return '—';
-  return `${formatLength(v[0], lang)} × ${formatLength(v[1], lang)} × ${formatLength(v[2], lang)}`;
+  return `${formatLength(v[0], opts)} × ${formatLength(v[1], opts)} × ${formatLength(v[2], opts)}`;
 }
 
 export function CadViewerPage({
   file,
   densityGCm3,
+  vertexBudget = DEFAULT_VERTEX_BUDGET,
 }: {
   file: PartFile;
   /** Material density in g/cm³ for the Weight readout; omitted → em-dash. */
   densityGCm3?: number | null;
+  /** Concurrent vertex budget; overridable so tests can drive over-budget bodies. */
+  vertexBudget?: number;
 }) {
   const api = usePartsApi();
   const { t, i18n } = useTranslation();
@@ -76,6 +108,19 @@ export function CadViewerPage({
   const [model, setModel] = useState<CadModel | null>(null);
   const [selection, setSelection] = useState<EntityRef[]>([]);
   const [panelTab, setPanelTab] = useState<'tree' | 'features'>('tree');
+
+  // Display options (ephemeral; DACH default = metric, precision 2, native colours on).
+  const [gearOpen, setGearOpen] = useState(false);
+  const [unitSystem, setUnitSystem] = useState<UnitSystem>('metric');
+  const [precision, setPrecision] = useState(2);
+  const [nativeColors, setNativeColors] = useState(true);
+  // Isolate: when set, only this body renders (drops the vertex load → re-plan).
+  const [isolatedBodyId, setIsolatedBodyId] = useState<string | null>(null);
+
+  const displayOpts = useMemo<DisplayOptions>(
+    () => ({ language: lang, system: unitSystem, precision }),
+    [lang, unitSystem, precision],
+  );
 
   useEffect(() => {
     const controller = new CadSceneController();
@@ -92,6 +137,7 @@ export function CadViewerPage({
         controller.loadModel(loaded);
         setModel(loaded);
         setSelection([]);
+        setIsolatedBodyId(null);
         setState('ready');
       })
       .catch((err: unknown) => {
@@ -150,21 +196,6 @@ export function CadViewerPage({
     controllerRef.current?.setSelection(selection);
   }, [selection]);
 
-  const setRenderMode = (mode: RenderMode) => {
-    controllerRef.current?.setRenderMode(mode);
-    setRenderModeState(mode);
-  };
-
-  const snapTo = (face: CubeFace) => {
-    controllerRef.current?.snapToFace(face);
-    glRef.current?.syncTarget();
-  };
-
-  const resetView = () => {
-    controllerRef.current?.resetView();
-    glRef.current?.syncTarget();
-  };
-
   const stats = useMemo(
     () => (model ? wholeFileStats(model, densityGCm3 ?? null) : null),
     [model, densityGCm3],
@@ -181,6 +212,57 @@ export function CadViewerPage({
   );
 
   const bodies = model?.bodies ?? [];
+
+  // Vertex-budget plan over the currently-visible bodies (isolate → subset).
+  const budgetPlan = useMemo(() => {
+    const counts = model ? bodyVertexCounts(model) : [];
+    const visible = isolatedBodyId ? counts.filter((c) => c.id === isolatedBodyId) : counts;
+    return planRenderBudget(visible, vertexBudget);
+  }, [model, isolatedBodyId, vertexBudget]);
+
+  const repByBody = useMemo(() => {
+    const map = new Map<string, RepColor>();
+    for (const b of budgetPlan.bodies) if (b.repColor) map.set(b.bodyId, b.repColor);
+    return map;
+  }, [budgetPlan]);
+
+  // Push per-body display (hidden / boxed) to the scene whenever it changes.
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller || !model) return;
+    const states = new Map<string, BodyDisplayState>();
+    for (const body of model.bodies) {
+      if (isolatedBodyId && body.id !== isolatedBodyId) {
+        states.set(body.id, { hidden: true, repColor: null });
+      } else {
+        states.set(body.id, { hidden: false, repColor: repByBody.get(body.id) ?? null });
+      }
+    }
+    controller.setBodyDisplayStates(states);
+  }, [model, isolatedBodyId, repByBody]);
+
+  // Apply the native-colour toggle to the scene.
+  useEffect(() => {
+    controllerRef.current?.setNativeColors(nativeColors);
+  }, [nativeColors, model]);
+
+  const setRenderMode = (mode: RenderMode) => {
+    controllerRef.current?.setRenderMode(mode);
+    setRenderModeState(mode);
+  };
+
+  const snapTo = (face: CubeFace) => {
+    controllerRef.current?.snapToFace(face);
+    glRef.current?.syncTarget();
+  };
+
+  const resetView = () => {
+    controllerRef.current?.resetView();
+    glRef.current?.syncTarget();
+  };
+
+  const toggleIsolate = (bodyId: string) =>
+    setIsolatedBodyId((cur) => (cur === bodyId ? null : bodyId));
 
   return (
     <main className="viewer-page">
@@ -203,6 +285,65 @@ export function CadViewerPage({
         <button type="button" disabled={state !== 'ready'} onClick={resetView}>
           {t('viewer.cad_reset_view')}
         </button>
+
+        <div className="cad-display-options">
+          <button
+            type="button"
+            className="cad-gear"
+            aria-label={t('viewer.cad_display_options')}
+            aria-expanded={gearOpen}
+            disabled={state !== 'ready'}
+            onClick={() => setGearOpen((o) => !o)}
+          >
+            ⚙
+          </button>
+          {gearOpen && state === 'ready' && (
+            <div
+              className="cad-display-popover"
+              role="group"
+              aria-label={t('viewer.cad_display_options')}
+            >
+              <fieldset className="cad-units">
+                <legend>{t('viewer.cad_units')}</legend>
+                <button
+                  type="button"
+                  aria-pressed={unitSystem === 'metric'}
+                  onClick={() => setUnitSystem('metric')}
+                >
+                  {t('viewer.cad_units_metric')}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={unitSystem === 'imperial'}
+                  onClick={() => setUnitSystem('imperial')}
+                >
+                  {t('viewer.cad_units_imperial')}
+                </button>
+              </fieldset>
+              <label className="cad-precision">
+                {t('viewer.cad_precision')}
+                <input
+                  type="number"
+                  min={MIN_PRECISION}
+                  max={MAX_PRECISION}
+                  value={precision}
+                  onChange={(e) => {
+                    const n = Number.parseInt(e.target.value, 10);
+                    if (!Number.isNaN(n)) setPrecision(clamp(n, MIN_PRECISION, MAX_PRECISION));
+                  }}
+                />
+              </label>
+              <label className="cad-native-colors">
+                <input
+                  type="checkbox"
+                  checked={nativeColors}
+                  onChange={(e) => setNativeColors(e.target.checked)}
+                />
+                {t('viewer.cad_native_colors')}
+              </label>
+            </div>
+          )}
+        </div>
       </header>
 
       <div className="cad-layout">
@@ -226,11 +367,49 @@ export function CadViewerPage({
             </button>
           </div>
           {panelTab === 'tree' ? (
-            <ul className="cad-tree">
-              {bodies.map((body, i) => (
-                <li key={body.id}>{body.name || t('viewer.cad_body_fallback', { n: i + 1 })}</li>
-              ))}
-            </ul>
+            <>
+              {isolatedBodyId && (
+                <button
+                  type="button"
+                  className="cad-tree-showall"
+                  onClick={() => setIsolatedBodyId(null)}
+                >
+                  {t('viewer.cad_show_all')}
+                </button>
+              )}
+              <ul className="cad-tree">
+                {bodies.map((body, i) => {
+                  const rep = repByBody.get(body.id);
+                  const isolatedOut = isolatedBodyId != null && body.id !== isolatedBodyId;
+                  return (
+                    <li key={body.id}>
+                      <button
+                        type="button"
+                        className={`cad-tree-body${isolatedOut ? ' cad-tree-body-hidden' : ''}`}
+                        aria-pressed={isolatedBodyId === body.id}
+                        title={t('viewer.cad_isolate')}
+                        onClick={() => toggleIsolate(body.id)}
+                      >
+                        {rep && (
+                          <span
+                            className={`cad-tree-icon cad-tree-icon-${rep}`}
+                            aria-hidden="true"
+                            title={t(
+                              rep === 'orange'
+                                ? 'viewer.cad_simplified_orange'
+                                : 'viewer.cad_simplified_blue',
+                            )}
+                          >
+                            ▪
+                          </span>
+                        )}
+                        {body.name || t('viewer.cad_body_fallback', { n: i + 1 })}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           ) : (
             <p className="cad-features-pending">{t('viewer.cad_features_pending')}</p>
           )}
@@ -266,19 +445,19 @@ export function CadViewerPage({
                       </div>
                       <div>
                         <dt>{t('viewer.cad_selection_area')}</dt>
-                        <dd>{formatArea(active.area, lang)}</dd>
+                        <dd>{formatArea(active.area, displayOpts)}</dd>
                       </div>
                       <div>
                         <dt>{t('viewer.cad_selection_height')}</dt>
-                        <dd>{formatLength(active.height, lang)}</dd>
+                        <dd>{formatLength(active.height, displayOpts)}</dd>
                       </div>
                       <div>
                         <dt>{t('viewer.cad_selection_diameter')}</dt>
-                        <dd>{formatLength(active.diameter, lang)}</dd>
+                        <dd>{formatLength(active.diameter, displayOpts)}</dd>
                       </div>
                       <div>
                         <dt>{t('viewer.cad_selection_angle')}</dt>
-                        <dd>{formatAngle(active.angle, lang)}</dd>
+                        <dd>{formatAngle(active.angle, displayOpts)}</dd>
                       </div>
                     </dl>
                   </section>
@@ -290,7 +469,7 @@ export function CadViewerPage({
                     <dl>
                       <div>
                         <dt>{t('viewer.cad_cumulative_area')}</dt>
-                        <dd>{formatArea(cumulative, lang)}</dd>
+                        <dd>{formatArea(cumulative, displayOpts)}</dd>
                       </div>
                     </dl>
                   </section>
@@ -301,17 +480,17 @@ export function CadViewerPage({
                   <dl>
                     <div>
                       <dt>{t('viewer.cad_readout_volume')}</dt>
-                      <dd>{formatVolume(stats?.volumeMm3 ?? null, lang)}</dd>
+                      <dd>{formatVolume(stats?.volumeMm3 ?? null, displayOpts)}</dd>
                     </div>
                     <div>
                       <dt>{t('viewer.cad_readout_surface')}</dt>
-                      <dd>{formatArea(stats?.surfaceAreaMm2 ?? null, lang)}</dd>
+                      <dd>{formatArea(stats?.surfaceAreaMm2 ?? null, displayOpts)}</dd>
                     </div>
                     <div>
                       <dt>{t('viewer.cad_readout_weight')}</dt>
                       <dd>
                         {stats?.massKg != null ? (
-                          formatMass(stats.massKg, lang)
+                          formatMass(stats.massKg, displayOpts)
                         ) : (
                           <span title={t('viewer.cad_weight_no_material')}>—</span>
                         )}
@@ -319,11 +498,11 @@ export function CadViewerPage({
                     </div>
                     <div>
                       <dt>{t('viewer.cad_axis_dims')}</dt>
-                      <dd>{formatTriple(dims, lang)}</dd>
+                      <dd>{formatTriple(dims, displayOpts)}</dd>
                     </div>
                     <div>
                       <dt>{t('viewer.cad_bbox_optimal')}</dt>
-                      <dd>{formatTriple(obb, lang)}</dd>
+                      <dd>{formatTriple(obb, displayOpts)}</dd>
                     </div>
                   </dl>
                 </section>

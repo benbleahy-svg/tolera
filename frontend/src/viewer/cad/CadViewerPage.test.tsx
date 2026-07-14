@@ -4,7 +4,7 @@
  * parseStep.test.ts against the real fixture) and the WebGL layer
  * (scene-state correctness is covered by sceneController.test.ts).
  */
-import { act, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,8 +13,12 @@ import type { PartFile } from '../../parts/api';
 import type { CadModel, EntityRef } from './model';
 
 const fetchFileBytes = vi.fn();
+// Stable reference — the real usePartsApi is useMemo-memoized, so the CAD load
+// effect (keyed on `api`) runs once. A fresh object per render would re-fire it
+// on every re-render and clobber viewer state (e.g. an isolate selection).
+const partsApiValue = { fetchFileBytes };
 vi.mock('../../parts/api', () => ({
-  usePartsApi: () => ({ fetchFileBytes }),
+  usePartsApi: () => partsApiValue,
 }));
 
 const loadMesh = vi.fn();
@@ -242,5 +246,103 @@ describe('CadViewerPage', () => {
     await screen.findByText('Deckel');
     expect(fetchFileBytes).toHaveBeenCalledWith('p1', 'f1');
     expect(loadMesh).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
+  });
+});
+
+describe('CadViewerPage — display options (M2.9 gear)', () => {
+  async function openGear() {
+    await userEvent.click(screen.getByRole('button', { name: 'Anzeigeoptionen' }));
+  }
+
+  it('opens in metric by default (mm / cm³), never imperial', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+    expect(screen.getByText('Volumen').parentElement?.textContent).toContain('1,00 cm³');
+    expect(screen.getByText('Oberfläche').parentElement?.textContent).toContain('mm²');
+  });
+
+  it('keeps the gear popover closed until the gear is clicked', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+    expect(screen.queryByRole('button', { name: 'Imperial (in)' })).not.toBeInTheDocument();
+    await openGear();
+    expect(screen.getByRole('button', { name: 'Imperial (in)' })).toBeInTheDocument();
+  });
+
+  it('flips dims/area/volume/weight to imperial when toggled', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} densityGCm3={7.85} />);
+    await screen.findByText('Würfel');
+    await openGear();
+    await userEvent.click(screen.getByRole('button', { name: 'Imperial (in)' }));
+    // 1000 mm³ = 0.061 in³ ; 600 mm² = 0.93 in²
+    expect(screen.getByText('Volumen').parentElement?.textContent).toContain('0,06 in³');
+    expect(screen.getByText('Oberfläche').parentElement?.textContent).toContain('in²');
+    // weight kg → lb
+    expect(screen.getByText('Gewicht').parentElement?.textContent).toContain('lb');
+  });
+
+  it('applies decimal precision live', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+    await openGear();
+    const precision = screen.getByLabelText('Dezimalstellen');
+    fireEvent.change(precision, { target: { value: '0' } });
+    // volume drops from 1,00 cm³ to 1 cm³
+    expect(screen.getByText('Volumen').parentElement?.textContent).toContain('1 cm³');
+    expect(screen.getByText('Volumen').parentElement?.textContent).not.toContain('1,00');
+  });
+
+  it('offers a native-model-colours toggle (on by default)', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+    await openGear();
+    const toggle = screen.getByLabelText('Modellfarben') as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await userEvent.click(toggle);
+    expect(toggle.checked).toBe(false);
+  });
+});
+
+describe('CadViewerPage — rendering limits & isolate (M2.9)', () => {
+  // Two 3-vertex bodies, budget 4 → collective overflow (6 > 4), neither
+  // individually over → the smaller is boxed blue, the other stays full.
+  it('substitutes a blue simplified rep for the least-significant body over budget', async () => {
+    loadMesh.mockResolvedValue(model(['Alpha', 'Beta']));
+    await renderWithProviders(<CadViewerPage file={file} vertexBudget={4} />);
+    await screen.findByText('Alpha');
+    expect(screen.getAllByTitle(/Sammlung über/)).toHaveLength(1);
+  });
+
+  it('shows an orange simplified rep for a single body over budget', async () => {
+    loadMesh.mockResolvedValue(model(['Alpha']));
+    await renderWithProviders(<CadViewerPage file={file} vertexBudget={2} />);
+    await screen.findByText('Alpha');
+    // one body, 3 vertices > budget 2 → orange
+    expect(screen.getAllByTitle(/Körper über/)).toHaveLength(1);
+  });
+
+  it('restores full detail when a body is isolated (load drops under budget)', async () => {
+    loadMesh.mockResolvedValue(model(['Alpha', 'Beta']));
+    await renderWithProviders(<CadViewerPage file={file} vertexBudget={4} />);
+    await screen.findByText('Alpha');
+    expect(screen.queryAllByTitle(/Sammlung über/)).toHaveLength(1);
+    // isolate Alpha → only 3 vertices visible ≤ 4 → no more blue rep
+    await userEvent.click(screen.getByRole('button', { name: /Alpha/ }));
+    expect(screen.queryAllByTitle(/Sammlung über/)).toHaveLength(0);
+    // a "show all" affordance appears while isolated
+    await userEvent.click(screen.getByRole('button', { name: 'Alle Körper anzeigen' }));
+    expect(screen.queryAllByTitle(/Sammlung über/)).toHaveLength(1);
+  });
+
+  it('renders no simplified reps when the model is within budget', async () => {
+    loadMesh.mockResolvedValue(model(['Alpha', 'Beta']));
+    await renderWithProviders(<CadViewerPage file={file} />); // default 25 M budget
+    await screen.findByText('Alpha');
+    expect(screen.queryAllByTitle(/über/)).toHaveLength(0);
   });
 });

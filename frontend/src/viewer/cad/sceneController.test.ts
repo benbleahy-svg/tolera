@@ -128,6 +128,127 @@ describe('CadSceneController', () => {
   });
 });
 
+const DEFAULT_BODY_COLOR = 0x8896a5;
+
+/** The full-detail mesh for a body id (userData.bodyId), or undefined. */
+function fullMesh(controller: CadSceneController, bodyId: string): THREE.Mesh | undefined {
+  let found: THREE.Mesh | undefined;
+  controller.scene.traverse((obj) => {
+    if (obj instanceof THREE.Mesh && obj.userData.bodyId === bodyId) found = obj;
+  });
+  return found;
+}
+
+/** The simplified-rep box mesh for a body id (userData.boxFor), or undefined. */
+function boxMesh(controller: CadSceneController, bodyId: string): THREE.Mesh | undefined {
+  let found: THREE.Mesh | undefined;
+  controller.scene.traverse((obj) => {
+    if (obj instanceof THREE.Mesh && obj.userData.boxFor === bodyId && obj.visible) found = obj;
+  });
+  return found;
+}
+
+/** The material colour (hex) of a body's visible box rep; throws if it has none. */
+function boxColorHex(controller: CadSceneController, bodyId: string): number {
+  const box = boxMesh(controller, bodyId);
+  if (!box) throw new Error(`expected a visible box rep for ${bodyId}`);
+  return (box.material as THREE.MeshStandardMaterial).color.getHex();
+}
+
+describe('CadSceneController — native colour toggle (M2.9)', () => {
+  let controller: CadSceneController;
+
+  beforeEach(() => {
+    controller = new CadSceneController();
+    controller.loadModel(syntheticModel(2)); // body-0 has native [0.5,0.5,0.5], body-1 none
+  });
+
+  it('starts with native colours enabled', () => {
+    expect(controller.nativeColorsEnabled).toBe(true);
+  });
+
+  it('forces the default model colour on every body when toggled off', () => {
+    controller.setNativeColors(false);
+    for (const mat of bodyMaterials(controller)) {
+      expect(mat.color.getHex()).toBe(DEFAULT_BODY_COLOR);
+    }
+    expect(controller.nativeColorsEnabled).toBe(false);
+  });
+
+  it('restores the native colour (and default for bodies without one) when toggled back on', () => {
+    controller.setNativeColors(false);
+    controller.setNativeColors(true);
+    const [first, second] = bodyMaterials(controller);
+    expect(first.color.r).toBeCloseTo(0.5, 5); // body-0 native
+    expect(second.color.getHex()).toBe(DEFAULT_BODY_COLOR); // body-1 had no native colour
+  });
+});
+
+describe('CadSceneController — simplified reps & isolate (M2.9)', () => {
+  let controller: CadSceneController;
+
+  beforeEach(() => {
+    controller = new CadSceneController();
+    controller.loadModel(syntheticModel(2));
+  });
+
+  it('replaces a boxed body with a coloured bounding-box rep and hides its full mesh', () => {
+    controller.setBodyDisplayStates(
+      new Map([
+        ['body-0', { hidden: false, repColor: 'blue' }],
+        ['body-1', { hidden: false, repColor: null }],
+      ]),
+    );
+    expect(fullMesh(controller, 'body-0')?.visible).toBe(false);
+    expect(boxMesh(controller, 'body-0')).toBeDefined();
+    // blue rep
+    expect(boxColorHex(controller, 'body-0')).toBe(0x3b82f6);
+    // the un-boxed body renders in full, no box
+    expect(fullMesh(controller, 'body-1')?.visible).toBe(true);
+    expect(boxMesh(controller, 'body-1')).toBeUndefined();
+  });
+
+  it('uses an orange rep for a single-body-over-budget box', () => {
+    controller.setBodyDisplayStates(
+      new Map([['body-0', { hidden: false, repColor: 'orange' }]]),
+    );
+    expect(boxColorHex(controller, 'body-0')).toBe(0xf59e0b);
+  });
+
+  it('hides a body entirely when isolated out (no box, no full mesh)', () => {
+    controller.setBodyDisplayStates(
+      new Map([
+        ['body-0', { hidden: false, repColor: null }],
+        ['body-1', { hidden: true, repColor: null }],
+      ]),
+    );
+    expect(fullMesh(controller, 'body-1')?.visible).toBe(false);
+    expect(boxMesh(controller, 'body-1')).toBeUndefined();
+    expect(fullMesh(controller, 'body-0')?.visible).toBe(true);
+  });
+
+  it('restores a previously-boxed body to full detail (isolate → re-plan)', () => {
+    controller.setBodyDisplayStates(
+      new Map([['body-0', { hidden: false, repColor: 'blue' }]]),
+    );
+    expect(fullMesh(controller, 'body-0')?.visible).toBe(false);
+    // isolating drops the load → body-0 no longer boxed
+    controller.setBodyDisplayStates(
+      new Map([['body-0', { hidden: false, repColor: null }]]),
+    );
+    expect(fullMesh(controller, 'body-0')?.visible).toBe(true);
+    expect(boxMesh(controller, 'body-0')).toBeUndefined();
+  });
+
+  it('clears simplified reps when a new model loads', () => {
+    controller.setBodyDisplayStates(
+      new Map([['body-0', { hidden: false, repColor: 'blue' }]]),
+    );
+    controller.loadModel(syntheticModel(1));
+    expect(boxMesh(controller, 'body-0')).toBeUndefined();
+  });
+});
+
 function highlightTriangleCount(controller: CadSceneController): number {
   let triangles = 0;
   controller.scene.traverse((obj) => {
