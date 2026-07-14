@@ -17,6 +17,11 @@ const fetchFileBytes = vi.fn();
 // effect (keyed on `api`) runs once. A fresh object per render would re-fire it
 // on every re-render and clobber viewer state (e.g. an isolate selection).
 const partsApiValue = { fetchFileBytes };
+vi.mock('../../collab/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../collab/api')>()),
+  useCollabApi: () => new Proxy({}, { get: () => () => Promise.resolve([]) }),
+}));
+
 vi.mock('../../parts/api', () => ({
   usePartsApi: () => partsApiValue,
 }));
