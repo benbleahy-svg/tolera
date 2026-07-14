@@ -271,6 +271,16 @@ describe('CadViewerPage — display options (M2.9 gear)', () => {
     expect(screen.getByRole('button', { name: 'Imperial (in)' })).toBeInTheDocument();
   });
 
+  it('closes the popover on Escape', async () => {
+    loadMesh.mockResolvedValue(cube10());
+    await renderWithProviders(<CadViewerPage file={file} />);
+    await screen.findByText('Würfel');
+    await openGear();
+    expect(screen.getByRole('button', { name: 'Imperial (in)' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: 'Imperial (in)' })).not.toBeInTheDocument();
+  });
+
   it('flips dims/area/volume/weight to imperial when toggled', async () => {
     loadMesh.mockResolvedValue(cube10());
     await renderWithProviders(<CadViewerPage file={file} densityGCm3={7.85} />);

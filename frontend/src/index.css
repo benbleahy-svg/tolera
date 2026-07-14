@@ -144,11 +144,14 @@ tr.est-missing-rate td {
 .cad-tree-body-hidden { opacity: 0.5; }
 .cad-tree-showall { margin-bottom: 0.4rem; font-size: 0.75rem; }
 /* blue = collection over budget, orange = single body over budget (SS: cube tree icons) */
-.cad-tree-icon { font-size: 0.85rem; line-height: 1; }
+.cad-tree-icon { display: inline-flex; align-items: center; line-height: 1; }
+.cad-tree-icon svg { display: block; }
 .cad-tree-icon-blue { color: #3b82f6; }
 .cad-tree-icon-orange { color: #f59e0b; }
 /* display-options gear + popover (SS: gear top-right of the viewer) */
 .cad-display-options { position: relative; margin-left: auto; }
+.cad-gear { font-size: 1rem; line-height: 1; padding: 0.2rem 0.45rem; }
+.cad-gear[aria-expanded='true'] { outline: 2px solid var(--accent, #d6409f); }
 .cad-display-popover { position: absolute; right: 0; top: calc(100% + 0.35rem); z-index: 5; display: grid; gap: 0.6rem; min-width: 12rem; padding: 0.75rem; background: var(--surface, #fff); border: 1px solid var(--border, #d0d4da); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
 .cad-display-popover fieldset { border: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
 .cad-display-popover legend { padding: 0; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted, #667085); }

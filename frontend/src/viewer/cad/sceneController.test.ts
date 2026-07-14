@@ -247,6 +247,22 @@ describe('CadSceneController — simplified reps & isolate (M2.9)', () => {
     controller.loadModel(syntheticModel(1));
     expect(boxMesh(controller, 'body-0')).toBeUndefined();
   });
+
+  it('does not pick a hidden (isolated/boxed-out) body', () => {
+    const rc = new THREE.Raycaster();
+    // straight down at (2,2) through the body-0 triangle in z=0
+    rc.set(new THREE.Vector3(2, 2, 10), new THREE.Vector3(0, 0, -1));
+    // visible → the face is pickable
+    expect(controller.pick(rc)).toEqual({ kind: 'face', bodyId: 'body-0', index: 0 });
+    // isolate it out (hidden) → the visibility guard skips it
+    controller.setBodyDisplayStates(
+      new Map([
+        ['body-0', { hidden: true, repColor: null }],
+        ['body-1', { hidden: true, repColor: null }],
+      ]),
+    );
+    expect(controller.pick(rc)).toBeNull();
+  });
 });
 
 function highlightTriangleCount(controller: CadSceneController): number {

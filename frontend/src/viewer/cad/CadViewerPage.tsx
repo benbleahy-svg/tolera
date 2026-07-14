@@ -246,6 +246,16 @@ export function CadViewerPage({
     controllerRef.current?.setNativeColors(nativeColors);
   }, [nativeColors, model]);
 
+  // Escape closes the display-options popover (standard popover affordance).
+  useEffect(() => {
+    if (!gearOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setGearOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [gearOpen]);
+
   const setRenderMode = (mode: RenderMode) => {
     controllerRef.current?.setRenderMode(mode);
     setRenderModeState(mode);
@@ -381,13 +391,25 @@ export function CadViewerPage({
                 {bodies.map((body, i) => {
                   const rep = repByBody.get(body.id);
                   const isolatedOut = isolatedBodyId != null && body.id !== isolatedBodyId;
+                  const name = body.name || t('viewer.cad_body_fallback', { n: i + 1 });
+                  const repLabel = rep
+                    ? t(rep === 'orange' ? 'viewer.cad_simplified_orange' : 'viewer.cad_simplified_blue')
+                    : null;
                   return (
                     <li key={body.id}>
                       <button
                         type="button"
                         className={`cad-tree-body${isolatedOut ? ' cad-tree-body-hidden' : ''}`}
                         aria-pressed={isolatedBodyId === body.id}
-                        title={t('viewer.cad_isolate')}
+                        // the rep meaning lives in the aria-hidden cube's title; surface it
+                        // to assistive tech via the button's accessible name when boxed
+                        aria-label={repLabel ? `${name} — ${repLabel}` : undefined}
+                        // tooltip mirrors the toggle: an isolated body's click un-isolates it
+                        title={
+                          isolatedBodyId === body.id
+                            ? t('viewer.cad_show_all')
+                            : t('viewer.cad_isolate')
+                        }
                         onClick={() => toggleIsolate(body.id)}
                       >
                         {rep && (
@@ -400,10 +422,15 @@ export function CadViewerPage({
                                 : 'viewer.cad_simplified_blue',
                             )}
                           >
-                            ▪
+                            {/* simplified-rep cube (blue/orange) — colour from currentColor */}
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                              <path d="M12 2 L21 7 L12 12 L3 7 Z" opacity="0.95" />
+                              <path d="M3 7 L12 12 L12 22 L3 17 Z" opacity="0.6" />
+                              <path d="M21 7 L12 12 L12 22 L21 17 Z" opacity="0.78" />
+                            </svg>
                           </span>
                         )}
-                        {body.name || t('viewer.cad_body_fallback', { n: i + 1 })}
+                        {name}
                       </button>
                     </li>
                   );

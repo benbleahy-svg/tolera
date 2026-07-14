@@ -20,7 +20,7 @@ const MM3_PER_IN3 = MM_PER_IN * MM_PER_IN * MM_PER_IN; // 16387.064
 const MM3_PER_CM3 = 1000;
 const LB_PER_KG = 2.2046226218;
 
-/** Whole-degree precision floor for mass — see module note. */
+/** Minimum decimal places for mass — see module note (grams on small parts). */
 const MASS_DECIMAL_FLOOR = 3;
 
 export type UnitSystem = 'metric' | 'imperial';
@@ -38,6 +38,24 @@ export interface DisplayOptions {
   precision?: number;
 }
 
+/**
+ * How one quantity converts + labels in each system. The base value (mm, mm²,
+ * mm³, kg) is multiplied by the active system's factor and suffixed with its
+ * unit — the single knob that removes the metric/imperial branch from every
+ * format function.
+ */
+interface UnitSpec {
+  metricFactor: number;
+  metricUnit: string;
+  imperialFactor: number;
+  imperialUnit: string;
+}
+
+const LENGTH: UnitSpec = { metricFactor: 1, metricUnit: 'mm', imperialFactor: 1 / MM_PER_IN, imperialUnit: 'in' };
+const AREA: UnitSpec = { metricFactor: 1, metricUnit: 'mm²', imperialFactor: 1 / MM2_PER_IN2, imperialUnit: 'in²' };
+const VOLUME: UnitSpec = { metricFactor: 1 / MM3_PER_CM3, metricUnit: 'cm³', imperialFactor: 1 / MM3_PER_IN3, imperialUnit: 'in³' };
+const MASS: UnitSpec = { metricFactor: 1, metricUnit: 'kg', imperialFactor: LB_PER_KG, imperialUnit: 'lb' };
+
 /** Map the app's i18n language to a number-formatting locale (comma vs point). */
 function localeTag(language: string): string {
   return language.startsWith('de') ? 'de-DE' : 'en-IE';
@@ -51,40 +69,37 @@ function fixed(value: number | null, language: string, digits: number): string |
   }).format(value);
 }
 
-function system(opts: DisplayOptions): UnitSystem {
-  return opts.system ?? 'metric';
-}
-
 function precision(opts: DisplayOptions): number {
   return opts.precision ?? 2;
 }
 
+/** Convert a base-unit value to the active system, format it, and append the unit. */
+function formatQuantity(
+  base: number | null,
+  opts: DisplayOptions,
+  spec: UnitSpec,
+  digits: number,
+): string {
+  const imperial = (opts.system ?? 'metric') === 'imperial';
+  const value = base != null ? base * (imperial ? spec.imperialFactor : spec.metricFactor) : null;
+  const formatted = fixed(value, opts.language, digits);
+  return formatted != null ? `${formatted} ${imperial ? spec.imperialUnit : spec.metricUnit}` : EM_DASH;
+}
+
 export function formatLength(mm: number | null, opts: DisplayOptions): string {
-  const imperial = system(opts) === 'imperial';
-  const value = mm != null ? (imperial ? mm / MM_PER_IN : mm) : null;
-  return fixed(value, opts.language, precision(opts))?.concat(imperial ? ' in' : ' mm') ?? EM_DASH;
+  return formatQuantity(mm, opts, LENGTH, precision(opts));
 }
 
 export function formatArea(mm2: number | null, opts: DisplayOptions): string {
-  const imperial = system(opts) === 'imperial';
-  const value = mm2 != null ? (imperial ? mm2 / MM2_PER_IN2 : mm2) : null;
-  return (
-    fixed(value, opts.language, precision(opts))?.concat(imperial ? ' in²' : ' mm²') ?? EM_DASH
-  );
+  return formatQuantity(mm2, opts, AREA, precision(opts));
 }
 
 export function formatVolume(mm3: number | null, opts: DisplayOptions): string {
-  if (mm3 == null || !Number.isFinite(mm3)) return EM_DASH;
-  const imperial = system(opts) === 'imperial';
-  const value = imperial ? mm3 / MM3_PER_IN3 : mm3 / MM3_PER_CM3;
-  return `${fixed(value, opts.language, precision(opts))} ${imperial ? 'in³' : 'cm³'}`;
+  return formatQuantity(mm3, opts, VOLUME, precision(opts));
 }
 
 export function formatMass(kg: number | null, opts: DisplayOptions): string {
-  const imperial = system(opts) === 'imperial';
-  const value = kg != null ? (imperial ? kg * LB_PER_KG : kg) : null;
-  const digits = Math.max(precision(opts), MASS_DECIMAL_FLOOR);
-  return fixed(value, opts.language, digits)?.concat(imperial ? ' lb' : ' kg') ?? EM_DASH;
+  return formatQuantity(kg, opts, MASS, Math.max(precision(opts), MASS_DECIMAL_FLOOR));
 }
 
 export function formatAngle(deg: number | null, opts: DisplayOptions): string {
