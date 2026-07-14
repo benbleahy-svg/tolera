@@ -29,6 +29,7 @@ file must never surface (cross-org test-plan case).
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -41,10 +42,11 @@ from .authz import Permission, require
 from .costing import recalculate_component
 from .deps import get_session
 from .errors import AppError
-from .models import Component, Operation, Part, PartFile, Quote, QuoteItem
+from .file_types import FileCategory, primary_rank
+from .models import Component, FileRole, Node, Operation, Part, PartFile, Quote, QuoteItem
 from .operations import ComponentCosting, _component_costing, _get_component_or_404
 from .operations import _lock_editable_quote as _lock_editable_quote_of
-from .parts import _get_part_or_404
+from .parts import PartOut, _get_part_or_404, _part_out
 
 library_router = APIRouter(prefix="/api", tags=["part-library"])
 
@@ -341,6 +343,94 @@ class ImportRouterIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_component_id: uuid.UUID
+
+
+# --------------------------------------------------------------------------- #
+# Merge Parts as Supporting Files (KB navigate-and-manage-the-part-library)
+# --------------------------------------------------------------------------- #
+class MergePartsIn(BaseModel):
+    """Merge N parts into one: the primary part keeps its identity; every other
+    part's files move onto it as SUPPORTING files."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    part_ids: list[uuid.UUID]
+    primary_part_id: uuid.UUID
+
+
+@library_router.post("/parts/merge")
+async def merge_parts(
+    payload: MergePartsIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> PartOut:
+    """Merge selected parts as supporting files of the chosen primary part.
+
+    The KB flow for a print/model pair whose names didn't auto-bundle
+    (``5-X-9__B.pdf`` + ``5-X-9.STEP``). Source parts are emptied and leave
+    the library (soft-deleted — irreversible, like the delete lifecycle).
+    A source that is referenced by a quote or a BOM refuses the merge: its
+    quote/BOM context must not silently lose its part."""
+    ids = list(dict.fromkeys(payload.part_ids))  # de-dupe, keep order
+    if len(ids) < 2:
+        raise AppError("invalid_merge", "Select at least two parts.", status_code=422)
+    if payload.primary_part_id not in ids:
+        raise AppError(
+            "invalid_merge", "The primary part must be among the selected parts.", status_code=422
+        )
+    parts = (
+        await session.scalars(
+            select(Part).where(Part.id.in_(ids), Part.deleted_at.is_(None)).with_for_update()
+        )
+    ).all()
+    if len(parts) != len(ids):
+        raise AppError("not_found", "Part not found.", status_code=404)
+    primary_part = next(p for p in parts if p.id == payload.primary_part_id)
+    source_ids = [p.id for p in parts if p.id != primary_part.id]
+
+    # Guard: a quoted part (Component) or a BOM child (non-root Node) stays.
+    in_use = await session.scalar(
+        select(func.count()).select_from(Component).where(Component.part_id.in_(source_ids))
+    )
+    in_bom = await session.scalar(
+        select(func.count())
+        .select_from(Node)
+        .where(Node.part_id.in_(source_ids), Node.parent_node_id.is_not(None))
+    )
+    if in_use or in_bom:
+        raise AppError(
+            "part_in_use",
+            "A selected part is used by a quote or BOM and cannot be merged away.",
+            status_code=409,
+        )
+
+    for source in parts:
+        if source.id == primary_part.id:
+            continue
+        source.primary_file_id = None  # release the composite FK before moving
+    await session.flush()
+    moved = (
+        await session.scalars(
+            select(PartFile).where(PartFile.part_id.in_(source_ids)).with_for_update()
+        )
+    ).all()
+    for pf in moved:
+        pf.part_id = primary_part.id
+        pf.role = FileRole.supporting
+    await session.flush()
+
+    # If the primary part had no PRIMARY file, the best moved file takes it.
+    if primary_part.primary_file_id is None and moved:
+        winner = max(moved, key=lambda r: primary_rank(FileCategory(r.file_type)))
+        winner.role = FileRole.primary
+        primary_part.primary_file_id = winner.id
+
+    now = datetime.now(UTC)
+    for source in parts:
+        if source.id != primary_part.id:
+            source.deleted_at = now
+    await session.flush()
+    return _part_out(primary_part)
 
 
 @library_router.post("/components/{component_id}/import-router")

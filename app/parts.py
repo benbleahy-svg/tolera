@@ -52,6 +52,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
+from sqlalchemy import or_ as sa_or
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,6 +78,7 @@ from .file_types import (
     sniff_matches_extension,
 )
 from .models import (
+    Component,
     FileAnnotationLayer,
     FileRole,
     Node,
@@ -84,6 +86,7 @@ from .models import (
     Part,
     PartFile,
     PartGeometry,
+    Process,
 )
 from .part_index import (
     STEP_SCAN_BYTES,
@@ -118,6 +121,10 @@ class PartOut(BaseModel):
     archived: bool
     created_at: datetime
     updated_at: datetime
+    # Library-card fields (M2.12): filled by the list endpoint, None elsewhere.
+    primary_filename: str | None = None
+    primary_file_type: str | None = None
+    process: str | None = None  # latest quoted process name
 
 
 class PartUpdate(BaseModel):
@@ -430,18 +437,84 @@ async def create_part(
 @parts_router.get("")
 async def list_parts(
     session: Annotated[AsyncSession, Depends(get_session)],
-    include_archived: Annotated[bool, Query()] = False,
+    tab: Annotated[Literal["team", "archived"], Query()] = "team",
+    q: Annotated[str | None, Query(max_length=200)] = None,
     limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PartOut]:
-    """List the active org's parts (RLS-scoped). Deleted parts never list;
-    archived ones only with ``include_archived`` (the Archived tab)."""
+    """The Part Library listing (M2.12, spec#partlib). RLS-scoped; deleted
+    parts never list; ``tab`` picks Team Parts vs Archived.
+
+    ``q`` searches identity (part#/name/revision), filenames, and the full
+    text of uploaded PDFs (``pdf_text``) — what makes a part findable by a
+    string that exists only in a drawing title block."""
     stmt = select(Part).where(Part.deleted_at.is_(None))
-    if not include_archived:
+    if tab == "team":
         stmt = stmt.where(Part.archived_at.is_(None))
+    else:
+        stmt = stmt.where(Part.archived_at.is_not(None))
+    if q:
+        pattern = f"%{q}%"
+        tsvector = func.to_tsvector("simple", func.coalesce(PartFile.pdf_text, ""))
+        file_match = (
+            select(PartFile.id)
+            .where(
+                PartFile.part_id == Part.id,
+                sa_or(
+                    PartFile.filename.ilike(pattern),
+                    # FTS ('simple' config — no German stemming, part numbers
+                    # survive) + an ILIKE guard for tokenizer-hostile strings
+                    # like Werkstoffnummern; fine unindexed at pilot scale.
+                    tsvector.op("@@")(func.plainto_tsquery("simple", q)),
+                    PartFile.pdf_text.ilike(pattern),
+                ),
+            )
+            .exists()
+        )
+        stmt = stmt.where(
+            sa_or(
+                Part.part_number.ilike(pattern),
+                Part.name.ilike(pattern),
+                Part.revision.ilike(pattern),
+                file_match,
+            )
+        )
     stmt = stmt.order_by(Part.created_at.desc()).limit(limit).offset(offset)
-    result = await session.execute(stmt)
-    return [_part_out(p) for p in result.scalars()]
+    parts = list((await session.scalars(stmt)).all())
+    cards = [_part_out(p) for p in parts]
+    await _fill_card_fields(session, parts, cards)
+    return cards
+
+
+async def _fill_card_fields(session: AsyncSession, parts: list[Part], cards: list[PartOut]) -> None:
+    """Batch-fill the library-card extras: primary file + latest quoted process."""
+    ids = [p.id for p in parts]
+    if not ids:
+        return
+    primary_rows = (
+        await session.execute(
+            select(PartFile.part_id, PartFile.filename, PartFile.file_type).where(
+                PartFile.part_id.in_(ids), PartFile.role == FileRole.primary
+            )
+        )
+    ).all()
+    primaries = {row[0]: (row[1], row[2]) for row in primary_rows}
+    # Latest quoted process per part (DISTINCT ON) — parts never quoted stay None.
+    process_rows = (
+        await session.execute(
+            select(Component.part_id, Process.name)
+            .join(Process, Process.id == Component.process_id)
+            .where(Component.part_id.in_(ids))
+            .order_by(Component.part_id, Component.created_at.desc())
+            .distinct(Component.part_id)
+        )
+    ).all()
+    processes = {row[0]: row[1] for row in process_rows}
+    for card in cards:
+        filename, file_type = primaries.get(card.id, (None, None))
+        card.primary_filename = filename
+        card.primary_file_type = file_type
+        card.process = processes.get(card.id)
 
 
 # Registered BEFORE the /{part_id} routes so "upload" is never parsed as a UUID.

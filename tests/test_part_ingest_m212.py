@@ -11,16 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.celery_app import celery_app
 from app.models import MembershipRole
 from app.part_index import normalize_filename
 from tests.conftest import Seeder, authed
@@ -30,21 +27,6 @@ STEP_BYTES = (FIXTURES / "cad" / "cube-20mm.step").read_bytes()
 PDF_BYTES = (FIXTURES / "drawings" / "halter-4711-rev-b.pdf").read_bytes()
 
 ADMIN = [MembershipRole.admin]
-
-
-@pytest.fixture
-def eager_celery() -> Iterator[None]:
-    saved = {
-        key: celery_app.conf[key]
-        for key in ("task_always_eager", "task_store_eager_result", "task_eager_propagates")
-    }
-    celery_app.conf.update(
-        task_always_eager=True, task_store_eager_result=True, task_eager_propagates=True
-    )
-    try:
-        yield
-    finally:
-        celery_app.conf.update(**saved)
 
 
 def _org_with_admin(seeder: Seeder, slug: str) -> tuple[Any, Any]:

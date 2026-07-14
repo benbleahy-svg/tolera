@@ -699,3 +699,21 @@ def authed(
         yield
     finally:
         app.dependency_overrides.pop(get_principal, None)
+
+
+@pytest.fixture
+def eager_celery() -> Iterator[None]:
+    """Run Celery tasks eagerly in-process (M2.5/M2.12 async-work tests)."""
+    from app.celery_app import celery_app
+
+    saved = {
+        key: celery_app.conf[key]
+        for key in ("task_always_eager", "task_store_eager_result", "task_eager_propagates")
+    }
+    celery_app.conf.update(
+        task_always_eager=True, task_store_eager_result=True, task_eager_propagates=True
+    )
+    try:
+        yield
+    finally:
+        celery_app.conf.update(**saved)
