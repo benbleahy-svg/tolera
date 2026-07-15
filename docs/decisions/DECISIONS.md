@@ -828,6 +828,14 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Recommended default:** **(b)** — the sub-spec's "renders what GeometryService tessellates" already points there. M2.6 therefore keeps the mesh source behind an async `MeshProvider` seam (worker-based occt-import-js today, swappable without touching scene/UI code), and nothing occt-import-js-specific is persisted. **Until this is resolved, face/entity ids from the client tessellation are opaque and transient — valid only within one loaded viewer session; M2.7 must present them as such and M2.11 must NOT persist them** (or must gate persistence on this decision landing first). Decide at the M4 grill, before M2.11 face-bound annotations ship if M2.11 lands first.
 **Affects:** M2.6 (seam only), M2.7 (face/entity id shape), M2.11 (persisted annotation binding), M4 (tessellation endpoint + feature→face map).
 
+## [2026-07-15] Lens correction storage — per-tenant only in v1; add-missing findings are born accepted (M3.2)
+
+**Status:** RESOLVED (autonomous, per the sub-spec's own stated default; flag for Benjamin's review)
+**Question:** AI-LENS-ENGINE §7 requires the training loop (`mark_inaccurate` / `replace` / add-missing → `{finding, predicted, corrected, tenant, file_ref, source_region}`) and says "decide storage scope: per-tenant by default; global only on opt-in/anonymized (log in DECISIONS.md)" — the log entry did not yet exist. Secondary: what status does a user-typed "add missing extraction" finding get?
+**Decision:** **Per-tenant only.** `extraction_correction` (migration 0021) is an org-scoped RLS table like every domain table; no global/anonymised pool, no anonymisation pipeline, no schema for it in v1 — that path is a later **opt-in** feature and lands additively when built. FK semantics: corrections **CASCADE with their source file** (they carry print content; file deletion is GDPR erasure, the 0020 reasoning) but **survive their finding** (`finding_id` SET NULL, `predicted` snapshot keeps the payload) because they feed the M3.11 eval set. Secondary: an add-missing finding is created with **`status=accepted`, confidence 1.0** — it is human ground truth, immediately usable, and the M3.1 replace-suggested re-run contract can never wipe it.
+**Resolved:** 2026-07-15 (/block M3.2 grill)
+**Affects:** M3.2 (schema + endpoints), M3.11 (eval harness reads corrections), AI & Automation Settings (future global-share opt-in toggle).
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*
