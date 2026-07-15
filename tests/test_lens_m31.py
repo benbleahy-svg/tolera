@@ -540,7 +540,11 @@ class TestExtractionEndpoint:
         with authed(app_client, user_id=admin_a, org_id=org_a, roles=ADMIN):
             part_id = _create_part(app_client)
             file_id = _upload_pdf(app_client, part_id, "halter-4711-rev-b.pdf", HALTER_PDF)
-            assert _run_extraction(app_client, part_id, file_id)["state"] == "succeeded"
+            started = app_client.post(f"/api/parts/{part_id}/files/{file_id}/extract")
+            assert started.status_code == 202, started.text
+            task_id = started.json()["task_id"]
+            status_path = f"/api/parts/{part_id}/files/{file_id}/extract/{task_id}"
+            assert app_client.get(status_path).json()["state"] == "succeeded"
 
         with authed(app_client, user_id=admin_b, org_id=org_b, roles=ADMIN):
             assert (
@@ -549,6 +553,9 @@ class TestExtractionEndpoint:
             assert (
                 app_client.get(f"/api/parts/{part_id}/files/{file_id}/findings").status_code == 404
             )
+            # A stolen/guessed task id is equally dead: the org/file gate 404s
+            # before any task state is consulted.
+            assert app_client.get(status_path).status_code == 404
 
     def test_non_extractable_upload_is_rejected_at_the_edge(
         self,

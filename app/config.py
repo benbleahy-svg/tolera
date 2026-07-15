@@ -138,9 +138,12 @@ class Settings(BaseSettings):
     lens_provider: str = "anthropic"
     lens_model: str = "claude-opus-4-8"
     anthropic_api_key: str = ""
-    # EU/GDPR data-residency routing for the DPA default path (DACH delta).
-    # Passed through as the API's `inference_geo`; empty = provider default.
-    lens_inference_geo: str = "eu"
+    # Inference-region routing for the DPA default path (DACH delta). Passed
+    # through as the API's `inference_geo`; empty = provider default. The API
+    # accepts only "us" | "global" today (no EU geo yet — verified 2026-07-15;
+    # DECISIONS.md), so the GDPR basis is the zero-data-retention DPA (spec
+    # #ai-settings) and this stays the seam to flip when an EU geo ships.
+    lens_inference_geo: str = ""
 
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"

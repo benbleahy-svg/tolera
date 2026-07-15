@@ -312,6 +312,9 @@ def _status_from_result(result: AsyncResult, file_id: uuid.UUID) -> ExtractStatu
         # answer as an unknown id. Strict key-required binding (tighter than
         # the M2.5 form) — every dict this task stores carries file_id.
         raise AppError("not_found", "Task not found.", status_code=status.HTTP_404_NOT_FOUND)
+    if state == "SUCCESS" and not isinstance(info, dict):
+        # A foreign task's plain return value — unbindable, answer as unknown.
+        raise AppError("not_found", "Task not found.", status_code=status.HTTP_404_NOT_FOUND)
     if state == "SUCCESS":
         if info.get("failed"):
             return ExtractStatusOut(

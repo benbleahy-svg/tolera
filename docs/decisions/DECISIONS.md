@@ -793,6 +793,13 @@ The check runs through the org-pinned session, so it reads only the active org's
 
 ---
 
+## [2026-07-15] Lens EU inference routing — DPA carries compliance; `inference_geo` seam defaults to provider default (M3.1)
+**Status:** RESOLVED (autonomous, low-stakes config default; flag for Benjamin's review)
+**Question:** The Lens spec (`#lens-models` DACH) wants the default extraction path on "an EU-region LLM under a DPA/AVV". The Anthropic API's `inference_geo` parameter accepts only `"us"` and `"global"` today — there is no EU geo (verified 2026-07-15 against the platform data-residency docs; a `"eu"` value would 400 every live request).
+**Decision:** The GDPR/AVV basis for the default path is the **zero-data-retention DPA with Anthropic as subprocessor** — exactly what tier-2 spec `#ai-settings` already states ("Anthropic Claude API under a zero-data-retention agreement… listed as a subprocessor in your DPA"). `Settings.lens_inference_geo` ships as the configurable seam, **default empty** (provider default); flip it the day Anthropic ships an EU geo. Unaffected and stronger: the export-control restricted path — a dual-use-flagged part's file never reaches ANY provider (enforced + gated by test).
+**Resolved:** 2026-07-15 (/block M3.1 ship review; CodeRabbit flagged the invalid `"eu"` default)
+**Affects:** M3.1 (Settings default), M3.3/M3.9/M3.10 (same provider seam), AI & Automation Settings block (surfaces the region setting).
+
 ## [2026-07-15] Job-status polling stays feature-scoped (resolves 2026-07-13 OPEN)
 **Status:** RESOLVED (autonomous, per the OPEN's own recommended default; flag for Benjamin's review)
 **Question:** (was OPEN 2026-07-13) M2.5's split status lives at `GET /api/parts/{part_id}/files/{file_id}/split/{task_id}` — feature-scoped, tenancy-checked through the org-scoped file lookup plus task-meta binding. M3 (Lens extraction) and M4 (GeometryService interrogation) also run long Celery jobs the UI must poll: scoped endpoints each, or a generic `/api/jobs/{id}`?

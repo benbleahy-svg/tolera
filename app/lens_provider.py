@@ -27,6 +27,10 @@ from .lens import PROMPT_VERSION, LensProvider, RawFinding
 
 logger = logging.getLogger("app.lens_provider")
 
+#: The Claude API caps requests at 32 MB; base64 expands the PDF by 4/3, so a
+#: raw document above ~24 MB cannot fit regardless of prompt size.
+MAX_PROVIDER_PDF_BYTES = 24 * 1024 * 1024
+
 
 class LensProviderError(Exception):
     """A deterministic model outcome (refusal, truncation, malformed JSON) —
@@ -219,6 +223,11 @@ class AnthropicLensProvider:
         self._inference_geo = inference_geo
 
     async def _ask(self, prompt: str, pdf: bytes, schema: dict[str, Any]) -> dict[str, Any]:
+        if len(pdf) > MAX_PROVIDER_PDF_BYTES:
+            # 200 MB uploads are allowed platform-wide, but the provider's
+            # request ceiling is 32 MB and base64 expands by 4/3 — cap BEFORE
+            # encoding so a big drawing pack can't balloon worker memory.
+            raise LensProviderError("provider_document_too_large")
         params: dict[str, Any] = {
             "model": self._model,
             "max_tokens": 16000,
@@ -253,9 +262,13 @@ class AnthropicLensProvider:
         if text is None:
             raise LensProviderError("provider_empty_response")
         try:
-            return dict(json.loads(text))
-        except (json.JSONDecodeError, TypeError) as exc:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
             raise LensProviderError("provider_invalid_json") from exc
+        if not isinstance(payload, dict):
+            # json.loads can yield a list/scalar — same deterministic bucket.
+            raise LensProviderError("provider_invalid_json")
+        return payload
 
     def _parse_findings(self, payload: dict[str, Any]) -> list[RawFinding]:
         findings: list[RawFinding] = []

@@ -228,7 +228,11 @@ class Seeder:
 
     def sql(self, statement: str, params: dict[str, object] | None = None) -> None:
         """Run one raw statement as the owner (bypasses RLS) — for planting
-        states no API mutates yet (e.g. an accepted finding before M3.2)."""
+        states no API mutates yet (e.g. an accepted finding before M3.2).
+
+        This connection sees every org: callers must self-scope the statement
+        (target rows by primary key, or filter by the intended ``org_id``) —
+        the same convention ``_status_events`` follows on the owner engine."""
 
         async def _run() -> None:
             async with self._engine.begin() as conn:

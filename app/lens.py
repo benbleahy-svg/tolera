@@ -16,6 +16,7 @@ Found-in-Files panel (M3.2) and Rules signals (M3.7) — never Kalk costing
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from dataclasses import dataclass
@@ -200,15 +201,23 @@ def _apply_document_units(findings: list[RawFinding]) -> None:
 
 
 async def run_document_extraction(provider: LensProvider, pdf: bytes) -> ExtractionRunResult:
-    """The two-pass extractor over one text-extractable PDF (first 10 pages)."""
+    """The two-pass extractor over one text-extractable PDF (first 10 pages).
+
+    Independent provider calls run concurrently (up to 12 round-trips on a
+    10-print-page pack would otherwise serialize into minutes of latency)."""
     all_texts = extract_page_texts(pdf)
     page_texts = all_texts[:MAX_EXTRACTION_PAGES]
 
-    findings = list(await provider.extract_quote_setup(pdf, page_texts))
-    is_print = await provider.classify_print_pages(pdf, page_texts)
+    quote_setup, is_print = await asyncio.gather(
+        provider.extract_quote_setup(pdf, page_texts),
+        provider.classify_print_pages(pdf, page_texts),
+    )
+    findings = list(quote_setup)
     print_pages = [no for no, flag in enumerate(is_print[: len(page_texts)], start=1) if flag]
-    for page_no in print_pages:
-        page_findings = await provider.extract_requirements(pdf, page_no, page_texts[page_no - 1])
+    per_page = await asyncio.gather(
+        *(provider.extract_requirements(pdf, no, page_texts[no - 1]) for no in print_pages)
+    )
+    for page_no, page_findings in zip(print_pages, per_page, strict=True):
         for finding in page_findings:
             if finding.page is None:
                 finding.page = page_no

@@ -2137,8 +2137,20 @@ class FindingStatus(enum.StrEnum):
     edited = "edited"
 
 
-_finding_category_enum = Enum(FindingCategory, name="finding_category", create_type=False)
-_finding_status_enum = Enum(FindingStatus, name="finding_status", create_type=False)
+# Map by .value (the _obtain_method_enum precedent) so a future name/value
+# divergence can't silently write the wrong label to the native enum.
+_finding_category_enum = Enum(
+    FindingCategory,
+    name="finding_category",
+    create_type=False,
+    values_callable=lambda enum_cls: [member.value for member in enum_cls],
+)
+_finding_status_enum = Enum(
+    FindingStatus,
+    name="finding_status",
+    create_type=False,
+    values_callable=lambda enum_cls: [member.value for member in enum_cls],
+)
 
 
 class ExtractionFinding(Base):

@@ -22,7 +22,7 @@ dependencies = [
     "pypdf>=6.14.2",
     # Explicit: SQLAlchemy's greenlet marker misses arm64 macOS, breaking fresh venvs.
     "greenlet>=3.5.2",
-    "anthropic>=0.116.0",
+    "anthropic>=0.116.0,<1",  # SDK allows breaking minors; uv.lock pins the exact build
 ]
 
 [dependency-groups]
