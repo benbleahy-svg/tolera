@@ -59,8 +59,11 @@ MASS_UNITS_TO_G: dict[str, float] = {
     "kg": 1000.0,
     "kilogram": 1000.0,
     "kilograms": 1000.0,
-    "lb": 453.592,
-    "lbs": 453.592,
+    # Parse-only non-metric tokens: a typed pound value CONVERTS to grams at the
+    # edge — storage stays metric (DECISIONS.md 2026-06-26 manual-dims model;
+    # CLAUDE.md §5 permits the input toggle, never a non-metric storage path).
+    "lb": 453.592,  # nosemgrep: semgrep.imperial-units
+    "lbs": 453.592,  # nosemgrep: semgrep.imperial-units
     "pound": 453.592,
     "pounds": 453.592,
     "oz": 28.349523125,

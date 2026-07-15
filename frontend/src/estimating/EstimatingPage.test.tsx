@@ -56,6 +56,10 @@ const getQuoteTotals = vi.fn(() =>
   }),
 );
 
+// The matches chip (M2.12) carries its own API hook — stub it out here; it has
+// its own tests in parts/MatchingParts.test.tsx.
+vi.mock('../parts/MatchingParts', () => ({ PartMatchesChip: () => null }));
+
 // Mock the estimating API module so the page never touches Clerk/network.
 vi.mock('./api', () => ({
   useEstimatingApi: () => ({

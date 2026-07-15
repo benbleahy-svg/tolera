@@ -19,6 +19,16 @@
 
 ---
 
+## [2026-07-15] M2.12 import-historical copy granularity + merge lifecycle shortcut
+
+**Status:** RESOLVED (autonomous, reversible app behavior; flag for Benjamin's review)
+**Question:** (1) Spec `#partlib` says selecting a match copies "its router, operations, and all manual overrides." Tolera's overrides live at three levels: operation columns (`manual_*_mins`), operation `variable_overrides` JSONB (incl. qty-keyed `{name: {"<qty>": value}}`), and per-quantity `QuoteCell.manual_cost`. Which travel? (2) `POST /api/parts/merge` removes emptied source parts — via Archived first (the lifecycle path) or directly?
+**Decision:** (1) The import copies the **operation rows wholesale** — `calc_*`/`manual_*` pairs, Kalk `cost_formula` snapshot, and the full `variable_overrides` JSONB (qty-keyed entries included: they are inputs bound to the op, and a non-matching qty key is simply never read). It **replaces** the target's router (import = reuse, not merge), and per-quantity `QuoteCell.manual_cost` values do **not** travel — cells are keyed to the target's own quantity breaks, which need not match the source's; the target's cells regenerate via `recalculate_component` (override-preserving on its own rows is moot since the rows are new). This is the boundary: *op-level overrides travel, cell-level ones don't.* (2) Merge soft-deletes emptied sources **directly** (skipping Archived) — they are empty husks whose files moved, not archivable history; the in-use guard (any `Component` or non-root `Node` reference → 409 `part_in_use`) keeps quoted/BOM parts un-mergeable. Note: that guard's race window is theoretical today (line items always mint fresh parts); when "add library part to quote" lands (spec Archived-tab flow), revisit with a DB-level guard.
+**Resolved:** 2026-07-15 (M2.12 autonomous build; flagged by fresh-eyes review)
+**Affects:** M2.12 (`app/part_library.py` import-router + merge), M4+ (add-library-part-to-quote must revisit the merge guard).
+
+---
+
 ## [2026-07-14] M2.8 exact-vs-approximate is fit-derived until M4 B-rep
 
 **Status:** RESOLVED (M2.8 grill; Benjamin delegated → "do what you recommend, verify against KB")

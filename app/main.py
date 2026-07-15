@@ -30,6 +30,7 @@ from .metrics import register_metrics
 from .middleware import MaxBodySizeMiddleware, RequestContextMiddleware
 from .notes import router as notes_router
 from .operations import operations_router
+from .part_library import library_router as part_library_router
 from .parts import parts_router
 from .pricing import pricing_router
 from .quotes import quotes_router
@@ -73,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(accounts_router)
     app.include_router(contacts_router)
     app.include_router(parts_router)
+    app.include_router(part_library_router)
     app.include_router(split_router)
     app.include_router(extract_router)
     app.include_router(quotes_router)
