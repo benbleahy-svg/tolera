@@ -8,6 +8,8 @@ import { DashboardPage } from './DashboardPage';
 const listTasks = vi.fn();
 const listMembers = vi.fn();
 const updateTask = vi.fn();
+const listNotifications = vi.fn();
+const markNotification = vi.fn();
 
 vi.mock('../collab/api', async () => {
   const actual = await vi.importActual<typeof import('../collab/api')>('../collab/api');
@@ -17,6 +19,8 @@ vi.mock('../collab/api', async () => {
       listTasks,
       listMembers,
       updateTask,
+      listNotifications,
+      markNotification,
       listChannels: vi.fn(),
       createChannel: vi.fn(),
       listMessages: vi.fn(),
@@ -24,8 +28,6 @@ vi.mock('../collab/api', async () => {
       editMessage: vi.fn(),
       deleteMessage: vi.fn(),
       assignTask: vi.fn(),
-      listNotifications: vi.fn(),
-      markNotification: vi.fn(),
     }),
   };
 });
@@ -56,6 +58,10 @@ describe('DashboardPage', () => {
     updateTask.mockReset();
     listMembers.mockResolvedValue(MEMBERS);
     updateTask.mockResolvedValue(task({ status: 'resolved' }));
+    listNotifications.mockReset();
+    markNotification.mockReset();
+    listNotifications.mockResolvedValue([]);
+    markNotification.mockResolvedValue({});
   });
 
   it('surfaces assigned tasks with assignee + status', async () => {
@@ -83,5 +89,53 @@ describe('DashboardPage', () => {
     await renderWithProviders(<DashboardPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'Erledigen' }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith('t1', 'resolved'));
+  });
+
+  it('renders the email-ingest notification with a quote link (M3.3)', async () => {
+    listTasks.mockResolvedValue([]);
+    listNotifications.mockResolvedValue([
+      {
+        id: 'n1',
+        kind: 'quote_email_ingested',
+        payload: { quote_id: 'q1', quote_number: '17', rfq_id: 'r1' },
+        read_at: null,
+        created_at: '2026-07-15T00:00:00Z',
+      },
+    ]);
+    await renderWithProviders(<DashboardPage />);
+
+    expect(
+      await screen.findByText(
+        'Neues Angebot aus E-Mail-Weiterleitung: Angebot #17 erstellt',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Angebot öffnen' })).toHaveAttribute(
+      'href',
+      '/quotes/q1',
+    );
+  });
+
+  it('marks a notification as read', async () => {
+    listTasks.mockResolvedValue([]);
+    listNotifications.mockResolvedValue([
+      {
+        id: 'n1',
+        kind: 'quote_email_ingested',
+        payload: { quote_id: 'q1', quote_number: '17' },
+        read_at: null,
+        created_at: '2026-07-15T00:00:00Z',
+      },
+    ]);
+    await renderWithProviders(<DashboardPage />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Als gelesen markieren' }),
+    );
+    await waitFor(() => expect(markNotification).toHaveBeenCalledWith('n1', true));
+  });
+
+  it('shows the notifications empty state', async () => {
+    listTasks.mockResolvedValue([]);
+    await renderWithProviders(<DashboardPage />);
+    expect(await screen.findByText('Keine Benachrichtigungen.')).toBeInTheDocument();
   });
 });

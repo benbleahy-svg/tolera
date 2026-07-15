@@ -16,7 +16,7 @@ celery_app = Celery(
     "tolera",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks", "app.file_split"],
+    include=["app.tasks", "app.file_split", "app.email_ingest"],
 )
 
 celery_app.conf.update(

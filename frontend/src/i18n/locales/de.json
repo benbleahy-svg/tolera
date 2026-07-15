@@ -612,7 +612,14 @@
     "reopen": "Wieder öffnen",
     "status_open": "Offen",
     "status_overdue": "Überfällig",
-    "status_resolved": "Erledigt"
+    "status_resolved": "Erledigt",
+    "notifications": "Benachrichtigungen",
+    "no_notifications": "Keine Benachrichtigungen.",
+    "mark_read": "Als gelesen markieren",
+    "open_quote": "Angebot öffnen",
+    "notif_quote_email": "Neues Angebot aus E-Mail-Weiterleitung: Angebot #{{number}} erstellt",
+    "notif_mention": "Sie wurden in einer Diskussion erwähnt",
+    "notif_task_assigned": "Ihnen wurde eine Aufgabe zugewiesen"
   },
   "lens": {
     "part_setup": "Teil einrichten",
