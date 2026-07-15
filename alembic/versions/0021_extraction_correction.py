@@ -52,7 +52,7 @@ def upgrade() -> None:
             id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             org_id uuid NOT NULL REFERENCES organization(id),
             finding_id uuid,
-            source_file_id uuid,
+            source_file_id uuid NOT NULL,
             correction_type correction_type NOT NULL,
             predicted jsonb,
             corrected jsonb,

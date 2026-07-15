@@ -2303,7 +2303,9 @@ class ExtractionCorrection(Base):
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = _org_fk()
     finding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    source_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # NOT NULL: the file is the label's GDPR lifecycle owner (CASCADE above) —
+    # an unanchored correction row would have no eraser.
+    source_file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     correction_type: Mapped[CorrectionType] = mapped_column(_correction_type_enum, nullable=False)
     # none_as_null: an explicit Python None must land as SQL NULL, not jsonb
     # 'null' — the shape CHECK tests IS NULL and would reject it otherwise.

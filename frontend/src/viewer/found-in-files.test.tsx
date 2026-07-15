@@ -173,6 +173,20 @@ describe('FoundInFilesPanel — AI-Governor gates', () => {
     );
   });
 
+  it('saves only dirty fields — untouched dims never become overrides', async () => {
+    updatePart.mockResolvedValue(PART);
+    await renderPanel([]);
+    await userEvent.click(screen.getByRole('tab', { name: 'Teilefelder' }));
+    const description = await screen.findByLabelText('Beschreibung');
+    await userEvent.type(description, 'Halter');
+    await userEvent.click(screen.getByRole('button', { name: 'Felder speichern' }));
+    await waitFor(() =>
+      expect(updatePart).toHaveBeenCalledWith('part-1', { description: 'Halter' }),
+    );
+    // Calc-vs-override: displayed-but-untouched dims are NOT written back.
+    expect(updateGeometry).not.toHaveBeenCalled();
+  });
+
   it('add-missing posts the typed callout (false-negative label)', async () => {
     addMissing.mockResolvedValue(finding({ id: 'new', status: 'accepted' }));
     await renderPanel([finding()]);

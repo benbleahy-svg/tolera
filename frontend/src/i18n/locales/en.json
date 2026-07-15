@@ -688,6 +688,7 @@
     "type_diameter": "Diameter",
     "type_datum": "Datum",
     "type_thread": "Thread",
-    "type_hole": "Hole"
+    "type_hole": "Hole",
+    "add_type_placeholder": "e.g. length"
   }
 }

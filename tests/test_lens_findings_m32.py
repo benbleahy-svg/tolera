@@ -350,6 +350,28 @@ class TestCorrections:
             assert rows[0]["predicted"]["value"] == "PP-1212-OO6"
             assert rows[0]["corrected"]["value"] == "PP-1212-006"
 
+    def test_predicted_provenance_survives_replace_chains(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """After a replace, a later reject must label the MODEL's original
+        output as predicted — never the human-edited value (eval-set purity)."""
+        org, admin, part_id, file_id = _setup(app_client, seeder, "m32-provenance")
+        finding_id = _plant_finding(seeder, org, file_id, value="MODEL-VALUE")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            base = f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}"
+            assert app_client.post(f"{base}/replace", json={"value": "HUMAN-1"}).status_code == 200
+            assert app_client.post(f"{base}/replace", json={"value": "HUMAN-2"}).status_code == 200
+            assert app_client.post(f"{base}/reject").status_code == 200
+            rows = self._corrections(app_client, part_id, file_id)
+            assert [r["correction_type"] for r in rows] == [
+                "replace",
+                "replace",
+                "mark_inaccurate",
+            ]
+            # Every label's `predicted` is the model's output, not human data.
+            assert all(r["predicted"]["value"] == "MODEL-VALUE" for r in rows)
+            assert rows[1]["corrected"]["value"] == "HUMAN-2"
+
     def test_replace_rejected_finding_is_409(self, app_client: TestClient, seeder: Seeder) -> None:
         org, admin, part_id, file_id = _setup(app_client, seeder, "m32-repl-rej")
         finding_id = _plant_finding(seeder, org, file_id, status="rejected")

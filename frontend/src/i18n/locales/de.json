@@ -688,6 +688,7 @@
     "type_diameter": "Durchmesser",
     "type_datum": "Bezug",
     "type_thread": "Gewinde",
-    "type_hole": "Bohrung"
+    "type_hole": "Bohrung",
+    "add_type_placeholder": "z. B. length"
   }
 }

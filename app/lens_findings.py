@@ -30,6 +30,7 @@ from .authz import Permission, require
 from .deps import get_session
 from .dimensions import DimensionError, evaluate_length
 from .errors import AppError
+from .lens import BboxSpec, GdtSpec, ToleranceSpec
 from .lens_extract import FindingOut, _get_part_and_file_or_404
 from .models import (
     CorrectionType,
@@ -69,28 +70,30 @@ class AcceptIn(BaseModel):
 class ReplaceIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    value: str
-    normalized_value: str | None = None
-    units: str | None = None
+    value: str = Field(min_length=1, max_length=500)
+    normalized_value: str | None = Field(None, max_length=500)
+    units: str | None = Field(None, max_length=16)
 
 
 class AddMissingIn(BaseModel):
     """A callout Lens missed — typed by the user, optionally with the drawn
-    region (page + bbox in the unrotated pdf-unit convention)."""
+    region (page + bbox in the unrotated pdf-unit convention). Nested payloads
+    are the M3.1 spec models — malformed shapes are rejected at the edge
+    (Pydantic v2, CLAUDE.md §5), never persisted as training labels."""
 
     model_config = ConfigDict(extra="forbid")
 
     category: FindingCategory
-    type: str = Field(min_length=1)
-    value: str | None = None
-    raw_text: str | None = None
-    normalized_value: str | None = None
-    units: str | None = None
-    tolerance: dict[str, Any] | None = None
-    role: str | None = None
-    gdt: dict[str, Any] | None = None
-    page: int | None = None
-    bbox: dict[str, Any] | None = None
+    type: str = Field(min_length=1, max_length=100)
+    value: str | None = Field(None, max_length=500)
+    raw_text: str | None = Field(None, max_length=2000)
+    normalized_value: str | None = Field(None, max_length=500)
+    units: str | None = Field(None, max_length=16)
+    tolerance: ToleranceSpec | None = None
+    role: str | None = Field(None, max_length=50)
+    gdt: GdtSpec | None = None
+    page: int | None = Field(None, ge=1)
+    bbox: BboxSpec | None = None
 
 
 class FindingActionOut(BaseModel):
@@ -101,7 +104,7 @@ class FindingActionOut(BaseModel):
 class CorrectionOut(BaseModel):
     id: uuid.UUID
     finding_id: uuid.UUID | None
-    source_file_id: uuid.UUID | None
+    source_file_id: uuid.UUID
     correction_type: str
     predicted: dict[str, Any] | None
     corrected: dict[str, Any] | None
@@ -128,6 +131,29 @@ def _finding_out(row: ExtractionFinding) -> FindingOut:
         confidence=float(row.confidence),
         status=row.status.value,
     )
+
+
+async def _predicted_for(session: AsyncSession, finding: ExtractionFinding) -> dict[str, Any]:
+    """The MODEL's prediction for this finding — never human-edited data.
+
+    A replace mutates the finding in place (status ``edited``), so a later
+    reject/replace must not snapshot the human value as "predicted" — that
+    would poison the M3.11 eval pairs. The first correction row for the
+    finding holds the original model output; reuse it once one exists.
+    """
+    if finding.status is FindingStatus.edited:
+        original = await session.scalar(
+            select(ExtractionCorrection.predicted)
+            .where(
+                ExtractionCorrection.finding_id == finding.id,
+                ExtractionCorrection.predicted.is_not(None),
+            )
+            .order_by(ExtractionCorrection.created_at)
+            .limit(1)
+        )
+        if original is not None:
+            return dict(original)
+    return _predicted_snapshot(finding)
 
 
 def _predicted_snapshot(row: ExtractionFinding) -> dict[str, Any]:
@@ -285,7 +311,7 @@ async def reject_finding(
                 finding_id=finding.id,
                 source_file_id=file_id,
                 correction_type=CorrectionType.mark_inaccurate,
-                predicted=_predicted_snapshot(finding),
+                predicted=await _predicted_for(session, finding),
                 corrected=None,
                 page=finding.page,
                 bbox=finding.bbox,
@@ -323,7 +349,7 @@ async def replace_finding(
             finding_id=finding.id,
             source_file_id=file_id,
             correction_type=CorrectionType.replace,
-            predicted=_predicted_snapshot(finding),
+            predicted=await _predicted_for(session, finding),
             corrected=corrected,
             page=finding.page,
             bbox=finding.bbox,
@@ -362,10 +388,10 @@ async def add_missing_finding(
         value=payload.value,
         normalized_value=payload.normalized_value,
         units=payload.units,
-        tolerance=payload.tolerance,
+        tolerance=payload.tolerance.model_dump() if payload.tolerance else None,
         role=payload.role,
-        gdt=payload.gdt,
-        bbox=payload.bbox,
+        gdt=payload.gdt.model_dump() if payload.gdt else None,
+        bbox=payload.bbox.model_dump() if payload.bbox else None,
         confidence=Decimal("1").quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
         status=FindingStatus.accepted,
     )
@@ -384,7 +410,7 @@ async def add_missing_finding(
             predicted=None,
             corrected=payload.model_dump(exclude_none=True),
             page=payload.page,
-            bbox=payload.bbox,
+            bbox=payload.bbox.model_dump() if payload.bbox else None,
             created_by=principal.user_id,
         )
     )

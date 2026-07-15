@@ -52,6 +52,9 @@ export function FoundInFilesPanel({ partId, fileId, filename, onLensWhiteoutsCha
   const [findings, setFindings] = useState<Finding[]>([]);
   const [part, setPart] = useState<Part | null>(null);
   const [extracting, setExtracting] = useState(false);
+  // One in-flight action at a time: replace/add-missing are not idempotent
+  // server-side, so a double-click must not mint duplicate labels.
+  const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [openChip, setOpenChip] = useState<string | null>(null);
   const [whiteoutOn, setWhiteoutOn] = useState<Set<SectionKey>>(new Set());
@@ -90,7 +93,15 @@ export function FoundInFilesPanel({ partId, fileId, filename, onLensWhiteoutsCha
     try {
       const { task_id } = await lensApi.extract(partId, fileId);
       const poll = async () => {
-        const status = await lensApi.extractStatus(partId, fileId, task_id);
+        let status;
+        try {
+          status = await lensApi.extractStatus(partId, fileId, task_id);
+        } catch {
+          // A failed poll must not strand the spinner (or reject unhandled).
+          setExtracting(false);
+          setNotice(t('lens.extract_failed'));
+          return;
+        }
         if (status.state === 'queued' || status.state === 'in_progress') {
           pollRef.current = window.setTimeout(() => void poll(), POLL_MS);
           return;
@@ -108,12 +119,16 @@ export function FoundInFilesPanel({ partId, fileId, filename, onLensWhiteoutsCha
   };
 
   const runAction = async (action: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(true);
     setNotice(null);
     try {
       await action();
       reload();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : t('lens.action_failed'));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -194,6 +209,7 @@ export function FoundInFilesPanel({ partId, fileId, filename, onLensWhiteoutsCha
                         key={chip.finding.id}
                         chip={chip}
                         filename={filename}
+                        busy={busy}
                         open={openChip === chip.finding.id}
                         onToggle={() =>
                           setOpenChip((cur) => (cur === chip.finding.id ? null : chip.finding.id))
@@ -212,7 +228,7 @@ export function FoundInFilesPanel({ partId, fileId, filename, onLensWhiteoutsCha
             {t('lens.add_missing')}
           </button>
           {addOpen && (
-            <AddMissingModal onSubmit={addMissing} onCancel={() => setAddOpen(false)} />
+            <AddMissingModal busy={busy} onSubmit={addMissing} onCancel={() => setAddOpen(false)} />
           )}
         </div>
       )}
@@ -228,6 +244,7 @@ export function FoundInFilesPanel({ partId, fileId, filename, onLensWhiteoutsCha
 function FindingChip({
   chip,
   filename,
+  busy,
   open,
   onToggle,
   onAccept,
@@ -236,6 +253,7 @@ function FindingChip({
 }: {
   chip: Chip;
   filename: string;
+  busy: boolean;
   open: boolean;
   onToggle: () => void;
   onAccept: (finding: Finding, applyTo?: IdentityType | Axis) => void;
@@ -273,7 +291,7 @@ function FindingChip({
           )}
           <div className="lens-popover-actions">
             {target.kind === 'identity' && canApply && (
-              <button type="button" onClick={() => onAccept(finding)}>
+              <button type="button" disabled={busy} onClick={() => onAccept(finding)}>
                 {t('lens.accept')}
               </button>
             )}
@@ -281,14 +299,19 @@ function FindingChip({
               <span className="lens-axis-actions">
                 {t('lens.apply_as')}
                 {(['size_x', 'size_y', 'size_z'] as const).map((axis) => (
-                  <button key={axis} type="button" onClick={() => onAccept(finding, axis)}>
+                  <button
+                    key={axis}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onAccept(finding, axis)}
+                  >
                     {axis.slice(-1).toUpperCase()}
                   </button>
                 ))}
               </span>
             )}
             {target.kind === 'none' && finding.status === 'suggested' && (
-              <button type="button" onClick={() => onAccept(finding)}>
+              <button type="button" disabled={busy} onClick={() => onAccept(finding)}>
                 {t('lens.accept_plain')}
               </button>
             )}
@@ -310,7 +333,7 @@ function FindingChip({
                   />
                   <button
                     type="button"
-                    disabled={!editValue.trim()}
+                    disabled={busy || !editValue.trim()}
                     onClick={() => {
                       onReplace(finding, editValue.trim());
                       setEditing(false);
@@ -330,7 +353,12 @@ function FindingChip({
                   {t('lens.replace')}
                 </button>
               ))}
-            <button type="button" className="lens-inaccurate" onClick={() => onReject(finding)}>
+            <button
+              type="button"
+              className="lens-inaccurate"
+              disabled={busy}
+              onClick={() => onReject(finding)}
+            >
               {t('lens.mark_inaccurate')}
             </button>
           </div>
@@ -380,6 +408,11 @@ function PartFieldsTab({
     description: part.description ?? '',
   });
   const [dims, setDims] = useState({ size_x: '', size_y: '', size_z: '' });
+  // Calc-vs-override (CLAUDE.md §5): PATCH only what the user actually typed —
+  // writing back displayed values would turn calculated dims into overrides
+  // (and a failed geometry load into a three-axis wipe).
+  const [dirty, setDirty] = useState<Set<string>>(new Set());
+  const [geomLoaded, setGeomLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -388,34 +421,57 @@ function PartFieldsTab({
       revision: part.revision ?? '',
       description: part.description ?? '',
     });
+    setDirty((prev) => {
+      const next = new Set(prev);
+      for (const field of ['part_number', 'revision', 'description']) next.delete(field);
+      return next;
+    });
   }, [part]);
 
   useEffect(() => {
     partsApi
       .getGeometry(part.id)
-      .then((geom) =>
+      .then((geom) => {
         setDims({
-          size_x: geom.size_x != null ? String(geom.size_x) : '',
-          size_y: geom.size_y != null ? String(geom.size_y) : '',
-          size_z: geom.size_z != null ? String(geom.size_z) : '',
-        }),
-      )
-      .catch(() => undefined);
+          size_x: formatDim(geom.size_x),
+          size_y: formatDim(geom.size_y),
+          size_z: formatDim(geom.size_z),
+        });
+        setGeomLoaded(true);
+      })
+      .catch(() => setGeomLoaded(false));
   }, [partsApi, part.id]);
 
+  const markDirty = (field: string) =>
+    setDirty((prev) => {
+      const next = new Set(prev);
+      next.add(field);
+      return next;
+    });
+
   const save = async () => {
+    if (dirty.size === 0) return;
     setSaving(true);
     try {
-      await partsApi.updatePart(part.id, {
-        part_number: draft.part_number || null,
-        revision: draft.revision || null,
-        description: draft.description || null,
-      });
-      const dimChanges: Record<string, string | null> = {};
-      for (const [key, value] of Object.entries(dims)) {
-        dimChanges[key] = value.trim() === '' ? null : value;
+      const identityChanges: Record<string, string | null> = {};
+      for (const field of ['part_number', 'revision', 'description'] as const) {
+        if (dirty.has(field)) identityChanges[field] = draft[field] || null;
       }
-      await partsApi.updateGeometry(part.id, dimChanges);
+      if (Object.keys(identityChanges).length > 0) {
+        await partsApi.updatePart(part.id, identityChanges);
+      }
+      const dimChanges: Record<string, string | null> = {};
+      for (const axis of ['size_x', 'size_y', 'size_z'] as const) {
+        // German decimal commas normalize to the evaluator's dot form.
+        if (dirty.has(axis)) {
+          const raw = dims[axis].trim();
+          dimChanges[axis] = raw === '' ? null : raw.replace(',', '.');
+        }
+      }
+      if (geomLoaded && Object.keys(dimChanges).length > 0) {
+        await partsApi.updateGeometry(part.id, dimChanges);
+      }
+      setDirty(new Set());
       onSaved();
     } finally {
       setSaving(false);
@@ -430,7 +486,10 @@ function PartFieldsTab({
         <span className="lens-field-input">
           <input
             value={draft[field]}
-            onChange={(e) => setDraft((d) => ({ ...d, [field]: e.target.value }))}
+            onChange={(e) => {
+              markDirty(field);
+              setDraft((d) => ({ ...d, [field]: e.target.value }));
+            }}
           />
           {suggestion && (
             <button
@@ -452,7 +511,7 @@ function PartFieldsTab({
       {identityField('part_number', t('lens.field_part_number'))}
       {identityField('revision', t('lens.field_revision'))}
       {identityField('description', t('lens.field_description'))}
-      <fieldset className="lens-dims">
+      <fieldset className="lens-dims" disabled={!geomLoaded}>
         <legend>{t('lens.dims_legend')}</legend>
         {(['size_x', 'size_y', 'size_z'] as const).map((axis) => (
           <label key={axis}>
@@ -460,16 +519,25 @@ function PartFieldsTab({
             <input
               value={dims[axis]}
               inputMode="decimal"
-              onChange={(e) => setDims((d) => ({ ...d, [axis]: e.target.value }))}
+              onChange={(e) => {
+                markDirty(axis);
+                setDims((d) => ({ ...d, [axis]: e.target.value }));
+              }}
             />
           </label>
         ))}
       </fieldset>
-      <button type="button" disabled={saving} onClick={() => void save()}>
+      <button type="button" disabled={saving || dirty.size === 0} onClick={() => void save()}>
         {saving ? t('lens.saving') : t('lens.save_fields')}
       </button>
     </div>
   );
+}
+
+/** German-locale display for a stored metric dim (comma decimals, no grouping). */
+function formatDim(value: number | null): string {
+  if (value == null) return '';
+  return value.toLocaleString('de-DE', { maximumFractionDigits: 4, useGrouping: false });
 }
 
 const ADD_CATEGORIES = ['quote_setup', 'requirements', 'features', 'dimensions'] as const;
@@ -477,9 +545,11 @@ const ADD_CATEGORIES = ['quote_setup', 'requirements', 'features', 'dimensions']
 /** "Add missing extraction" — typed form (v1; the drawn region can follow
  * via the viewer marquee — the API already takes page + bbox). */
 function AddMissingModal({
+  busy,
   onSubmit,
   onCancel,
 }: {
+  busy: boolean;
   onSubmit: (body: AddMissingBody) => void;
   onCancel: () => void;
 }) {
@@ -507,7 +577,11 @@ function AddMissingModal({
       </label>
       <label>
         {t('lens.add_type')}
-        <input value={type} onChange={(e) => setType(e.target.value)} placeholder="length" />
+        <input
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          placeholder={t('lens.add_type_placeholder')}
+        />
       </label>
       <label>
         {t('lens.add_value')}
@@ -523,7 +597,7 @@ function AddMissingModal({
         </button>
         <button
           type="button"
-          disabled={!type.trim() || !value.trim()}
+          disabled={busy || !type.trim() || !value.trim()}
           onClick={() =>
             onSubmit({
               category,
