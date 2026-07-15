@@ -28,11 +28,13 @@ is editing the quote's content); reads need only an authenticated org session.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
+import logging
 import os
 import urllib.parse
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from functools import partial
 from typing import Annotated, Any, Literal
@@ -49,7 +51,9 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
+from sqlalchemy import or_ as sa_or
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal
 from .authz import Permission, require
 from .config import Settings
+from .db import run_after_commit
 from .deps import get_app_settings, get_session, get_storage
 from .dimensions import (
     DimensionError,
@@ -74,6 +79,7 @@ from .file_types import (
     sniff_matches_extension,
 )
 from .models import (
+    Component,
     FileAnnotationLayer,
     FileRole,
     Node,
@@ -81,8 +87,17 @@ from .models import (
     Part,
     PartFile,
     PartGeometry,
+    Process,
+)
+from .part_index import (
+    STEP_SCAN_BYTES,
+    extract_pdf_text_task,
+    extract_step_part_number,
+    normalize_filename,
 )
 from .storage import ObjectStorage, object_key
+
+logger = logging.getLogger("app.parts")
 
 parts_router = APIRouter(prefix="/api/parts", tags=["parts", "files"])
 
@@ -109,6 +124,10 @@ class PartOut(BaseModel):
     archived: bool
     created_at: datetime
     updated_at: datetime
+    # Library-card fields (M2.12): filled by the list endpoint, None elsewhere.
+    primary_filename: str | None = None
+    primary_file_type: str | None = None
+    process: str | None = None  # latest quoted process name
 
 
 class PartUpdate(BaseModel):
@@ -215,7 +234,7 @@ def _part_out(part: Part) -> PartOut:
         is_assembly=part.is_assembly,
         obtain_method=part.obtain_method,
         export_controlled=part.export_controlled,
-        archived=part.deleted_at is not None,
+        archived=part.archived_at is not None,
         created_at=part.created_at,
         updated_at=part.updated_at,
     )
@@ -316,7 +335,11 @@ async def _get_part_or_404(
     supporting files with a NULL primary, or racing swaps could surface a raw
     unique-index error (CodeRabbit PR #8)."""
     part = await session.get(Part, part_id, with_for_update=for_update or None)
-    if part is None:
+    # A DELETED part is gone from the library and its files are purged — every
+    # part-scoped route 404s. (Archived parts stay reachable: they can be
+    # restored or re-quoted.) Quotes keep their costing; they reference the
+    # component/operation rows, not these routes (spec#partlib lifecycle).
+    if part is None or part.deleted_at is not None:
         raise AppError("not_found", "Part not found.", status_code=status.HTTP_404_NOT_FOUND)
     return part
 
@@ -417,17 +440,137 @@ async def create_part(
 @parts_router.get("")
 async def list_parts(
     session: Annotated[AsyncSession, Depends(get_session)],
-    include_archived: Annotated[bool, Query()] = False,
+    tab: Annotated[Literal["team", "archived"], Query()] = "team",
+    q: Annotated[str | None, Query(max_length=200)] = None,
     limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PartOut]:
-    """List the active org's parts (RLS-scoped)."""
-    stmt = select(Part)
-    if not include_archived:
-        stmt = stmt.where(Part.deleted_at.is_(None))
+    """The Part Library listing (M2.12, spec#partlib). RLS-scoped; deleted
+    parts never list; ``tab`` picks Team Parts vs Archived.
+
+    ``q`` searches identity (part#/name/revision), filenames, and the full
+    text of uploaded PDFs (``pdf_text``) — what makes a part findable by a
+    string that exists only in a drawing title block."""
+    stmt = select(Part).where(Part.deleted_at.is_(None))
+    if tab == "team":
+        stmt = stmt.where(Part.archived_at.is_(None))
+    else:
+        stmt = stmt.where(Part.archived_at.is_not(None))
+    if q:
+        pattern = f"%{q}%"
+        tsvector = func.to_tsvector("simple", func.coalesce(PartFile.pdf_text, ""))
+        file_match = (
+            select(PartFile.id)
+            .where(
+                PartFile.part_id == Part.id,
+                sa_or(
+                    PartFile.filename.ilike(pattern),
+                    # FTS ('simple' config — no German stemming, part numbers
+                    # survive) + an ILIKE guard for tokenizer-hostile strings
+                    # like Werkstoffnummern; fine unindexed at pilot scale.
+                    tsvector.op("@@")(func.plainto_tsquery("simple", q)),
+                    PartFile.pdf_text.ilike(pattern),
+                ),
+            )
+            .exists()
+        )
+        stmt = stmt.where(
+            sa_or(
+                Part.part_number.ilike(pattern),
+                Part.name.ilike(pattern),
+                Part.revision.ilike(pattern),
+                file_match,
+            )
+        )
     stmt = stmt.order_by(Part.created_at.desc()).limit(limit).offset(offset)
-    result = await session.execute(stmt)
-    return [_part_out(p) for p in result.scalars()]
+    parts = list((await session.scalars(stmt)).all())
+    cards = [_part_out(p) for p in parts]
+    await _fill_card_fields(session, parts, cards)
+    return cards
+
+
+async def _fill_card_fields(session: AsyncSession, parts: list[Part], cards: list[PartOut]) -> None:
+    """Batch-fill the library-card extras: primary file + latest quoted process."""
+    ids = [p.id for p in parts]
+    if not ids:
+        return
+    primary_rows = (
+        await session.execute(
+            select(PartFile.part_id, PartFile.filename, PartFile.file_type).where(
+                PartFile.part_id.in_(ids), PartFile.role == FileRole.primary
+            )
+        )
+    ).all()
+    primaries = {row[0]: (row[1], row[2]) for row in primary_rows}
+    # Latest quoted process per part (DISTINCT ON) — parts never quoted stay None.
+    process_rows = (
+        await session.execute(
+            select(Component.part_id, Process.name)
+            .join(Process, Process.id == Component.process_id)
+            .where(Component.part_id.in_(ids))
+            .order_by(Component.part_id, Component.created_at.desc())
+            .distinct(Component.part_id)
+        )
+    ).all()
+    processes = {row[0]: row[1] for row in process_rows}
+    for card in cards:
+        filename, file_type = primaries.get(card.id, (None, None))
+        card.primary_filename = filename
+        card.primary_file_type = file_type
+        card.process = processes.get(card.id)
+
+
+# Registered BEFORE the /{part_id} routes so "upload" is never parsed as a UUID.
+@parts_router.post("/upload", status_code=status.HTTP_201_CREATED)
+async def upload_library_parts(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    storage: Annotated[ObjectStorage, Depends(get_storage)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+    files: Annotated[list[UploadFile], File()],
+) -> list[PartOut]:
+    """Upload files straight to the Part Library, creating parts (M2.12).
+
+    Auto-bundling (KB `uploading-parts-to-your-part-library`): files whose
+    normalized stems match (``Bracket.stp`` + ``Bracket.pdf``) become ONE part,
+    the CAD file its PRIMARY; non-matching names come in as separate parts (a
+    mismatched print is merged manually later). Each new part takes the primary
+    file's stem as its display name.
+    """
+    validated = await _validate_upload_batch(files, settings)
+
+    # Group by the normalized stem — the auto-bundling key. A degenerate stem
+    # (normalize → None) never bundles: each such file gets its own part.
+    groups: dict[str, list[tuple[UploadFile, str, str]]] = {}
+    for item in validated:
+        key = normalize_filename(item[1]) or f"\x00{id(item[0])}"
+        groups.setdefault(key, []).append(item)
+
+    stored_keys: list[str] = []
+    created: list[Part] = []
+    try:
+        for batch in groups.values():
+            part = await create_root_part(session, principal.active_org_id)
+            rows = await _store_files_on_part(
+                session,
+                storage,
+                org_id=principal.active_org_id,
+                part=part,
+                validated=batch,
+                stored_keys=stored_keys,
+            )
+            primary = next((r for r in rows if r.role == FileRole.primary), rows[0])
+            stem, _, _ = primary.filename.rpartition(".")
+            part.name = stem or primary.filename
+            created.append(part)
+        await session.flush()
+    except Exception:
+        # ANY failure (validation, DB, driver, storage) discards the blobs
+        # written so far — the rows roll back with the session either way.
+        await _discard_blobs(storage, stored_keys)
+        raise
+
+    return [_part_out(p) for p in created]
 
 
 @parts_router.get("/{part_id}")
@@ -458,6 +601,74 @@ async def update_part(
         setattr(part, field, value)
     await session.flush()
     return _part_out(part)
+
+
+# --------------------------------------------------------------------------- #
+# Lifecycle: Active → Archived → Deleted (M2.12, spec#partlib "Part lifecycle")
+# --------------------------------------------------------------------------- #
+@parts_router.post("/{part_id}/archive")
+async def archive_part(
+    part_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> PartOut:
+    """Move a part to the Archived tab. Quotes retain all data; the part can be
+    restored or added to new quotes from there. Idempotent."""
+    part = await _get_part_or_404(session, part_id, for_update=True)
+    if part.archived_at is None:
+        part.archived_at = datetime.now(UTC)
+        await session.flush()
+    return _part_out(part)
+
+
+@parts_router.post("/{part_id}/restore")
+async def restore_part(
+    part_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> PartOut:
+    """Return an archived part to Team Parts. Idempotent."""
+    part = await _get_part_or_404(session, part_id, for_update=True)
+    part.archived_at = None
+    await session.flush()
+    return _part_out(part)
+
+
+@parts_router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_part(
+    part_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    storage: Annotated[ObjectStorage, Depends(get_storage)],
+    background: BackgroundTasks,
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> Response:
+    """Irreversibly delete an archived part (spec#partlib lifecycle: Deleted is
+    entered from Archived only).
+
+    Files are purged — rows now, blobs post-commit — while the part row stays
+    (soft ``deleted_at``): quotes keep every dimension and costing, showing a
+    "File Deleted" placeholder instead of downloads. There is no restore."""
+    part = await _get_part_or_404(session, part_id, for_update=True)
+    if part.archived_at is None:
+        raise AppError(
+            "not_archived",
+            "Archive the part before deleting it.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    keys = list(
+        (
+            await session.scalars(select(PartFile.storage_key).where(PartFile.part_id == part_id))
+        ).all()
+    )
+    # Clear the pointer first so the composite FK doesn't block the row deletes.
+    part.primary_file_id = None
+    await session.flush()
+    await session.execute(sa_delete(PartFile).where(PartFile.part_id == part_id))
+    part.deleted_at = datetime.now(UTC)
+    await session.flush()
+    for key in keys:
+        background.add_task(storage.delete, key)  # purge blobs post-commit
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --------------------------------------------------------------------------- #
@@ -581,11 +792,46 @@ async def upload_part_files(
     leaving orphan blobs. If the part has no PRIMARY, the highest-geometric-rank
     uploaded file becomes PRIMARY (ties → first uploaded)."""
     part = await _get_part_or_404(session, part_id, for_update=True)
+    validated = await _validate_upload_batch(files, settings)
+
+    # --- Phase 2: store blobs + create rows (clean up blobs on any failure) ---
+    stored_keys: list[str] = []
+    try:
+        rows = await _store_files_on_part(
+            session,
+            storage,
+            org_id=principal.active_org_id,
+            part=part,
+            validated=validated,
+            stored_keys=stored_keys,
+        )
+    except IntegrityError as exc:
+        await _discard_blobs(storage, stored_keys)
+        if "uq_part_file_one_primary" in str(exc.orig):
+            raise AppError(
+                "primary_conflict",
+                "Another file became the PRIMARY for this part; retry.",
+                status_code=status.HTTP_409_CONFLICT,
+            ) from exc
+        raise
+    except Exception:
+        # ANY other failure discards the blobs written so far (rows roll back).
+        await _discard_blobs(storage, stored_keys)
+        raise
+
+    return [_part_file_out(row) for row in rows]
+
+
+async def _validate_upload_batch(
+    files: list[UploadFile], settings: Settings
+) -> list[tuple[UploadFile, str, str]]:
+    """Phase 1: validate every file at the edge (no storage writes yet).
+
+    Returns ``(file, safe_name, category_value)`` triples; raises on the first
+    bad file so a bad batch rejects wholesale without leaving orphan blobs."""
     if not files:
         raise AppError("no_files", "No files were provided.", status_code=422)
-
-    # --- Phase 1: validate every file (no storage writes yet) ---
-    validated: list[tuple[UploadFile, str, str]] = []  # (file, safe_name, category_value)
+    validated: list[tuple[UploadFile, str, str]] = []
     for upload in files:
         # Filenames are not echoed in error bodies — they can carry customer/part
         # identifiers (CLAUDE.md §5: no PII in errors).
@@ -615,52 +861,94 @@ async def upload_part_files(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             )
         validated.append((upload, name, category.value))
+    return validated
 
-    # --- Phase 2: store blobs + create rows (clean up blobs on any failure) ---
-    stored_keys: list[str] = []
+
+_HASH_CHUNK_BYTES = 1024 * 1024
+
+
+async def _hash_and_head(upload: UploadFile) -> tuple[str, bytes]:
+    """One streaming pass over the spooled body: SHA-256 of the raw bytes (the
+    Exact-File-Match key — computed before any processing, spec#partlib) plus
+    the head bytes the STEP part-number scan reads. Rewinds the file after."""
+    hasher = hashlib.sha256()
+    head = b""
+    while chunk := await upload.read(_HASH_CHUNK_BYTES):
+        if len(head) < STEP_SCAN_BYTES:
+            head += chunk[: STEP_SCAN_BYTES - len(head)]
+        hasher.update(chunk)
+    await upload.seek(0)
+    return hasher.hexdigest(), head
+
+
+async def _store_files_on_part(
+    session: AsyncSession,
+    storage: ObjectStorage,
+    *,
+    org_id: uuid.UUID,
+    part: Part,
+    validated: list[tuple[UploadFile, str, str]],
+    stored_keys: list[str],
+) -> list[PartFile]:
+    """Phase 2 for one part: store blobs, create indexed rows, assign PRIMARY.
+
+    Appends every written blob key to ``stored_keys`` as it goes so the caller
+    can discard them all on failure (the rows roll back with the session).
+    PDF files get their ``pdf_text`` extracted on Celery post-commit (§5)."""
     rows: list[PartFile] = []
+    for upload, name, category_value in validated:
+        file_id = uuid.uuid4()
+        key = object_key(org_id, part.id, file_id, name)
+        digest, head = await _hash_and_head(upload)
+        # Cap already enforced pre-store in Phase 1; ``size`` here is the
+        # authoritative byte count actually written.
+        size = await storage.put(key, upload.file, content_type=upload.content_type)
+        stored_keys.append(key)
+        row = PartFile(
+            id=file_id,
+            org_id=org_id,
+            part_id=part.id,
+            storage_key=key,
+            filename=name,
+            file_type=category_value,
+            content_type=upload.content_type,
+            size_bytes=size,
+            role=FileRole.supporting,
+            # Match-index fields (M2.12 spec#partlib): deterministic, at ingest.
+            file_hash=digest,
+            filename_normalized=normalize_filename(name),
+            part_number_extracted=extract_step_part_number(head),
+        )
+        session.add(row)
+        rows.append(row)
+        if name.lower().endswith(".pdf"):
+            # Post-commit only (run_after_commit): the worker re-reads the
+            # committed row; a failed/rolled-back request enqueues nothing.
+            run_after_commit(session, partial(_enqueue_pdf_text, org_id, file_id))
+
+    # Insert the part_file rows BEFORE pointing part.primary_file_id at one of
+    # them: that FK is a plain column (no ORM relationship), so the unit of work
+    # doesn't know to order the INSERTs ahead of the part UPDATE on its own.
+    await session.flush()
+    _assign_primary_if_absent(part, rows)
+    await session.flush()
+    return rows
+
+
+def _enqueue_pdf_text(org_id: uuid.UUID, file_id: uuid.UUID) -> None:
+    """Enqueue pdf_text extraction; runs inside the after_commit listener.
+
+    Never raises: the commit has already happened, so a broker outage must not
+    turn a succeeded request into a 500. The miss is logged (ids only); a
+    ``pdf_text IS NULL`` backfill sweep is the recovery path (follow-up)."""
     try:
-        for upload, name, category_value in validated:
-            file_id = uuid.uuid4()
-            key = object_key(principal.active_org_id, part_id, file_id, name)
-            # Cap already enforced pre-store in Phase 1; ``size`` here is the
-            # authoritative byte count actually written.
-            size = await storage.put(key, upload.file, content_type=upload.content_type)
-            stored_keys.append(key)
-            row = PartFile(
-                id=file_id,
-                org_id=principal.active_org_id,
-                part_id=part_id,
-                storage_key=key,
-                filename=name,
-                file_type=category_value,
-                content_type=upload.content_type,
-                size_bytes=size,
-                role=FileRole.supporting,
-            )
-            session.add(row)
-            rows.append(row)
-
-        # Insert the part_file rows BEFORE pointing part.primary_file_id at one of
-        # them: that FK is a plain column (no ORM relationship), so the unit of work
-        # doesn't know to order the INSERTs ahead of the part UPDATE on its own.
-        await session.flush()
-        _assign_primary_if_absent(part, rows)
-        await session.flush()
-    except AppError:
-        await _discard_blobs(storage, stored_keys)
-        raise
-    except IntegrityError as exc:
-        await _discard_blobs(storage, stored_keys)
-        if "uq_part_file_one_primary" in str(exc.orig):
-            raise AppError(
-                "primary_conflict",
-                "Another file became the PRIMARY for this part; retry.",
-                status_code=status.HTTP_409_CONFLICT,
-            ) from exc
-        raise
-
-    return [_part_file_out(row) for row in rows]
+        extract_pdf_text_task.delay(str(org_id), str(file_id))
+    except Exception:
+        logger.warning(
+            "pdf_text_enqueue_failed",
+            extra={"org_id": str(org_id), "file_id": str(file_id)},
+            exc_info=True,
+        )
 
 
 def _assign_primary_if_absent(part: Part, rows: list[PartFile]) -> None:
@@ -744,6 +1032,7 @@ async def create_redacted_copy(
     name = _safe_filename(f"{stem}-redacted.pdf")
     new_id = uuid.uuid4()
     key = object_key(principal.active_org_id, part_id, new_id, name)
+    digest, _head = await _hash_and_head(file)
     size = await storage.put(key, file.file, content_type="application/pdf")
     try:
         row = PartFile(
@@ -757,12 +1046,17 @@ async def create_redacted_copy(
             size_bytes=size,
             role=FileRole.supporting,
             is_redacted=True,
+            # Index the redacted copy like any upload (M2.12) — its own hash and
+            # its own (redaction-stripped) text, never the source's.
+            file_hash=digest,
+            filename_normalized=normalize_filename(name),
         )
         session.add(row)
         await session.flush()
     except Exception:
         await _discard_blobs(storage, [key])
         raise
+    run_after_commit(session, partial(_enqueue_pdf_text, principal.active_org_id, new_id))
     return _part_file_out(row)
 
 

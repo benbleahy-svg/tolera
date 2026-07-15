@@ -38,6 +38,7 @@ from .db import make_engine, make_sessionmaker, org_scoped_session
 from .deps import get_session, get_storage
 from .errors import AppError
 from .models import FileRole, PartFile
+from .part_index import extract_pdf_text, file_sha256, normalize_filename
 from .parts import _discard_blobs, _get_part_file_or_404
 from .pdf_split import PdfSplitError, split_pdf_pages, validate_pdf_split
 from .storage import ObjectStorage, object_key
@@ -109,6 +110,12 @@ async def run_split(
                         size_bytes=size,
                         role=FileRole.supporting,
                         source_file_id=file_id,
+                        # Match-index fields (M2.12): pages are indexed like any
+                        # upload — inline here, we already hold the bytes in a
+                        # worker context (no second task round-trip).
+                        file_hash=file_sha256(page_bytes),
+                        filename_normalized=normalize_filename(name),
+                        pdf_text=extract_pdf_text(page_bytes),
                     )
                 )
                 file_ids.append(str(new_id))

@@ -11,10 +11,10 @@ the active org. This is the tenancy pattern every later block inherits.
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -61,3 +61,15 @@ async def org_scoped_session(
             {"oid": str(org_id)},
         )
         yield session
+
+
+def run_after_commit(session: AsyncSession, callback: Callable[[], None]) -> None:
+    """Run ``callback`` once, only if/when this session's transaction commits.
+
+    The post-commit seam for side effects that must see committed rows (e.g.
+    enqueueing a Celery task that re-reads the DB, M2.12 pdf_text indexing).
+    FastAPI ``BackgroundTasks`` run *before* dependency teardown — i.e. before
+    the ``get_session`` commit — so they race the very rows they depend on;
+    ``after_commit`` cannot. A rolled-back request fires nothing.
+    """
+    event.listen(session.sync_session, "after_commit", lambda _s: callback(), once=True)

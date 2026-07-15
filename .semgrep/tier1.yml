@@ -1,0 +1,126 @@
+# Tier-1 mechanical rules — the CLAUDE.md §5 / REVIEW.md invariants that CAN be
+# checked statically. Runs locally in /ship and as the `semgrep` CI job.
+# Deliberately conservative: ERROR = merge-blocking, WARNING = must be justified
+# in the PR body. What can't be caught statically (Lens→Kalk boundary, tax
+# rounding, RLS behaviour) is owned by fixtures + the AI reviewers.
+rules:
+  # ── Money must be integer minor units + currency, never a float ──────────
+  - id: money-as-float-column
+    languages: [python]
+    severity: ERROR
+    message: >
+      Money as a float. Monetary values are integer minor units + explicit
+      currency (EUR/CHF) — use Integer/BigInteger and a currency column
+      (CLAUDE.md §5, REVIEW.md 🔴 "Money mistyped").
+    patterns:
+      - pattern-either:
+          - pattern: $NAME = Column(Float, ...)
+          - pattern: $NAME = Column(sa.Float, ...)
+          - pattern: $NAME = Column(Numeric, ...)
+          - pattern: $NAME = Column(sa.Numeric, ...)
+          - pattern: "$NAME: Mapped[float] = mapped_column(...)"
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(price|cost|amount|total|subtotal|fee|charge|markup|margin|tax|rate_minor|money).*
+
+  - id: money-float-in-pydantic
+    languages: [python]
+    severity: ERROR
+    message: >
+      Money typed as float in a schema. Use int (minor units) + a currency field
+      (CLAUDE.md §5).
+    patterns:
+      - pattern-either:
+          - pattern: "$NAME: float"
+          - pattern: "$NAME: float = $DEFAULT"
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(price|cost|amount|total|subtotal|fee|charge|unit_price|money).*
+
+  # ── Kalk / pricing must be bit-for-bit deterministic ─────────────────────
+  - id: kalk-nondeterminism
+    languages: [python]
+    severity: ERROR
+    message: >
+      Non-deterministic operation in the pricing path. Kalk and the cost roll-up
+      must be bit-for-bit deterministic — no time, randomness, network, or
+      environment reads (REVIEW.md 🔴 "Determinism break in Kalk").
+    paths:
+      include:
+        - "**/pricing/**"
+        - "**/kalk/**"
+    pattern-either:
+      - pattern: datetime.now(...)
+      - pattern: datetime.datetime.now(...)
+      - pattern: datetime.utcnow(...)
+      - pattern: datetime.datetime.utcnow(...)
+      - pattern: time.time()
+      - pattern: random.$F(...)
+      - pattern: uuid.uuid4()
+      - pattern: os.urandom(...)
+      - pattern: os.environ.get(...)
+      - pattern: requests.$F(...)
+      - pattern: httpx.$F(...)
+
+  # ── Schema changes only via reversible Alembic migrations ────────────────
+  - id: raw-ddl-outside-migrations
+    languages: [python]
+    severity: ERROR
+    message: >
+      Raw DDL outside alembic/. Every schema change is a reversible Alembic
+      migration — no manual DDL (CLAUDE.md §5, REVIEW.md 🔴 "Irreversible schema").
+    paths:
+      exclude:
+        - "alembic/**"
+        - "tests/**"
+        - "docker/initdb/**"
+    pattern-regex: (?i)execute\(\s*[frbu]*['"]\s*(CREATE|ALTER|DROP|TRUNCATE)\s
+
+  # ── No secrets / obvious PII in logs ─────────────────────────────────────
+  - id: secret-in-log
+    languages: [python]
+    severity: ERROR
+    message: >
+      Possible secret/credential in a log call. Never log secrets, tokens, or
+      customer PII / print contents (CLAUDE.md §5 engineering rules).
+    pattern-regex: (?i)\blog(?:ger)?\.\w+\([^)]*\b(password|passwort|secret|api_key|apikey|client_secret|private_key|authorization)\b
+
+  # ── Every domain table org-scoped (advisory — some tables are global) ────
+  - id: model-missing-org-id
+    languages: [python]
+    severity: WARNING
+    message: >
+      SQLAlchemy model without an org_id column. Every DOMAIN table must be
+      org-scoped with RLS (CLAUDE.md §5). If this table is intentionally global
+      (e.g. orgs itself, users), say so in the PR body.
+    paths:
+      include:
+        - "**/models/**"
+    patterns:
+      - pattern: |
+          class $M(Base):
+            ...
+      - pattern-not: |
+          class $M(Base):
+            ...
+            org_id = $X
+            ...
+      - pattern-not: |
+          class $M(Base):
+            ...
+            org_id: $T
+            ...
+      - pattern-not: |
+          class $M(Base):
+            ...
+            org_id: $T = $X
+            ...
+
+  # ── Imperial units must not creep in (DACH delta: metric-native) ─────────
+  - id: imperial-units
+    languages: [python]
+    severity: WARNING
+    message: >
+      Imperial unit reference. Tolera is metric-native (mm/kg/deg) — the DACH
+      delta drops PP's imperial path (CLAUDE.md §5).
+    pattern-regex: (?i)\b(inch(es)?_to|to_inch(es)?|\blbs?\b|pounds?_|fahrenheit)\b
