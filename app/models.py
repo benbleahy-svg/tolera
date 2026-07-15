@@ -18,6 +18,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
+from uuid import UUID as PyUUID  # for classes whose own `uuid` column shadows the module
 
 from sqlalchemy import (
     BigInteger,
@@ -2533,3 +2534,39 @@ class EmailMessage(Base):
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
+
+
+# --------------------------------------------------------------------------- #
+# M3.6 — Review rules (the portable query AST)
+# --------------------------------------------------------------------------- #
+class Rule(Base):
+    """A Requirements-Review rule — the persisted form of the canonical query
+    AST (spec ``#rules-schema``; DB-SCHEMA.sql ``rule``). The AST lives in
+    JSONB exactly as serialized (``signals``/``resolutions``); scalar columns
+    carry the identity/config fields. ``uuid`` is the *portable* identity from
+    the import/export JSON (upsert key per org — unique cross-org so the same
+    pasted set imports into any org); ``id`` stays the internal PK.
+
+    ``default_assignee_id`` is deliberately un-FK'd: an imported set may name
+    a user absent from this org; M3.8 validates at assignment time.
+    ``is_active`` is internal only — never part of the canonical JSON."""
+
+    __tablename__ = "rule"
+    __table_args__ = (
+        UniqueConstraint("org_id", "uuid", name="uq_rule_org_uuid"),
+        CheckConstraint("logical_operator IN ('AND', 'OR')", name="ck_rule_logical_operator"),
+        Index("ix_rule_org_active", "org_id", "is_active"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    uuid: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    logical_operator: Mapped[str] = mapped_column(Text, nullable=False)
+    signals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    resolutions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    default_assignee_id: Mapped[PyUUID | None] = mapped_column(UUID(as_uuid=True))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()

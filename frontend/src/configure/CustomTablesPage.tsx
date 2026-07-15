@@ -162,6 +162,7 @@ export function CustomTablesPage() {
         <span aria-current="page">{t('configure.custom_tables')}</span>
         <Link to="/configure/pricing">{t('configure.pricing')}</Link>
         <Link to="/configure/operations">{t('configure.operations')}</Link>
+        <Link to="/configure/rules">{t('configure.rules')}</Link>
       </nav>
       <h1>{t('configure.custom_tables')}</h1>
       <p className="configure-hint">{t('configure.custom_tables_hint')}</p>
