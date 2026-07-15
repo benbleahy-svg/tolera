@@ -19,8 +19,8 @@ Geometry match columns (``geometry_signature``/``geometry_vector`` + pgvector)
 are deliberately absent — they land with GeometryService (M4); ``part.geom_hash``
 already reserves the signature seat.
 
-Revision ID: 0018_part_library_index
-Revises: 0017_part_file_source
+Revision ID: 0019_part_library_index
+Revises: 0018_collaboration
 Create Date: 2026-07-15
 """
 
@@ -30,8 +30,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0018_part_library_index"
-down_revision: str | None = "0017_part_file_source"
+revision: str = "0019_part_library_index"
+down_revision: str | None = "0018_collaboration"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -106,3 +106,19 @@ export function formatAngle(deg: number | null, opts: DisplayOptions): string {
   // Angle is unitless across systems and always whole degrees (precision-exempt).
   return fixed(deg, opts.language, 0)?.concat('°') ?? EM_DASH;
 }
+
+/**
+ * A measured distance with the M2.8 exact-vs-approximate trust signal: an
+ * `exact` result (special orientation — parallel planes / concentric cylinders /
+ * perpendicular cyl+plane) prints bare; anything else gets a leading `~` to
+ * flag it as approximate. See `measure.ts` and DECISIONS.md [2026-07-14].
+ */
+export function formatMeasureDistance(
+  mm: number | null,
+  exact: boolean,
+  opts: DisplayOptions,
+): string {
+  const value = formatLength(mm, opts);
+  if (value === EM_DASH) return value;
+  return exact ? value : `~${value}`;
+}

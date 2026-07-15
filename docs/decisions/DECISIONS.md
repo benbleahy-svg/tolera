@@ -29,6 +29,28 @@
 
 ---
 
+## [2026-07-14] M2.8 exact-vs-approximate is fit-derived until M4 B-rep
+
+**Status:** RESOLVED (M2.8 grill; Benjamin delegated → "do what you recommend, verify against KB")
+**Question:** The measure tool's trust signal is that a result is **exact** (no prefix) on *special* relative orientations — **parallel planes, concentric cylinders, perpendicular cylinder+plane** — and **`~` approximate** otherwise (`VIEWER-AND-FILE-TYPES.md` §2). But that sub-spec's §1 v1-note says this guarantee "requires **real B-rep queries, not just mesh**", while the viewer is **mesh-only until M4** (DECISIONS [2026-07-14] viewer-mesh-provenance; M2.7 face types are mesh fits). The build-plan M2.8 acceptance nonetheless demands the distinction *now* ("parallel-plane distance unprefixed within tight tolerance; a skew measurement carries `~`"). How is "exact" derived and labelled without a B-rep kernel?
+**Options considered:** (a) **fit-based exact** — classify the special relationship from M2.7's mesh fits (plane normals, cylinder axes/centers); when special, compute the distance from the fitted analytic parameters and drop the `~`; else raw point-to-point distance with `~`; (b) defer the exact guarantee to M4 and prefix *everything* `~` now (fails the build-plan acceptance, needs it re-scoped); (c) fit-based exact gated behind an extra fit-residual threshold that downgrades nominally-special pairs to `~`.
+**Decision:** **(a) fit-based exact.** The exact/`~` classification is driven by the existing mesh fits: a pair is "special" when their fitted primitives satisfy the relationship within an angular/coaxial tolerance (parallel planes: |n̂₁·n̂₂|≈1; concentric cylinders: axes collinear + centers on a common axis; perpendicular cyl+plane: cylinder axis ∥ plane normal). "Exact" here means **fit-exact — as exact as the tessellation** — and swaps to true B-rep-exact **behind the same `MeshProvider`/GeometryService seam at M4**, exactly as face-typing already degrades (DECISIONS [2026-07-14] Weight readout). No separate fit-residual downgrade gate (option c): the parallel/coaxial detection *already* carries an angular tolerance, and clean fixtures don't warrant another knob. **KB check:** `3d-viewer-tools` describes caliper/parametric-center/angle behaviour but is **silent on `~`** — the exact/approximate distinction is Tolera-only, so this contradicts nothing upstream. The mesh-fit provenance is never persisted (viewer-mesh-provenance OPEN).
+**Resolved:** 2026-07-14 (M2.8 grill; KB `3d-viewer-tools` cross-checked)
+**Affects:** M2.8 (measure math + `~` labelling), M4 (authoritative B-rep exact queries swap in behind the seam).
+
+---
+
+## [2026-07-14] M2.8 measure operates on faces + surface hit-points; classified edge/vertex entities deferred to M4
+
+**Status:** RESOLVED (M2.8 grill; Benjamin delegated → "do what you recommend")
+**Question:** The KB (`3d-viewer-tools`) and sub-spec describe measuring between "features, **faces, or edges**", from "the parametric center of the **edge or face**". M2.7 shipped **face picking only** and deferred edge derivation "to M2.8 where the measure tool needs edge/vertex entities" (DECISIONS [2026-07-14] face-only selection). Deriving true pickable edges (boundary-polyline extraction between face groups + line/circle classification) is ~⅓ of the block and is itself only a mesh fit. What is measurable in M2.8?
+**Options considered:** (a) **faces + surface hit-points** — pick a face and/or the exact ray hit-point (`hit.point`); circular *faces* measure from their fitted parametric center; (b) full edge+vertex entity derivation now; (c) faces + nearest-mesh-vertex snap, no classified edges.
+**Decision:** **(a) faces + surface hit-points.** This covers every M2.8 acceptance path without classified edges: point-to-point distance, face-pair caliper (parallel planes), angle between two faces, and **hole-to-hole / concentric center-to-center via the cylindrical face's fitted parametric center** (the KB "parametric center of the edge *or face*" — the face branch). `EntityRef` already reserves `kind:'edge'`, so classified edge/vertex entities add in M4 (alongside authoritative B-rep) **without reshaping** the ref or the M2.11 annotation binding. Matches the mesh-only reality already locked for the viewer; edges are a graceful deferral, not a scope cut of any acceptance line.
+**Resolved:** 2026-07-14 (M2.8 grill; KB `3d-viewer-tools` cross-checked)
+**Affects:** M2.8 (pickable entities for measure), M4 (classified edge/vertex entities + B-rep), M2.11 (annotation binding reuses `EntityRef`).
+
+---
+
 ## [2026-07-14] M2.7 face-only selection; edge picking deferred to M2.8
 
 **Status:** RESOLVED (autonomous, scoping; flag for Benjamin's review)
