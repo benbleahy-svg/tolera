@@ -211,6 +211,25 @@ def _remaining_budget(out: list[ParsedAttachment]) -> int:
     return MAX_TOTAL_ATTACHMENT_BYTES - sum(len(a.payload) for a in out)
 
 
+#: Refuse to even PARSE archives declaring more entries than this:
+#: ``ZipFile()`` materialises the whole central directory eagerly, so a
+#: million-entry archive would allocate gigabytes before any member loop
+#: (CodeRabbit major). Generous vs MAX_ATTACHMENT_MEMBERS — dirs count too.
+MAX_ZIP_ENTRIES = 2000
+_EOCD_SIG = b"PK\x05\x06"
+
+
+def _zip_entry_count(payload: bytes) -> int | None:
+    """Entry count from the end-of-central-directory record, WITHOUT letting
+    ``ZipFile`` parse the central directory. EOCD sits in the last 22 bytes
+    plus up to a 64 KiB comment; ``None`` = record not found (corrupt)."""
+    tail = payload[-(65536 + 22) :]
+    pos = tail.rfind(_EOCD_SIG)
+    if pos < 0 or pos + 12 > len(tail):
+        return None
+    return int.from_bytes(tail[pos + 10 : pos + 12], "little")
+
+
 def _collect_zip_members(
     container_name: str,
     payload: bytes,
@@ -221,9 +240,20 @@ def _collect_zip_members(
 ) -> bool:
     """Recurse a ZIP attachment into ``out``. Returns False when the archive
     could not be unpacked (caller keeps the container opaque so nothing is
-    lost). Zip-bomb guards: member count cap, per-member size cap enforced on
-    the ACTUAL decompressed bytes (headers can lie), aggregate budget bounding
-    what a single decompress may even READ, nesting depth cap."""
+    lost). Zip-bomb guards: container size + declared-entry caps checked
+    BEFORE the (eager) central-directory parse, member count cap, per-member
+    size cap enforced on the ACTUAL decompressed bytes (headers can lie),
+    aggregate budget bounding what a single decompress may even READ,
+    nesting depth cap."""
+    if len(payload) > max_member_bytes:
+        return False  # container over the per-file cap — don't even parse it
+    entries = _zip_entry_count(payload)
+    if entries is None or entries > MAX_ZIP_ENTRIES:
+        logger.warning(
+            "zip_unpack_refused",
+            extra={"reason": "entry_count", "entries": entries, "container_depth": depth},
+        )
+        return False
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as zf:
             for info in zf.infolist():

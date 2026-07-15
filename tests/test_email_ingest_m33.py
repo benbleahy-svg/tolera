@@ -140,7 +140,9 @@ def _eml_with_zip(zip_bytes: bytes, *, filename: str = "paket.zip") -> bytes:
 
 def _zip_of(members: dict[str, bytes]) -> bytes:
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
+    # Deflate (like real packers): the member-size-cap test needs a container
+    # that stays under the cap while a member decompresses past it.
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, data in members.items():
             zf.writestr(name, data)
     return buf.getvalue()
@@ -196,6 +198,15 @@ def test_parse_zip_member_size_capped() -> None:
         max_member_bytes=1024 * 1024,
     )
     assert [a.filename for a in parsed.attachments] == ["ok.step"]
+
+
+def test_parse_zip_with_excessive_entry_count_kept_opaque() -> None:
+    """ZipFile parses the central directory eagerly, so an entry-count bomb is
+    refused BEFORE parsing and the container stored opaque (CodeRabbit major)."""
+    many = _zip_of({f"n{i}.txt": b"x" for i in range(2001)})
+    parsed = parse_rfq_email(_eml_with_zip(many))
+    assert [a.filename for a in parsed.attachments] == ["paket.zip"]
+    assert parsed.attachments[0].origin is None
 
 
 def test_parse_zip_aggregate_budget_capped(monkeypatch: pytest.MonkeyPatch) -> None:
