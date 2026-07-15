@@ -28,7 +28,7 @@ from collections.abc import Iterator
 from email import policy
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -198,6 +198,29 @@ def test_parse_zip_member_size_capped() -> None:
     assert [a.filename for a in parsed.attachments] == ["ok.step"]
 
 
+def test_parse_zip_aggregate_budget_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One email may not accumulate more decompressed bytes than the aggregate
+    budget, however many members stay under the per-member cap (review 🔴1)."""
+    import app.email_ingest as ingest_mod
+
+    member = b"ISO-10303-21;" + b"\x00" * (60 * 1024)
+    monkeypatch.setattr(ingest_mod, "MAX_TOTAL_ATTACHMENT_BYTES", 100 * 1024)
+    parsed = parse_rfq_email(_eml_with_zip(_zip_of({f"teil-{i}.step": member for i in range(3)})))
+    assert len(parsed.attachments) == 1  # second member would exceed the budget
+
+
+def test_parse_overlong_message_id_falls_back_to_surrogate() -> None:
+    msg = EmailMessage()
+    msg["From"] = SENDER
+    msg["To"] = RECIPIENT
+    msg["Subject"] = "Anfrage"
+    msg["Message-Id"] = f"<{'x' * 4000}@kunde-beispiel.de>"
+    msg.set_content("Hallo.")
+    parsed = parse_rfq_email(msg.as_bytes())
+    # An index-row-busting header never reaches the unique index (review 🟡6).
+    assert parsed.message_id.startswith("sha256:")
+
+
 def test_parse_missing_message_id_gets_content_hash_surrogate() -> None:
     msg = EmailMessage()
     msg["From"] = SENDER
@@ -344,6 +367,14 @@ def test_webhook_ingests_sample_eml_end_to_end(
     assert str(rfq[4]) == quote_id and rfq[5] is not None
     assert "Losgroessen" in (rfq[6] or "")
 
+    # The ORIGINAL RFQ blob round-trips byte-faithfully (ASCII fixture).
+    app = cast("Any", ingest_client.app)  # TestClient types .app as a bare ASGI callable
+
+    async def _read_back(key: str) -> bytes:
+        return b"".join([chunk async for chunk in app.state.storage.stream(key)])
+
+    assert asyncio.run(_read_back(rfq[2])) == raw
+
     # Attachment filed: one part + one primary file, RFQ provenance kept.
     files = _fetch_rows(
         tenancy_db,
@@ -465,6 +496,22 @@ def test_webhook_rejects_bad_signature(
     _seed_org_with_member(seeder)
     resp = _post_webhook(ingest_client, SAMPLE_EML.read_bytes(), key="wrong-key")
     assert resp.status_code == 401
+
+
+def test_webhook_rejects_replayed_token(
+    ingest_client: TestClient,
+    seeder: Seeder,
+    eager_celery: None,
+    lens_calls: list[tuple[str, str, str]],
+) -> None:
+    """The HMAC doesn't bind the payload, so a captured (timestamp, token,
+    signature) must be single-use (review 🟡4)."""
+    _seed_org_with_member(seeder)
+    fields = _sign(SIGNING_KEY)
+    first = _post_webhook(ingest_client, SAMPLE_EML.read_bytes(), fields=fields)
+    replay = _post_webhook(ingest_client, ZIP_EML.read_bytes(), fields=fields)
+    assert first.status_code == 200
+    assert replay.status_code == 401
 
 
 def test_webhook_fails_closed_when_unconfigured(tenancy_db: str, seeder: Seeder) -> None:

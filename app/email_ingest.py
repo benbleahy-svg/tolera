@@ -82,11 +82,15 @@ RFQ_EML_FILENAME = "original-rfq.eml"
 #: the Message-Id dedupe is the durable idempotency gate behind it).
 SIGNATURE_MAX_AGE_SECONDS = 900
 #: ZIP recursion guards: total extracted members per email, nesting depth
-#: (outer zip = 0; "recurse ZIPs" needs 1; deeper is hostile), and the
-#: spec's per-file cap ("size cap 200 MB/file" — #email-connectivity).
+#: (outer zip = 0; "recurse ZIPs" needs 1; deeper is hostile), the spec's
+#: per-file cap ("size cap 200 MB/file" — #email-connectivity), and an
+#: AGGREGATE decompressed-bytes budget per email — without it a small zip
+#: deflating to 200 MB x N members would be held in memory all at once
+#: (zip-bomb → worker OOM; fresh-eyes review 🔴1).
 MAX_ATTACHMENT_MEMBERS = 200
 MAX_ZIP_DEPTH = 1
 DEFAULT_MAX_MEMBER_BYTES = 200 * 1024 * 1024
+MAX_TOTAL_ATTACHMENT_BYTES = 500 * 1024 * 1024
 
 
 # --------------------------------------------------------------------------- #
@@ -117,6 +121,32 @@ def verify_mailgun_signature(
         signing_key.encode(), (timestamp + token).encode(), hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+class _TokenReplayCache:
+    """Single-use enforcement for Mailgun tokens (fresh-eyes review 🟡4):
+    the HMAC covers only ``timestamp + token`` — it does NOT bind the payload
+    — so a captured signature could be re-posted with a crafted body within
+    the freshness window. Mailgun's guidance is to cache seen tokens and
+    reject repeats. In-process cache: sufficient for the single-API-container
+    pilot deploy; a multi-instance deploy needs a shared (Redis) cache —
+    noted as a follow-up in the PR."""
+
+    def __init__(self, ttl_seconds: float = SIGNATURE_MAX_AGE_SECONDS * 2) -> None:
+        self._ttl = ttl_seconds
+        self._seen: dict[str, float] = {}
+
+    def seen_before(self, token: str) -> bool:
+        now = time.time()
+        if len(self._seen) > 10_000:  # bound memory; expired entries dominate
+            self._seen = {t: exp for t, exp in self._seen.items() if exp > now}
+        if self._seen.get(token, 0) > now:
+            return True
+        self._seen[token] = now + self._ttl
+        return False
+
+
+_token_replay_cache = _TokenReplayCache()
 
 
 # --------------------------------------------------------------------------- #
@@ -152,9 +182,17 @@ def _surrogate_message_id(raw: bytes) -> str:
     return f"sha256:{hashlib.sha256(raw).hexdigest()}"
 
 
+#: RFC 5322 caps a header line at 998 chars; anything longer is hostile and
+#: would also blow Postgres's btree index-row limit on the unique index
+#: (fresh-eyes review 🟡6) — fall back to the content-hash surrogate instead.
+MAX_MESSAGE_ID_CHARS = 512
+
+
 def message_id_of(raw: bytes, msg: Message) -> str:
-    header = msg.get("Message-Id")
-    return header.strip() if header and header.strip() else _surrogate_message_id(raw)
+    header = (msg.get("Message-Id") or "").strip()
+    if not header or len(header) > MAX_MESSAGE_ID_CHARS:
+        return _surrogate_message_id(raw)
+    return header
 
 
 def _acceptable(name: str, payload: bytes, max_member_bytes: int) -> bool:
@@ -165,6 +203,12 @@ def _acceptable(name: str, payload: bytes, max_member_bytes: int) -> bool:
     if len(payload) > max_member_bytes:
         return False
     return sniff_matches_extension(name, payload[:MAGIC_SNIFF_BYTES])
+
+
+def _remaining_budget(out: list[ParsedAttachment]) -> int:
+    """The aggregate decompressed-bytes budget left for this email (🔴1:
+    per-member caps alone let N members hold N x 200 MB in memory at once)."""
+    return MAX_TOTAL_ATTACHMENT_BYTES - sum(len(a.payload) for a in out)
 
 
 def _collect_zip_members(
@@ -178,7 +222,8 @@ def _collect_zip_members(
     """Recurse a ZIP attachment into ``out``. Returns False when the archive
     could not be unpacked (caller keeps the container opaque so nothing is
     lost). Zip-bomb guards: member count cap, per-member size cap enforced on
-    the ACTUAL decompressed bytes (headers can lie), nesting depth cap."""
+    the ACTUAL decompressed bytes (headers can lie), aggregate budget bounding
+    what a single decompress may even READ, nesting depth cap."""
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as zf:
             for info in zf.infolist():
@@ -190,9 +235,24 @@ def _collect_zip_members(
                         extra={"cap": MAX_ATTACHMENT_MEMBERS, "container_depth": depth},
                     )
                     break
+                # Never read past the smaller of the per-member cap and what's
+                # left of the aggregate budget (+1 so the over-limit case is
+                # detectable and the member is dropped, not truncated).
+                read_cap = min(max_member_bytes, _remaining_budget(out))
+                if read_cap <= 0:
+                    logger.warning(
+                        "zip_budget_exhausted",
+                        extra={"budget": MAX_TOTAL_ATTACHMENT_BYTES, "container_depth": depth},
+                    )
+                    break
                 member_name = _safe_filename(info.filename)
                 with zf.open(info) as fh:
-                    data = fh.read(max_member_bytes + 1)
+                    data = fh.read(read_cap + 1)
+                if len(data) > read_cap:
+                    logger.info(
+                        "attachment_skipped", extra={"reason": "member_too_large", "depth": depth}
+                    )
+                    continue
                 _collect_attachment(
                     member_name,
                     None,
@@ -229,10 +289,10 @@ def _collect_attachment(
         ):
             return  # members filed; the container itself is not
         # Unpack failed (or nested too deep): keep the archive opaque.
-        if _acceptable(name, payload, max_member_bytes):
+        if _acceptable(name, payload, max_member_bytes) and len(payload) <= _remaining_budget(out):
             out.append(ParsedAttachment(name, content_type, payload, origin))
         return
-    if not _acceptable(name, payload, max_member_bytes):
+    if not _acceptable(name, payload, max_member_bytes) or len(payload) > _remaining_budget(out):
         logger.info("attachment_skipped", extra={"reason": "not_acceptable", "depth": depth})
         return
     out.append(ParsedAttachment(name, content_type, payload, origin))
@@ -332,6 +392,15 @@ async def mailgun_inbound(
         raise AppError(
             "invalid_signature",
             "Signaturprüfung fehlgeschlagen.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+    if _token_replay_cache.seen_before(token):
+        # The signature doesn't bind the payload — reject token reuse so a
+        # captured (timestamp, token, signature) can't be re-posted with a
+        # crafted body inside the freshness window (🟡4).
+        raise AppError(
+            "replayed_token",
+            "Signatur-Token wurde bereits verwendet.",
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
     slug = slug_from_recipient(recipient)
@@ -546,63 +615,69 @@ async def run_rfq_ingest(
     stored_keys: list[str] = []
     try:
         sessionmaker = make_sessionmaker(engine)
-        async with org_scoped_session(sessionmaker, org_id) as session:
-            rfq = await session.get(RequestForQuote, rfq_id)
-            if rfq is None:
-                return {"failed": True, "error_code": "rfq_gone"}
-            if rfq.processed_on is not None and rfq.quote_id is not None:
-                # Redelivered after commit — idempotent no-op (§5).
-                return {"already_processed": True, "quote_id": str(rfq.quote_id)}
-            if not rfq.eml_storage_key:  # pragma: no cover — webhook always sets it
-                return {"failed": True, "error_code": "eml_missing"}
+        try:
+            async with org_scoped_session(sessionmaker, org_id) as session:
+                # Row-lock the gate row: two concurrent deliveries (visibility-
+                # timeout expiry, manual requeue) would otherwise both see
+                # processed_on IS NULL and mint two quotes (🟡2). The second
+                # worker blocks here, then sees the winner's processed_on.
+                rfq = await session.get(RequestForQuote, rfq_id, with_for_update=True)
+                if rfq is None:
+                    return {"failed": True, "error_code": "rfq_gone"}
+                if rfq.processed_on is not None and rfq.quote_id is not None:
+                    # Redelivered after commit — idempotent no-op (§5).
+                    return {"already_processed": True, "quote_id": str(rfq.quote_id)}
+                if not rfq.eml_storage_key:  # pragma: no cover — webhook always sets it
+                    return {"failed": True, "error_code": "eml_missing"}
 
-            parsed = parse_rfq_email(await _read_blob(storage, rfq.eml_storage_key))
+                parsed = parse_rfq_email(await _read_blob(storage, rfq.eml_storage_key))
 
-            contact: Contact | None = None
-            if parsed.sender_email:
-                contact = await session.scalar(
-                    select(Contact).where(
-                        Contact.email == parsed.sender_email, Contact.deleted_at.is_(None)
+                contact: Contact | None = None
+                if parsed.sender_email:
+                    # Deterministic pick if duplicate live emails ever exist (🟢7).
+                    contact = await session.scalar(
+                        select(Contact)
+                        .where(Contact.email == parsed.sender_email, Contact.deleted_at.is_(None))
+                        .order_by(Contact.created_at)
+                        .limit(1)
                     )
+                    if contact is None:
+                        first, last = _split_sender_name(parsed.sender_name)
+                        # Account-less = the held-for-review intake state
+                        # (DECISIONS.md 2026-06-25) — no Account is invented.
+                        contact = Contact(
+                            org_id=org_id,
+                            account_id=None,
+                            email=parsed.sender_email,
+                            first_name=first,
+                            last_name=last,
+                        )
+                        session.add(contact)
+                        await session.flush()
+
+                org = await session.get(Organization, org_id)
+                if org is None:  # pragma: no cover — GUC guarantees visibility
+                    return {"failed": True, "error_code": "org_gone"}
+                quote = Quote(
+                    org_id=org_id,
+                    number=await _next_quote_number(session, org_id),
+                    currency=org.currency,
+                    contact_id=contact.id if contact else None,
+                    account_id=contact.account_id if contact else None,
+                    rfq_received_date=parsed.sent_at or datetime.now(UTC),
+                    email_thread_id=parsed.message_id,
                 )
-                if contact is None:
-                    first, last = _split_sender_name(parsed.sender_name)
-                    # Account-less = the held-for-review intake state
-                    # (DECISIONS.md 2026-06-25) — no Account is invented.
-                    contact = Contact(
-                        org_id=org_id,
-                        account_id=None,
-                        email=parsed.sender_email,
-                        first_name=first,
-                        last_name=last,
-                    )
-                    session.add(contact)
-                    await session.flush()
+                session.add(quote)
+                await session.flush()
 
-            org = await session.get(Organization, org_id)
-            if org is None:  # pragma: no cover — GUC guarantees visibility
-                return {"failed": True, "error_code": "org_gone"}
-            quote = Quote(
-                org_id=org_id,
-                number=await _next_quote_number(session, org_id),
-                currency=org.currency,
-                contact_id=contact.id if contact else None,
-                account_id=contact.account_id if contact else None,
-                rfq_received_date=parsed.sent_at or datetime.now(UTC),
-                email_thread_id=parsed.message_id,
-            )
-            session.add(quote)
-            await session.flush()
+                rfq.quote_id = quote.id
+                rfq.processed_on = datetime.now(UTC)
+                rfq.description = parsed.body_text or None
+                first, last = _split_sender_name(parsed.sender_name)
+                rfq.first_name, rfq.last_name = first, last
+                if parsed.sender_email and not rfq.email:
+                    rfq.email = parsed.sender_email
 
-            rfq.quote_id = quote.id
-            rfq.processed_on = datetime.now(UTC)
-            rfq.description = parsed.body_text or None
-            first, last = _split_sender_name(parsed.sender_name)
-            rfq.first_name, rfq.last_name = first, last
-            if parsed.sender_email and not rfq.email:
-                rfq.email = parsed.sender_email
-
-            try:
                 part_count, to_extract = await _file_attachments(
                     session,
                     storage,
@@ -611,38 +686,40 @@ async def run_rfq_ingest(
                     attachments=parsed.attachments,
                     stored_keys=stored_keys,
                 )
-            except Exception:
-                # Roll the rows back with the session; discard written blobs.
-                for key in stored_keys:
-                    await storage.delete(key)
-                raise
 
-            member_ids = (
-                await session.scalars(
-                    select(UserOrgMembership.user_id).where(
-                        UserOrgMembership.org_id == org_id,
-                        UserOrgMembership.status == MembershipStatus.active,
+                member_ids = (
+                    await session.scalars(
+                        select(UserOrgMembership.user_id).where(
+                            UserOrgMembership.org_id == org_id,
+                            UserOrgMembership.status == MembershipStatus.active,
+                        )
                     )
-                )
-            ).all()
-            for user_id in member_ids:
-                # Spec #wingman: "New Quote created from Email Forwarding:
-                # Created Quote #N" — rendered German-first client-side; the
-                # M3.9 Triage card replaces this plain notification later.
-                session.add(
-                    Notification(
-                        org_id=org_id,
-                        user_id=user_id,
-                        kind="quote_email_ingested",
-                        payload={
-                            "quote_id": str(quote.id),
-                            "quote_number": quote.number,
-                            "rfq_id": str(rfq_id),
-                        },
+                ).all()
+                for user_id in member_ids:
+                    # Spec #wingman: "New Quote created from Email Forwarding:
+                    # Created Quote #N" — rendered German-first client-side; the
+                    # M3.9 Triage card replaces this plain notification later.
+                    session.add(
+                        Notification(
+                            org_id=org_id,
+                            user_id=user_id,
+                            kind="quote_email_ingested",
+                            payload={
+                                "quote_id": str(quote.id),
+                                "quote_number": quote.number,
+                                "rfq_id": str(rfq_id),
+                            },
+                        )
                     )
-                )
-            await session.flush()
-            quote_id, quote_number = quote.id, quote.number
+                await session.flush()
+                quote_id, quote_number = quote.id, quote.number
+        except Exception:
+            # Rows roll back with the session (including a failed COMMIT);
+            # discard every blob written this attempt so a Celery retry
+            # starts clean instead of compounding orphans (🟡3).
+            for key in stored_keys:
+                await storage.delete(key)
+            raise
         # Transaction committed — only now queue extraction on committed rows.
         for part_id, file_id in to_extract:
             _enqueue_lens_extract(org_id, part_id, file_id)
