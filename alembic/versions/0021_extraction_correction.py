@@ -65,7 +65,15 @@ def upgrade() -> None:
                 REFERENCES part_file(org_id, id) ON DELETE CASCADE,
             CONSTRAINT fk_extraction_correction_finding_org
                 FOREIGN KEY (org_id, finding_id)
-                REFERENCES extraction_finding(org_id, id) ON DELETE SET NULL (finding_id)
+                REFERENCES extraction_finding(org_id, id) ON DELETE SET NULL (finding_id),
+            CONSTRAINT ck_extraction_correction_shape CHECK (
+                (correction_type = 'mark_inaccurate'
+                    AND predicted IS NOT NULL AND corrected IS NULL)
+                OR (correction_type = 'replace'
+                    AND predicted IS NOT NULL AND corrected IS NOT NULL)
+                OR (correction_type = 'add_missing'
+                    AND predicted IS NULL AND corrected IS NOT NULL)
+            )
         )
         """
     )

@@ -416,7 +416,10 @@ class TestCorrections:
         finding_id = _plant_finding(seeder, org, file_id, value="WRONG")
         with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
             app_client.post(f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}/reject")
-        seeder.sql("DELETE FROM extraction_finding WHERE id = :id", {"id": uuid.UUID(finding_id)})
+        seeder.sql(
+            "DELETE FROM extraction_finding WHERE id = :id AND org_id = :org_id",
+            {"id": uuid.UUID(finding_id), "org_id": org},
+        )
         with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
             rows = self._corrections(app_client, part_id, file_id)
             assert len(rows) == 1
@@ -433,15 +436,20 @@ class TestTenancy:
         finding_id = _plant_finding(seeder, org_a, file_id)
         org_b, admin_b = _org_with_admin(seeder, "m32-org-b")
         with authed(app_client, user_id=admin_b, org_id=org_b, roles=ADMIN):
-            for action in ("accept", "reject"):
-                resp = app_client.post(
-                    f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}/{action}"
-                )
+            base = f"/api/parts/{part_id}/files/{file_id}"
+            # EVERY new write route must fail the tenant gate identically.
+            for action, body in (
+                ("accept", None),
+                ("reject", None),
+                ("replace", {"value": "X"}),
+            ):
+                resp = app_client.post(f"{base}/findings/{finding_id}/{action}", json=body)
                 assert resp.status_code == 404, action
-            assert (
-                app_client.get(f"/api/parts/{part_id}/files/{file_id}/corrections").status_code
-                == 404
+            add = app_client.post(
+                f"{base}/findings", json={"category": "requirements", "type": "note", "value": "x"}
             )
+            assert add.status_code == 404
+            assert app_client.get(f"{base}/corrections").status_code == 404
 
     def test_corrections_are_org_scoped(self, app_client: TestClient, seeder: Seeder) -> None:
         """Two orgs correct findings; each sees only its own labels (per-tenant
@@ -459,13 +467,37 @@ class TestTenancy:
             assert rows[0]["predicted"]["value"] == "B-VALUE"
 
     def test_finding_of_other_file_404(self, app_client: TestClient, seeder: Seeder) -> None:
-        """A finding id must belong to the addressed file — no drive-by accepts."""
+        """A finding id must belong to the addressed file — no drive-by
+        mutations through a mismatched file path, on any action."""
         org, admin, part_id, file_id = _setup(app_client, seeder, "m32-otherfile")
         with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
             other_file = _upload_pdf(app_client, part_id)
         finding_id = _plant_finding(seeder, org, other_file)
         with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
-            resp = app_client.post(
-                f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}/accept"
+            for action, body in (
+                ("accept", None),
+                ("reject", None),
+                ("replace", {"value": "X"}),
+            ):
+                resp = app_client.post(
+                    f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}/{action}",
+                    json=body,
+                )
+                assert resp.status_code == 404, action
+
+    def test_file_of_other_part_404(self, app_client: TestClient, seeder: Seeder) -> None:
+        """add-missing + corrections resolve the file THROUGH the part —
+        a file paired with the wrong part_id is a 404, not a hit."""
+        org, admin, part_id, _file_id = _setup(app_client, seeder, "m32-otherpart")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            other_part = _create_part(app_client)
+            other_file = _upload_pdf(app_client, other_part)
+            add = app_client.post(
+                f"/api/parts/{part_id}/files/{other_file}/findings",
+                json={"category": "requirements", "type": "note", "value": "x"},
             )
-            assert resp.status_code == 404
+            assert add.status_code == 404
+            assert (
+                app_client.get(f"/api/parts/{part_id}/files/{other_file}/corrections").status_code
+                == 404
+            )

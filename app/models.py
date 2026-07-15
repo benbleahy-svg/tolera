@@ -2284,6 +2284,17 @@ class ExtractionCorrection(Base):
             ["extraction_finding.org_id", "extraction_finding.id"],
             name="fk_extraction_correction_finding_org",
         ),
+        # A corrupt training label is silent poison for the M3.11 eval set —
+        # enforce the type↔payload shape at the DB, not just in the endpoints.
+        CheckConstraint(
+            "(correction_type = 'mark_inaccurate'"
+            "    AND predicted IS NOT NULL AND corrected IS NULL)"
+            " OR (correction_type = 'replace'"
+            "    AND predicted IS NOT NULL AND corrected IS NOT NULL)"
+            " OR (correction_type = 'add_missing'"
+            "    AND predicted IS NULL AND corrected IS NOT NULL)",
+            name="ck_extraction_correction_shape",
+        ),
         Index("ix_extraction_correction_org_file", "org_id", "source_file_id"),
         # Keeps the SET NULL FK's referencing-row scan cheap on re-run deletes.
         Index("ix_extraction_correction_org_finding", "org_id", "finding_id"),
@@ -2294,10 +2305,12 @@ class ExtractionCorrection(Base):
     finding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     source_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     correction_type: Mapped[CorrectionType] = mapped_column(_correction_type_enum, nullable=False)
-    predicted: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    corrected: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # none_as_null: an explicit Python None must land as SQL NULL, not jsonb
+    # 'null' — the shape CHECK tests IS NULL and would reject it otherwise.
+    predicted: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    corrected: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     page: Mapped[int | None] = mapped_column(Integer)
-    bbox: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    bbox: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("app_user.id")
     )

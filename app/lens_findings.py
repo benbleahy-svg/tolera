@@ -257,7 +257,8 @@ async def accept_finding(
     target = _resolve_apply_target(finding, payload.apply_to if payload else None)
     if target is not None:
         part = await session.get(Part, part_id, with_for_update=True)
-        assert part is not None  # gated by _get_finding_or_404
+        if part is None:  # deleted between the finding gate and this lock
+            raise AppError("not_found", "Part not found.", status_code=status.HTTP_404_NOT_FOUND)
         await _apply_to_part(session, part, finding, target)
     if finding.status is FindingStatus.suggested:
         finding.status = FindingStatus.accepted
@@ -396,9 +397,12 @@ async def list_corrections(
     part_id: uuid.UUID,
     file_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> list[CorrectionOut]:
     """The file's training labels — read surface for QA and the M3.11 eval
-    harness. Org-scoped via RLS (per-tenant storage, never cross-org)."""
+    harness. Org-scoped via RLS (per-tenant storage, never cross-org) and
+    permission-gated like the actions that create the rows: training labels
+    expose predicted/corrected print content, not mere viewer state."""
     await _get_part_and_file_or_404(session, part_id, file_id)
     rows = (
         (
