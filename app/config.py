@@ -155,6 +155,23 @@ class Settings(BaseSettings):
     # clerk_authorized_party_set fail-closed precedent).
     mailgun_webhook_signing_key: str = ""
 
+    # --- Email connectivity / two-way threading (M3.5 — spec #email-connectivity) ---
+    # AES-256-GCM key for credentials at rest: 64 hex chars (32 bytes).
+    # Delivered as env (Infisical in prod — spec build notes); empty default =
+    # the connections API FAILS CLOSED (503), never plaintext storage.
+    email_credentials_key: str = ""
+    # OAuth app registrations (spec build notes: registered on day one; Gmail
+    # ships behind Google's pending-verification warning — DECISIONS.md
+    # 2026-06-14). Empty = that provider's connect button reports
+    # "not configured"; SMTP/IMAP and CI mocks work without them.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    ms_oauth_client_id: str = ""
+    ms_oauth_client_secret: str = ""
+    ms_oauth_tenant: str = "common"
+    # Inbound sync cadence (spec: "Celery task every 5 min").
+    email_sync_interval_seconds: int = 300
+
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"
     default_locale: str = "de-DE"

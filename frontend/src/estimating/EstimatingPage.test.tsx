@@ -64,6 +64,10 @@ const getQuoteTotals = vi.fn(() =>
 // its own tests in parts/MatchingParts.test.tsx.
 vi.mock('../parts/MatchingParts', () => ({ PartMatchesChip: () => null }));
 
+// The communications timeline (M3.5) has its own suite; stub it here so the
+// page render never touches Clerk via useEmailApi.
+vi.mock('./CommunicationsSection', () => ({ CommunicationsSection: () => null }));
+
 // Mock the estimating API module so the page never touches Clerk/network.
 vi.mock('./api', () => ({
   useEstimatingApi: () => ({
