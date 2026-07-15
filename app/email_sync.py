@@ -27,6 +27,7 @@ re-polls and redeliveries no-ops; provider errors land on
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import uuid
@@ -47,6 +48,7 @@ from .email_providers import (
     SyncResult,
     get_provider,
 )
+from .errors import AppError
 from .lens_extract import _run_on_own_loop
 from .models import (
     EmailConnectionType,
@@ -77,6 +79,18 @@ def _task_settings() -> Settings:
 def attachment_key(org_id: uuid.UUID, message_id: uuid.UUID, filename: str) -> str:
     """Tenant-scoped storage key, mirroring ``rfq_object_key``'s layout."""
     return f"org/{org_id}/email/{message_id}/{filename}"
+
+
+def _effective_message_id(msg: InboundEmail) -> str:
+    """The Message-Id, or a deterministic content-hash surrogate when the
+    header is absent (legal, rare) — otherwise an UNSEEN IMAP message with no
+    Message-Id would re-store on every poll (the M3.3 surrogate precedent)."""
+    if msg.message_id:
+        return msg.message_id
+    digest = hashlib.sha256(
+        "\x00".join([msg.from_address, msg.subject, msg.body_text, str(msg.sent_at or "")]).encode()
+    ).hexdigest()
+    return f"sha256:{digest}"
 
 
 # --------------------------------------------------------------------------- #
@@ -150,7 +164,14 @@ async def _store_inbound(
     message_id = uuid.uuid4()
     attachments: list[dict[str, Any]] = []
     for att in msg.attachments:
-        name = _safe_filename(att.filename)
+        try:
+            name = _safe_filename(att.filename)
+        except AppError:
+            # A hostile/broken filename must skip THIS attachment, never fail
+            # the sync transaction — that would pin the cursor and refetch the
+            # same message forever (fresh-eyes review 🔴3).
+            logger.info("email_attachment_skipped", extra={"reason": "bad_filename"})
+            continue
         # Same allow-list gate as ingest (extension + magic bytes + cap) — a
         # reply attachment is as untrusted as an RFQ attachment.
         if not _acceptable(name, att.payload, MAX_ATTACHMENT_BYTES):
@@ -173,7 +194,7 @@ async def _store_inbound(
         thread_id=thread.id,
         connection_id=connection.id,
         direction=EmailDirection.inbound,
-        rfc_message_id=msg.message_id or None,
+        rfc_message_id=_effective_message_id(msg),
         in_reply_to=msg.in_reply_to,
         from_address=msg.from_address or "unbekannt@invalid",
         to_addresses=msg.to_addresses,
@@ -227,14 +248,12 @@ async def run_email_sync_connection(
 
                 matched = 0
                 for msg in result.messages:
-                    if msg.message_id:
-                        exists = await session.scalar(
-                            select(EmailMessage.id).where(
-                                EmailMessage.rfc_message_id == msg.message_id
-                            )
-                        )
-                        if exists is not None:
-                            continue  # idempotent re-poll (IMAP UNSEEN, redelivery)
+                    effective_id = _effective_message_id(msg)
+                    exists = await session.scalar(
+                        select(EmailMessage.id).where(EmailMessage.rfc_message_id == effective_id)
+                    )
+                    if exists is not None:
+                        continue  # idempotent re-poll (IMAP UNSEEN, redelivery)
                     thread = await _match_thread(session, org_id, msg)
                     if thread is None:
                         continue  # no match → NOT stored (data minimisation)

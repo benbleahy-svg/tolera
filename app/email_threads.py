@@ -89,8 +89,10 @@ def _out(row: EmailMessage) -> EmailMessageOut:
     )
 
 
-async def _quote_or_404(session: AsyncSession, quote_id: uuid.UUID) -> Quote:
-    quote = await session.get(Quote, quote_id)
+async def _quote_or_404(
+    session: AsyncSession, quote_id: uuid.UUID, *, for_update: bool = False
+) -> Quote:
+    quote = await session.get(Quote, quote_id, with_for_update=for_update)
     if quote is None:
         raise AppError(
             "quote_not_found",
@@ -131,7 +133,11 @@ async def send_email(
 ) -> EmailMessageOut:
     """Send from the caller's own address (primary connection) and record the
     outbound message on the quote's thread."""
-    await _quote_or_404(session, quote_id)
+    # Row-lock the quote: two concurrent first sends would otherwise both see
+    # "no thread", both send, and the loser would die on the unique index
+    # AFTER its email left (fresh-eyes review 🟡7). The lock serializes sends
+    # per quote; the second request sees the winner's thread row.
+    await _quote_or_404(session, quote_id, for_update=True)
     connection = await session.scalar(
         select(UserEmailConnection).where(
             UserEmailConnection.user_id == principal.user_id,

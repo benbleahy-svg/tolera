@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import secrets
 import time
 import uuid
 from datetime import datetime
@@ -30,7 +32,7 @@ from typing import Annotated, Any, Literal, cast
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update
@@ -49,6 +51,12 @@ from .models import EmailConnectionType, UserEmailConnection
 router = APIRouter(prefix="/email-connections", tags=["email-connections"])
 
 STATE_TTL_SECONDS = 600
+#: Host-only, HttpOnly browser cookie binding the OAuth callback to the browser
+#: that STARTED the flow (fresh-eyes review 🔴1: without it, a victim clicking
+#: an attacker's authorize_url would link THEIR mailbox to the attacker's
+#: connection row). SameSite=Lax is still sent on the provider's top-level
+#: redirect back to the callback.
+OAUTH_NONCE_COOKIE = "tolera_oauth_nonce"
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -185,8 +193,21 @@ async def disconnect(
     principal: Annotated[Principal, Depends(get_principal)],
 ) -> None:
     row = await _own_connection(session, principal, connection_id)
+    was_primary = row.is_primary
     await session.delete(row)
     await session.flush()
+    if was_primary:
+        # Promote the oldest remaining connection — sending must not silently
+        # brick because the primary was disconnected (fresh-eyes review).
+        successor = await session.scalar(
+            select(UserEmailConnection)
+            .where(UserEmailConnection.user_id == principal.user_id)
+            .order_by(UserEmailConnection.created_at)
+            .limit(1)
+        )
+        if successor is not None:
+            successor.is_primary = True
+            await session.flush()
 
 
 @router.put("/{connection_id}/primary")
@@ -263,12 +284,19 @@ def _redirect_uri(provider: OAuthProvider, settings: Settings) -> str:
     return f"{settings.api_base_url}/email-connections/oauth/{provider}/callback"
 
 
-def _seal_state(settings: Settings, principal: Principal, provider: OAuthProvider) -> str:
+def _seal_state(
+    settings: Settings, principal: Principal, provider: OAuthProvider, browser_nonce: str
+) -> str:
     payload = {
         "user_id": str(principal.user_id),
         "org_id": str(principal.active_org_id),
         "provider": provider,
         "exp": time.time() + STATE_TTL_SECONDS,
+        # Binds the callback to the initiating browser (cookie) — 🔴1.
+        "nonce_hash": hashlib.sha256(browser_nonce.encode()).hexdigest(),
+        # Single-use marker, consumed at the callback via the shared Redis
+        # SET-NX gate (the M3.3 webhook-token precedent).
+        "jti": uuid.uuid4().hex,
     }
     blob = encrypt_credentials(settings.email_credentials_key, payload)
     return base64.urlsafe_b64encode(blob).decode()
@@ -294,6 +322,15 @@ def _open_state(settings: Settings, state: str, provider: OAuthProvider) -> dict
     return payload
 
 
+async def _state_replayed(jti: str, redis_url: str) -> bool:
+    """Single-use enforcement for OAuth states — same shared SET-NX gate the
+    Mailgun webhook tokens use (degrades to the in-process cache when Redis
+    is unreachable; the nonce cookie still binds the browser)."""
+    from .email_ingest import _token_replayed
+
+    return await _token_replayed(f"oauth-state:{jti}", redis_url)
+
+
 class OAuthStartOut(BaseModel):
     authorize_url: str
     state: str
@@ -302,11 +339,22 @@ class OAuthStartOut(BaseModel):
 @router.get("/oauth/{provider}/start")
 async def oauth_start(
     provider: OAuthProvider,
+    response: Response,
     principal: Annotated[Principal, Depends(get_principal)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> OAuthStartOut:
     client_id, _ = _oauth_config(provider, settings)
-    state = _seal_state(settings, principal, provider)
+    browser_nonce = secrets.token_urlsafe(32)
+    response.set_cookie(
+        OAUTH_NONCE_COOKIE,
+        browser_nonce,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=settings.api_base_url.startswith("https://"),
+        path="/email-connections/oauth",
+    )
+    state = _seal_state(settings, principal, provider, browser_nonce)
     if provider == "gmail":
         params = {
             "client_id": client_id,
@@ -391,15 +439,38 @@ async def _initial_cursor(
 @router.get("/oauth/{provider}/callback")
 async def oauth_callback(
     provider: OAuthProvider,
-    code: str,
     state: str,
     request: Request,
     settings: Annotated[Settings, Depends(get_app_settings)],
+    code: str = "",
+    error: str = "",
 ) -> RedirectResponse:
     """The browser lands here from Google/Microsoft — no session, so the sealed
-    ``state`` is the authentication (10-min expiry). On success: encrypted
-    connection row + redirect to the settings page."""
+    ``state`` is the authentication (10-min expiry), hardened three ways
+    (fresh-eyes review 🔴1): it must decrypt+match, the browser must present
+    the nonce cookie the START set (so an attacker-forwarded authorize_url
+    dies here), and its ``jti`` is single-use (Redis SET-NX, in-process
+    fallback — the M3.3 precedent). On success: encrypted connection row +
+    redirect to the settings page."""
+    if error or not code:
+        # User denied consent (or the provider errored) — back to settings
+        # with a friendly flag, never a raw validation error (review 🟡8).
+        return RedirectResponse(
+            f"{settings.app_base_url}/settings/email?connect_error={provider}",
+            status_code=status.HTTP_302_FOUND,
+        )
     payload = _open_state(settings, state, provider)
+    browser_nonce = request.cookies.get(OAUTH_NONCE_COOKIE, "")
+    nonce_ok = bool(browser_nonce) and hashlib.sha256(
+        browser_nonce.encode()
+    ).hexdigest() == payload.get("nonce_hash")
+    jti = str(payload.get("jti", ""))
+    if not nonce_ok or not jti or await _state_replayed(jti, settings.redis_url):
+        raise AppError(
+            "invalid_oauth_state",
+            "Ungültiger oder abgelaufener OAuth-Status.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
     user_id = uuid.UUID(str(payload["user_id"]))
     org_id = uuid.UUID(str(payload["org_id"]))
     exchanged = await _exchange_code(provider, code, settings)
@@ -433,7 +504,9 @@ async def oauth_callback(
         )
         session.add(row)
         await session.flush()
-    return RedirectResponse(
+    redirect = RedirectResponse(
         f"{settings.app_base_url}/settings/email?connected={provider}",
         status_code=status.HTTP_302_FOUND,
     )
+    redirect.delete_cookie(OAUTH_NONCE_COOKIE, path="/email-connections/oauth")
+    return redirect

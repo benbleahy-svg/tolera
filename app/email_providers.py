@@ -29,6 +29,7 @@ import contextlib
 import email
 import imaplib
 import smtplib
+import ssl
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email import policy
@@ -474,7 +475,10 @@ class SmtpImapProvider:
             host = str(credentials.get("smtp_host", ""))
             port = int(credentials.get("smtp_port", 587))
             with smtplib.SMTP(host, port, timeout=30) as smtp:
-                smtp.starttls()
+                # Explicit verified context: the stdlib default here skips
+                # certificate/hostname checks (fresh-eyes review 🔴2) — an
+                # on-path attacker must never harvest the mailbox password.
+                smtp.starttls(context=ssl.create_default_context())
                 smtp.login(
                     str(credentials.get("username", "")), str(credentials.get("password", ""))
                 )
@@ -494,7 +498,9 @@ class SmtpImapProvider:
             host = str(credentials.get("imap_host", ""))
             port = int(credentials.get("imap_port", 993))
             raws: list[bytes] = []
-            imap = imaplib.IMAP4_SSL(host, port, timeout=30)
+            imap = imaplib.IMAP4_SSL(
+                host, port, timeout=30, ssl_context=ssl.create_default_context()
+            )
             try:
                 imap.login(
                     str(credentials.get("username", "")), str(credentials.get("password", ""))

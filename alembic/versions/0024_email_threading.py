@@ -140,6 +140,23 @@ def upgrade() -> None:
     op.execute(
         "CREATE INDEX ix_email_message_org_thread ON email_message (org_id, thread_id, created_at)"
     )
+    # Reply-matching hot path (_match_thread): provider thread id lookups and
+    # the ingest-anchor lookup on quote.email_thread_id would otherwise be
+    # per-message seq scans every 5-minute poll.
+    op.execute(
+        """
+        CREATE INDEX ix_quote_email_thread_provider_id
+            ON quote_email_thread (org_id, provider_thread_id)
+            WHERE provider_thread_id IS NOT NULL
+        """
+    )
+    op.execute(
+        """
+        CREATE INDEX ix_quote_email_thread_anchor
+            ON quote (org_id, email_thread_id)
+            WHERE email_thread_id IS NOT NULL
+        """
+    )
 
     for table in ("user_email_connection", "quote_email_thread", "email_message"):
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
@@ -176,6 +193,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS list_email_sync_targets()")
+    op.execute("DROP INDEX IF EXISTS ix_quote_email_thread_anchor")
     for table in ("email_message", "quote_email_thread", "user_email_connection"):
         op.execute(f"DROP POLICY IF EXISTS org_isolation ON {table}")
         op.execute(f"REVOKE ALL ON {table} FROM {APP_ROLE}")

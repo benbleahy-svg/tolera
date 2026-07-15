@@ -417,3 +417,50 @@ def test_timeline_readable_by_viewer(
         resp = client.get(f"/quotes/{quote}/emails")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
+
+
+def test_poisoned_attachment_filename_skips_attachment_not_sync(
+    client: TestClient, seeder: Seeder, provider: MockProvider, tenancy_db: str
+) -> None:
+    """Fresh-eyes 🔴3: a hostile filename must not wedge the connection —
+    the message still lands, the attachment is skipped, the cursor advances."""
+    org, user, quote = _seed_quote_org(seeder, "acme-poison")
+    with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        connection_id = _connect(client)
+        _send(client, quote)
+        provider.inbox = [
+            _reply(
+                in_reply_to="<out-1@acme-machining.de>",
+                attachments=[InboundAttachment("..", "application/pdf", b"%PDF-1.4 x")],
+            )
+        ]
+        result = _run_sync(org, connection_id)
+        assert result["matched"] == 1  # the reply itself is stored
+        timeline = client.get(f"/quotes/{quote}/emails").json()
+    assert timeline[1]["attachments"] == []  # the poisoned attachment is not
+    [(synced_at,)] = _fetch_rows(
+        tenancy_db,
+        "SELECT last_synced_at FROM user_email_connection WHERE id = :id",
+        {"id": uuid.UUID(connection_id)},
+    )
+    assert synced_at is not None  # the sync completed; no crash-loop
+
+
+def test_message_id_less_reply_dedupes_via_surrogate(
+    client: TestClient, seeder: Seeder, provider: MockProvider, tenancy_db: str
+) -> None:
+    """Fresh-eyes 🟡5: an UNSEEN IMAP reply with no Message-Id must not
+    re-store every poll — the content-hash surrogate dedupes it."""
+    org, user, quote = _seed_quote_org(seeder, "acme-noid")
+    with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        connection_id = _connect(client)
+        _send(client, quote)
+        provider.inbox = [_reply(message_id="", in_reply_to="<out-1@acme-machining.de>")]
+        assert _run_sync(org, connection_id)["matched"] == 1
+        assert _run_sync(org, connection_id)["matched"] == 0  # surrogate hit
+    rows = _fetch_rows(
+        tenancy_db,
+        "SELECT count(*) FROM email_message WHERE org_id = :org AND direction = 'inbound'",
+        {"org": org},
+    )
+    assert rows == [(1,)]

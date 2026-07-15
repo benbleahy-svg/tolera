@@ -281,3 +281,88 @@ def test_connection_test_sends_to_own_address(
             "subject": resp.json()["subject"],
         }
     ]
+
+
+def test_oauth_callback_rejects_missing_browser_cookie(
+    email_client: TestClient, seeder: Seeder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fresh-eyes 🔴1: a victim clicking an attacker's authorize_url has no
+    nonce cookie for that state — the callback must refuse to link."""
+    org, user = _seed_member(seeder, slug="fechner-csrf")
+
+    async def fake_exchange(provider: Any, code: str, settings: Any) -> dict[str, Any]:
+        raise AssertionError("must never exchange the code without the browser cookie")
+
+    monkeypatch.setattr("app.email_connections._exchange_code", fake_exchange)
+    with authed(email_client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        state = email_client.get("/email-connections/oauth/gmail/start").json()["state"]
+    email_client.cookies.clear()  # a different browser presents no nonce cookie
+    resp = email_client.get(
+        "/email-connections/oauth/gmail/callback",
+        params={"code": "auth-code-999", "state": state},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "invalid_oauth_state"
+
+
+def test_oauth_state_is_single_use(
+    email_client: TestClient,
+    seeder: Seeder,
+    monkeypatch: pytest.MonkeyPatch,
+    tenancy_db: str,
+) -> None:
+    org, user = _seed_member(seeder, slug="fechner-replay")
+
+    async def fake_exchange(provider: Any, code: str, settings: Any) -> dict[str, Any]:
+        return {"refresh_token": "1//r", "email": "jan@replay.example", "name": None}
+
+    async def fake_baseline(connection_type: Any, credentials: dict[str, Any]) -> str | None:
+        return None
+
+    monkeypatch.setattr("app.email_connections._exchange_code", fake_exchange)
+    monkeypatch.setattr("app.email_connections._initial_cursor", fake_baseline)
+    with authed(email_client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        start = email_client.get("/email-connections/oauth/gmail/start").json()
+    params = {"code": "auth-code-1", "state": start["state"]}
+    first = email_client.get(
+        "/email-connections/oauth/gmail/callback", params=params, follow_redirects=False
+    )
+    assert first.status_code == 302
+    replay = email_client.get(
+        "/email-connections/oauth/gmail/callback", params=params, follow_redirects=False
+    )
+    assert replay.status_code == 400  # jti consumed (and the cookie was cleared)
+    rows = _fetch_rows(
+        tenancy_db,
+        "SELECT count(*) FROM user_email_connection WHERE org_id = :org",
+        {"org": org},
+    )
+    assert rows == [(1,)]
+
+
+def test_oauth_consent_denied_redirects_to_settings(email_client: TestClient) -> None:
+    """User clicks 'Abbrechen' on Google's screen: error param, no code —
+    friendly redirect, never a raw validation error (fresh-eyes 🟡8)."""
+    resp = email_client.get(
+        "/email-connections/oauth/gmail/callback",
+        params={"error": "access_denied", "state": "irrelevant"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert "connect_error=gmail" in resp.headers["location"]
+
+
+def test_deleting_primary_promotes_oldest_remaining(
+    email_client: TestClient, seeder: Seeder
+) -> None:
+    org, user = _seed_member(seeder, slug="fechner-promote")
+    with authed(email_client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        first = _connect_smtp(email_client).json()
+        second = _connect_smtp(
+            email_client, {**SMTP_PAYLOAD, "from_address": "verkauf@acme-machining.de"}
+        ).json()
+        assert email_client.delete(f"/email-connections/{first['id']}").status_code == 204
+        listed = email_client.get("/email-connections").json()
+    assert [c["id"] for c in listed] == [second["id"]]
+    assert listed[0]["is_primary"] is True  # sending is not silently bricked
