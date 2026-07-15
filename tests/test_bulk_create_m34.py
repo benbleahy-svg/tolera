@@ -370,6 +370,11 @@ def test_accept_rejects_invalid_rows(
         ):
             resp = ingest_client.post(f"/api/quotes/{quote_id}/bulk-create", json={"rows": rows})
             assert resp.status_code == 422, rows
+            # The single API error envelope (CLAUDE.md §5): {code, message, details}.
+            envelope = resp.json()
+            assert envelope["code"] == "validation_error", rows
+            assert envelope["message"]
+            assert envelope["details"], rows  # the redacted per-field errors
 
 
 @pytest.mark.usefixtures("eager_celery", "lens_calls")

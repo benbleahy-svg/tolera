@@ -7,7 +7,7 @@
  * Accept — the only path that creates anything.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { BulkCreatePrefill, BulkCreateRowBody, QuoteSummary } from './types';
@@ -107,6 +107,35 @@ export function BulkCreateDialog({ quoteId, getPrefill, create, onCreated, onClo
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Modal focus management (CodeRabbit): focus lands on the first control
+  // when the dialog opens, and Tab/Shift+Tab wrap inside it.
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const focusables = () =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])'),
+      ).filter((el) => !el.hasAttribute('disabled'));
+    focusables()[0]?.focus();
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const els = focusables();
+      if (els.length === 0) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    container.addEventListener('keydown', trap);
+    return () => container.removeEventListener('keydown', trap);
+  }, []);
+
   const setCell = (index: number, field: 'part_number' | 'revision' | 'description' | 'quantities', value: string) => {
     setRows((current) =>
       current.map((row, i) =>
@@ -150,6 +179,7 @@ export function BulkCreateDialog({ quoteId, getPrefill, create, onCreated, onClo
 
   return (
     <div
+      ref={containerRef}
       className="est-modal-backdrop"
       role="dialog"
       aria-modal="true"
