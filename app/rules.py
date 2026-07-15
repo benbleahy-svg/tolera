@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal
 from .authz import Permission, require
 from .deps import get_session
-from .errors import AppError
+from .errors import AppError, _redact_validation_errors
 from .models import Rule
 from .rules_schema import RuleSchema, parse_rules_json, serialize_rules
 
@@ -129,7 +129,9 @@ async def import_rules(
         raise AppError(
             code="invalid_rules_json",
             message="The pasted rules JSON does not match the canonical rule schema.",
-            details=exc.errors(include_url=False, include_input=False),
+            # Redacted like the global 422 handler: ``ctx`` carries the raw
+            # (non-JSON-serializable) ValueError from custom validators.
+            details=_redact_validation_errors(exc.errors(include_url=False)),
             status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
         ) from exc
     except ValueError as exc:

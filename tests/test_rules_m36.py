@@ -414,3 +414,66 @@ def test_list_returns_summaries_with_retained_ast(app_client: TestClient, seeder
     assert query["units"] == "mm"  # units retained verbatim for M3.7
     assert query["value_type"] == "distance"
     assert len(tight["resolutions"]) == 3
+
+
+# --------------------------------------------------------------------------- #
+# Review-hardening regressions (fresh-eyes findings, pre-merge)
+# --------------------------------------------------------------------------- #
+class TestReviewHardening:
+    def test_non_finite_numbers_are_rejected(self) -> None:
+        """NaN/Infinity parse as Python floats but are invalid in Postgres
+        jsonb AND in a re-exported JSON string — reject at the edge."""
+        rule = _minimal_rule()
+        text = json.dumps([rule]).replace("0.13", "NaN")
+        with pytest.raises(ValueError, match=r"[Nn]on-finite"):
+            parse_rules_json(text)
+        text = json.dumps([rule]).replace("0.13", "Infinity")
+        with pytest.raises(ValueError, match=r"[Nn]on-finite"):
+            parse_rules_json(text)
+
+    def test_count_query_value_is_strict(self) -> None:
+        rule = _minimal_rule()
+        group = rule["signals"][0]["groups"][0]  # type: ignore[index]
+        group["document_path"] = "control_frames"
+        group["queries"] = []
+        for bad in ("7", 7.0):
+            group["count_query"] = {"operator": "greaterThanOrEqual", "value": bad}
+            with pytest.raises(ValidationError):
+                _parse_one(rule)
+
+    def test_string_filter_rejects_numeric_operator(self) -> None:
+        rule = _minimal_rule()
+        query = rule["signals"][0]["groups"][0]["queries"][0]  # type: ignore[index]
+        query.update(
+            {
+                "operator": "lessThanOrEqual",
+                "value": "abc",
+                "value_type": "string",
+                "filter_type": "string",
+                "units": None,
+            }
+        )
+        with pytest.raises(ValidationError):
+            _parse_one(rule)
+
+
+def test_custom_validator_rejection_returns_envelope_not_500(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """Regression: pydantic stuffs the raw ValueError of a custom validator
+    into ``ctx`` — unredacted it 500s during JSON serialization. An unknown
+    document_path (a custom-validator failure) must come back as the 422
+    envelope."""
+    org, admin = _org_with_admin(seeder, "org-a")
+    rule = _minimal_rule()
+    rule["signals"][0]["groups"][0]["document_path"] = "bogus_path"  # type: ignore[index]
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        resp = app_client.post("/api/rules/import", json={"rules_json": json.dumps([rule])})
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "invalid_rules_json"
+        nan_resp = app_client.post(
+            "/api/rules/import",
+            json={"rules_json": json.dumps([_minimal_rule()]).replace("0.13", "NaN")},
+        )
+        assert nan_resp.status_code == 422
+        assert nan_resp.json()["code"] == "invalid_rules_json"

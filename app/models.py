@@ -2554,6 +2554,7 @@ class Rule(Base):
     __tablename__ = "rule"
     __table_args__ = (
         UniqueConstraint("org_id", "uuid", name="uq_rule_org_uuid"),
+        CheckConstraint("logical_operator IN ('AND', 'OR')", name="ck_rule_logical_operator"),
         Index("ix_rule_org_active", "org_id", "is_active"),
     )
 

@@ -106,7 +106,7 @@ class CountQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     operator: Literal["lessThanOrEqual", "greaterThanOrEqual", "equals"]
-    value: Annotated[int, Field(ge=0)]
+    value: Annotated[StrictInt, Field(ge=0)]
 
 
 class Query(BaseModel):
@@ -140,8 +140,11 @@ class Query(BaseModel):
                 raise ValueError("a boolean filter needs a true/false value")
             if self.operator != "equals":
                 raise ValueError("a boolean filter only supports equals")
-        elif not isinstance(self.value, str | list):
-            raise ValueError("a string filter needs a string or keyword-list value")
+        else:
+            if not isinstance(self.value, str | list):
+                raise ValueError("a string filter needs a string or keyword-list value")
+            if self.operator not in ("equals", "includesCaseInsensitive", "regex"):
+                raise ValueError("a string filter needs a string operator")
         return self
 
 
@@ -232,6 +235,10 @@ class RuleSchema(BaseModel):
 MAX_RULES_JSON_BYTES = 1024 * 1024
 
 
+def _reject_non_finite(literal: str) -> float:
+    raise ValueError(f"non-finite number {literal!r} is not allowed in a rule set")
+
+
 def parse_rules_json(text: str) -> list[RuleSchema]:
     """Parse the pasted JSON string into validated rules.
 
@@ -242,7 +249,9 @@ def parse_rules_json(text: str) -> list[RuleSchema]:
     if len(text.encode("utf-8")) > MAX_RULES_JSON_BYTES:
         raise ValueError("rules JSON exceeds the 1 MB paste-in limit")
     try:
-        payload = json.loads(text)
+        # NaN/Infinity would poison the contract twice over: Postgres rejects
+        # them in jsonb, and an export containing them is not valid JSON.
+        payload = json.loads(text, parse_constant=_reject_non_finite)
     except json.JSONDecodeError as exc:
         raise ValueError(f"not valid JSON: {exc}") from exc
     if not isinstance(payload, list):
