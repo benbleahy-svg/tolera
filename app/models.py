@@ -466,6 +466,11 @@ class PartFile(Base):
     # DDL (0017): composite same-org FK → part_file(org_id, id) with column-list
     # SET NULL (source_file_id) — PG15+ form the ORM can't express, so authored raw.
     source_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Intake provenance (M3.3): which ingested RFQ this file arrived with —
+    # lets the quote Files panel group "Supporting Files (n) — auto-extracted
+    # from the email" and lets M3.4 distribute files to line items. Composite
+    # same-org FK added in migration 0022.
+    rfq_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     # Match-index fields (M2.12, spec#partlib "How matching works") — computed
     # deterministically at ingest by app.part_index; geometry signature/vector
     # land with GeometryService (M4). pdf_text is filled async (Celery).
@@ -565,6 +570,74 @@ class Node(Base):
 # --------------------------------------------------------------------------- #
 # M1.3 — quotes (stub) + saved views
 # --------------------------------------------------------------------------- #
+class RequestForQuote(Base):
+    """An intake RFQ — the canonical ``request_for_quote`` (DB-SCHEMA.sql
+    "intake (RFQ)"; M3.3). Email ingest (spec ``#wingman`` pipeline 1) creates
+    one per inbound message to ``{org-slug}@rfq.tolera.eu``; the Smart RFQ form
+    (M3.4 ⟂) will create them without the email-specific fields.
+
+    **Additive ingest columns** beyond the frozen DDL (the lean-extend
+    precedent): ``email_message_id`` — the RFC 5322 Message-Id (or a
+    ``sha256:…`` content-hash surrogate), unique per org so a Mailgun retry can
+    never mint a duplicate quote (M3.3 "dedupe on message-id"); ``subject``;
+    and the stored raw ``.eml`` (``eml_*``) — the quote's **ORIGINAL RFQ**
+    (spec quote-files: "RFQ (1) — the original .eml with an ORIGINAL RFQ
+    badge"). Files otherwise belong to Parts, and the ``.eml`` is not a part,
+    so its blob is keyed here."""
+
+    __tablename__ = "request_for_quote"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        # Mirror migration 0022 so a metadata-created schema (tests) carries
+        # the same integrity rule (CodeRabbit).
+        CheckConstraint(
+            "eml_size_bytes IS NULL OR eml_size_bytes >= 0", name="ck_rfq_eml_size_nonneg"
+        ),
+        # Composite-FK target so part_file.(org_id, rfq_id) pins same-org.
+        UniqueConstraint("org_id", "id", name="uq_rfq_org_id_id"),
+        # The converted quote must live in THIS org (fk added in migration —
+        # composite same-org form, MATCH SIMPLE skips pre-conversion NULLs).
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"], ["quote.org_id", "quote.id"], name="fk_rfq_quote_org"
+        ),
+        # Webhook idempotency: same Message-Id ⇒ same RFQ ⇒ no duplicate quote.
+        # Partial: form-created RFQs (M3.4 ⟂) have no email at all.
+        Index(
+            "uq_rfq_org_message_id",
+            "org_id",
+            "email_message_id",
+            unique=True,
+            postgresql_where=text("email_message_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    rfq_number: Mapped[str | None] = mapped_column(String)
+    business_name: Mapped[str | None] = mapped_column(String)
+    first_name: Mapped[str | None] = mapped_column(String)
+    last_name: Mapped[str | None] = mapped_column(String)
+    email: Mapped[str | None] = mapped_column(CITEXT)
+    phone: Mapped[str | None] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text)
+    referrer: Mapped[str | None] = mapped_column(String)
+    marketing_source: Mapped[str | None] = mapped_column(String)
+    requested_delivery_date: Mapped[date | None] = mapped_column(Date)
+    export_controlled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # Email-ingest additions (M3.3).
+    email_message_id: Mapped[str | None] = mapped_column(Text)
+    subject: Mapped[str | None] = mapped_column(Text)
+    eml_storage_key: Mapped[str | None] = mapped_column(Text)
+    eml_filename: Mapped[str | None] = mapped_column(String)
+    eml_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    # Conversion state: set once the ingest task has built the draft quote.
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    processed_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+
+
 class QuoteStatus(enum.StrEnum):
     """A quote's lifecycle status (spec ``#quotelifecycle``, "decided").
 
@@ -696,6 +769,10 @@ class Quote(Base):
     estimator_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     rfq_number: Mapped[str | None] = mapped_column(String)
     private_notes: Mapped[str | None] = mapped_column(Text)
+    # Canonical ``quote.email_thread_id`` (DB-SCHEMA.sql), added by M3.3: the
+    # inbound RFC 5322 Message-Id — M3.5 threads replies onto it via
+    # In-Reply-To/References matching.
+    email_thread_id: Mapped[str | None] = mapped_column(Text)
     # E4-d freeze marker — column only in M1.4; freeze/Refresh-Pricing is pricing-engine work.
     config_frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # M1.11 — the top-of-quote dynamic-lead-time editor state (spec #addons

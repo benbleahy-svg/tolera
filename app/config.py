@@ -145,6 +145,16 @@ class Settings(BaseSettings):
     # #ai-settings) and this stays the seam to flip when an EU geo ships.
     lens_inference_geo: str = ""
 
+    # --- Email ingest / Mailgun EU (M3.3 — spec #email-connectivity; M0.0 §5) ---
+    # Only the inbound-webhook signing key is needed here: Mailgun is retained
+    # for inbound RFQ forwarding only ({org-slug}@rfq.tolera.eu → webhook →
+    # auto-quote); outbound goes through the user's own mailbox (M3.5). Empty
+    # default so the app boots without it — the webhook itself FAILS CLOSED
+    # (503) when the key is unset, in every environment: an unauthenticated
+    # ingest endpoint must never accept unsigned posts (the validate_storage /
+    # clerk_authorized_party_set fail-closed precedent).
+    mailgun_webhook_signing_key: str = ""
+
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"
     default_locale: str = "de-DE"

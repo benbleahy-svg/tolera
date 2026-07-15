@@ -612,7 +612,14 @@
     "reopen": "Reopen",
     "status_open": "Open",
     "status_overdue": "Overdue",
-    "status_resolved": "Resolved"
+    "status_resolved": "Resolved",
+    "notifications": "Notifications",
+    "no_notifications": "No notifications.",
+    "mark_read": "Mark as read",
+    "open_quote": "Open quote",
+    "notif_quote_email": "New Quote created from Email Forwarding: Created Quote #{{number}}",
+    "notif_mention": "You were mentioned in a discussion",
+    "notif_task_assigned": "A task was assigned to you"
   },
   "lens": {
     "part_setup": "Part Setup",
