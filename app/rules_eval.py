@@ -40,6 +40,7 @@ import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from .rules_schema import CONTROL_FRAME_PATHS, Group, Query, RuleSchema, Signal
@@ -241,6 +242,11 @@ def _compare_string(actual: str, operator: str, expected: Any) -> bool:
         # entire text is one spec code — the rule would be dead on arrival. Per
         # line, it means what it reads as: a line that *is* a spec code.
         return re.search(str(expected), actual, re.MULTILINE) is not None
+    # `equals` admits a keyword list too (the schema allows a list value on any
+    # string filter). Comparing str to list would silently never match, so read
+    # a list as any-of — the only sensible reading of "equals one of these".
+    if isinstance(expected, list):
+        return any(actual == str(k) for k in expected)
     return bool(actual == expected)
 
 
@@ -282,12 +288,19 @@ def _as_number(value: Any) -> float | None:
     """
     if isinstance(value, bool):
         return None
-    if isinstance(value, int | float):
-        return float(value)
+    # Decimal, not just int/float: every part_geometry dimension is a Numeric
+    # column, so the real part_attributes mapping hands us Decimal — rejecting
+    # it would silently kill every `part` rule the moment M3.8 wires the row.
+    if isinstance(value, int | float | Decimal):
+        number = float(value)
+        return number if math.isfinite(number) else None
     if not isinstance(value, str):
         return None
 
-    text = value.strip()
+    # A trailing separator is punctuation, not a decimal point: without this
+    # "0,05." reads its dot as the decimal separator and strips the comma as
+    # thousands, giving 5.0 — a silent 100x error.
+    text = value.strip().rstrip(".,")
     if not text:
         return None
     last_dot, last_comma = text.rfind("."), text.rfind(",")
@@ -303,18 +316,18 @@ def _as_number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _finding_number(finding: Mapping[str, Any], key: str = "value") -> float | None:
-    """A finding's numeric value, normalized to mm/deg by its own ``units``.
+def _finding_number(finding: Mapping[str, Any]) -> float | None:
+    """A finding's ``value``, normalized to mm/deg by its own ``units``.
 
-    ``normalized_value`` is Lens's transformed channel and wins when numeric;
-    ``value`` is the guarded verbatim claim (M3.1's never-hallucinate rule) and
-    is the fallback.
+    Deliberately **not** ``normalized_value``: that channel has no pinned unit
+    semantics (M3.1's provider schema requires the field but neither prompt
+    defines what "normalized" means), so pairing it with ``units`` could convert
+    a value that was already converted. M3.2's accept path reached the same
+    conclusion and reads ``value`` for exactly this reason (ship-review
+    2026-07-15, ``lens_findings``). ``value`` is also the guarded channel — the
+    never-hallucinate rule covers it, but not ``normalized_value``.
     """
-    number = None
-    if key == "value":
-        number = _as_number(finding.get("normalized_value"))
-    if number is None:
-        number = _as_number(finding.get(key))
+    number = _as_number(finding.get("value"))
     if number is None:
         return None
     return _to_mm(number, finding.get("units"))
@@ -388,9 +401,20 @@ def _smallest_delta(tolerance: Mapping[str, Any], units: str | None) -> float | 
     """The tightest side of a tolerance, in mm/deg.
 
     ``unilateral``/``bilateral`` carry deltas → ``min(|upper|, |lower|)`` over
-    the sides actually present (a ``+0.1/-0`` really is tight on the zero side,
-    which is PP's literal "tightest of upper/lower"). ``limit`` carries absolute
-    limits, not deltas — its equivalent ± band is ``(upper - lower) / 2``.
+    the **non-zero** sides. ``limit`` carries absolute limits, not deltas — its
+    equivalent ± band is ``(upper - lower) / 2``.
+
+    ASSUMED (DECISIONS.md ``OPEN:`` 2026-07-16): the zero-side exclusion. Read
+    literally, "tightest of upper/lower" makes a ``+0.5/-0`` callout yield 0 —
+    tighter than anything — so *every* unilateral ``+X/-0``, including ``+5/-0``,
+    would fire the §5 tight-tolerance rule as a false positive; the identical
+    requirement written as the limits ``25.0/25.5`` yields 0.25 and does not,
+    so the two branches would contradict each other. Excluding zero sides keeps
+    the reading for real tolerances (``±0.05`` → 0.05, ``+0.1/-0.05`` → 0.05)
+    without the degeneracy. A genuinely zero-tolerance callout (both sides 0)
+    still yields 0 and still fires. The KB defines PP's rule *set* but never
+    this computation, so the ladder is silent — cheap to reverse (one function,
+    fixtures only, no shop has authored a rule yet), hence a default not a halt.
     """
     upper = _as_number(tolerance.get("upper"))
     lower = _as_number(tolerance.get("lower"))
@@ -399,7 +423,10 @@ def _smallest_delta(tolerance: Mapping[str, Any], units: str | None) -> float | 
             return None
         return _to_mm(abs(upper - lower) / 2, units)
     sides = [abs(side) for side in (upper, lower) if side is not None]
-    return _to_mm(min(sides), units) if sides else None
+    toleranced = [side for side in sides if side > 0]
+    if toleranced:
+        return _to_mm(min(toleranced), units)
+    return _to_mm(0.0, units) if sides else None
 
 
 def _frame_items(ctx: EvaluationContext, characteristic: str | None) -> list[Mapping[str, Any]]:
@@ -416,13 +443,20 @@ def _frame_items(ctx: EvaluationContext, characteristic: str | None) -> list[Map
             continue
         gdt = finding.get("gdt")
         datum_refs = gdt.get("datum_refs") if isinstance(gdt, Mapping) else None
-        items.append(
-            {
-                "value": _finding_number(finding),
-                "datum_count": len(datum_refs) if isinstance(datum_refs, Sequence) else 0,
-            }
-        )
+        items.append({"value": _finding_number(finding), "datum_count": _count(datum_refs)})
     return items
+
+
+def _count(value: Any) -> int:
+    """How many entries a JSONB collection holds — 0 for anything else.
+
+    ``gdt`` is unvalidated on read and a ``str`` IS a ``Sequence``, so without
+    the exclusion ``datum_refs: "A|B|C"`` would count 5 datums (the same
+    exclusion :func:`_resolve_interrogation` applies).
+    """
+    if isinstance(value, str | bytes) or not isinstance(value, Sequence):
+        return 0
+    return len(value)
 
 
 def _frame_characteristic(finding: Mapping[str, Any]) -> str | None:

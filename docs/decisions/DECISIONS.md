@@ -19,6 +19,35 @@
 
 ---
 
+## [2026-07-16] OPEN: M3.7 `smallest_delta` — does a unilateral `+X/-0` count as a tight tolerance?
+
+**Status:** OPEN (M3.7 ships a default; nothing is blocked — cheap to reverse)
+**Question:** RULES-ENGINE-SPEC §4 defines `smallest_delta` as "tightest of upper/lower" but never says how to compute it. Read literally as `min(|upper|, |lower|)`, a **unilateral `25 +0.5/-0`** yields **0** — tighter than anything — so *every* `+X/-0` callout, including `+5/-0`, fires the §5 rule-1 tight-tolerance rule (≤ 0.13 mm) and raises a spurious NO_QUOTE review item. Unilateral `+X/-0` is extremely common on prints, so the literal reading is a false-positive firehose — exactly the noise §6's build/test loop warns about. It also makes the branches self-contradictory: the *same* requirement written as the limits `25.0/25.5` goes through the `limit` branch (equivalent band `(upper-lower)/2` = 0.25) and does **not** fire. The KB (`building-review-rules`) publishes PP's rule *set* but never the engine's computation, and the DACH delta is silent — the ladder does not answer this.
+**Options considered:**
+- **(a) Literal `min(|upper|, |lower|)`** — faithful to the §4 wording and possibly to PP's real behaviour, but `+5/-0` reads as maximally tight. Firehose.
+- **(b) `min` over the **non-zero** sides ← shipped default.** Keeps the §4 reading for real tolerances (`±0.05` → 0.05; `+0.1/-0.05` → 0.05) and drops the degeneracy. A genuinely exact callout (both sides 0) still yields 0 and still fires. Departs from the literal wording only where that wording is degenerate.
+- **(c) Half-band for every kind** (`(upper+lower)/2` for deltas) — consistent with the `limit` branch by construction (`±0.05` → 0.05 coincides), but re-reads "tightest of upper/lower" as "average of", which the wording does not support.
+**Recommended default:** (b) — shipped, with the reasoning in `app.rules_eval._smallest_delta` and a regression test each way.
+**Why it is not a halt:** not in CLAUDE.md §6.1's expensive-to-reverse set (no schema, money/tax, tenancy, or API contract). One function + fixtures; no shop has authored a rule yet, so flipping it later costs a line and a test. Per §6.2 the block continued.
+**Affects:** M3.7 (`_smallest_delta`), M3.8 (review-item volume — resolve before shops author rules against it), `SEED-AND-FIXTURES §7` starter rules.
+
+---
+
+## [2026-07-16] OPEN: M3.7/M3.8 — ReDoS exposure from org-authored rule regexes over customer print text
+
+**Status:** OPEN (not exploitable at M3.7 — the evaluator is unwired; **must be resolved before M3.8 wires it**)
+**Question:** A rule's `regex` operator runs an **org-authored** pattern against **customer-supplied** print text (`app.rules_eval._compare_string`). M3.6's import validates only that the pattern *compiles* (`rules_schema.Query._value_matches_filter_type`) — there is no timeout, complexity bound, or text-length cap. Measured against this code, `^(a+)+$` over a 24-char non-matching string takes **0.47 s**, 27 chars **3.8 s**, 30 chars **30.9 s** (doubling per character). The threat needs no malicious admin: a shop writes an innocent-looking backtracking pattern (`(\d+[ -]?)+` is easy to author by accident), then a **customer** uploads the print whose text layer triggers it — hanging a Celery worker and killing rule evaluation for that quote. CLAUDE.md §5's timeout-bounded Celery tasks cap the blast radius but still lose the worker and every review item for the quote.
+**Options considered:**
+- **(a) Bound the match** — run under a time/step budget. Python's `re` has no timeout; needs the `regex` module (`timeout=`) or a subprocess/thread. New dependency or new failure mode, but the only mitigation that actually stops backtracking.
+- **(b) Reject risky patterns at import** (nested quantifiers etc.) — no dependency, fails closed at config time with a clear message, but heuristic and incomplete.
+- **(c) Cap the scanned text length** — trivial, but does **not** help: the measured blow-up is at 24–30 characters.
+- **(d) Accept the risk** — Celery timeouts contain it; rule editing is `config_edit`-gated.
+**Recommended default:** **(a) + (b)** — bound the match *and* reject the obvious nested-quantifier shapes at import, since (c) is ineffective and (d) leaves a customer-triggerable worker hang.
+**Why it is not a halt for M3.7:** M3.7 ships a pure module with **no request path and no caller** — nothing executes a regex until M3.8 wires the evaluator to the post-AI trigger. Per §6.2 the block continued on work that does not depend on the answer; the fix lands where the pattern is accepted (M3.6 import) and executed (M3.8 wiring).
+**Affects:** M3.6 (import-time pattern validation), M3.7 (`_compare_string`), M3.8 (the Celery trigger that first executes rules).
+
+---
+
 ## [2026-07-15] M2.12 import-historical copy granularity + merge lifecycle shortcut
 
 **Status:** RESOLVED (autonomous, reversible app behavior; flag for Benjamin's review)

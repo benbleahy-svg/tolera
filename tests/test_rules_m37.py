@@ -12,6 +12,7 @@ golden: each is asserted against a matching and a non-matching component.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -612,6 +613,95 @@ class TestRobustness:
         assert evaluate_rule(rule, one_tight) is False, "only matching items count"
         two_tight = ctx(extractions=[frame("position", "0.05"), frame("position", "0.08")])
         assert evaluate_rule(rule, two_tight) is True
+
+
+# --------------------------------------------------------------------------- #
+# 7. the real production shapes (ship-review regressions)
+# --------------------------------------------------------------------------- #
+class TestProductionShapes:
+    def test_part_attributes_accept_decimal(self, worked_rules: list[RuleSchema]) -> None:
+        """part_geometry dims are Numeric columns → Decimal, not float. A
+        float-only parser would silently kill every `part` rule (ship-review)."""
+        rule = rule_named(worked_rules, "Machine envelope exceeded")
+        assert evaluate_rule(rule, ctx(part_attributes={"max_dim": Decimal("400")})) is True
+        assert evaluate_rule(rule, ctx(part_attributes={"max_dim": Decimal("100")})) is False
+
+    def test_normalized_value_never_double_converts(self) -> None:
+        """`normalized_value` has no pinned unit semantics, so it must not be
+        paired with `units` — M3.2's accept path reads `value` for the same
+        reason (ship-review 2026-07-15)."""
+        rule = _greatest_dim_rule(305)
+        finding = dim("12", units="in")  # 304.8 mm — just under the threshold
+        finding["normalized_value"] = "304.8"  # already-converted, unit unknown
+        assert evaluate_rule(rule, ctx(extractions=[finding])) is False, (
+            "trusting normalized_value here would give 304.8 * 25.4 = 7741.92 mm"
+        )
+
+    def test_tight_control_frame_on_an_inch_print_still_fires(
+        self, worked_rules: list[RuleSchema]
+    ) -> None:
+        """The dangerous direction: a missed tight tolerance means the shop
+        quotes a job it cannot hold."""
+        rule = rule_named(worked_rules, "All tight dimension tolerances")
+        finding = frame("⏥", "0.005")  # 0.127 mm — inside the 0.13 mm threshold
+        finding["units"] = "in"
+        finding["normalized_value"] = "0.127"
+        assert evaluate_rule(rule, ctx(extractions=[finding])) is True
+
+    def test_unilateral_zero_side_is_not_maximally_tight(
+        self, worked_rules: list[RuleSchema]
+    ) -> None:
+        """A +5/-0 callout is loose. Reading its zero side as "tightest" would
+        fire the tight-tolerance rule on nearly every print (DECISIONS OPEN:)."""
+        rule = rule_named(worked_rules, "All tight dimension tolerances")
+        loose = ctx(
+            extractions=[dim("25", tolerance={"kind": "unilateral", "upper": "5", "lower": "0"})]
+        )
+        assert evaluate_rule(rule, loose) is False
+        # …and the same requirement written as limits agrees
+        as_limits = ctx(
+            extractions=[dim("25", tolerance={"kind": "limit", "upper": "30", "lower": "25"})]
+        )
+        assert evaluate_rule(rule, as_limits) is False
+
+    def test_unilateral_tight_side_still_fires(self, worked_rules: list[RuleSchema]) -> None:
+        rule = rule_named(worked_rules, "All tight dimension tolerances")
+        tight = ctx(
+            extractions=[dim("25", tolerance={"kind": "unilateral", "upper": "0.05", "lower": "0"})]
+        )
+        assert evaluate_rule(rule, tight) is True
+
+    def test_exact_zero_tolerance_still_fires(self, worked_rules: list[RuleSchema]) -> None:
+        """Both sides zero is a genuinely exact callout — that IS tight."""
+        rule = rule_named(worked_rules, "All tight dimension tolerances")
+        exact = ctx(
+            extractions=[dim("25", tolerance={"kind": "bilateral", "upper": "0", "lower": "0"})]
+        )
+        assert evaluate_rule(rule, exact) is True
+
+    def test_trailing_period_does_not_shift_the_decimal(self) -> None:
+        """ "0,05." must not read the dot as the decimal separator (→ 5.0)."""
+        rule = _tight_length_rule()
+        assert (
+            evaluate_rule(rule, ctx(extractions=[dim("25", tolerance={"upper": "0,05."})])) is True
+        )
+
+    def test_string_equals_with_keyword_list_is_any_of(self) -> None:
+        rule = _single_group_rule(
+            "text",
+            [_query(["raw_text"], "equals", ["SPX-1", "SPX-2"], "string", "string", None)],
+        )
+        assert evaluate_rule(rule, ctx(document_texts=["SPX-2"])) is True
+        assert evaluate_rule(rule, ctx(document_texts=["SPX-3"])) is False
+
+    def test_datum_refs_as_string_does_not_count_characters(self) -> None:
+        rule = _single_group_rule(
+            "position_control_frames",
+            [_query(["datum_count"], "greaterThanOrEqual", 3, "number", "numeric", None)],
+        )
+        malformed = frame("⌖", "0.1")
+        malformed["gdt"]["datum_refs"] = "A|B"  # 3 chars, 2 datums
+        assert evaluate_rule(rule, ctx(extractions=[malformed])) is False
 
 
 # --------------------------------------------------------------------------- #
