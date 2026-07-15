@@ -170,8 +170,11 @@ def upgrade() -> None:
         )
     # Connections are disconnectable; threads/messages are an audit trail.
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON user_email_connection TO {APP_ROLE}")
-    op.execute(f"GRANT SELECT, INSERT, UPDATE ON quote_email_thread TO {APP_ROLE}")
-    op.execute(f"GRANT SELECT, INSERT, UPDATE ON email_message TO {APP_ROLE}")
+    # Messages get NO UPDATE at all; threads only the mutable routing column
+    # (CodeRabbit: an unrestricted UPDATE would let the audit trail be rewritten).
+    op.execute(f"GRANT SELECT, INSERT ON quote_email_thread TO {APP_ROLE}")
+    op.execute(f"GRANT UPDATE (provider_thread_id) ON quote_email_thread TO {APP_ROLE}")
+    op.execute(f"GRANT SELECT, INSERT ON email_message TO {APP_ROLE}")
 
     # The 5-minute beat task fans out one sync task per connection, but it runs
     # before any org GUC is set — RLS (correctly) hides every connection row.

@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 
 import { ApiError } from '../api/client';
 import { useEmailApi } from './api';
@@ -39,6 +40,20 @@ export function EmailConnectionPage() {
   const [showForm, setShowForm] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // The OAuth callback redirects here with ?connected= / ?connect_error= —
+  // surface the outcome and clean the URL (CodeRabbit).
+  useEffect(() => {
+    if (searchParams.get('connected')) {
+      setNotice(t('email.connected'));
+    } else if (searchParams.get('connect_error')) {
+      setError(t('email.connect_failed'));
+    } else {
+      return;
+    }
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams, t]);
 
   const load = useCallback(() => {
     api

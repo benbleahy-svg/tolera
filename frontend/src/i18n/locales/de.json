@@ -765,6 +765,7 @@
     "no_connection": "Kein E-Mail-Konto verbunden. Verbinden Sie Ihr Konto, um vom eigenen Absender zu versenden.",
     "go_connect": "Jetzt verbinden",
     "outbound": "Gesendet",
-    "inbound": "Empfangen"
+    "inbound": "Empfangen",
+    "connect_failed": "Verbindung fehlgeschlagen oder abgebrochen."
   }
 }

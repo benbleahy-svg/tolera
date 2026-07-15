@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -149,7 +149,9 @@ def _reply(
         subject="AW: Ihr Angebot Q-1",
         body_text="Danke, wir bestellen 50 Stück.",
         body_html=None,
-        sent_at=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+        # AFTER the outbound's now(): the timeline orders by message time
+        # (coalesce(sent_at, created_at)), and the reply follows the send.
+        sent_at=datetime.now(UTC) + timedelta(minutes=5),
         attachments=attachments or [],
     )
 
@@ -278,8 +280,9 @@ def test_reply_matches_ingested_rfq_thread_id(
     no outbound was ever sent from the platform."""
     org, user, quote = _seed_quote_org(seeder, "acme-rfq")
     seeder.sql(
-        "UPDATE quote SET email_thread_id = '<rfq-42@kunde-beispiel.de>' WHERE id = :id",
-        {"id": quote},
+        "UPDATE quote SET email_thread_id = '<rfq-42@kunde-beispiel.de>' "
+        "WHERE org_id = :org AND id = :id",
+        {"org": org, "id": quote},
     )
     with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
         connection_id = _connect(client)
@@ -336,16 +339,16 @@ def test_sync_updates_cursor_and_status(
     # SMTP/IMAP has no cursor; simulate the gmail cursor path directly.
     seeder.sql(
         "UPDATE user_email_connection SET connection_type = 'gmail', "
-        "gmail_history_id = 'hist-1' WHERE id = :id",
-        {"id": uuid.UUID(connection_id)},
+        "gmail_history_id = 'hist-1' WHERE org_id = :org AND id = :id",
+        {"org": org, "id": uuid.UUID(connection_id)},
     )
     provider.next_cursor = "hist-2"
     _run_sync(org, connection_id)
     [(history_id, synced_at, sync_error)] = _fetch_rows(
         tenancy_db,
         "SELECT gmail_history_id, last_synced_at, last_sync_error "
-        "FROM user_email_connection WHERE id = :id",
-        {"id": uuid.UUID(connection_id)},
+        "FROM user_email_connection WHERE org_id = :org AND id = :id",
+        {"org": org, "id": uuid.UUID(connection_id)},
     )
     assert history_id == "hist-2"
     assert synced_at is not None
@@ -440,8 +443,8 @@ def test_poisoned_attachment_filename_skips_attachment_not_sync(
     assert timeline[1]["attachments"] == []  # the poisoned attachment is not
     [(synced_at,)] = _fetch_rows(
         tenancy_db,
-        "SELECT last_synced_at FROM user_email_connection WHERE id = :id",
-        {"id": uuid.UUID(connection_id)},
+        "SELECT last_synced_at FROM user_email_connection WHERE org_id = :org AND id = :id",
+        {"org": org, "id": uuid.UUID(connection_id)},
     )
     assert synced_at is not None  # the sync completed; no crash-loop
 
@@ -464,3 +467,28 @@ def test_message_id_less_reply_dedupes_via_surrogate(
         {"org": org},
     )
     assert rows == [(1,)]
+
+
+def test_provider_thread_id_is_scoped_to_the_connection(
+    client: TestClient, seeder: Seeder, provider: MockProvider, tenancy_db: str
+) -> None:
+    """Gmail threadIds are mailbox-scoped: a colliding id arriving through a
+    DIFFERENT connection in the same org must not misfile onto this thread."""
+    org, user, quote = _seed_quote_org(seeder, "acme-collide")
+    other = seeder.user("verkauf@acme-collide.example")
+    seeder.membership(other, org, [MembershipRole.admin])
+    with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        _connect(client)
+        _send(client, quote)  # thread now carries provider_thread_id prov-thread-1
+    with authed(client, user_id=other, org_id=org, roles=[MembershipRole.admin]):
+        other_connection = _connect(client)
+        # Same provider thread id, different mailbox, no In-Reply-To.
+        provider.inbox = [_reply(provider_thread_id="prov-thread-1", references=[])]
+        result = _run_sync(org, other_connection)
+    assert result["matched"] == 0
+    rows = _fetch_rows(
+        tenancy_db,
+        "SELECT count(*) FROM email_message WHERE org_id = :org AND direction = 'inbound'",
+        {"org": org},
+    )
+    assert rows == [(0,)]

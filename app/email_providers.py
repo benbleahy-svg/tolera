@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email import policy
 from email.message import EmailMessage as MimeMessage
-from email.utils import make_msgid, parseaddr, parsedate_to_datetime
+from email.utils import getaddresses, make_msgid, parseaddr, parsedate_to_datetime
 from typing import Any, Protocol
 
 import httpx
@@ -154,7 +154,9 @@ def parse_inbound_mime(raw: bytes, *, provider_thread_id: str | None = None) -> 
     format and IMAP fetches share this path)."""
     msg = email.message_from_bytes(raw, policy=policy.default)
     _, from_address = parseaddr(str(msg.get("From", "")))
-    to_addresses = [addr for _, addr in (parseaddr(t) for t in str(msg.get("To", "")).split(","))]
+    # getaddresses, not a comma split: display names like "Meier, Hans" carry
+    # commas of their own (CodeRabbit).
+    to_addresses = [addr for _, addr in getaddresses([str(msg.get("To", ""))])]
     sent_at: datetime | None = None
     if msg.get("Date"):
         try:
@@ -369,8 +371,11 @@ class OutlookProvider:
     async def baseline_cursor(self, credentials: dict[str, Any]) -> str | None:
         # Walk the delta to its end once; the returned deltaLink means
         # "everything after connect time".
+        # changeType=created keeps updates/deletes out of the stream (CodeRabbit).
         result = await self._delta(
-            credentials, f"{GRAPH_API}/me/mailFolders/inbox/messages/delta", collect=False
+            credentials,
+            f"{GRAPH_API}/me/mailFolders/inbox/messages/delta?changeType=created",
+            collect=False,
         )
         return result.cursor
 
@@ -486,7 +491,9 @@ class SmtpImapProvider:
 
         try:
             await asyncio.to_thread(_send)
-        except (smtplib.SMTPException, OSError) as exc:
+        except (smtplib.SMTPException, OSError, ValueError, TypeError) as exc:
+            # ValueError/TypeError: a malformed stored port must surface as the
+            # same safe ProviderError as any other transport failure.
             raise ProviderError("smtp_send_failed", "SMTP-Versand fehlgeschlagen.") from exc
         return SendResult(message_id=message_id, provider_thread_id=None)
 
@@ -520,7 +527,7 @@ class SmtpImapProvider:
 
         try:
             raws = await asyncio.to_thread(_fetch)
-        except (imaplib.IMAP4.error, OSError) as exc:
+        except (imaplib.IMAP4.error, OSError, ValueError, TypeError) as exc:
             raise ProviderError("imap_sync_failed", "IMAP-Abgleich fehlgeschlagen.") from exc
         return SyncResult([parse_inbound_mime(raw) for raw in raws], None)
 

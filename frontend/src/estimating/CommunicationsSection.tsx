@@ -30,12 +30,17 @@ export function CommunicationsSection({
   const [body, setBody] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [noConnection, setNoConnection] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const load = useCallback(() => {
     api
       .getQuoteEmails(quoteId)
       .then(setMessages)
-      .catch(() => setMessages([]));
+      .catch((e: unknown) => {
+        // A broken fetch must not masquerade as "no messages yet" (CodeRabbit).
+        setMessages([]);
+        setError(e instanceof Error ? e.message : String(e));
+      });
   }, [api, quoteId]);
 
   useEffect(() => {
@@ -46,6 +51,7 @@ export function CommunicationsSection({
     event.preventDefault();
     setError(null);
     setNoConnection(false);
+    setSending(true); // a double-click must not send two real emails
     api
       .sendQuoteEmail(quoteId, {
         to: to
@@ -68,7 +74,8 @@ export function CommunicationsSection({
         } else {
           setError(e instanceof Error ? e.message : String(e));
         }
-      });
+      })
+      .finally(() => setSending(false));
   };
 
   const stamp = (message: EmailMessage) => {
@@ -121,7 +128,9 @@ export function CommunicationsSection({
               onChange={(event) => setBody(event.target.value)}
             />
           </label>
-          <button type="submit">{t('email.send')}</button>
+          <button type="submit" disabled={sending}>
+            {t('email.send')}
+          </button>
         </form>
       )}
 

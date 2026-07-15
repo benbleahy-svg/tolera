@@ -76,9 +76,11 @@ def _task_settings() -> Settings:
     return get_settings()
 
 
-def attachment_key(org_id: uuid.UUID, message_id: uuid.UUID, filename: str) -> str:
-    """Tenant-scoped storage key, mirroring ``rfq_object_key``'s layout."""
-    return f"org/{org_id}/email/{message_id}/{filename}"
+def attachment_key(org_id: uuid.UUID, message_id: uuid.UUID, position: int, filename: str) -> str:
+    """Tenant-scoped storage key. ``position`` keeps two same-named attachments
+    on one message from overwriting each other (CodeRabbit); the display name
+    stays in the metadata."""
+    return f"org/{org_id}/email/{message_id}/{position}-{filename}"
 
 
 def _effective_message_id(msg: InboundEmail) -> str:
@@ -97,7 +99,10 @@ def _effective_message_id(msg: InboundEmail) -> str:
 # Reply matching (spec threading mechanism + the M3.3 email_thread_id key)
 # --------------------------------------------------------------------------- #
 async def _match_thread(
-    session: AsyncSession, org_id: uuid.UUID, msg: InboundEmail
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    msg: InboundEmail,
+    connection: UserEmailConnection,
 ) -> QuoteEmailThread | None:
     """The thread an inbound message belongs to, or ``None`` (→ not stored).
 
@@ -106,10 +111,18 @@ async def _match_thread(
     (follow-ups); against ``quote.email_thread_id`` (ingested RFQ) — which
     creates the quote's thread row anchored on the RFQ's Message-Id."""
     if msg.provider_thread_id:
+        # Provider thread ids are MAILBOX-scoped (Gmail threadId / Outlook
+        # conversationId): constrain the match to threads this connection has
+        # messages on, or a same-org id collision across two mailboxes would
+        # misfile a reply onto another quote (CodeRabbit).
         thread = await session.scalar(
-            select(QuoteEmailThread).where(
-                QuoteEmailThread.provider_thread_id == msg.provider_thread_id
+            select(QuoteEmailThread)
+            .join(EmailMessage, EmailMessage.thread_id == QuoteEmailThread.id)
+            .where(
+                QuoteEmailThread.provider_thread_id == msg.provider_thread_id,
+                EmailMessage.connection_id == connection.id,
             )
+            .limit(1)
         )
         if thread is not None:
             return thread
@@ -136,8 +149,21 @@ async def _match_thread(
     if thread_id is not None:
         return await session.get(QuoteEmailThread, thread_id)
 
-    quote = await session.scalar(select(Quote).where(Quote.email_thread_id.in_(candidates)))
+    quote = await session.scalar(
+        select(Quote).where(Quote.email_thread_id.in_(candidates)).with_for_update()
+    )
     if quote is not None:
+        # The quote row lock serializes against a concurrent sync AND against
+        # send_email (which locks the same row), so only one transaction can
+        # create the quote's thread (CodeRabbit); re-check after acquiring it.
+        thread = cast(
+            "QuoteEmailThread | None",
+            await session.scalar(
+                select(QuoteEmailThread).where(QuoteEmailThread.quote_id == quote.id)
+            ),
+        )
+        if thread is not None:
+            return thread
         thread = QuoteEmailThread(
             org_id=org_id,
             quote_id=quote.id,
@@ -163,7 +189,7 @@ async def _store_inbound(
 ) -> EmailMessage:
     message_id = uuid.uuid4()
     attachments: list[dict[str, Any]] = []
-    for att in msg.attachments:
+    for position, att in enumerate(msg.attachments):
         try:
             name = _safe_filename(att.filename)
         except AppError:
@@ -177,7 +203,7 @@ async def _store_inbound(
         if not _acceptable(name, att.payload, MAX_ATTACHMENT_BYTES):
             logger.info("email_attachment_skipped", extra={"reason": "not_acceptable"})
             continue
-        key = attachment_key(org_id, message_id, name)
+        key = attachment_key(org_id, message_id, position, name)
         size = await storage.put(key, io.BytesIO(att.payload), content_type=att.content_type)
         stored_keys.append(key)
         attachments.append(
@@ -254,7 +280,7 @@ async def run_email_sync_connection(
                     )
                     if exists is not None:
                         continue  # idempotent re-poll (IMAP UNSEEN, redelivery)
-                    thread = await _match_thread(session, org_id, msg)
+                    thread = await _match_thread(session, org_id, msg, connection)
                     if thread is None:
                         continue  # no match → NOT stored (data minimisation)
                     row = await _store_inbound(
@@ -324,6 +350,13 @@ def email_sync_connection_task(self: Any, org_id: str, connection_id: str) -> di
 
 
 async def _list_sync_targets(db_url: str) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """Accepted deviation (CodeRabbit flags the cross-org read): the beat
+    fan-out has no org context by construction, and this design's RLS keys on
+    an app-set GUC — any APP_ROLE session can already SET it to any org, so a
+    dedicated scheduler role would add a second DSN without moving the trust
+    boundary (the 0022 ``resolve_org_id_by_slug`` threat model, reviewed and
+    accepted in M3.3). The function stays ids-only; every domain read/write
+    happens in the per-connection org-scoped task."""
     engine = make_engine(db_url)
     try:
         sessionmaker = make_sessionmaker(engine)

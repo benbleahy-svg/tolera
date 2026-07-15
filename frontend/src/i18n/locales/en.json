@@ -765,6 +765,7 @@
     "no_connection": "No email account connected. Connect your account to send from your own address.",
     "go_connect": "Connect now",
     "outbound": "Sent",
-    "inbound": "Received"
+    "inbound": "Received",
+    "connect_failed": "Connection failed or was cancelled."
   }
 }

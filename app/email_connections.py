@@ -63,7 +63,10 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly"
 )
-MS_SCOPES = "offline_access https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.ReadWrite"
+MS_SCOPES = (
+    "offline_access User.Read "  # User.Read: the /me profile lookup needs it (CodeRabbit)
+    "https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.ReadWrite"
+)
 
 OAuthProvider = Literal["gmail", "outlook"]
 
@@ -423,7 +426,12 @@ async def _exchange_code(provider: OAuthProvider, code: str, settings: Settings)
             )
         prof = await client.get(profile_url, headers={"Authorization": f"Bearer {access_token}"})
         profile = prof.json() if prof.status_code == 200 else {}
-    email_addr = profile.get("emailAddress") or profile.get("mail") or ""
+    email_addr = (
+        profile.get("emailAddress")  # Gmail profile
+        or profile.get("mail")  # Graph /me (may be null for some tenants)
+        or profile.get("userPrincipalName")  # Graph fallback (CodeRabbit)
+        or ""
+    )
     name = profile.get("displayName")
     return {"refresh_token": refresh_token, "email": str(email_addr).lower(), "name": name}
 

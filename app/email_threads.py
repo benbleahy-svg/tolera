@@ -23,7 +23,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .accounts import _normalize_email
@@ -118,7 +118,9 @@ async def timeline(
     rows = await session.scalars(
         select(EmailMessage)
         .where(EmailMessage.thread_id == thread_id)
-        .order_by(EmailMessage.created_at, EmailMessage.id)
+        # Message time, not row time: a late-synced inbound must sort where it
+        # was SENT, not where the poll happened to store it (CodeRabbit).
+        .order_by(func.coalesce(EmailMessage.sent_at, EmailMessage.created_at), EmailMessage.id)
     )
     return [_out(row) for row in rows]
 
@@ -173,6 +175,13 @@ async def send_email(
     credentials = decrypt_credentials(
         settings.email_credentials_key, connection.encrypted_credentials
     )
+    # Known limitation (CodeRabbit critical, deferred to the M5 composer): the
+    # provider send happens inside the request transaction, so a commit failure
+    # AFTER a successful send loses the timeline row and a client retry would
+    # re-send. The real fix is a durable outbox row committed before the send —
+    # that lands with the M5 send-quote composer, which rebuilds this flow
+    # (templates, PDF, fallback). The quote row lock above already serializes
+    # concurrent sends; the frontend disables the submit while in flight.
     result = await get_provider(connection.connection_type).send(
         credentials,
         from_address=connection.from_address,
