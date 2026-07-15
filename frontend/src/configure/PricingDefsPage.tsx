@@ -12,6 +12,9 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 import { ApiError } from '../api/client';
+import { KalkEditor } from '../estimating/KalkEditor';
+import { CATEGORY_SWATCHES } from '../estimating/PricingSection';
+import type { KalkCheckResult } from '../estimating/types';
 import {
   type DefCalcType,
   type DefCategory,
@@ -21,42 +24,59 @@ import {
   useConfigureApi,
 } from './api';
 
-function NewPricingItemModal({
+function PricingItemDefModal({
+  initial,
   onCommit,
   onClose,
+  onKalkCheck,
 }: {
+  initial: PricingItemDefOut | null;
   onCommit: (body: PricingItemDefBody) => void;
   onClose: () => void;
+  onKalkCheck: (formula: string) => Promise<KalkCheckResult>;
 }) {
   const { t } = useTranslation();
-  const [name, setName] = useState('');
-  const [calcType, setCalcType] = useState<DefCalcType>('markup');
-  const [category, setCategory] = useState<DefCategory | 'custom'>('general');
-  const [customName, setCustomName] = useState('');
-  const [color, setColor] = useState('#8b1e3f');
-  const [formula, setFormula] = useState('');
-  const [pct, setPct] = useState('');
+  const [name, setName] = useState(initial?.name ?? '');
+  const [calcType, setCalcType] = useState<DefCalcType>(initial?.calc_type ?? 'markup');
+  const [category, setCategory] = useState<DefCategory | 'custom'>(
+    initial?.is_custom ? 'custom' : (initial?.category ?? 'general'),
+  );
+  const [customName, setCustomName] = useState(initial?.custom_category_name ?? '');
+  const [color, setColor] = useState(initial?.color ?? CATEGORY_SWATCHES[0]);
+  const [formula, setFormula] = useState(initial?.formula ?? '');
+  const [pct, setPct] = useState(initial?.default_pct ?? '');
 
   const isCustom = category === 'custom';
   const canCommit =
     name.trim() !== '' && (!isCustom || (customName.trim() !== '' && formula.trim() !== ''));
 
+  const title = initial
+    ? t('pricing.edit_item_title', { name: initial.name })
+    : t('pricing.new_item');
+
   return (
-    <div className="est-modal-backdrop" role="dialog" aria-label={t('pricing.new_item')}>
-      <div className="est-modal">
-        <h3>{t('pricing.new_item')}</h3>
+    <div className="est-modal-backdrop" role="dialog" aria-label={title}>
+      <div className="est-modal est-pricing-modal">
+        <h3>{title}</h3>
         <label>
           {t('pricing.item_name')}
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label>
-          {t('pricing.calc_type')}
-          <select value={calcType} onChange={(e) => setCalcType(e.target.value as DefCalcType)}>
-            <option value="markup">{t('pricing.type_markup')}</option>
-            <option value="margin">{t('pricing.type_margin')}</option>
-            <option value="target_margin">{t('pricing.type_target_margin')}</option>
-          </select>
-        </label>
+        <fieldset className="est-radio-group">
+          <legend>{t('pricing.calc_type')}</legend>
+          {(['markup', 'margin', 'target_margin'] as DefCalcType[]).map((type) => (
+            <label key={type}>
+              <input
+                type="radio"
+                name="def-calc-type"
+                value={type}
+                checked={calcType === type}
+                onChange={() => setCalcType(type)}
+              />
+              {t(`pricing.type_${type}`)}
+            </label>
+          ))}
+        </fieldset>
         {calcType !== 'target_margin' && (
           <label>
             {t('pricing.category')}
@@ -79,24 +99,34 @@ function NewPricingItemModal({
               {t('pricing.custom_category_name')}
               <input value={customName} onChange={(e) => setCustomName(e.target.value)} />
             </label>
-            <label>
-              {t('pricing.color')}
-              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-            </label>
-            <label>
-              {t('pricing.formula')}
-              <textarea
-                rows={8}
-                value={formula}
-                onChange={(e) => setFormula(e.target.value)}
-                spellCheck={false}
-              />
-            </label>
+            <fieldset className="est-swatch-group">
+              <legend>{t('pricing.color')}</legend>
+              {CATEGORY_SWATCHES.map((swatch) => (
+                <button
+                  key={swatch}
+                  type="button"
+                  className={swatch === color ? 'est-swatch est-swatch-active' : 'est-swatch'}
+                  style={{ background: swatch }}
+                  aria-label={t('pricing.color_swatch_label', { color: swatch })}
+                  aria-pressed={swatch === color}
+                  onClick={() => setColor(swatch)}
+                />
+              ))}
+            </fieldset>
           </>
+        )}
+        {(isCustom || initial) && (
+          <KalkEditor
+            value={formula}
+            onChange={setFormula}
+            name={name.trim() === '' ? undefined : name.trim()}
+            onCheck={onKalkCheck}
+            rows={6}
+          />
         )}
         <label>
           {t('pricing.default_pct')}
-          <input value={pct} onChange={(e) => setPct(e.target.value)} placeholder="10" />
+          <input value={pct ?? ''} onChange={(e) => setPct(e.target.value)} placeholder="10" />
         </label>
         <div className="est-modal-actions">
           <button type="button" onClick={onClose}>
@@ -114,11 +144,12 @@ function NewPricingItemModal({
                 custom_category_name: isCustom ? customName.trim() : null,
                 color: isCustom ? color : null,
                 formula: isCustom || formula.trim() !== '' ? formula : null,
-                default_pct: pct.trim() === '' ? null : pct.trim().replace(',', '.'),
+                default_pct:
+                  String(pct).trim() === '' ? null : String(pct).trim().replace(',', '.'),
               })
             }
           >
-            {t('pricing.add_item')}
+            {initial ? t('estimating.save_changes') : t('pricing.add_item')}
           </button>
         </div>
       </div>
@@ -132,6 +163,7 @@ export function PricingDefsPage() {
   const [defs, setDefs] = useState<PricingItemDefOut[]>([]);
   const [discountDefs, setDiscountDefs] = useState<DiscountDefOut[]>([]);
   const [creating, setCreating] = useState(false);
+  const [editingDef, setEditingDef] = useState<PricingItemDefOut | null>(null);
   const [discountName, setDiscountName] = useState('');
   const [discountPct, setDiscountPct] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -209,6 +241,13 @@ export function PricingDefsPage() {
                 <td className="est-row-actions">
                   <button
                     type="button"
+                    onClick={() => setEditingDef(def)}
+                    aria-label={t('pricing.edit_item_label', { name: def.name })}
+                  >
+                    ↗
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => api.deletePricingItemDef(def.id).then(reload).catch(fail)}
                     aria-label={t('estimating.remove', { name: def.name })}
                   >
@@ -280,13 +319,22 @@ export function PricingDefsPage() {
         </table>
       </section>
 
-      {creating && (
-        <NewPricingItemModal
+      {(creating || editingDef) && (
+        <PricingItemDefModal
+          initial={editingDef}
+          onKalkCheck={api.kalkCheck}
           onCommit={(body) => {
+            const save = editingDef
+              ? api.updatePricingItemDef(editingDef.id, body)
+              : api.createPricingItemDef(body);
             setCreating(false);
-            api.createPricingItemDef(body).then(reload).catch(fail);
+            setEditingDef(null);
+            save.then(reload).catch(fail);
           }}
-          onClose={() => setCreating(false)}
+          onClose={() => {
+            setCreating(false);
+            setEditingDef(null);
+          }}
         />
       )}
     </main>

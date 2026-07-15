@@ -197,6 +197,7 @@ export function OperationDrawer({
         ))}
       </section>
       <KalkSection
+        name={operation.name}
         formula={operation.cost_formula}
         variableOverrides={operation.variable_overrides}
         loadReport={loadKalkReport}

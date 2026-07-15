@@ -259,6 +259,8 @@ function pricingSummary(): import('./types').PricingSummary {
         quantity: 1,
         unit_cost: '25.0000',
         total_excl_discounts: '30.0000',
+        total_markup: null,
+        total_markup_pct: null,
         calc_unit_price: '30.00',
         manual_unit_price: null,
         unit_price: '30.00',
@@ -274,6 +276,8 @@ function pricingSummary(): import('./types').PricingSummary {
         quantity: 10,
         unit_cost: '16.0000',
         total_excl_discounts: '192.0000',
+        total_markup: null,
+        total_markup_pct: null,
         calc_unit_price: '19.20',
         manual_unit_price: null,
         unit_price: '19.20',
@@ -316,6 +320,29 @@ describe('EstimatingPage', () => {
     // pricing renders below costing: the stack row + the discounted total
     expect(screen.getByText('General Markup')).toBeInTheDocument();
     expect(screen.getByText('Preisbildung (Pricing)')).toBeInTheDocument();
+  });
+
+  it('renders the estimating-grid anatomy: time columns, per-unit lines, yield + make qty footers', async () => {
+    getCosting.mockResolvedValue(
+      costing([op('Drehen', [cell(1, '25.0000'), cell(10, '160.0000')])]),
+    );
+    await renderPage();
+    await screen.findByText('Drehen');
+    // Setup Time / Run Time columns on the grid (DemoA/8, DemoB/15): flat setup
+    // shows the € cost, runtime shows resolved minutes
+    expect(screen.getAllByText('Rüstzeit').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Laufzeit').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('15 Min.').length).toBeGreaterThan(0);
+    // per-unit beneath the qty-10 total: 160/10 = 16,00 €
+    expect(screen.getAllByText('16,00 €').length).toBeGreaterThan(0);
+    // named summary rows + yield/make-quantity footers (operations router)
+    expect(screen.getByText('Materialsumme')).toBeInTheDocument();
+    expect(screen.getByText('Summe Arbeitsgänge')).toBeInTheDocument();
+    expect(screen.getByText('Ausbeute (%)')).toBeInTheDocument();
+    expect(screen.getByText('Fertigungsmenge')).toBeInTheDocument();
+    expect(screen.getAllByText('100,00 %').length).toBe(2);
+    // an empty Materials section still renders its table skeleton with a zero summary
+    expect(screen.getAllByText('0,00 €').length).toBeGreaterThan(0);
   });
 
   it('marks overridden cells and keeps the calc visible in the drawer', async () => {

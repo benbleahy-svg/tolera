@@ -277,7 +277,19 @@
     "missing_rate": "No rate",
     "configure_rates_link": "Configure rates →",
     "missing_rates_banner_one": "Operation rates not set — costs will show as €0.00 (1 line item).",
-    "missing_rates_banner_other": "Operation rates not set — costs will show as €0.00 ({{count}} line items)."
+    "missing_rates_banner_other": "Operation rates not set — costs will show as €0.00 ({{count}} line items).",
+    "setup_time_col": "Setup Time",
+    "run_time_col": "Run Time",
+    "material_summary": "Material Summary",
+    "operation_summary": "Operation Summary",
+    "yield_row": "Yield (%)",
+    "make_quantity_row": "Make Quantity",
+    "show_unit_values": "Show unit values",
+    "display_options": "Display options",
+    "collapse_section": "Collapse {{title}}",
+    "expand_section": "Expand {{title}}",
+    "change_process_title": "Update Process and Material",
+    "process_search_placeholder": "Filter processes …"
   },
   "kalk": {
     "formula": "Kalk formula",
@@ -289,7 +301,9 @@
     "variables": "Variables",
     "calculated_option": "Calculated: {{value}}",
     "save_overrides": "Apply variables",
-    "check_failed": "Check failed — please try again."
+    "check_failed": "Check failed — please try again.",
+    "formula_titled": "Kalk formula — {{name}}",
+    "show_hidden_variables": "Show hidden variables ({{count}})"
   },
   "configure": {
     "custom_tables": "Custom Tables",
@@ -325,7 +339,11 @@
     "rates_banner_one": "1 operation needs a rate — costs will show as €0.00.",
     "rates_banner_other": "{{count}} operations need rates — costs will show as €0.00.",
     "rates_banner_materials_one": "1 material has no cost rate.",
-    "rates_banner_materials_other": "{{count}} materials have no cost rate."
+    "rates_banner_materials_other": "{{count}} materials have no cost rate.",
+    "op_def_drawer": "Edit operation — {{name}}",
+    "edit_op_def_label": "Edit {{name}}",
+    "export_csv": "Export CSV",
+    "export_csv_label": "Export table {{name}} as CSV"
   },
   "pricing": {
     "refresh_pricing": "Refresh Pricing",
@@ -368,7 +386,7 @@
     "total_excl_discounts": "Total (excl. Discounts)",
     "unit_price_excl_discounts": "Unit Price (excl. Discounts)",
     "unit_price_override_label": "Unit-price override for quantity {{quantity}}",
-    "total_profit": "Total Profit / Margin",
+    "total_profit": "Total Profit",
     "add_discount": "ADD DISCOUNT",
     "discount_name": "Discount name",
     "discount_pct": "Discount (%)",
@@ -401,7 +419,17 @@
     "apply_to_all": "APPLY TO ALL",
     "quote_totals_title": "Quote totals",
     "net_total": "Net",
-    "gross_total": "Gross"
+    "gross_total": "Gross",
+    "actions_menu": "ACTIONS",
+    "total_markup": "Total Markup",
+    "profit_margin": "Profit Margin",
+    "edit_item_title": "Pricing Formula — {{name}}",
+    "edit_item_label": "Edit {{name}}",
+    "reorder_handle_label": "Reorder {{name}}",
+    "from_library": "From the library",
+    "create_new": "Create new",
+    "add_from_library_label": "Add {{name}} from the library",
+    "color_swatch_label": "Color {{color}}"
   },
   "viewer": {
     "back_to_parts": "← Parts",

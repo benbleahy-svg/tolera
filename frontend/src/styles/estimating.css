@@ -449,3 +449,234 @@
   font-size: 0.75rem;
   color: #b45309;
 }
+
+/* --------------- shared section chrome (collapse + gear) ----------------- */
+
+.est-section-header {
+  gap: 0.4rem;
+  justify-content: flex-start;
+}
+
+.est-collapse-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  font-size: 0.9rem;
+}
+
+.est-section-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  position: relative;
+}
+
+.est-gear {
+  position: relative;
+}
+
+.est-gear > button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 0 0.2rem;
+}
+
+.est-gear-pop {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 14rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.est-gear-pop label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* ACTIONS ▾ dropdown (native details) */
+.est-menu {
+  position: relative;
+}
+
+.est-menu > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 4px;
+}
+
+.est-menu > summary::after {
+  content: ' ▾';
+}
+
+.est-menu-pop {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 12rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.est-menu-pop button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0.3rem 0.4rem;
+  cursor: pointer;
+}
+
+.est-menu-pop button:hover {
+  background: var(--surface-hover, #eef1f5);
+}
+
+/* ----------------------- grid anatomy (frames) --------------------------- */
+
+.est-add-row td {
+  position: relative;
+  border-bottom: none;
+}
+
+.est-add-button {
+  color: var(--accent, #2563eb);
+  background: none;
+  border: 1px solid var(--accent, #2563eb);
+  border-radius: 4px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.est-add-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.est-meta-row td {
+  font-weight: 400;
+  color: var(--muted, #64748b);
+}
+
+.est-drag-handle {
+  cursor: grab;
+  opacity: 0.6;
+  padding-right: 0.2rem;
+  user-select: none;
+}
+
+/* ----------------------- Kalk editor chrome ------------------------------ */
+
+.est-kalk-editor-frame {
+  display: flex;
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.est-kalk-gutter {
+  margin: 0;
+  padding: 0.35rem 0.4rem;
+  text-align: right;
+  min-width: 2rem;
+  overflow: hidden;
+  user-select: none;
+  background: var(--surface-hover, #eef1f5);
+  color: var(--muted, #64748b);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.est-kalk-editor-frame .est-kalk-editor {
+  border: none;
+  outline: none;
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  resize: vertical;
+}
+
+/* ------------------- pricing item modal (edit path) ---------------------- */
+
+.est-pricing-modal {
+  max-width: 34rem;
+  max-height: 85vh;
+  overflow: auto;
+}
+
+.est-def-list {
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 4px;
+  max-height: 10rem;
+  overflow: auto;
+}
+
+.est-radio-group,
+.est-swatch-group {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.est-radio-group legend,
+.est-swatch-group legend {
+  padding: 0;
+  margin-bottom: 0.2rem;
+}
+
+.est-radio-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.est-swatch {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.est-swatch-active {
+  border-color: var(--text, #111);
+}
+
+.est-show-hidden {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}

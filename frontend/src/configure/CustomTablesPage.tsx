@@ -263,6 +263,35 @@ export function CustomTablesPage() {
                     e.target.value = '';
                   }}
                 />
+                <button
+                  type="button"
+                  aria-label={t('configure.export_csv_label', { name: detail.name })}
+                  onClick={() => {
+                    // spec #kalk-tables: tables are downloadable — client-side
+                    // CSV of the loaded columns + rows (German headers as-is)
+                    const quote = (v: unknown): string => {
+                      if (v === null || v === undefined) return '';
+                      const s =
+                        typeof v === 'boolean' ? (v ? 'ja' : 'nein') : String(v);
+                      return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+                    };
+                    const header = detail.columns.map((c) => quote(c.name)).join(';');
+                    const lines = rows.map((r) =>
+                      detail.columns.map((c) => quote(r[c.name])).join(';'),
+                    );
+                    const blob = new Blob([[header, ...lines].join('\n')], {
+                      type: 'text/csv;charset=utf-8',
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${detail.name}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  {t('configure.export_csv')}
+                </button>
                 <button type="button" onClick={remove}>
                   {t('configure.delete_table')}
                 </button>

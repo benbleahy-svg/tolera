@@ -2,20 +2,31 @@
  * Costing & Pricing (M1.10, spec #costing; DemoE frames 07-15): the Costing
  * table (five standard categories with color chips, Total Estimated Cost, then
  * the custom-category re-slices below it), the Pricing stack (independent,
- * additive items — Markup / Margin / Target-Margin — with per-break "% over
- * amount" cells, click-to-override %), the Discounts section, and the output
- * rows (Total / Unit Price excl. discounts with override, discounted price,
- * profit + margin). Everything renders per quantity break, total with per-unit
- * beneath where the frames show it.
+ * additive items — Markup / Margin / Target-Margin — an ORDERED stack with
+ * drag-handle reorder, per-break "% over amount" cells, click-to-override %,
+ * and an expand-to-edit path opening the Kalk editor), the Discounts section,
+ * and the output rows (Total / Unit Price excl. discounts with override, Total
+ * Markup, profit, margin). Items and discounts originate from the Configure
+ * library (snapshot-on-attach, DECISIONS 2026-07-09 ruling 6) with ad-hoc
+ * creation as the secondary path. Sections are collapsible with Display
+ * Options; ADD buttons render inside the tables per the frames.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { CollapsibleSection, useSectionPrefs } from './CollapsibleSection';
+import { KalkEditor } from './KalkEditor';
 import type {
   CalcType,
+  DiscountCreateBody,
+  DiscountDefLite,
+  KalkCheckResult,
   PricingCategory,
   PricingItemCreateBody,
+  PricingItemDefLite,
+  PricingItemOut,
+  PricingItemUpdateBody,
   PricingSummary,
 } from './types';
 
@@ -27,17 +38,35 @@ const CATEGORY_COLORS: Record<PricingCategory, string> = {
   purchased_component: '#46c8d8',
 };
 
+/** The 8 fixed cost-category swatches (spec #costing New-Pricing-Item modal). */
+export const CATEGORY_SWATCHES = [
+  '#8b1e3f', // maroon
+  '#d97706', // orange
+  '#d4a72c', // gold
+  '#1b6e3c', // green
+  '#0d9488', // teal
+  '#2563eb', // blue
+  '#7c3aed', // purple
+  '#64748b', // grey
+];
+
 interface Props {
   pricing: PricingSummary;
   formatMoney: (value: string | null) => string;
   editable: boolean;
   onAddItem: (body: PricingItemCreateBody) => void;
+  onUpdateItem: (pricingItemId: string, body: PricingItemUpdateBody) => void;
   onRemoveItem: (pricingItemId: string) => void;
+  onReorderItems: (pricingItemIds: string[]) => void;
   onItemPctOverride: (pricingItemId: string, quantity: number, manualPct: string | null) => void;
-  onAddDiscount: (name: string, defaultPct: string) => void;
+  onAddDiscount: (body: DiscountCreateBody) => void;
   onRemoveDiscount: (discountId: string) => void;
   onDiscountPctOverride: (discountId: string, quantity: number, manualPct: string | null) => void;
   onUnitPriceOverride: (quantity: number, manualUnitPrice: string | null) => void;
+  onRefreshPricing: () => void;
+  loadItemDefs: () => Promise<PricingItemDefLite[]>;
+  loadDiscountDefs: () => Promise<DiscountDefLite[]>;
+  onKalkCheck: (formula: string) => Promise<KalkCheckResult>;
 }
 
 function formatPct(value: string | null): string {
@@ -62,16 +91,18 @@ function PctCell({
   unreachable = false,
   editable,
   label,
+  showUnitValues = true,
   formatMoney,
   onOverride,
 }: {
   pct: string | null;
   overridden: boolean;
-  /** The $ contribution shown beneath the %; undefined = pct-only cell. */
+  /** The € contribution shown beneath the %; undefined = pct-only cell. */
   amount?: string | null;
   unreachable?: boolean;
   editable: boolean;
   label: string;
+  showUnitValues?: boolean;
   formatMoney: (value: string | null) => string;
   onOverride: (manualPct: string | null) => void;
 }) {
@@ -117,7 +148,7 @@ function PctCell({
           {formatPct(pct)}
           {overridden && ' *'}
         </span>
-        {amount !== undefined && (
+        {amount !== undefined && showUnitValues && (
           <>
             <br />
             <small>{formatMoney(amount)}</small>
@@ -134,21 +165,36 @@ function PctCell({
   );
 }
 
-function AddPricingItemModal({
-  onCommit,
+/**
+ * Create / edit a pricing item. Create mode leads with the Configure library
+ * ("add from library" — snapshot-on-attach); the ad-hoc form doubles as the
+ * edit surface ("Pricing Formula — <name>" with the Kalk editor).
+ */
+function PricingItemModal({
+  initial,
+  defs,
+  onCreate,
+  onUpdate,
   onClose,
+  onKalkCheck,
 }: {
-  onCommit: (body: PricingItemCreateBody) => void;
+  initial: PricingItemOut | null;
+  defs: PricingItemDefLite[];
+  onCreate: (body: PricingItemCreateBody) => void;
+  onUpdate: (pricingItemId: string, body: PricingItemUpdateBody) => void;
   onClose: () => void;
+  onKalkCheck: (formula: string) => Promise<KalkCheckResult>;
 }) {
   const { t } = useTranslation();
-  const [name, setName] = useState('');
-  const [calcType, setCalcType] = useState<CalcType>('markup');
-  const [category, setCategory] = useState<PricingCategory | 'custom'>('general');
-  const [customName, setCustomName] = useState('');
-  const [color, setColor] = useState('#8b1e3f');
-  const [formula, setFormula] = useState('');
-  const [pct, setPct] = useState('');
+  const [name, setName] = useState(initial?.name ?? '');
+  const [calcType, setCalcType] = useState<CalcType>(initial?.calc_type ?? 'markup');
+  const [category, setCategory] = useState<PricingCategory | 'custom'>(
+    initial?.is_custom ? 'custom' : (initial?.category ?? 'general'),
+  );
+  const [customName, setCustomName] = useState(initial?.custom_category_name ?? '');
+  const [color, setColor] = useState(initial?.color ?? CATEGORY_SWATCHES[0]);
+  const [formula, setFormula] = useState(initial?.formula ?? '');
+  const [pct, setPct] = useState(initial?.default_pct ?? '');
 
   const isCustom = category === 'custom';
   const canCommit =
@@ -156,34 +202,72 @@ function AddPricingItemModal({
 
   const commit = () => {
     if (!canCommit) return;
-    onCommit({
+    const body = {
       name: name.trim(),
       calc_type: calcType,
-      category: isCustom ? 'general' : category,
+      category: isCustom ? ('general' as const) : category,
       is_custom: isCustom,
       custom_category_name: isCustom ? customName.trim() : null,
       color: isCustom ? color : null,
       formula: isCustom ? formula : formula.trim() === '' ? null : formula,
-      default_pct: pct.trim() === '' ? null : pct.trim().replace(',', '.'),
-    });
+      default_pct: pct === '' ? null : String(pct).trim().replace(',', '.'),
+    };
+    if (initial) onUpdate(initial.id, body);
+    else onCreate(body);
   };
 
+  const title = initial
+    ? t('pricing.edit_item_title', { name: initial.name })
+    : t('pricing.new_item');
+
   return (
-    <div className="est-modal-backdrop" role="dialog" aria-label={t('pricing.new_item')}>
-      <div className="est-modal">
-        <h3>{t('pricing.new_item')}</h3>
+    <div className="est-modal-backdrop" role="dialog" aria-label={title}>
+      <div className="est-modal est-pricing-modal">
+        <h3>{title}</h3>
+        {!initial && defs.length > 0 && (
+          <>
+            <h4>{t('pricing.from_library')}</h4>
+            <ul className="est-picker-hits est-def-list">
+              {defs.map((def) => (
+                <li key={def.id}>
+                  <button
+                    type="button"
+                    onClick={() => onCreate({ source_def_id: def.id })}
+                    aria-label={t('pricing.add_from_library_label', { name: def.name })}
+                  >
+                    {def.name}
+                    {def.is_custom && def.custom_category_name && (
+                      <CategoryChip
+                        label={def.custom_category_name}
+                        color={def.color ?? '#64748b'}
+                      />
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <h4>{t('pricing.create_new')}</h4>
+          </>
+        )}
         <label>
           {t('pricing.item_name')}
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label>
-          {t('pricing.calc_type')}
-          <select value={calcType} onChange={(e) => setCalcType(e.target.value as CalcType)}>
-            <option value="markup">{t('pricing.type_markup')}</option>
-            <option value="margin">{t('pricing.type_margin')}</option>
-            <option value="target_margin">{t('pricing.type_target_margin')}</option>
-          </select>
-        </label>
+        <fieldset className="est-radio-group">
+          <legend>{t('pricing.calc_type')}</legend>
+          {(['markup', 'margin', 'target_margin'] as CalcType[]).map((type) => (
+            <label key={type}>
+              <input
+                type="radio"
+                name="calc-type"
+                value={type}
+                checked={calcType === type}
+                onChange={() => setCalcType(type)}
+              />
+              {t(`pricing.type_${type}`)}
+            </label>
+          ))}
+        </fieldset>
         {calcType !== 'target_margin' && (
           <label>
             {t('pricing.category')}
@@ -206,31 +290,41 @@ function AddPricingItemModal({
               {t('pricing.custom_category_name')}
               <input value={customName} onChange={(e) => setCustomName(e.target.value)} />
             </label>
-            <label>
-              {t('pricing.color')}
-              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-            </label>
-            <label>
-              {t('pricing.formula')}
-              <textarea
-                rows={8}
-                value={formula}
-                onChange={(e) => setFormula(e.target.value)}
-                spellCheck={false}
-              />
-            </label>
+            <fieldset className="est-swatch-group">
+              <legend>{t('pricing.color')}</legend>
+              {CATEGORY_SWATCHES.map((swatch) => (
+                <button
+                  key={swatch}
+                  type="button"
+                  className={swatch === color ? 'est-swatch est-swatch-active' : 'est-swatch'}
+                  style={{ background: swatch }}
+                  aria-label={t('pricing.color_swatch_label', { color: swatch })}
+                  aria-pressed={swatch === color}
+                  onClick={() => setColor(swatch)}
+                />
+              ))}
+            </fieldset>
           </>
+        )}
+        {(isCustom || initial) && (
+          <KalkEditor
+            value={formula}
+            onChange={setFormula}
+            name={name.trim() === '' ? undefined : name.trim()}
+            onCheck={onKalkCheck}
+            rows={6}
+          />
         )}
         <label>
           {t('pricing.default_pct')}
-          <input value={pct} onChange={(e) => setPct(e.target.value)} placeholder="10" />
+          <input value={pct ?? ''} onChange={(e) => setPct(e.target.value)} placeholder="10" />
         </label>
         <div className="est-modal-actions">
           <button type="button" onClick={onClose}>
             {t('common.cancel')}
           </button>
           <button type="button" onClick={commit} disabled={!canCommit}>
-            {t('pricing.add_item')}
+            {initial ? t('estimating.save_changes') : t('pricing.add_item')}
           </button>
         </div>
       </div>
@@ -243,20 +337,46 @@ export function PricingSection({
   formatMoney,
   editable,
   onAddItem,
+  onUpdateItem,
   onRemoveItem,
+  onReorderItems,
   onItemPctOverride,
   onAddDiscount,
   onRemoveDiscount,
   onDiscountPctOverride,
   onUnitPriceOverride,
+  onRefreshPricing,
+  loadItemDefs,
+  loadDiscountDefs,
+  onKalkCheck,
 }: Props) {
   const { t } = useTranslation();
+  const [costingPrefs, setCostingPref] = useSectionPrefs('costing');
+  const [pricingPrefs, setPricingPref] = useSectionPrefs('pricing');
+  const [discountPrefs, setDiscountPref] = useSectionPrefs('discounts');
   const [addingItem, setAddingItem] = useState(false);
+  const [editingItem, setEditingItem] = useState<PricingItemOut | null>(null);
+  const [itemDefs, setItemDefs] = useState<PricingItemDefLite[]>([]);
   const [addingDiscount, setAddingDiscount] = useState(false);
+  const [discountDefs, setDiscountDefs] = useState<DiscountDefLite[]>([]);
   const [discountName, setDiscountName] = useState('');
   const [discountPct, setDiscountPct] = useState('');
   const [priceEdit, setPriceEdit] = useState<number | null>(null);
   const [priceDraft, setPriceDraft] = useState('');
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+
+  const showCostingUnits = costingPrefs.unit_values !== false;
+  const showPricingUnits = pricingPrefs.unit_values !== false;
+
+  useEffect(() => {
+    if (!addingItem) return;
+    loadItemDefs().then(setItemDefs).catch(() => setItemDefs([]));
+  }, [addingItem, loadItemDefs]);
+
+  useEffect(() => {
+    if (!addingDiscount) return;
+    loadDiscountDefs().then(setDiscountDefs).catch(() => setDiscountDefs([]));
+  }, [addingDiscount, loadDiscountDefs]);
 
   const quantities = pricing.quantities;
   const row = (quantity: number) => pricing.costing.find((c) => c.quantity === quantity);
@@ -300,11 +420,36 @@ export function PricingSection({
       .find((item) => item.id === itemId)
       ?.cells.find((cell) => cell.quantity === quantity);
 
+  // drag-handle reorder (the stack is ordered; position feeds Zuschlagskalkulation)
+  const dropOn = (targetId: string) => {
+    if (!draggedId || draggedId === targetId) return;
+    const ids = pricing.pricing_items.map((item) => item.id);
+    const from = ids.indexOf(draggedId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ...ids.splice(from, 1));
+    onReorderItems(ids);
+  };
+
+  const pricingColumnCount = quantities.length + 2;
+
   return (
     <>
       {/* ------------------------------ Costing ------------------------------ */}
-      <section className="est-section">
-        <h3>{t('pricing.costing_title')}</h3>
+      <CollapsibleSection
+        id="costing"
+        title={t('pricing.costing_title')}
+        collapsed={costingPrefs.collapsed === true}
+        onToggleCollapsed={() => setCostingPref('collapsed', costingPrefs.collapsed !== true)}
+        options={[
+          {
+            key: 'unit_values',
+            label: t('estimating.show_unit_values'),
+            checked: showCostingUnits,
+            onChange: (checked) => setCostingPref('unit_values', checked),
+          },
+        ]}
+      >
         <table className="est-table">
           <thead>
             <tr>
@@ -328,8 +473,12 @@ export function PricingSection({
                   return (
                     <td key={quantity} className="est-num">
                       {formatMoney(value)}
-                      <br />
-                      <small>{formatMoney(perUnit(value, quantity))}</small>
+                      {showCostingUnits && (
+                        <>
+                          <br />
+                          <small>{formatMoney(perUnit(value, quantity))}</small>
+                        </>
+                      )}
                     </td>
                   );
                 })}
@@ -340,8 +489,12 @@ export function PricingSection({
               {quantities.map((quantity) => (
                 <td key={quantity} className="est-num">
                   {formatMoney(row(quantity)?.total ?? null)}
-                  <br />
-                  <small>{formatMoney(totals(quantity)?.unit_cost ?? null)}</small>
+                  {showCostingUnits && (
+                    <>
+                      <br />
+                      <small>{formatMoney(totals(quantity)?.unit_cost ?? null)}</small>
+                    </>
+                  )}
                 </td>
               ))}
             </tr>
@@ -364,8 +517,12 @@ export function PricingSection({
                     return (
                       <td key={quantity} className="est-num">
                         {formatMoney(custom?.cost ?? null)}
-                        <br />
-                        <small>{formatMoney(perUnit(custom?.cost ?? null, quantity))}</small>
+                        {showCostingUnits && (
+                          <>
+                            <br />
+                            <small>{formatMoney(perUnit(custom?.cost ?? null, quantity))}</small>
+                          </>
+                        )}
                       </td>
                     );
                   })}
@@ -374,16 +531,33 @@ export function PricingSection({
             })}
           </tbody>
         </table>
-      </section>
+      </CollapsibleSection>
 
       {/* ------------------------------ Pricing ------------------------------ */}
-      <section className="est-section">
-        <header className="est-section-header">
-          <h3>{t('pricing.pricing_title')}</h3>
-          <button type="button" onClick={() => setAddingItem(true)} disabled={!editable}>
-            {t('pricing.add_pricing_item')}
-          </button>
-        </header>
+      <CollapsibleSection
+        id="pricing"
+        title={t('pricing.pricing_title')}
+        collapsed={pricingPrefs.collapsed === true}
+        onToggleCollapsed={() => setPricingPref('collapsed', pricingPrefs.collapsed !== true)}
+        options={[
+          {
+            key: 'unit_values',
+            label: t('estimating.show_unit_values'),
+            checked: showPricingUnits,
+            onChange: (checked) => setPricingPref('unit_values', checked),
+          },
+        ]}
+        actions={
+          <details className="est-menu">
+            <summary>{t('pricing.actions_menu')}</summary>
+            <div className="est-menu-pop" role="menu">
+              <button type="button" disabled={!editable} onClick={onRefreshPricing}>
+                {t('pricing.refresh_pricing')}
+              </button>
+            </div>
+          </details>
+        }
+      >
         <table className="est-table">
           <thead>
             <tr>
@@ -398,8 +572,24 @@ export function PricingSection({
           </thead>
           <tbody>
             {pricing.pricing_items.map((item) => (
-              <tr key={item.id}>
+              <tr
+                key={item.id}
+                onDragOver={(e) => {
+                  if (draggedId) e.preventDefault();
+                }}
+                onDrop={() => dropOn(item.id)}
+              >
                 <td>
+                  <span
+                    className="est-drag-handle"
+                    draggable={editable}
+                    role="button"
+                    aria-label={t('pricing.reorder_handle_label', { name: item.name })}
+                    onDragStart={() => setDraggedId(item.id)}
+                    onDragEnd={() => setDraggedId(null)}
+                  >
+                    ≡
+                  </span>{' '}
                   {item.name}{' '}
                   {item.is_custom && item.custom_category_name ? (
                     <CategoryChip
@@ -428,6 +618,7 @@ export function PricingSection({
                       amount={cell?.amount ?? null}
                       unreachable={cell?.unreachable ?? false}
                       editable={editable}
+                      showUnitValues={showPricingUnits}
                       label={t('pricing.pct_override_label', {
                         name: item.name,
                         quantity,
@@ -440,6 +631,14 @@ export function PricingSection({
                 <td className="est-row-actions">
                   <button
                     type="button"
+                    onClick={() => setEditingItem(item)}
+                    disabled={!editable}
+                    aria-label={t('pricing.edit_item_label', { name: item.name })}
+                  >
+                    ↗
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onRemoveItem(item.id)}
                     disabled={!editable}
                     aria-label={t('estimating.remove', { name: item.name })}
@@ -449,6 +648,18 @@ export function PricingSection({
                 </td>
               </tr>
             ))}
+            <tr className="est-add-row">
+              <td colSpan={pricingColumnCount}>
+                <button
+                  type="button"
+                  className="est-add-button"
+                  onClick={() => setAddingItem(true)}
+                  disabled={!editable}
+                >
+                  {t('pricing.add_pricing_item')}
+                </button>
+              </td>
+            </tr>
           </tbody>
           <tfoot>
             <tr className="est-total-row">
@@ -513,60 +724,48 @@ export function PricingSection({
               <td />
             </tr>
             <tr>
-              <td>{t('pricing.total_profit')}</td>
+              <td>{t('pricing.total_markup')}</td>
               {quantities.map((quantity) => {
                 const total = totals(quantity);
                 return (
                   <td key={quantity} className="est-num">
-                    {formatMoney(total?.total_profit ?? null)}
+                    {formatPct(total?.total_markup_pct ?? null)}
                     <br />
-                    <small>{formatPct(total?.profit_margin_pct ?? null)}</small>
+                    <small>{formatMoney(total?.total_markup ?? null)}</small>
                   </td>
                 );
               })}
               <td />
             </tr>
+            <tr>
+              <td>{t('pricing.total_profit')}</td>
+              {quantities.map((quantity) => (
+                <td key={quantity} className="est-num">
+                  {formatMoney(totals(quantity)?.total_profit ?? null)}
+                </td>
+              ))}
+              <td />
+            </tr>
+            <tr>
+              <td>{t('pricing.profit_margin')}</td>
+              {quantities.map((quantity) => (
+                <td key={quantity} className="est-num">
+                  {formatPct(totals(quantity)?.profit_margin_pct ?? null)}
+                </td>
+              ))}
+              <td />
+            </tr>
           </tfoot>
         </table>
-      </section>
+      </CollapsibleSection>
 
       {/* ------------------------------ Discounts ---------------------------- */}
-      <section className="est-section">
-        <header className="est-section-header">
-          <h3>{t('pricing.discounts_title')}</h3>
-          <button type="button" onClick={() => setAddingDiscount(true)} disabled={!editable}>
-            {t('pricing.add_discount')}
-          </button>
-        </header>
-        {addingDiscount && (
-          <div className="est-picker-pop">
-            <input
-              autoFocus
-              value={discountName}
-              onChange={(e) => setDiscountName(e.target.value)}
-              placeholder={t('pricing.discount_name')}
-              aria-label={t('pricing.discount_name')}
-            />
-            <input
-              value={discountPct}
-              onChange={(e) => setDiscountPct(e.target.value)}
-              placeholder="%"
-              aria-label={t('pricing.discount_pct')}
-            />
-            <button
-              type="button"
-              disabled={discountName.trim() === '' || discountPct.trim() === ''}
-              onClick={() => {
-                onAddDiscount(discountName.trim(), discountPct.trim().replace(',', '.'));
-                setAddingDiscount(false);
-                setDiscountName('');
-                setDiscountPct('');
-              }}
-            >
-              {t('pricing.add_discount')}
-            </button>
-          </div>
-        )}
+      <CollapsibleSection
+        id="discounts"
+        title={t('pricing.discounts_title')}
+        collapsed={discountPrefs.collapsed === true}
+        onToggleCollapsed={() => setDiscountPref('collapsed', discountPrefs.collapsed !== true)}
+      >
         <table className="est-table">
           <tbody>
             {pricing.discounts.map((discount) => (
@@ -603,6 +802,71 @@ export function PricingSection({
                 </td>
               </tr>
             ))}
+            <tr className="est-add-row">
+              <td colSpan={pricingColumnCount}>
+                <button
+                  type="button"
+                  className="est-add-button"
+                  onClick={() => setAddingDiscount((v) => !v)}
+                  disabled={!editable}
+                >
+                  {t('pricing.add_discount')}
+                </button>
+                {addingDiscount && (
+                  <div className="est-picker-pop">
+                    {discountDefs.length > 0 && (
+                      <ul className="est-picker-hits est-def-list">
+                        {discountDefs.map((def) => (
+                          <li key={def.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onAddDiscount({ source_def_id: def.id });
+                                setAddingDiscount(false);
+                              }}
+                              aria-label={t('pricing.add_from_library_label', {
+                                name: def.name,
+                              })}
+                            >
+                              {def.name}
+                              {def.default_pct != null && ` (${formatPct(def.default_pct)})`}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <input
+                      autoFocus={discountDefs.length === 0}
+                      value={discountName}
+                      onChange={(e) => setDiscountName(e.target.value)}
+                      placeholder={t('pricing.discount_name')}
+                      aria-label={t('pricing.discount_name')}
+                    />
+                    <input
+                      value={discountPct}
+                      onChange={(e) => setDiscountPct(e.target.value)}
+                      placeholder="%"
+                      aria-label={t('pricing.discount_pct')}
+                    />
+                    <button
+                      type="button"
+                      disabled={discountName.trim() === '' || discountPct.trim() === ''}
+                      onClick={() => {
+                        onAddDiscount({
+                          name: discountName.trim(),
+                          default_pct: discountPct.trim().replace(',', '.'),
+                        });
+                        setAddingDiscount(false);
+                        setDiscountName('');
+                        setDiscountPct('');
+                      }}
+                    >
+                      {t('pricing.add_discount')}
+                    </button>
+                  </div>
+                )}
+              </td>
+            </tr>
           </tbody>
           <tfoot>
             <tr>
@@ -635,15 +899,25 @@ export function PricingSection({
             </tr>
           </tfoot>
         </table>
-      </section>
+      </CollapsibleSection>
 
-      {addingItem && (
-        <AddPricingItemModal
-          onCommit={(body) => {
+      {(addingItem || editingItem) && (
+        <PricingItemModal
+          initial={editingItem}
+          defs={itemDefs}
+          onCreate={(body) => {
             setAddingItem(false);
             onAddItem(body);
           }}
-          onClose={() => setAddingItem(false)}
+          onUpdate={(id, body) => {
+            setEditingItem(null);
+            onUpdateItem(id, body);
+          }}
+          onClose={() => {
+            setAddingItem(false);
+            setEditingItem(null);
+          }}
+          onKalkCheck={onKalkCheck}
         />
       )}
     </>
