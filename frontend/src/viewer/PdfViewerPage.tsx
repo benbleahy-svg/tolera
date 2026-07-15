@@ -19,6 +19,7 @@ import type { Annotation as CollabAnnotation } from '../collab/api';
 import { type BoundSelection, CollaborationPanel } from '../collab/CollaborationPanel';
 import { usePartsApi, type PartFile } from '../parts/api';
 import { AnnotationOverlay } from './AnnotationOverlay';
+import { FoundInFilesPanel } from './FoundInFilesPanel';
 import { MeasureOverlay, type MeasureTool } from './MeasureOverlay';
 import { scaleFromCalibration, scaleFromRatio, type Measurement, type Scale } from './measure';
 import {
@@ -171,6 +172,8 @@ export function PdfViewerPage() {
 
   const [redactions, setRedactions] = useState<Redaction[]>([]);
   const [whiteouts, setWhiteouts] = useState<WhiteoutSection[]>([]);
+  // Lens category-isolation whiteouts (M3.2) — same overlay, panel-driven.
+  const [lensWhiteouts, setLensWhiteouts] = useState<WhiteoutSection[]>([]);
   const [redactTool, setRedactTool] = useState<RedactTool | null>(null);
   const [redactPreset, setRedactPreset] = useState<keyof typeof REDACTION_PRESETS>('schwarz');
   const [whiteoutActive, setWhiteoutActive] = useState(false);
@@ -1039,13 +1042,22 @@ export function PdfViewerPage() {
                       : []
                   }
                   whiteouts={
-                    (docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? whiteouts : []
+                    (docRotation + (pageRotations[page] ?? 0)) % 360 === 0
+                      ? // Lens toggles force the active flag on, so while one is
+                        // on, hand-drawn sections join only if their own switch
+                        // is (a Lens toggle must not force-reveal them); with no
+                        // Lens sections the M2.4 behaviour is untouched
+                        // (outlines when inactive).
+                        lensWhiteouts.length > 0
+                        ? [...(whiteoutActive ? whiteouts : []), ...lensWhiteouts]
+                        : whiteouts
+                      : []
                   }
                   tool={
                     (docRotation + (pageRotations[page] ?? 0)) % 360 === 0 ? redactTool : null
                   }
                   style={REDACTION_PRESETS[redactPreset]}
-                  whiteoutActive={whiteoutActive}
+                  whiteoutActive={whiteoutActive || lensWhiteouts.length > 0}
                   spotlightId={spotlightId}
                   onAddRedaction={(redaction) => setRedactions((prev) => [...prev, redaction])}
                   onAddWhiteout={(section) => setWhiteouts((prev) => [...prev, section])}
@@ -1063,6 +1075,14 @@ export function PdfViewerPage() {
               </PageCanvas>
             ))}
         </section>
+        {partId && fileId && (
+          <FoundInFilesPanel
+            partId={partId}
+            fileId={fileId}
+            filename={file?.filename ?? ''}
+            onLensWhiteoutsChange={setLensWhiteouts}
+          />
+        )}
       </div>
 
       {layout === 'paged' && doc && (

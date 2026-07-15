@@ -23,6 +23,7 @@ from .errors import register_exception_handlers
 from .file_split import split_router
 from .health import router as health_router
 from .lens_extract import extract_router
+from .lens_findings import findings_router
 from .logging import configure_logging
 from .materials import materials_router
 from .me import router as me_router
@@ -77,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(part_library_router)
     app.include_router(split_router)
     app.include_router(extract_router)
+    app.include_router(findings_router)
     app.include_router(quotes_router)
     app.include_router(saved_views_router)
     app.include_router(materials_router)

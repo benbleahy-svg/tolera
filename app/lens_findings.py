@@ -1,0 +1,475 @@
+"""Found-in-Files actions on Lens findings (M3.2 — spec ``#wingman`` §3,
+``#lens-accept``; AI-LENS-ENGINE §4/§7).
+
+The AI-Governor write path: a finding is a *suggestion* until the explicit
+human action lands here — **accept** (optionally filling the matching part
+field in the same transaction, so status and field can never diverge),
+**reject** (= "Mark as inaccurate", a false-positive label), **replace**
+(wrong-value label) and **add-missing** (false-negative label). Reject /
+replace / add-missing each persist one ``extraction_correction`` row with the
+``{predicted, corrected}`` pair + source region — per-tenant training data
+(DECISIONS.md 2026-07-15). Nothing here touches costing: an accepted identity
+or dimension write is exactly the M1.5/M1.7 manual-entry path, human-confirmed
+(CLAUDE.md §5 — Lens is never auto-fed into Kalk).
+"""
+
+from __future__ import annotations
+
+import uuid
+from decimal import ROUND_HALF_UP, Decimal
+from functools import partial
+from typing import Annotated, Any, Literal
+
+from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .auth import Principal
+from .authz import Permission, require
+from .deps import get_session
+from .dimensions import DimensionError, evaluate_length
+from .errors import AppError
+from .lens import BboxSpec, GdtSpec, ToleranceSpec
+from .lens_extract import FindingOut, _get_part_and_file_or_404
+from .models import (
+    CorrectionType,
+    ExtractionCorrection,
+    ExtractionFinding,
+    FindingCategory,
+    FindingStatus,
+    Part,
+)
+from .parts import _apply_dim, _get_or_create_geometry
+
+findings_router = APIRouter(prefix="/api/parts", tags=["lens"])
+
+# Click-to-fill targets (spec #wingman §2 NUM/REV click-fill; AI-LENS §4
+# "apply part#/rev/desc; set X/Y/Z from dims").
+ApplyTarget = Literal["part_number", "revision", "description", "size_x", "size_y", "size_z"]
+_IDENTITY_TARGETS: dict[str, str] = {
+    "part_number": "part_number",
+    "revision": "revision",
+    "description": "description",
+}
+_AXIS_TARGETS = ("size_x", "size_y", "size_z")
+# Only a *length-like* dimension may fill a size axis — an angle (deg) written
+# as mm would be silently wrong (ship-review 2026-07-15).
+_AXIS_SOURCE_TYPES = ("length", "diameter", "radius")
+
+
+class AcceptIn(BaseModel):
+    """``apply_to`` picks the fill target; omitted, it derives from the finding
+    type (identity types self-target; a dimension needs its axis named)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    apply_to: ApplyTarget | None = None
+
+
+class ReplaceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(min_length=1, max_length=500)
+    normalized_value: str | None = Field(None, max_length=500)
+    units: str | None = Field(None, max_length=16)
+
+
+class AddMissingIn(BaseModel):
+    """A callout Lens missed — typed by the user, optionally with the drawn
+    region (page + bbox in the unrotated pdf-unit convention). Nested payloads
+    are the M3.1 spec models — malformed shapes are rejected at the edge
+    (Pydantic v2, CLAUDE.md §5), never persisted as training labels."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: FindingCategory
+    type: str = Field(min_length=1, max_length=100)
+    value: str | None = Field(None, max_length=500)
+    raw_text: str | None = Field(None, max_length=2000)
+    normalized_value: str | None = Field(None, max_length=500)
+    units: str | None = Field(None, max_length=16)
+    tolerance: ToleranceSpec | None = None
+    role: str | None = Field(None, max_length=50)
+    gdt: GdtSpec | None = None
+    page: int | None = Field(None, ge=1)
+    bbox: BboxSpec | None = None
+
+
+class FindingActionOut(BaseModel):
+    finding: FindingOut
+    applied_field: str | None = None
+
+
+class CorrectionOut(BaseModel):
+    id: uuid.UUID
+    finding_id: uuid.UUID | None
+    source_file_id: uuid.UUID
+    correction_type: str
+    predicted: dict[str, Any] | None
+    corrected: dict[str, Any] | None
+    page: int | None
+    bbox: dict[str, Any] | None
+
+
+def _finding_out(row: ExtractionFinding) -> FindingOut:
+    return FindingOut(
+        id=row.id,
+        source_file_id=row.source_file_id,
+        component_id=row.component_id,
+        page=row.page,
+        category=row.category.value,
+        type=row.type,
+        raw_text=row.raw_text,
+        value=row.value,
+        normalized_value=row.normalized_value,
+        units=row.units,
+        tolerance=row.tolerance,
+        role=row.role,
+        gdt=row.gdt,
+        bbox=row.bbox,
+        confidence=float(row.confidence),
+        status=row.status.value,
+    )
+
+
+async def _predicted_for(session: AsyncSession, finding: ExtractionFinding) -> dict[str, Any]:
+    """The MODEL's prediction for this finding — never human-edited data.
+
+    A replace mutates the finding in place (status ``edited``), so a later
+    reject/replace must not snapshot the human value as "predicted" — that
+    would poison the M3.11 eval pairs. The first correction row for the
+    finding holds the original model output; reuse it once one exists.
+    """
+    if finding.status is FindingStatus.edited:
+        original = await session.scalar(
+            select(ExtractionCorrection.predicted)
+            .where(
+                ExtractionCorrection.finding_id == finding.id,
+                ExtractionCorrection.predicted.is_not(None),
+            )
+            .order_by(ExtractionCorrection.created_at)
+            .limit(1)
+        )
+        if original is not None:
+            return dict(original)
+    return _predicted_snapshot(finding)
+
+
+def _predicted_snapshot(row: ExtractionFinding) -> dict[str, Any]:
+    """The finding as the model emitted it — the durable half of the training
+    pair (survives the finding row itself; see the 0021 SET NULL)."""
+    return {
+        "category": row.category.value,
+        "type": row.type,
+        "raw_text": row.raw_text,
+        "value": row.value,
+        "normalized_value": row.normalized_value,
+        "units": row.units,
+        "tolerance": row.tolerance,
+        "role": row.role,
+        "gdt": row.gdt,
+        "confidence": float(row.confidence),
+    }
+
+
+async def _get_finding_or_404(
+    session: AsyncSession, part_id: uuid.UUID, file_id: uuid.UUID, finding_id: uuid.UUID
+) -> ExtractionFinding:
+    """Resolve a finding through its file: the org gate (RLS + org-scoped file
+    lookup) runs first, and the finding must belong to the addressed file —
+    same 404 for cross-org, unknown and misaddressed ids."""
+    await _get_part_and_file_or_404(session, part_id, file_id)
+    finding = await session.get(ExtractionFinding, finding_id, with_for_update=True)
+    if finding is None or finding.source_file_id != file_id:
+        raise AppError("not_found", "Finding not found.", status_code=status.HTTP_404_NOT_FOUND)
+    return finding
+
+
+def _resolve_apply_target(finding: ExtractionFinding, apply_to: ApplyTarget | None) -> str | None:
+    """Which field this accept fills, or None for a plain acknowledge.
+
+    Explicit targets are validated against the finding (a part_number can't
+    land in size_x); a bare accept derives the target from the type — and a
+    dimension finding, having three possible axes, must name one (422).
+    """
+    if apply_to is None:
+        if finding.type in _IDENTITY_TARGETS:
+            return _IDENTITY_TARGETS[finding.type]
+        if finding.type in _AXIS_SOURCE_TYPES:
+            raise AppError(
+                "apply_target_required",
+                "Eine Bemaßung braucht eine Zielachse (size_x/size_y/size_z).",
+                status_code=422,
+            )
+        return None
+    if apply_to in _IDENTITY_TARGETS:
+        if finding.type != apply_to:
+            raise AppError(
+                "apply_mismatch",
+                f"Ein Fund vom Typ '{finding.type}' kann nicht nach '{apply_to}' "
+                "übernommen werden.",
+                status_code=422,
+            )
+        return apply_to
+    # Axis target: only a length-like dimension carries a fillable length.
+    if finding.category is not FindingCategory.dimensions or finding.type not in _AXIS_SOURCE_TYPES:
+        raise AppError(
+            "apply_mismatch",
+            f"Ein Fund vom Typ '{finding.type}' kann nicht nach '{apply_to}' übernommen werden.",
+            status_code=422,
+        )
+    return apply_to
+
+
+async def _apply_to_part(
+    session: AsyncSession, part: Part, finding: ExtractionFinding, target: str
+) -> None:
+    """Write the accepted value where it belongs — the same paths the manual
+    editors use (PATCH part / PATCH geometry), so calc-vs-override and the
+    metric-storage contract hold identically."""
+    if target in _IDENTITY_TARGETS:
+        value = finding.normalized_value or finding.value
+        if value is None:
+            raise AppError("empty_value", "Der Fund enthält keinen Wert.", status_code=422)
+        setattr(part, target, value)
+        return
+    # Geometry axis: the RAW print value, interpreted in the finding's unit —
+    # `normalized_value` has no pinned unit semantics yet, so trusting it here
+    # could double-convert an inch print (ship-review 2026-07-15). Stored
+    # metric with override provenance (parts._apply_dim). No unit on the
+    # finding = the document default, mm-native (DACH); any other unit string
+    # is not a length and must not be written as one.
+    value = finding.value
+    if value is None:
+        raise AppError("empty_value", "Der Fund enthält keinen Wert.", status_code=422)
+    if finding.units not in ("mm", "in", None):
+        raise AppError(
+            "invalid_units",
+            f"Einheit '{finding.units}' kann nicht als Länge übernommen werden.",
+            status_code=422,
+        )
+    unit = finding.units or "mm"
+    geom = await _get_or_create_geometry(session, part)
+    overrides = dict(geom.overrides or {})
+    try:
+        _apply_dim(
+            geom, overrides, target, value, partial(evaluate_length, default_unit=unit), unit
+        )
+    except DimensionError as exc:
+        raise AppError("invalid_dimension", str(exc), status_code=422) from exc
+    geom.overrides = overrides
+
+
+@findings_router.post("/{part_id}/files/{file_id}/findings/{finding_id}/accept")
+async def accept_finding(
+    part_id: uuid.UUID,
+    file_id: uuid.UUID,
+    finding_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+    payload: AcceptIn | None = None,
+) -> FindingActionOut:
+    """Explicit Accept: flip the suggestion to ``accepted`` and fill the target
+    part field — one transaction, so the two can never diverge. Accept hands
+    ownership of the filled field to the human: an already-accepted finding is
+    a pure no-op acknowledge (a retry must never re-run the part write over a
+    later manual edit — the UI re-offers fill only on suggested/edited).
+    A rejected one is gone from the panel (409)."""
+    finding = await _get_finding_or_404(session, part_id, file_id, finding_id)
+    if finding.status is FindingStatus.rejected:
+        raise AppError(
+            "invalid_status",
+            "Ein als ungenau markierter Fund kann nicht übernommen werden.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    # Validate the target even when the write below is skipped — a contract
+    # violation (part_number → size_x) stays 422 no matter the status.
+    target = _resolve_apply_target(finding, payload.apply_to if payload else None)
+    if finding.status is FindingStatus.accepted:
+        return FindingActionOut(finding=_finding_out(finding), applied_field=None)
+    if target is not None:
+        part = await session.get(Part, part_id, with_for_update=True)
+        if part is None:  # deleted between the finding gate and this lock
+            raise AppError("not_found", "Part not found.", status_code=status.HTTP_404_NOT_FOUND)
+        await _apply_to_part(session, part, finding, target)
+    if finding.status is FindingStatus.suggested:
+        finding.status = FindingStatus.accepted
+    await session.flush()
+    return FindingActionOut(finding=_finding_out(finding), applied_field=target)
+
+
+@findings_router.post("/{part_id}/files/{file_id}/findings/{finding_id}/reject")
+async def reject_finding(
+    part_id: uuid.UUID,
+    file_id: uuid.UUID,
+    finding_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> FindingActionOut:
+    """ "Mark as inaccurate": remove the wrong finding and persist the
+    false-positive label. Idempotent — a second reject adds no second label.
+
+    Allowed on an accepted finding (a late false-positive is still training
+    signal — the panel offers it on every non-rejected chip), but the part
+    field written at accept is human-owned by then and is NEVER silently
+    mutated here: un-applying is lossy (no pre-accept snapshot exists) and an
+    un-gated part write would break the explicit-Accept invariant. The user
+    corrects the field in the Part-Fields tab beside the panel."""
+    finding = await _get_finding_or_404(session, part_id, file_id, finding_id)
+    if finding.status is not FindingStatus.rejected:
+        session.add(
+            ExtractionCorrection(
+                id=uuid.uuid4(),
+                org_id=principal.active_org_id,
+                finding_id=finding.id,
+                source_file_id=file_id,
+                correction_type=CorrectionType.mark_inaccurate,
+                predicted=await _predicted_for(session, finding),
+                corrected=None,
+                page=finding.page,
+                bbox=finding.bbox,
+                created_by=principal.user_id,
+            )
+        )
+        finding.status = FindingStatus.rejected
+        await session.flush()
+    return FindingActionOut(finding=_finding_out(finding))
+
+
+@findings_router.post("/{part_id}/files/{file_id}/findings/{finding_id}/replace")
+async def replace_finding(
+    part_id: uuid.UUID,
+    file_id: uuid.UUID,
+    finding_id: uuid.UUID,
+    payload: ReplaceIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> FindingActionOut:
+    """The user supplies the right value: persist the ``{predicted, corrected}``
+    pair, then edit the finding in place (status ``edited`` — survives re-runs).
+
+    Allowed on an accepted finding; the part field it filled is not touched
+    (human-owned since accept, see ``reject_finding``). ``edited`` re-arms the
+    fill affordance, so applying the corrected value stays an explicit,
+    human-gated accept — never an automatic side effect of the correction."""
+    finding = await _get_finding_or_404(session, part_id, file_id, finding_id)
+    if finding.status is FindingStatus.rejected:
+        raise AppError(
+            "invalid_status",
+            "Ein als ungenau markierter Fund kann nicht ersetzt werden.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    corrected = payload.model_dump(exclude_none=True)
+    session.add(
+        ExtractionCorrection(
+            id=uuid.uuid4(),
+            org_id=principal.active_org_id,
+            finding_id=finding.id,
+            source_file_id=file_id,
+            correction_type=CorrectionType.replace,
+            predicted=await _predicted_for(session, finding),
+            corrected=corrected,
+            page=finding.page,
+            bbox=finding.bbox,
+            created_by=principal.user_id,
+        )
+    )
+    finding.value = payload.value
+    finding.normalized_value = payload.normalized_value
+    if payload.units is not None:
+        finding.units = payload.units
+    finding.status = FindingStatus.edited
+    await session.flush()
+    return FindingActionOut(finding=_finding_out(finding))
+
+
+@findings_router.post("/{part_id}/files/{file_id}/findings", status_code=status.HTTP_201_CREATED)
+async def add_missing_finding(
+    part_id: uuid.UUID,
+    file_id: uuid.UUID,
+    payload: AddMissingIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> FindingOut:
+    """ "Add missing extraction": the false-negative label. The typed callout
+    becomes a real finding — born ``accepted`` at confidence 1 (human ground
+    truth: the M3.1 replace-suggested re-run can never wipe it)."""
+    await _get_part_and_file_or_404(session, part_id, file_id)
+    finding = ExtractionFinding(
+        id=uuid.uuid4(),
+        org_id=principal.active_org_id,
+        source_file_id=file_id,
+        page=payload.page,
+        category=payload.category,
+        type=payload.type,
+        raw_text=payload.raw_text,
+        value=payload.value,
+        normalized_value=payload.normalized_value,
+        units=payload.units,
+        tolerance=payload.tolerance.model_dump() if payload.tolerance else None,
+        role=payload.role,
+        gdt=payload.gdt.model_dump() if payload.gdt else None,
+        bbox=payload.bbox.model_dump() if payload.bbox else None,
+        confidence=Decimal("1").quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+        status=FindingStatus.accepted,
+    )
+    session.add(finding)
+    # Flush the finding first: the correction FKs it, and with no ORM
+    # relationship between the two mappers the unit of work won't order the
+    # inserts itself.
+    await session.flush()
+    session.add(
+        ExtractionCorrection(
+            id=uuid.uuid4(),
+            org_id=principal.active_org_id,
+            finding_id=finding.id,
+            source_file_id=file_id,
+            correction_type=CorrectionType.add_missing,
+            predicted=None,
+            corrected=payload.model_dump(exclude_none=True),
+            page=payload.page,
+            bbox=payload.bbox.model_dump() if payload.bbox else None,
+            created_by=principal.user_id,
+        )
+    )
+    await session.flush()
+    return _finding_out(finding)
+
+
+@findings_router.get("/{part_id}/files/{file_id}/corrections")
+async def list_corrections(
+    part_id: uuid.UUID,
+    file_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> list[CorrectionOut]:
+    """The file's training labels — read surface for QA and the M3.11 eval
+    harness. Org-scoped via RLS (per-tenant storage, never cross-org) and
+    permission-gated like the actions that create the rows: training labels
+    expose predicted/corrected print content, not mere viewer state."""
+    await _get_part_and_file_or_404(session, part_id, file_id)
+    rows = (
+        (
+            await session.execute(
+                select(ExtractionCorrection)
+                .where(ExtractionCorrection.source_file_id == file_id)
+                .order_by(ExtractionCorrection.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        CorrectionOut(
+            id=row.id,
+            finding_id=row.finding_id,
+            source_file_id=row.source_file_id,
+            correction_type=row.correction_type.value,
+            predicted=row.predicted,
+            corrected=row.corrected,
+            page=row.page,
+            bbox=row.bbox,
+        )
+        for row in rows
+    ]

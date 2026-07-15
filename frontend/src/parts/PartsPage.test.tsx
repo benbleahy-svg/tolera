@@ -35,6 +35,7 @@ function part(id: string, extra: Partial<Part> = {}): Part {
     name: null,
     part_number: null,
     revision: null,
+    description: null,
     archived: false,
     created_at: '2026-07-01T00:00:00Z',
     updated_at: '2026-07-01T00:00:00Z',

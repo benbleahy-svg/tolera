@@ -10,6 +10,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { renderWithProviders } from '../test/render';
+import { partPanelStubs } from '../test/lensStubs';
 import {
   MM_PER_PT,
   arcThroughPoints,
@@ -199,6 +200,7 @@ const stableApi = {
   listFiles: vi.fn(() => Promise.resolve([])),
   getAnnotations: vi.fn(() => Promise.resolve({ objects: [] })),
   putAnnotations: vi.fn(),
+  ...partPanelStubs,
 };
 
 vi.mock('../collab/api', async (importOriginal) => ({
@@ -209,6 +211,17 @@ vi.mock('../collab/api', async (importOriginal) => ({
 vi.mock('../parts/api', () => ({
   usePartsApi: () => stableApi,
 }));
+
+// M3.2: the page now mounts the Found-in-Files panel — quiet shared stubs
+// (the panel's own behaviour is covered in found-in-files.test.tsx).
+
+vi.mock('./lens-api', async () => {
+  // Hoist-safe: the factory imports the stub itself instead of closing over
+  // this file's static import (vitest hoists mock factories above it).
+  const { stableLensApi } = await import('../test/lensStubs');
+  return { useLensApi: () => stableLensApi };
+});
+
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();

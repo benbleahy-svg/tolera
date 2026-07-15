@@ -11,6 +11,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { renderWithProviders } from '../test/render';
+import { partPanelStubs } from '../test/lensStubs';
 import { diffImageData, nextZoom, parsePageSelection, searchPages } from './utils';
 
 // --- pure logic --------------------------------------------------------------
@@ -133,7 +134,13 @@ const listFiles = vi.fn(() =>
   ]),
 );
 
-const stableApi = { fetchFileBytes, listFiles, getAnnotations, putAnnotations };
+const stableApi = {
+  fetchFileBytes,
+  listFiles,
+  getAnnotations,
+  putAnnotations,
+  ...partPanelStubs,
+};
 
 vi.mock('../collab/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../collab/api')>()),
@@ -145,6 +152,17 @@ vi.mock('../parts/api', () => ({
   // page's load effect on every render
   usePartsApi: () => stableApi,
 }));
+
+// M3.2: the page now mounts the Found-in-Files panel — quiet shared stubs
+// (the panel's own behaviour is covered in found-in-files.test.tsx).
+
+vi.mock('./lens-api', async () => {
+  // Hoist-safe: the factory imports the stub itself instead of closing over
+  // this file's static import (vitest hoists mock factories above it).
+  const { stableLensApi } = await import('../test/lensStubs');
+  return { useLensApi: () => stableLensApi };
+});
+
 
 import { PdfViewerPage } from './PdfViewerPage';
 
