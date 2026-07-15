@@ -793,12 +793,12 @@ The check runs through the org-pinned session, so it reads only the active org's
 
 ---
 
-## [2026-07-13] OPEN: Generic job-status API vs per-feature scoped polling endpoints
-**Status:** OPEN
-**Question:** M2.5's split status lives at `GET /api/parts/{part_id}/files/{file_id}/split/{task_id}` — deliberately feature-scoped, tenancy-checked through the org-scoped file lookup plus task-meta binding. M3 (Lens extraction) and M4 (GeometryService interrogation) also run long Celery jobs the UI must poll: do they each get a scoped endpoint, or does a generic `/api/jobs/{id}` contract (with its own org-binding story) replace them?
-**Options considered:** keep per-feature scoped endpoints (simple tenancy story, some duplication); introduce a generic jobs resource once a second consumer exists (one polling client, but needs a durable org-scoped job table rather than Celery result meta).
-**Recommended default:** keep the scoped pattern until M3 lands, then decide with the second consumer's real shape on the table; if a generic resource wins, back it with a durable `job` table (org-scoped, RLS) instead of raw Celery meta.
-**Affects:** M2.5 (unchanged either way), M3, M4, frontend polling helpers.
+## [2026-07-15] Job-status polling stays feature-scoped (resolves 2026-07-13 OPEN)
+**Status:** RESOLVED (autonomous, per the OPEN's own recommended default; flag for Benjamin's review)
+**Question:** (was OPEN 2026-07-13) M2.5's split status lives at `GET /api/parts/{part_id}/files/{file_id}/split/{task_id}` — feature-scoped, tenancy-checked through the org-scoped file lookup plus task-meta binding. M3 (Lens extraction) and M4 (GeometryService interrogation) also run long Celery jobs the UI must poll: scoped endpoints each, or a generic `/api/jobs/{id}`?
+**Decision:** **Keep the scoped pattern.** M3.1 (Lens extraction) is the second consumer and its real shape is identical to M2.5's — a file-scoped task (`POST …/files/{file_id}/extract` → `GET …/extract/{task_id}`), so the org-scoped file lookup + task-meta binding tenancy story transfers verbatim and no durable job table is needed. A generic jobs resource would today buy one polling client at the cost of a new org-scoped `job` table + RLS + its own binding story — not justified by two consumers of the same shape. **M4 revisits** only if interrogation polling doesn't fit the file/part scope (e.g. assembly-wide jobs).
+**Resolved:** 2026-07-15 (/block M3.1 grill)
+**Affects:** M2.5 (unchanged), M3.1 (extract status endpoint), M4 (revisit trigger), frontend polling helpers (one shared shape).
 
 ---
 

@@ -2112,3 +2112,94 @@ class Notification(Base):
     )
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
+
+
+# --------------------------------------------------------------------------- #
+# AI / Lens extractions (M3.1 — spec #lens-finding; AI-LENS-ENGINE §8)
+# --------------------------------------------------------------------------- #
+class FindingCategory(enum.StrEnum):
+    """The 5-category extraction taxonomy (spec ``#lens-extraction``)."""
+
+    quote_setup = "quote_setup"
+    requirements = "requirements"
+    features = "features"
+    dimensions = "dimensions"
+    regions = "regions"
+
+
+class FindingStatus(enum.StrEnum):
+    """AI-Governor lifecycle: every finding is born a *suggestion*; only an
+    explicit human action moves it on (spec ``#lens-accept`` — never auto-applied)."""
+
+    suggested = "suggested"
+    accepted = "accepted"
+    rejected = "rejected"
+    edited = "edited"
+
+
+_finding_category_enum = Enum(FindingCategory, name="finding_category", create_type=False)
+_finding_status_enum = Enum(FindingStatus, name="finding_status", create_type=False)
+
+
+class ExtractionFinding(Base):
+    """One structured Lens extraction from a print/document (spec ``#lens-finding``).
+
+    Suggestions only — consumed by part-field fill (M3.2), Rules/Review signals
+    (M3.7) and the viewer overlay; **never** fed into Kalk costing (CLAUDE.md §5).
+    M3.1 findings bind to their source file (+ ``page``); ``component_id`` stays
+    NULL until a consumer links one (M3.2 click-to-fill / M4 pipeline 5).
+
+    ``bbox`` uses the M2.2 annotation-layer convention — unrotated pdf-unit page
+    coordinates ``{x, y, width, height}`` (DECISIONS.md 2026-07-12). ``tolerance``
+    is ``{kind: unilateral|bilateral|limit, upper, lower}``; ``gdt`` is ISO GPS
+    ``{symbol, datum_refs[], material_condition}``. ``units`` defaults to the
+    document's detected units, mm-native (DACH)."""
+
+    __tablename__ = "extraction_finding"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        # Same-org composite FKs (tenancy invariant at the DB level, the
+        # part_file/component precedent). File deletion is a HARD delete (GDPR
+        # erasure, M1.2) — findings carry print content, so they cascade with it.
+        ForeignKeyConstraint(
+            ["org_id", "source_file_id"],
+            ["part_file.org_id", "part_file.id"],
+            name="fk_extraction_finding_file_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_extraction_finding_component_org",
+            ondelete="SET NULL",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1", name="ck_extraction_finding_confidence"
+        ),
+        # Findings are listed per file (Found-in-Files panel) and per component.
+        Index("ix_extraction_finding_org_file", "org_id", "source_file_id"),
+        Index("ix_extraction_finding_org_component", "org_id", "component_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    component_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    source_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    page: Mapped[int | None] = mapped_column(Integer)
+    category: Mapped[FindingCategory] = mapped_column(_finding_category_enum, nullable=False)
+    # Open taxonomy ('part_number' | 'hole' | 'control_frame' | …) — text per the
+    # canonical DDL, NOT NULL per the spec contract (type is required there).
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_text: Mapped[str | None] = mapped_column(Text)
+    value: Mapped[str | None] = mapped_column(Text)
+    normalized_value: Mapped[str | None] = mapped_column(Text)
+    units: Mapped[str | None] = mapped_column(Text)
+    tolerance: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    role: Mapped[str | None] = mapped_column(Text)
+    gdt: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    bbox: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    status: Mapped[FindingStatus] = mapped_column(
+        _finding_status_enum, nullable=False, server_default=FindingStatus.suggested.value
+    )
+    created_at: Mapped[datetime] = _ts()
