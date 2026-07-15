@@ -30,6 +30,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import urllib.parse
 import uuid
@@ -95,6 +96,8 @@ from .part_index import (
     normalize_filename,
 )
 from .storage import ObjectStorage, object_key
+
+logger = logging.getLogger("app.parts")
 
 parts_router = APIRouter(prefix="/api/parts", tags=["parts", "files"])
 
@@ -933,7 +936,19 @@ async def _store_files_on_part(
 
 
 def _enqueue_pdf_text(org_id: uuid.UUID, file_id: uuid.UUID) -> None:
-    extract_pdf_text_task.delay(str(org_id), str(file_id))
+    """Enqueue pdf_text extraction; runs inside the after_commit listener.
+
+    Never raises: the commit has already happened, so a broker outage must not
+    turn a succeeded request into a 500. The miss is logged (ids only); a
+    ``pdf_text IS NULL`` backfill sweep is the recovery path (follow-up)."""
+    try:
+        extract_pdf_text_task.delay(str(org_id), str(file_id))
+    except Exception:
+        logger.warning(
+            "pdf_text_enqueue_failed",
+            extra={"org_id": str(org_id), "file_id": str(file_id)},
+            exc_info=True,
+        )
 
 
 def _assign_primary_if_absent(part: Part, rows: list[PartFile]) -> None:

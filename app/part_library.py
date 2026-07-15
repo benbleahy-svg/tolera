@@ -214,7 +214,7 @@ async def _cards(session: AsyncSession, part_ids: list[uuid.UUID]) -> dict[uuid.
     primary_rows = (
         await session.execute(
             select(PartFile.part_id, PartFile.filename).where(
-                PartFile.part_id.in_(part_ids), PartFile.role == "primary"
+                PartFile.part_id.in_(part_ids), PartFile.role == FileRole.primary
             )
         )
     ).all()
@@ -282,8 +282,12 @@ async def get_part_matches(
             buckets.append(MatchBucket(key=key, status="pending_m4", count=0, matches=[]))
             continue
         ids = ready[key]
-        ordered = [cards[pid] for pid in sorted(ids, key=lambda p: cards[p].part_id.hex)]
-        ordered.sort(key=lambda c: (c.quote_count, c.part_id.hex), reverse=True)
+        # Most-quoted first (the demo's card order), id as a deterministic tiebreak.
+        ordered = sorted(
+            (cards[pid] for pid in ids),
+            key=lambda c: (c.quote_count, c.part_id.hex),
+            reverse=True,
+        )
         buckets.append(
             MatchBucket(key=key, status="ready", count=len(ids), matches=ordered[:_BUCKET_CARD_CAP])
         )
@@ -389,6 +393,10 @@ async def merge_parts(
     source_ids = [p.id for p in parts if p.id != primary_part.id]
 
     # Guard: a quoted part (Component) or a BOM child (non-root Node) stays.
+    # Race note (DECISIONS.md 2026-07-15): only the part rows are locked; a
+    # concurrent Component insert referencing a source could slip past. Today
+    # that path doesn't exist (line items always mint fresh parts) — revisit
+    # with a DB-level guard when "add library part to quote" lands.
     in_use = await session.scalar(
         select(func.count()).select_from(Component).where(Component.part_id.in_(source_ids))
     )

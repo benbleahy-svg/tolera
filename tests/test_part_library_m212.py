@@ -12,11 +12,13 @@ library; a source that has been quoted refuses the merge.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.models import MembershipRole
+from app.storage import MemoryStorage
 from tests.conftest import Seeder, authed
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -106,6 +108,58 @@ class TestTabsAndCards:
         assert card["primary_filename"] is None
         assert card["primary_file_type"] is None
         assert card["process"] is None
+
+
+class TestPartLifecycle:
+    def test_delete_requires_archived_first(self, app_client: TestClient, seeder: Seeder) -> None:
+        org, admin = _org_with_admin(seeder, "org-lc1")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part = _new_part(app_client)
+            resp = app_client.delete(f"/api/parts/{part}")
+            assert resp.status_code == 409
+            assert resp.json()["code"] == "not_archived"
+
+    def test_restore_returns_part_to_team_tab(self, app_client: TestClient, seeder: Seeder) -> None:
+        org, admin = _org_with_admin(seeder, "org-lc2")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            part = _new_part(app_client)
+            assert app_client.post(f"/api/parts/{part}/archive").json()["archived"] is True
+            restored = app_client.post(f"/api/parts/{part}/restore").json()
+            assert restored["archived"] is False
+            assert _list_ids(app_client, tab="team") == [part]
+            assert _list_ids(app_client, tab="archived") == []
+
+    def test_delete_purges_files_but_quote_costing_survives(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """The spec#partlib lifecycle claim: 'all dimensions and costing are
+        preserved' — deleting a part purges its files (rows + blobs) while the
+        quote keeps its router and prices ('File Deleted' placeholder UX)."""
+        org, admin = _org_with_admin(seeder, "org-lc3")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            quote_id = seeder.quote(org, "Q-2026-0500")
+            item = app_client.post(f"/api/quotes/{quote_id}/items").json()["items"][-1]
+            part_id, component_id = item["part_id"], item["root_component_id"]
+            _upload(app_client, part_id, "Halter.step", STEP_BYTES)
+            resp = app_client.post(
+                f"/api/components/{component_id}/operations",
+                json={"name": "Saegen", "run_rate": "60"},
+            )
+            assert resp.status_code == 201
+
+            storage = cast(MemoryStorage, cast(FastAPI, app_client.app).state.storage)
+            keys_before = [k for k in storage._objects if part_id in k]
+            assert keys_before, "the upload stored a blob"
+
+            assert app_client.post(f"/api/parts/{part_id}/archive").status_code == 200
+            assert app_client.delete(f"/api/parts/{part_id}").status_code == 204
+
+            # Files gone — rows and blobs; the part's routes 404.
+            assert app_client.get(f"/api/parts/{part_id}").status_code == 404
+            assert all(part_id not in k for k in storage._objects)
+            # The quote's costing is intact: router row still there.
+            costing = app_client.get(f"/api/components/{component_id}/costing").json()
+            assert [o["name"] for o in costing["operations"]] == ["Saegen"]
 
 
 class TestLibrarySearch:
