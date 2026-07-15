@@ -20,6 +20,7 @@ import { PartsPage } from './parts/PartsPage';
 import { FileViewerPage } from './viewer/FileViewerPage';
 import { QuotesPage } from './quotes/QuotesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+import { EmailConnectionPage } from './settings/EmailConnectionPage';
 import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
@@ -52,6 +53,8 @@ export default function App() {
         {/* Configure → Pricing: the org pricing-item/discount library (M1.10). */}
         <Route path="/configure/pricing" element={<PricingDefsPage />} />
         <Route path="/configure/operations" element={<OperationsPage />} />
+        {/* Settings → User Profile → Email Connection (M3.5). */}
+        <Route path="/settings/email" element={<EmailConnectionPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />

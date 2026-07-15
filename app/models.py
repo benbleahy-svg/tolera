@@ -30,6 +30,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -2398,4 +2399,137 @@ class ExtractionCorrection(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("app_user.id")
     )
+    created_at: Mapped[datetime] = _ts()
+
+
+# --------------------------------------------------------------------------- #
+# Two-way email threading (M3.5 — spec #email-connectivity)
+# --------------------------------------------------------------------------- #
+class EmailConnectionType(enum.StrEnum):
+    """How a user's mailbox is connected (spec ``#email-connectivity`` v1 set)."""
+
+    gmail = "gmail"
+    outlook = "outlook"
+    smtp_imap = "smtp_imap"
+
+
+class EmailDirection(enum.StrEnum):
+    """Message direction on the quote communications timeline."""
+
+    outbound = "outbound"
+    inbound = "inbound"
+
+
+_email_connection_type_enum = Enum(
+    EmailConnectionType,
+    name="email_connection_type",
+    create_type=False,
+    values_callable=lambda enum_cls: [member.value for member in enum_cls],
+)
+_email_direction_enum = Enum(
+    EmailDirection,
+    name="email_direction",
+    create_type=False,
+    values_callable=lambda enum_cls: [member.value for member in enum_cls],
+)
+
+
+class UserEmailConnection(Base):
+    """A user's connected mailbox — quotes send from ``from_address``, replies
+    sync back through the same connection (spec ``#email-connectivity``).
+
+    ``encrypted_credentials`` is AES-256-GCM ciphertext (``email_crypto``):
+    the OAuth refresh token (gmail/outlook) or the SMTP/IMAP credential bundle.
+    It is never logged and never serialized into an API response.
+    ``gmail_history_id`` / ``outlook_delta_link`` are the incremental sync
+    cursors; per (org, user) with at most one ``is_primary`` (partial unique
+    index in migration 0024)."""
+
+    __tablename__ = "user_email_connection"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_user_email_connection_org_id_id"),
+        Index("ix_email_connection_org_user", "org_id", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id"), nullable=False
+    )
+    connection_type: Mapped[EmailConnectionType] = mapped_column(
+        _email_connection_type_enum, nullable=False
+    )
+    from_address: Mapped[str] = mapped_column(CITEXT, nullable=False)
+    from_name: Mapped[str | None] = mapped_column(Text)
+    encrypted_credentials: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    gmail_history_id: Mapped[str | None] = mapped_column(Text)
+    outlook_delta_link: Mapped[str | None] = mapped_column(Text)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+
+
+class QuoteEmailThread(Base):
+    """One row per quote that has been sent by email: ``sent_message_id`` is
+    the RFC 2822 Message-ID of the FIRST outbound message, ``provider_thread_id``
+    the Gmail ``threadId`` / Outlook ``conversationId`` — the reply-matching
+    keys (spec ``#email-connectivity`` threading mechanism)."""
+
+    __tablename__ = "quote_email_thread"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_quote_email_thread_org_id_id"),
+        UniqueConstraint("org_id", "quote_id", name="uq_quote_email_thread_quote"),
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_quote_email_thread_quote_org",
+        ),
+        Index("ix_quote_email_thread_sent_message_id", "org_id", "sent_message_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    sent_message_id: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_thread_id: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+
+
+class EmailMessage(Base):
+    """Every message in a quote thread, both directions — the communications
+    timeline row (spec ``#email-connectivity``). The partial unique index on
+    (org, ``rfc_message_id``) makes the 5-minute sync idempotent. Attachments
+    live in Object Storage; this row links them as
+    ``[{filename, storage_key, size_bytes, content_type}]``."""
+
+    __tablename__ = "email_message"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "thread_id"],
+            ["quote_email_thread.org_id", "quote_email_thread.id"],
+            name="fk_email_message_thread_org",
+        ),
+        Index("ix_email_message_org_thread", "org_id", "thread_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    thread_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: Which mailbox sent/received it; survives a disconnect (SET NULL, 0024).
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    direction: Mapped[EmailDirection] = mapped_column(_email_direction_enum, nullable=False)
+    rfc_message_id: Mapped[str | None] = mapped_column(Text)
+    in_reply_to: Mapped[str | None] = mapped_column(Text)
+    from_address: Mapped[str] = mapped_column(CITEXT, nullable=False)
+    to_addresses: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    subject: Mapped[str | None] = mapped_column(Text)
+    body_text: Mapped[str | None] = mapped_column(Text)
+    body_html: Mapped[str | None] = mapped_column(Text)
+    attachments: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()

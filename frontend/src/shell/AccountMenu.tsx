@@ -8,6 +8,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Link } from 'react-router-dom';
+
 import { useSession, type SessionUser } from '../session/session';
 import { BuildingIcon, ChevronIcon, SignOutIcon } from './icons';
 import { LocaleToggle } from './LocaleToggle';
@@ -47,6 +49,9 @@ export function AccountMenu({
               <LocaleToggle />
             </div>
           </div>
+          <Link className="menu-row" to="/settings/email" onClick={() => setOpen(false)}>
+            <span>{t('account.email_connection')}</span>
+          </Link>
           <button type="button" className="menu-row danger" onClick={onSignOut}>
             <SignOutIcon />
             <span>{t('account.sign_out')}</span>
