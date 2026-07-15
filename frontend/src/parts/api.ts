@@ -20,6 +20,7 @@ export interface Part {
   name: string | null;
   part_number: string | null;
   revision: string | null;
+  description: string | null;
   archived: boolean;
   created_at: string;
   updated_at: string;
@@ -89,6 +90,21 @@ export interface PartFile {
   created_at: string;
 }
 
+/** A part's manual geometry (effective metric values + override provenance). */
+export interface PartGeometry {
+  part_id: string;
+  size_x: number | null;
+  size_y: number | null;
+  size_z: number | null;
+  max_dim: number | null;
+  med_dim: number | null;
+  min_dim: number | null;
+  area: number | null;
+  volume: number | null;
+  weight: number | null;
+  overrides: Record<string, { input: string; unit: string }>;
+}
+
 /** Task state for a server-side PDF split, as the viewer's toasts consume it. */
 export interface SplitStatus {
   state: 'queued' | 'in_progress' | 'succeeded' | 'failed';
@@ -101,6 +117,19 @@ export interface PartsApi {
   listParts: (params?: { tab?: 'team' | 'archived'; q?: string }) => Promise<Part[]>;
   createPart: () => Promise<Part>;
   getPart: (id: string) => Promise<Part>;
+  /** Patch identity fields (part#/rev/description…) — the click-to-fill target. */
+  updatePart: (
+    id: string,
+    changes: Partial<Pick<Part, 'name' | 'part_number' | 'revision' | 'description'>>,
+  ) => Promise<Part>;
+  getGeometry: (partId: string) => Promise<PartGeometry>;
+  /** Set manual dims; values evaluate server-side (math + units, stored metric). */
+  updateGeometry: (
+    partId: string,
+    changes: Partial<Record<'size_x' | 'size_y' | 'size_z', string | number | null>> & {
+      unit?: 'mm' | 'in';
+    },
+  ) => Promise<PartGeometry>;
   /** Library-level upload: auto-bundles same-stem files into one part (M2.12). */
   uploadLibraryParts: (files: File[]) => Promise<Part[]>;
   archivePart: (id: string) => Promise<Part>;
@@ -159,6 +188,11 @@ export function usePartsApi(): PartsApi {
       },
       createPart: () => apiFetch('/api/parts', token, { method: 'POST' }),
       getPart: (id) => apiFetch(`/api/parts/${id}`, token),
+      updatePart: (id, changes) =>
+        apiFetch(`/api/parts/${id}`, token, { method: 'PATCH', body: changes }),
+      getGeometry: (partId) => apiFetch(`/api/parts/${partId}/geometry`, token),
+      updateGeometry: (partId, changes) =>
+        apiFetch(`/api/parts/${partId}/geometry`, token, { method: 'PATCH', body: changes }),
       uploadLibraryParts: (files) => {
         const form = new FormData();
         for (const file of files) form.append('files', file, file.name);

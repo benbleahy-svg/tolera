@@ -73,6 +73,33 @@ const stableApi = {
   putAnnotations,
   splitFile,
   splitStatus,
+  // Found-in-Files panel reads (M3.2) — plain stable functions, never reset.
+  getPart: () =>
+    Promise.resolve({
+      id: 'p1',
+      primary_file_id: null,
+      name: null,
+      part_number: null,
+      revision: null,
+      description: null,
+      archived: false,
+      created_at: '',
+      updated_at: '',
+    }),
+  getGeometry: () =>
+    Promise.resolve({
+      part_id: 'p1',
+      size_x: null,
+      size_y: null,
+      size_z: null,
+      max_dim: null,
+      med_dim: null,
+      min_dim: null,
+      area: null,
+      volume: null,
+      weight: null,
+      overrides: {},
+    }),
 };
 
 vi.mock('../collab/api', async (importOriginal) => ({
@@ -83,6 +110,24 @@ vi.mock('../collab/api', async (importOriginal) => ({
 vi.mock('../parts/api', () => ({
   usePartsApi: () => stableApi,
 }));
+
+// M3.2: the page now mounts the Found-in-Files panel — quiet, stable stubs
+// (the panel's own behaviour is covered in found-in-files.test.tsx).
+const stableLensApi = {
+  listFindings: () => Promise.resolve([]),
+  extract: () => Promise.resolve({ task_id: 't' }),
+  extractStatus: () =>
+    Promise.resolve({ state: 'succeeded', finding_count: 0, dropped_count: 0, error: null }),
+  acceptFinding: () => Promise.resolve({ finding: null, applied_field: null }),
+  rejectFinding: () => Promise.resolve({ finding: null, applied_field: null }),
+  replaceFinding: () => Promise.resolve({ finding: null, applied_field: null }),
+  addMissing: () => Promise.resolve(null),
+};
+
+vi.mock('./lens-api', () => ({
+  useLensApi: () => stableLensApi,
+}));
+
 
 // the page reads params via useParams — provide a route wrapper
 vi.mock('react-router-dom', async (importOriginal) => {

@@ -1,0 +1,135 @@
+/*
+ * Found-in-Files panel (M3.2). The purple "AI/Lens" system colour is a design
+ * token (spec #wingman §5): applied anywhere Lens has acted or can act.
+ * AI-Governor treatment: a *suggested* finding renders at 55 % opacity and
+ * turns solid only after the explicit Accept (CLAUDE.md §1).
+ */
+:root {
+  --color-ai-signal: #7c3aed;
+  --ai-suggested-opacity: 0.55;
+}
+
+.lens-panel {
+  width: 320px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border, #d0d4da);
+  padding: 0.75rem;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+.lens-panel h2 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+.lens-panel-hint { color: var(--muted, #667085); margin: 0 0 0.5rem; }
+
+.lens-tabs { display: flex; gap: 0.25rem; border-bottom: 2px solid var(--border, #d0d4da); }
+.lens-tabs button {
+  border: none;
+  background: none;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+}
+.lens-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--color-ai-signal);
+  font-weight: 600;
+}
+.lens-badge {
+  background: var(--color-ai-signal);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0 0.35rem;
+  margin-left: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.lens-section header { display: flex; align-items: center; justify-content: space-between; }
+.lens-section h3 { margin: 0.75rem 0 0.25rem; font-size: 0.95rem; }
+.lens-whiteout-toggle { display: flex; align-items: center; gap: 0.3rem; color: var(--muted, #667085); }
+
+.lens-group { display: flex; gap: 0.5rem; margin: 0.3rem 0; }
+.lens-group-label {
+  flex: 0 0 7.5rem;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  color: var(--muted, #667085);
+  padding-top: 0.35rem;
+}
+.lens-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; flex: 1; }
+
+.lens-chip-wrap { position: relative; }
+.lens-chip {
+  border: 1px solid var(--color-ai-signal);
+  color: var(--color-ai-signal);
+  background: color-mix(in srgb, var(--color-ai-signal) 8%, transparent);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+/* The AI-Governor gate: a suggestion is visibly *not yet real*. */
+.lens-chip[data-status='suggested'] { opacity: var(--ai-suggested-opacity); }
+.lens-chip[data-status='accepted'],
+.lens-chip[data-status='edited'] { opacity: 1; }
+.lens-chip-count {
+  background: var(--color-ai-signal);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  margin-left: 0.35rem;
+  font-size: 0.7rem;
+}
+
+.lens-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 240px;
+  max-width: 320px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+  padding: 0.6rem;
+}
+.lens-popover p { margin: 0 0 0.4rem; }
+.lens-popover-source { color: var(--muted, #667085); font-size: 0.78rem; }
+.lens-popover-actions { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.lens-popover-actions .lens-inaccurate { color: var(--color-ai-signal); }
+.lens-axis-actions { display: inline-flex; gap: 0.2rem; align-items: center; }
+.lens-replace { display: inline-flex; gap: 0.2rem; }
+.lens-replace input { width: 7rem; }
+
+.lens-fields { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+.lens-field { display: flex; flex-direction: column; gap: 0.15rem; }
+.lens-field-input { display: flex; gap: 0.25rem; align-items: center; }
+.lens-field-input input { flex: 1; }
+/* Purple click-fill dot — only rendered above the confidence threshold. */
+.lens-fill-dot {
+  border: none;
+  background: none;
+  color: var(--color-ai-signal);
+  cursor: pointer;
+  font-size: 1rem;
+  opacity: var(--ai-suggested-opacity);
+}
+.lens-fill-dot:hover { opacity: 1; }
+.lens-dims { display: flex; gap: 0.4rem; border: 1px solid var(--border, #d0d4da); border-radius: 6px; }
+.lens-dims label { display: flex; flex-direction: column; flex: 1; }
+.lens-dims input { width: 100%; }
+
+.lens-add-missing { margin-top: 0.75rem; }
+.lens-modal {
+  position: absolute;
+  z-index: 40;
+  inset: auto 0.75rem 0.75rem;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.lens-modal label { display: flex; flex-direction: column; gap: 0.15rem; }
