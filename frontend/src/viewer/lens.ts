@@ -188,6 +188,17 @@ export function whiteoutSectionsFor(findings: Finding[], sections: SectionKey[])
 }
 
 /**
+ * Whether an accept could actually write this finding — mirrors the backend
+ * value contract (identity fills use normalized_value||value; an axis fill
+ * uses the raw value only). A raw_text-only finding gets no fill affordance:
+ * offering one would just 422 server-side.
+ */
+export function hasFillValue(finding: Finding): boolean {
+  if (finding.category === 'dimensions') return finding.value != null;
+  return (finding.normalized_value ?? finding.value) != null;
+}
+
+/**
  * The best click-fill suggestion for an identity field: highest-confidence
  * *suggested* finding of that type at/above the purple-signal threshold.
  */
@@ -198,7 +209,7 @@ export function fillSuggestion(findings: Finding[], type: IdentityType): Finding
         f.type === type &&
         f.status === 'suggested' &&
         f.confidence >= AI_SIGNAL_CONFIDENCE_MIN &&
-        (f.value ?? f.raw_text) != null,
+        hasFillValue(f),
     )
     .sort((a, b) => b.confidence - a.confidence);
   return candidates[0] ?? null;

@@ -20,6 +20,7 @@ import {
   fillSuggestion,
   fillTarget,
   findingsBadgeCount,
+  hasFillValue,
   groupFindings,
   whiteoutSectionsFor,
   type Axis,
@@ -266,8 +267,10 @@ function FindingChip({
   const finding = chip.finding;
   const target = fillTarget(finding);
   // Suggested AND edited findings offer the fill action — a replace would
-  // otherwise dead-end the corrected value (ship-review 2026-07-15).
-  const canApply = finding.status === 'suggested' || finding.status === 'edited';
+  // otherwise dead-end the corrected value (ship-review 2026-07-15). No
+  // affordance without a fillable value (the backend would 422).
+  const canApply =
+    (finding.status === 'suggested' || finding.status === 'edited') && hasFillValue(finding);
 
   return (
     <span className="lens-chip-wrap">
@@ -415,17 +418,17 @@ function PartFieldsTab({
   const [geomLoaded, setGeomLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Sync from the server WITHOUT wiping fields the user is mid-editing: any
+  // chip action reloads `part`, and unsaved input must survive it. Read the
+  // dirty set through a ref so this effect reruns only on part reloads.
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
   useEffect(() => {
-    setDraft({
-      part_number: part.part_number ?? '',
-      revision: part.revision ?? '',
-      description: part.description ?? '',
-    });
-    setDirty((prev) => {
-      const next = new Set(prev);
-      for (const field of ['part_number', 'revision', 'description']) next.delete(field);
-      return next;
-    });
+    setDraft((d) => ({
+      part_number: dirtyRef.current.has('part_number') ? d.part_number : (part.part_number ?? ''),
+      revision: dirtyRef.current.has('revision') ? d.revision : (part.revision ?? ''),
+      description: dirtyRef.current.has('description') ? d.description : (part.description ?? ''),
+    }));
   }, [part]);
 
   useEffect(() => {
@@ -603,7 +606,7 @@ function AddMissingModal({
               category,
               type: type.trim(),
               value: value.trim(),
-              ...(page.trim() ? { page: Number(page) } : {}),
+              ...(/^\d+$/.test(page.trim()) ? { page: Number(page.trim()) } : {}),
             })
           }
         >

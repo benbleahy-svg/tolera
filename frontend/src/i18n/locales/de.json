@@ -615,7 +615,7 @@
     "status_resolved": "Erledigt"
   },
   "lens": {
-    "part_setup": "Part Setup",
+    "part_setup": "Teil einrichten",
     "part_setup_hint": "Positionen und Teile durchgehen, Extraktionen prüfen und Teile- und Kalkulationsdaten erfassen.",
     "tab_part_fields": "Teilefelder",
     "tab_found_in_files": "In Dateien gefunden",

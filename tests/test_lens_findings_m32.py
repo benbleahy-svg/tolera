@@ -428,6 +428,31 @@ class TestCorrections:
             )
             assert resp.status_code == 422
 
+    def test_corrections_die_with_their_file(self, app_client: TestClient, seeder: Seeder) -> None:
+        """GDPR erasure: labels carry print content, so hard-deleting the file
+        row must cascade-delete its correction rows (0021 FK)."""
+        org, admin, part_id, file_id = _setup(app_client, seeder, "m32-file-gdpr")
+        finding_id = _plant_finding(seeder, org, file_id)
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            app_client.post(f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}/reject")
+        seeder.sql(
+            "DELETE FROM part_file WHERE id = :id AND org_id = :org_id",
+            {"id": uuid.UUID(file_id), "org_id": org},
+        )
+        # Owner-side count check (the API 404s once the file is gone, which
+        # would not distinguish cascade from mere gating).
+        seeder.sql(
+            f"""
+            DO $$
+            BEGIN
+                IF (SELECT count(*) FROM extraction_correction
+                    WHERE source_file_id = '{file_id}'::uuid) > 0 THEN
+                    RAISE EXCEPTION 'corrections survived file deletion';
+                END IF;
+            END $$
+            """
+        )
+
     def test_correction_survives_finding_deletion(
         self, app_client: TestClient, seeder: Seeder
     ) -> None:

@@ -8,7 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { renderWithProviders } from '../test/render';
@@ -201,6 +201,46 @@ describe('FoundInFilesPanel — AI-Governor gates', () => {
         value: 'passivieren',
       }),
     );
+  });
+});
+
+describe('FoundInFilesPanel — resilience', () => {
+  it('a failed status poll surfaces an error instead of stranding the spinner', async () => {
+    vi.useFakeTimers();
+    try {
+      extract.mockResolvedValue({ task_id: 't1' });
+      extractStatus.mockRejectedValue(new Error('boom'));
+      listFindings.mockResolvedValue([]);
+      await renderWithProviders(
+        <FoundInFilesPanel partId="part-1" fileId="file-1" filename="print.pdf" />,
+      );
+      await vi.waitFor(() => expect(listFindings).toHaveBeenCalled());
+      fireEvent.click(screen.getByRole('button', { name: 'Zeichnung analysieren' }));
+      await vi.waitFor(() => expect(extract).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(2000); // poll fires and rejects
+      expect(screen.getByRole('status')).toHaveTextContent('Extraktion fehlgeschlagen.');
+      // Spinner released: the button is back to its idle label and enabled.
+      expect(screen.getByRole('button', { name: 'Zeichnung analysieren' })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the busy guard blocks double-submitting a non-idempotent action', async () => {
+    let resolveReplace: (v: unknown) => void = () => {};
+    replaceFinding.mockImplementation(
+      () => new Promise((resolve) => (resolveReplace = resolve)),
+    );
+    await renderPanel([finding()]);
+    await userEvent.click(await screen.findByRole('button', { name: /PP-1212-006/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Ersetzen' }));
+    await userEvent.clear(screen.getByLabelText('Neuer Wert'));
+    await userEvent.type(screen.getByLabelText('Neuer Wert'), 'X');
+    const save = screen.getByRole('button', { name: 'Speichern' });
+    await userEvent.click(save);
+    await userEvent.click(save); // in-flight: disabled + runAction bails
+    resolveReplace({ finding: finding({ status: 'edited' }), applied_field: null });
+    await waitFor(() => expect(replaceFinding).toHaveBeenCalledTimes(1));
   });
 });
 
