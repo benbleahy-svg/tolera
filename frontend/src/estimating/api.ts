@@ -15,8 +15,12 @@ import type {
   AddOnDefOut,
   ClassNode,
   ComponentCosting,
+  DiscountCreateBody,
+  DiscountDefLite,
   ExpediteTierBody,
   PricingItemCreateBody,
+  PricingItemDefLite,
+  PricingItemUpdateBody,
   PricingSummary,
   QuoteTotals,
   KalkCheckResult,
@@ -67,16 +71,17 @@ export interface EstimatingApi {
   ) => Promise<ComponentCosting>;
   getPricing: (componentId: string) => Promise<PricingSummary>;
   addPricingItem: (componentId: string, body: PricingItemCreateBody) => Promise<unknown>;
+  updatePricingItem: (pricingItemId: string, body: PricingItemUpdateBody) => Promise<unknown>;
+  reorderPricingItems: (componentId: string, pricingItemIds: string[]) => Promise<unknown>;
+  listPricingItemDefs: () => Promise<PricingItemDefLite[]>;
+  listDiscountDefs: () => Promise<DiscountDefLite[]>;
   removePricingItem: (pricingItemId: string) => Promise<void>;
   setPricingItemPct: (
     pricingItemId: string,
     quantity: number,
     manualPct: string | null,
   ) => Promise<unknown>;
-  addDiscount: (
-    componentId: string,
-    body: { name: string; default_pct?: string | null },
-  ) => Promise<unknown>;
+  addDiscount: (componentId: string, body: DiscountCreateBody) => Promise<unknown>;
   removeDiscount: (discountId: string) => Promise<void>;
   setDiscountPct: (
     discountId: string,
@@ -179,6 +184,15 @@ export function useEstimatingApi(): EstimatingApi {
           method: 'POST',
           body,
         }),
+      updatePricingItem: (pricingItemId, body) =>
+        apiFetch(`/api/pricing-items/${pricingItemId}`, token, { method: 'PATCH', body }),
+      reorderPricingItems: (componentId, pricingItemIds) =>
+        apiFetch(`/api/components/${componentId}/pricing-items/order`, token, {
+          method: 'PUT',
+          body: { pricing_item_ids: pricingItemIds },
+        }),
+      listPricingItemDefs: () => apiFetch('/api/pricing-item-defs', token),
+      listDiscountDefs: () => apiFetch('/api/discount-defs', token),
       removePricingItem: (pricingItemId) =>
         apiFetch(`/api/pricing-items/${pricingItemId}`, token, { method: 'DELETE' }),
       setPricingItemPct: (pricingItemId, quantity, manualPct) =>

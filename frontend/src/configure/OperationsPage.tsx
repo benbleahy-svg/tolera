@@ -11,8 +11,91 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
-import type { OperationDefOut } from '../estimating/types';
-import { useConfigureApi } from './api';
+import { KalkEditor } from '../estimating/KalkEditor';
+import type { KalkCheckResult, OperationDefOut } from '../estimating/types';
+import { useConfigureApi, type OperationDefUpdateBody } from './api';
+
+/**
+ * The operation-definition editor (spec op-def editor, "Edit operation
+ * formula"): name, rates and the def-level Kalk formula behind the library
+ * operation. Existing quote operations keep their snapshot (E4-d
+ * config-freeze); the def-level Variables table (visibility eyes) needs a
+ * def-evaluation endpoint and is logged as OPEN in DECISIONS.md.
+ */
+function OpDefDrawer({
+  def,
+  onSave,
+  onClose,
+  onKalkCheck,
+}: {
+  def: OperationDefOut;
+  onSave: (body: OperationDefUpdateBody) => void;
+  onClose: () => void;
+  onKalkCheck: (formula: string) => Promise<KalkCheckResult>;
+}) {
+  const { t } = useTranslation();
+  const [name, setName] = useState(def.name);
+  const [runRate, setRunRate] = useState(def.run_rate ?? '');
+  const [labourRate, setLabourRate] = useState(def.labour_rate ?? '');
+  const [formula, setFormula] = useState(def.cost_formula ?? '');
+
+  const blankToNull = (v: string): string | null => (v.trim() === '' ? null : v.trim());
+
+  return (
+    <aside className="est-drawer" aria-label={t('configure.op_def_drawer', { name: def.name })}>
+      <header>
+        <h3>{def.name}</h3>
+        <button type="button" onClick={onClose} aria-label={t('common.close')}>
+          ×
+        </button>
+      </header>
+      <section>
+        <label className="est-override-row">
+          <span>{t('configure.op_name')}</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="est-override-row">
+          <span>{t('estimating.run_rate')}</span>
+          <input value={runRate} onChange={(e) => setRunRate(e.target.value)} />
+        </label>
+        {def.calculation_mode === 'machine_plus_operator' && (
+          <label className="est-override-row">
+            <span>{t('estimating.labour_rate')}</span>
+            <input value={labourRate} onChange={(e) => setLabourRate(e.target.value)} />
+          </label>
+        )}
+      </section>
+      <KalkEditor
+        value={formula}
+        onChange={setFormula}
+        name={name.trim() === '' ? undefined : name.trim()}
+        onCheck={onKalkCheck}
+      />
+      <footer className="est-actions">
+        <button type="button" onClick={onClose}>
+          {t('common.cancel')}
+        </button>
+        <button
+          type="button"
+          disabled={name.trim() === ''}
+          onClick={() => {
+            const body: OperationDefUpdateBody = {
+              name: name.trim(),
+              run_rate: blankToNull(runRate.replace(',', '.')),
+              cost_formula: blankToNull(formula),
+            };
+            if (def.calculation_mode === 'machine_plus_operator') {
+              body.labour_rate = blankToNull(labourRate.replace(',', '.'));
+            }
+            onSave(body);
+          }}
+        >
+          {t('estimating.save_changes')}
+        </button>
+      </footer>
+    </aside>
+  );
+}
 
 /** Mirrors the backend rule: rate-bearing defs only, NULL or 0 = missing. */
 function defNeedsRate(def: OperationDefOut): boolean {
@@ -32,6 +115,7 @@ export function OperationsPage() {
   const [unratedMaterials, setUnratedMaterials] = useState(0);
   const [quickRate, setQuickRate] = useState('');
   const [search, setSearch] = useState('');
+  const [editingDefId, setEditingDefId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fail = useCallback((e: unknown) => {
@@ -126,6 +210,7 @@ export function OperationsPage() {
             <th>{t('configure.op_name')}</th>
             <th>{t('configure.op_mode')}</th>
             <th className="est-num">{t('configure.op_run_rate')}</th>
+            <th aria-label={t('estimating.row_actions')} />
           </tr>
         </thead>
         <tbody>
@@ -146,10 +231,44 @@ export function OperationsPage() {
                   }}
                 />
               </td>
+              <td className="est-row-actions">
+                <button
+                  type="button"
+                  onClick={() => setEditingDefId(def.id)}
+                  aria-label={t('configure.edit_op_def_label', { name: def.name })}
+                >
+                  ↗
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {editingDefId &&
+        (() => {
+          const def = defs.find((d) => d.id === editingDefId);
+          if (!def) return null;
+          return (
+            <OpDefDrawer
+              key={def.id}
+              def={def}
+              onKalkCheck={api.kalkCheck}
+              onSave={(body) => {
+                setError(null);
+                // close only on success — a failed save keeps the drawer
+                // (and the estimator's edits) alive with the error shown
+                api
+                  .updateOperationDef(def.id, body)
+                  .then(() => {
+                    setEditingDefId(null);
+                    reload(search);
+                  })
+                  .catch(fail);
+              }}
+              onClose={() => setEditingDefId(null)}
+            />
+          );
+        })()}
     </main>
   );
 }
