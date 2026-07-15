@@ -44,6 +44,8 @@ export function ChangeProcessModal({
   useEffect(() => {
     const q = materialQuery.trim();
     if (q === '') {
+      // also invalidates in-flight searches from the previous query
+      seq.current += 1;
       setMaterialHits([]);
       return;
     }
@@ -119,6 +121,9 @@ export function ChangeProcessModal({
                 <button
                   type="button"
                   onClick={() => {
+                    // invalidate any in-flight search so a late response
+                    // can't repopulate the hit list after the pick
+                    seq.current += 1;
                     setPickedMaterial(hit);
                     setMaterialQuery('');
                     setMaterialHits([]);

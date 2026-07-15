@@ -201,13 +201,16 @@ export function KalkSection({
   );
   // default_visible=False hides a variable from the quote-side panel unless the
   // estimator opts in ("Show hidden variables", spec op-def Variables table);
-  // an already-overridden hidden variable stays visible so the override is
-  // never invisible state.
+  // a hidden variable with a PERSISTED override (or an in-progress draft)
+  // stays visible until its removal is actually saved — an override must
+  // never be invisible state.
+  const hasOverride = (name: string) =>
+    overrideDrafts[name] !== undefined || variableOverrides[name] !== undefined;
   const hiddenCount = allVariables.filter(
-    (v) => v.default_visible === false && overrideDrafts[v.name] === undefined,
+    (v) => v.default_visible === false && !hasOverride(v.name),
   ).length;
   const variables = allVariables.filter(
-    (v) => showHidden || v.default_visible !== false || overrideDrafts[v.name] !== undefined,
+    (v) => showHidden || v.default_visible !== false || hasOverride(v.name),
   );
   const grouped = new Set((first?.variable_groups ?? []).flatMap((g) => g.members));
   const ungrouped = variables.filter((v) => !grouped.has(v.name));
@@ -238,7 +241,13 @@ export function KalkSection({
 
   return (
     <section className="est-kalk">
-      <KalkEditor value={draft} onChange={setDraft} name={name} onCheck={onCheck} />
+      <KalkEditor
+        value={draft}
+        onChange={setDraft}
+        name={name}
+        onCheck={onCheck}
+        disabled={disabled}
+      />
       <div className="est-actions">
         <button
           type="button"

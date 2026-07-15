@@ -1286,6 +1286,17 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
     env = await load_pricing_env(session, component)
     quantities = [brk.quantity for brk in env.breaks]
 
+    def cost_total(brk: ComponentQuantity) -> Decimal:
+        """Total Estimated Cost roll-up — the single source for every output
+        row (callers gate on material_cost for the has-repriced distinction)."""
+        return (
+            (brk.material_cost or _ZERO)
+            + (brk.inside_cost or _ZERO)
+            + (brk.outside_cost or _ZERO)
+            + (brk.purchased_component_cost or _ZERO)
+            + (brk.child_override_cost or _ZERO)
+        )
+
     costing = []
     for brk in env.breaks:
         custom_rows = []
@@ -1309,17 +1320,7 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
                 "outside": brk.outside_cost,
                 "purchased_component": brk.purchased_component_cost,
                 "child_override": brk.child_override_cost,
-                "total": (
-                    _q4(
-                        (brk.material_cost or _ZERO)
-                        + (brk.inside_cost or _ZERO)
-                        + (brk.outside_cost or _ZERO)
-                        + (brk.purchased_component_cost or _ZERO)
-                        + (brk.child_override_cost or _ZERO)
-                    )
-                    if brk.material_cost is not None
-                    else None
-                ),
+                "total": (_q4(cost_total(brk)) if brk.material_cost is not None else None),
                 "unit_cost": brk.unit_cost,
                 "custom_rows": custom_rows,
             }
@@ -1479,13 +1480,6 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
             return _q4(brk.manual_unit_price * brk.quantity)
         if brk.material_cost is None:  # never repriced — no roll-up state yet
             return None
-        cost_total = (
-            brk.material_cost
-            + (brk.inside_cost or _ZERO)
-            + (brk.outside_cost or _ZERO)
-            + (brk.purchased_component_cost or _ZERO)
-            + (brk.child_override_cost or _ZERO)
-        )
         amounts = _ZERO
         for item in env.items:
             cell = env.item_cells.get((item.id, brk.quantity))
@@ -1493,7 +1487,7 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
                 continue
             amount = cell.manual_profit if cell.manual_profit is not None else cell.calc_profit
             amounts += amount if amount is not None else _ZERO
-        return _q4(cost_total + amounts)
+        return _q4(cost_total(brk) + amounts)
 
     def total_markup(brk: ComponentQuantity) -> tuple[Decimal | None, Decimal | None]:
         """Total Markup (spec #costing output rows, DemoE 09): the pre-discount
@@ -1502,15 +1496,9 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
         pre_discount = total_excl_discounts(brk)
         if pre_discount is None or brk.material_cost is None:
             return None, None
-        cost_total = (
-            brk.material_cost
-            + (brk.inside_cost or _ZERO)
-            + (brk.outside_cost or _ZERO)
-            + (brk.purchased_component_cost or _ZERO)
-            + (brk.child_override_cost or _ZERO)
-        )
-        amount = _q4(pre_discount - cost_total)
-        pct = _q4(amount / cost_total * _HUNDRED) if cost_total != _ZERO else None
+        cost = cost_total(brk)
+        amount = _q4(pre_discount - cost)
+        pct = _q4(amount / cost * _HUNDRED) if cost != _ZERO else None
         return amount, pct
 
     totals = []

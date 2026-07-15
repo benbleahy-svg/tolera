@@ -42,7 +42,7 @@ function PricingItemDefModal({
     initial?.is_custom ? 'custom' : (initial?.category ?? 'general'),
   );
   const [customName, setCustomName] = useState(initial?.custom_category_name ?? '');
-  const [color, setColor] = useState(initial?.color ?? CATEGORY_SWATCHES[0]);
+  const [color, setColor] = useState(initial?.color ?? CATEGORY_SWATCHES[0].value);
   const [formula, setFormula] = useState(initial?.formula ?? '');
   const [pct, setPct] = useState(initial?.default_pct ?? '');
 
@@ -103,13 +103,17 @@ function PricingItemDefModal({
               <legend>{t('pricing.color')}</legend>
               {CATEGORY_SWATCHES.map((swatch) => (
                 <button
-                  key={swatch}
+                  key={swatch.value}
                   type="button"
-                  className={swatch === color ? 'est-swatch est-swatch-active' : 'est-swatch'}
-                  style={{ background: swatch }}
-                  aria-label={t('pricing.color_swatch_label', { color: swatch })}
-                  aria-pressed={swatch === color}
-                  onClick={() => setColor(swatch)}
+                  className={
+                    swatch.value === color ? 'est-swatch est-swatch-active' : 'est-swatch'
+                  }
+                  style={{ background: swatch.value }}
+                  aria-label={t('pricing.color_swatch_label', {
+                    color: t(`pricing.color_${swatch.key}`),
+                  })}
+                  aria-pressed={swatch.value === color}
+                  onClick={() => setColor(swatch.value)}
                 />
               ))}
             </fieldset>
@@ -327,9 +331,15 @@ export function PricingDefsPage() {
             const save = editingDef
               ? api.updatePricingItemDef(editingDef.id, body)
               : api.createPricingItemDef(body);
-            setCreating(false);
-            setEditingDef(null);
-            save.then(reload).catch(fail);
+            // close only on success — a failed save keeps the modal (and the
+            // user's edits) alive with the error shown
+            save
+              .then(() => {
+                setCreating(false);
+                setEditingDef(null);
+                reload();
+              })
+              .catch(fail);
           }}
           onClose={() => {
             setCreating(false);

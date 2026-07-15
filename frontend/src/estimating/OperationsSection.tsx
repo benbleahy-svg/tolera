@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { CollapsibleSection, useSectionPrefs } from './CollapsibleSection';
+import { perUnitExact, sumExact } from './money';
 import type { OpCategory, OperationDefOut, OperationOut } from './types';
 
 interface Props {
@@ -100,22 +101,12 @@ export function OperationsSection({
   const cellFor = (op: OperationOut, quantity: number) =>
     op.cells.find((cell) => cell.quantity === quantity);
 
-  const summary = (quantity: number): string | null => {
-    let total = 0;
-    let seen = false;
-    for (const op of rows) {
-      const cell = cellFor(op, quantity);
-      if (cell?.effective_cost != null) {
-        total += Number(cell.effective_cost);
-        seen = true;
-      }
-    }
-    // an empty section still shows a zero summary (frames: "$0.00")
-    return seen || rows.length === 0 ? total.toFixed(4) : null;
-  };
-
-  const perUnit = (value: string | null, quantity: number): string | null =>
-    value == null || quantity === 0 ? null : (Number(value) / quantity).toFixed(4);
+  // exact 4-dp sum; an empty section still shows a zero summary (frames: "$0.00")
+  const summary = (quantity: number): string | null =>
+    sumExact(
+      rows.map((op) => cellFor(op, quantity)?.effective_cost),
+      rows.length > 0,
+    );
 
   const formatPctDe = (value: number): string =>
     `${new Intl.NumberFormat(i18n.language === 'de' ? 'de-DE' : 'en-IE', {
@@ -183,10 +174,10 @@ export function OperationsSection({
                 )}
               </td>
               <td className="est-num">
+                {/* flat setup has no time — '---' like the frames; the € cost
+                    lives in the drawer, never under a time heading */}
                 {op.setup_basis === 'flat'
-                  ? op.setup_cost != null
-                    ? formatMoney(op.setup_cost)
-                    : '---'
+                  ? '---'
                   : formatMins(op.manual_setup_mins, op.calc_setup_mins, i18n.language)}
               </td>
               <td className="est-num">
@@ -204,7 +195,7 @@ export function OperationsSection({
                     {showUnitValues && (
                       <>
                         <br />
-                        <small>{formatMoney(perUnit(cell?.effective_cost ?? null, quantity))}</small>
+                        <small>{formatMoney(perUnitExact(cell?.effective_cost ?? null, quantity))}</small>
                       </>
                     )}
                   </td>
@@ -299,7 +290,7 @@ export function OperationsSection({
                 {showUnitValues && (
                   <>
                     <br />
-                    <small>{formatMoney(perUnit(summary(quantity), quantity))}</small>
+                    <small>{formatMoney(perUnitExact(summary(quantity), quantity))}</small>
                   </>
                 )}
               </td>

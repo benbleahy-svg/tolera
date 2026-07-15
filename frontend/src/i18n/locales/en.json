@@ -429,7 +429,15 @@
     "from_library": "From the library",
     "create_new": "Create new",
     "add_from_library_label": "Add {{name}} from the library",
-    "color_swatch_label": "Color {{color}}"
+    "color_swatch_label": "Color {{color}}",
+    "color_maroon": "Maroon",
+    "color_orange": "Orange",
+    "color_gold": "Gold",
+    "color_green": "Green",
+    "color_teal": "Teal",
+    "color_blue": "Blue",
+    "color_purple": "Purple",
+    "color_grey": "Grey"
   },
   "viewer": {
     "back_to_parts": "← Parts",

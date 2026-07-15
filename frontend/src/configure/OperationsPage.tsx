@@ -254,10 +254,14 @@ export function OperationsPage() {
               onKalkCheck={api.kalkCheck}
               onSave={(body) => {
                 setError(null);
-                setEditingDefId(null);
+                // close only on success — a failed save keeps the drawer
+                // (and the estimator's edits) alive with the error shown
                 api
                   .updateOperationDef(def.id, body)
-                  .then(() => reload(search))
+                  .then(() => {
+                    setEditingDefId(null);
+                    reload(search);
+                  })
                   .catch(fail);
               }}
               onClose={() => setEditingDefId(null)}

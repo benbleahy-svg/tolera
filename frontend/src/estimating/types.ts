@@ -444,11 +444,9 @@ export interface PricingSummary {
   totals: PricingTotalsRow[];
 }
 
-export interface PricingItemCreateBody {
-  /** Attach from the Configure library (snapshot-on-attach); when set, the
-   * remaining fields are taken from the def server-side. */
-  source_def_id?: string;
-  name?: string;
+/** Ad-hoc pricing-item fields (also the PATCH body). */
+export interface PricingItemFields {
+  name: string;
   calc_type?: CalcType;
   category?: PricingCategory;
   is_custom?: boolean;
@@ -458,13 +456,15 @@ export interface PricingItemCreateBody {
   default_pct?: string | null;
 }
 
-export type PricingItemUpdateBody = Omit<PricingItemCreateBody, 'source_def_id'>;
+/** Create either FROM the Configure library (snapshot-on-attach — the def
+ * supplies every field server-side) OR ad-hoc — never a mix. */
+export type PricingItemCreateBody = { source_def_id: string } | PricingItemFields;
 
-export interface DiscountCreateBody {
-  source_def_id?: string;
-  name?: string;
-  default_pct?: string | null;
-}
+export type PricingItemUpdateBody = PricingItemFields;
+
+export type DiscountCreateBody =
+  | { source_def_id: string }
+  | { name: string; default_pct?: string | null };
 
 /** Configure-library defs offered by the on-quote Add flows. */
 export interface PricingItemDefLite {

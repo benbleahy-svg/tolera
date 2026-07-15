@@ -26,6 +26,9 @@ export function KalkEditor({ value, onChange, name, onCheck, rows = 8, disabled 
   const { t } = useTranslation();
   const [checkResult, setCheckResult] = useState<KalkCheckResult | null>(null);
   const gutterRef = useRef<HTMLPreElement | null>(null);
+  // invalidates in-flight CHECK responses once the formula has changed —
+  // a slow response must never label a newer draft as checked
+  const checkSeq = useRef(0);
 
   const lineCount = Math.max(value.split('\n').length, 1);
   const lines = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n');
@@ -47,6 +50,7 @@ export function KalkEditor({ value, onChange, name, onCheck, rows = 8, disabled 
           value={value}
           disabled={disabled}
           onChange={(e) => {
+            checkSeq.current += 1;
             onChange(e.target.value);
             setCheckResult(null);
           }}
@@ -73,10 +77,14 @@ export function KalkEditor({ value, onChange, name, onCheck, rows = 8, disabled 
         <div className="est-actions est-kalk-check-row">
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              const mySeq = ++checkSeq.current;
               void onCheck(value)
-                .then(setCheckResult)
-                .catch(() =>
+                .then((result) => {
+                  if (mySeq === checkSeq.current) setCheckResult(result);
+                })
+                .catch(() => {
+                  if (mySeq !== checkSeq.current) return;
                   setCheckResult({
                     ok: false,
                     errors: [
@@ -87,9 +95,9 @@ export function KalkEditor({ value, onChange, name, onCheck, rows = 8, disabled 
                         col: null,
                       },
                     ],
-                  }),
-                )
-            }
+                  });
+                });
+            }}
             disabled={value.trim() === ''}
           >
             {t('kalk.check')}

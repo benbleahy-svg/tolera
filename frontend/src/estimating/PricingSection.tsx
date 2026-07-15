@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 
 import { CollapsibleSection, useSectionPrefs } from './CollapsibleSection';
 import { KalkEditor } from './KalkEditor';
+import { perUnitExact } from './money';
 import type {
   CalcType,
   DiscountCreateBody,
@@ -38,16 +39,17 @@ const CATEGORY_COLORS: Record<PricingCategory, string> = {
   purchased_component: '#46c8d8',
 };
 
-/** The 8 fixed cost-category swatches (spec #costing New-Pricing-Item modal). */
-export const CATEGORY_SWATCHES = [
-  '#8b1e3f', // maroon
-  '#d97706', // orange
-  '#d4a72c', // gold
-  '#1b6e3c', // green
-  '#0d9488', // teal
-  '#2563eb', // blue
-  '#7c3aed', // purple
-  '#64748b', // grey
+/** The 8 fixed cost-category swatches (spec #costing New-Pricing-Item modal);
+ * `key` resolves to a translated color name for the aria-label. */
+export const CATEGORY_SWATCHES: { value: string; key: string }[] = [
+  { value: '#8b1e3f', key: 'maroon' },
+  { value: '#d97706', key: 'orange' },
+  { value: '#d4a72c', key: 'gold' },
+  { value: '#1b6e3c', key: 'green' },
+  { value: '#0d9488', key: 'teal' },
+  { value: '#2563eb', key: 'blue' },
+  { value: '#7c3aed', key: 'purple' },
+  { value: '#64748b', key: 'grey' },
 ];
 
 interface Props {
@@ -88,17 +90,20 @@ function PctCell({
   pct,
   overridden,
   amount,
+  quantity,
   unreachable = false,
   editable,
   label,
-  showUnitValues = true,
+  showUnitValues = false,
   formatMoney,
   onOverride,
 }: {
   pct: string | null;
   overridden: boolean;
-  /** The € contribution shown beneath the %; undefined = pct-only cell. */
+  /** The break-total € contribution shown beneath the %; undefined = pct-only cell. */
   amount?: string | null;
+  /** Break quantity — enables the per-unit line under "Stückwerte anzeigen". */
+  quantity?: number;
   unreachable?: boolean;
   editable: boolean;
   label: string;
@@ -148,10 +153,18 @@ function PctCell({
           {formatPct(pct)}
           {overridden && ' *'}
         </span>
-        {amount !== undefined && showUnitValues && (
+        {/* break-total contribution always (frames: "% over €"); the toggle
+            adds the exact per-unit contribution beneath it */}
+        {amount !== undefined && (
           <>
             <br />
             <small>{formatMoney(amount)}</small>
+          </>
+        )}
+        {amount !== undefined && showUnitValues && quantity !== undefined && (
+          <>
+            <br />
+            <small>{formatMoney(perUnitExact(amount ?? null, quantity))}</small>
           </>
         )}
         {unreachable && (
@@ -192,7 +205,7 @@ function PricingItemModal({
     initial?.is_custom ? 'custom' : (initial?.category ?? 'general'),
   );
   const [customName, setCustomName] = useState(initial?.custom_category_name ?? '');
-  const [color, setColor] = useState(initial?.color ?? CATEGORY_SWATCHES[0]);
+  const [color, setColor] = useState(initial?.color ?? CATEGORY_SWATCHES[0].value);
   const [formula, setFormula] = useState(initial?.formula ?? '');
   const [pct, setPct] = useState(initial?.default_pct ?? '');
 
@@ -262,7 +275,16 @@ function PricingItemModal({
                 name="calc-type"
                 value={type}
                 checked={calcType === type}
-                onChange={() => setCalcType(type)}
+                onChange={() => {
+                  setCalcType(type);
+                  // target-margin has no category — clear any custom-only
+                  // state so it never leaks into the submitted body
+                  if (type === 'target_margin' && category === 'custom') {
+                    setCategory('general');
+                    setCustomName('');
+                    setFormula('');
+                  }
+                }}
               />
               {t(`pricing.type_${type}`)}
             </label>
@@ -294,13 +316,17 @@ function PricingItemModal({
               <legend>{t('pricing.color')}</legend>
               {CATEGORY_SWATCHES.map((swatch) => (
                 <button
-                  key={swatch}
+                  key={swatch.value}
                   type="button"
-                  className={swatch === color ? 'est-swatch est-swatch-active' : 'est-swatch'}
-                  style={{ background: swatch }}
-                  aria-label={t('pricing.color_swatch_label', { color: swatch })}
-                  aria-pressed={swatch === color}
-                  onClick={() => setColor(swatch)}
+                  className={
+                    swatch.value === color ? 'est-swatch est-swatch-active' : 'est-swatch'
+                  }
+                  style={{ background: swatch.value }}
+                  aria-label={t('pricing.color_swatch_label', {
+                    color: t(`pricing.color_${swatch.key}`),
+                  })}
+                  aria-pressed={swatch.value === color}
+                  onClick={() => setColor(swatch.value)}
                 />
               ))}
             </fieldset>
@@ -382,9 +408,6 @@ export function PricingSection({
   const row = (quantity: number) => pricing.costing.find((c) => c.quantity === quantity);
   const totals = (quantity: number) => pricing.totals.find((x) => x.quantity === quantity);
 
-  const perUnit = (value: string | null, quantity: number): string | null =>
-    value == null ? null : (Number(value) / quantity).toFixed(4);
-
   const standardRows: {
     key: 'material' | 'inside' | 'outside' | 'purchased_component' | 'child_override';
     label: string;
@@ -420,13 +443,23 @@ export function PricingSection({
       .find((item) => item.id === itemId)
       ?.cells.find((cell) => cell.quantity === quantity);
 
-  // drag-handle reorder (the stack is ordered; position feeds Zuschlagskalkulation)
+  // reorder (the stack is ordered; position feeds Zuschlagskalkulation):
+  // pointer drag on the handle, plus ArrowUp/ArrowDown when it has focus
   const dropOn = (targetId: string) => {
     if (!draggedId || draggedId === targetId) return;
     const ids = pricing.pricing_items.map((item) => item.id);
     const from = ids.indexOf(draggedId);
     const to = ids.indexOf(targetId);
     if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ...ids.splice(from, 1));
+    onReorderItems(ids);
+  };
+
+  const moveItemBy = (itemId: string, direction: -1 | 1) => {
+    const ids = pricing.pricing_items.map((item) => item.id);
+    const from = ids.indexOf(itemId);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= ids.length) return;
     ids.splice(to, 0, ...ids.splice(from, 1));
     onReorderItems(ids);
   };
@@ -476,7 +509,7 @@ export function PricingSection({
                       {showCostingUnits && (
                         <>
                           <br />
-                          <small>{formatMoney(perUnit(value, quantity))}</small>
+                          <small>{formatMoney(perUnitExact(value, quantity))}</small>
                         </>
                       )}
                     </td>
@@ -520,7 +553,7 @@ export function PricingSection({
                         {showCostingUnits && (
                           <>
                             <br />
-                            <small>{formatMoney(perUnit(custom?.cost ?? null, quantity))}</small>
+                            <small>{formatMoney(perUnitExact(custom?.cost ?? null, quantity))}</small>
                           </>
                         )}
                       </td>
@@ -584,9 +617,17 @@ export function PricingSection({
                     className="est-drag-handle"
                     draggable={editable}
                     role="button"
+                    tabIndex={editable ? 0 : -1}
                     aria-label={t('pricing.reorder_handle_label', { name: item.name })}
                     onDragStart={() => setDraggedId(item.id)}
                     onDragEnd={() => setDraggedId(null)}
+                    onKeyDown={(e) => {
+                      if (!editable) return;
+                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        moveItemBy(item.id, e.key === 'ArrowUp' ? -1 : 1);
+                      }
+                    }}
                   >
                     ≡
                   </span>{' '}
@@ -616,6 +657,7 @@ export function PricingSection({
                       pct={cell?.pct ?? null}
                       overridden={cell?.manual_pct != null}
                       amount={cell?.amount ?? null}
+                      quantity={quantity}
                       unreachable={cell?.unreachable ?? false}
                       editable={editable}
                       showUnitValues={showPricingUnits}

@@ -623,6 +623,13 @@
   resize: vertical;
 }
 
+/* keyboard focus stays visible on the frame (the textarea's own outline is
+   suppressed so the gutter and editor read as one control) */
+.est-kalk-editor-frame:focus-within {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: 1px;
+}
+
 /* ------------------- pricing item modal (edit path) ---------------------- */
 
 .est-pricing-modal {

@@ -185,7 +185,8 @@ describe('PricingSection', () => {
     await renderSection();
     expect(screen.getByText('Raw Material Markup')).toBeInTheDocument();
     expect(screen.getByText('60,00 %')).toBeInTheDocument();
-    expect(screen.getByText('404.52 €')).toBeInTheDocument();
+    // qty 1: the break-total contribution and the per-unit line coincide
+    expect(screen.getAllByText('404.52 €').length).toBeGreaterThan(0);
     expect(screen.getByText('Gesamt (ohne Rabatte)')).toBeInTheDocument();
     // discounted output rows
     expect(screen.getByText('Treuerabatt')).toBeInTheDocument();
@@ -223,7 +224,7 @@ describe('PricingSection', () => {
     await userEvent.selectOptions(screen.getByLabelText('Kostenkategorie'), 'custom');
     await userEvent.type(screen.getByLabelText('Kategoriename'), 'Laser Workcenter');
     // color comes from the 8 fixed swatches, first one preselected
-    await userEvent.click(screen.getByRole('button', { name: 'Farbe #2563eb' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Farbe Blau' }));
     await userEvent.type(
       screen.getByLabelText('Kalk-Formel — Laser Markup'),
       'set_custom_cost(0)',
@@ -286,6 +287,15 @@ describe('PricingSection', () => {
       'pi-raw',
       expect.objectContaining({ name: 'Materialaufschlag', calc_type: 'markup' }),
     );
+  });
+
+  it('reorders the pricing stack via keyboard on the focused handle', async () => {
+    const onReorderItems = vi.fn();
+    await renderSection({ onReorderItems });
+    const handle = screen.getByRole('button', { name: 'Raw Material Markup verschieben' });
+    handle.focus();
+    await userEvent.keyboard('{ArrowDown}');
+    expect(onReorderItems).toHaveBeenCalledWith(['pi-diff', 'pi-raw', 'pi-target']);
   });
 
   it('reorders the pricing stack by drag handle', async () => {

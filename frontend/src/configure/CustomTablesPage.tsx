@@ -271,15 +271,19 @@ export function CustomTablesPage() {
                     // CSV of the loaded columns + rows (German headers as-is)
                     const quote = (v: unknown): string => {
                       if (v === null || v === undefined) return '';
-                      const s =
-                        typeof v === 'boolean' ? (v ? 'ja' : 'nein') : String(v);
+                      let s = typeof v === 'boolean' ? (v ? 'ja' : 'nein') : String(v);
+                      // CSV-injection guard: a leading =, +, - or @ in a TEXT
+                      // cell becomes a formula in spreadsheet apps — neutralize
+                      // with a leading apostrophe (numbers stay numbers)
+                      if (typeof v === 'string' && /^[=+\-@]/.test(s)) s = `'${s}`;
                       return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
                     };
                     const header = detail.columns.map((c) => quote(c.name)).join(';');
                     const lines = rows.map((r) =>
                       detail.columns.map((c) => quote(r[c.name])).join(';'),
                     );
-                    const blob = new Blob([[header, ...lines].join('\n')], {
+                    // UTF-8 BOM so Excel renders umlauts/ß correctly
+                    const blob = new Blob(['\uFEFF' + [header, ...lines].join('\n')], {
                       type: 'text/csv;charset=utf-8',
                     });
                     const url = URL.createObjectURL(blob);

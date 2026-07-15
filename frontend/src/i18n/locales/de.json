@@ -429,7 +429,15 @@
     "from_library": "Aus der Bibliothek",
     "create_new": "Neu erstellen",
     "add_from_library_label": "{{name}} aus der Bibliothek hinzufügen",
-    "color_swatch_label": "Farbe {{color}}"
+    "color_swatch_label": "Farbe {{color}}",
+    "color_maroon": "Dunkelrot",
+    "color_orange": "Orange",
+    "color_gold": "Gold",
+    "color_green": "Grün",
+    "color_teal": "Türkis",
+    "color_blue": "Blau",
+    "color_purple": "Violett",
+    "color_grey": "Grau"
   },
   "viewer": {
     "back_to_parts": "← Teile",
