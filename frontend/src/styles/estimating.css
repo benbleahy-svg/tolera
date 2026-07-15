@@ -354,3 +354,98 @@
 .est-table td small {
   color: var(--muted, #64748b);
 }
+
+/* ---- Bulk Create Line Items (M3.4 — DemoB/04) ---- */
+/* ASSUMED (grill #14): spec text says "green banner" but the AI-signal token +
+   the DemoB frame are purple — AI-Governor consistency wins; cheap to swap. */
+.bulk-create-modal {
+  width: min(760px, 92vw);
+}
+.bulk-create-intro {
+  color: var(--text-muted, #555);
+  margin: 0.25rem 0 0.75rem;
+}
+.bulk-create-rfq-files {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.bulk-create-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border, #d0d0d5);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.bulk-create-original-badge {
+  background: var(--color-ai-signal);
+  color: #fff;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.bulk-create-autofill-banner {
+  border: 1px solid var(--color-ai-signal);
+  background: color-mix(in srgb, var(--color-ai-signal) 8%, transparent);
+  color: var(--color-ai-signal);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  margin: 0.25rem 0 0.75rem;
+}
+.bulk-create-parse-failed {
+  color: var(--text-muted, #555);
+  font-style: italic;
+}
+.bulk-create-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.bulk-create-table th {
+  text-align: left;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border, #d0d0d5);
+}
+.bulk-create-table td {
+  padding: 0.2rem 0.4rem;
+}
+.bulk-create-table input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.bulk-create-row-no {
+  color: var(--text-muted, #888);
+  font-size: 0.8rem;
+  width: 2rem;
+}
+.bulk-create-add-row {
+  margin: 0.5rem 0 1rem;
+}
+.bulk-create-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.bulk-create-open.has-suggestions {
+  border-color: var(--color-ai-signal);
+  color: var(--color-ai-signal);
+}
+.bulk-create-hint {
+  color: var(--color-ai-signal);
+  font-size: 0.8rem;
+}
+.bulk-create-matched-files {
+  margin: 0.1rem 0 0;
+  font-size: 0.75rem;
+  color: var(--color-ai-signal);
+}
+.bulk-create-qty-warning {
+  margin: 0.1rem 0 0;
+  font-size: 0.75rem;
+  color: #b45309;
+}

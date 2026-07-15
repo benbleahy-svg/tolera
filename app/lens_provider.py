@@ -23,7 +23,7 @@ from anthropic import AsyncAnthropic
 from pydantic import ValidationError
 
 from .config import Settings, get_settings
-from .lens import PROMPT_VERSION, LensProvider, RawFinding
+from .lens import PROMPT_VERSION, LensProvider, RawFinding, RawLineItem
 
 logger = logging.getLogger("app.lens_provider")
 
@@ -208,6 +208,58 @@ _CLASSIFY_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+# ---- Email-body parts-list parse (M3.4 — AI-LENS §3, text LLM, no vision) ---- #
+#: Version stamp for the parts-list prompt (the M3 pin-prompts convention).
+#: Lives here (not app.email_parts) to keep the import direction one-way.
+PARTS_PROMPT_VERSION = "email-parts-v1"
+
+_PARTS_LIST_PROMPT = (
+    "[{version}] Below are the plain-text body of a customer RFQ email "
+    "(German or English) and the filenames of its attachments. Extract the "
+    "requested parts list. For each requested line item report: part_number "
+    "(verbatim, as written in the body or as it appears in an attachment "
+    "filename), revision (only if stated), description (only if stated "
+    "verbatim), quantities (every requested lot size, as integers), "
+    "requested_date_raw (the verbatim date text, if a delivery date is "
+    "stated) and requested_date (its ISO 8601 yyyy-mm-dd form), and a "
+    "confidence between 0 and 1. German RFQs often write lot sizes as "
+    "'Losgroessen 1, 5, 20 Stk.' and dates as dd.mm.yyyy. "
+    f"{_NEVER_HALLUCINATE}"
+).format(version=PARTS_PROMPT_VERSION)
+
+_PARTS_LIST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "part_number": {"type": "string"},
+                    "revision": {"type": ["string", "null"]},
+                    "description": {"type": ["string", "null"]},
+                    "quantities": {"type": "array", "items": {"type": "integer"}},
+                    "requested_date": {"type": ["string", "null"]},
+                    "requested_date_raw": {"type": ["string", "null"]},
+                    "confidence": {"type": "number"},
+                },
+                "required": [
+                    "part_number",
+                    "revision",
+                    "description",
+                    "quantities",
+                    "requested_date",
+                    "requested_date_raw",
+                    "confidence",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
 
 class AnthropicLensProvider:
     """Vision-LLM extraction on the Claude API (structured JSON outputs).
@@ -229,26 +281,29 @@ class AnthropicLensProvider:
             # request ceiling is 32 MB and base64 expands by 4/3 — cap BEFORE
             # encoding so a big drawing pack can't balloon worker memory.
             raise LensProviderError("provider_document_too_large")
+        return await self._complete(
+            [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": base64.standard_b64encode(pdf).decode("ascii"),
+                    },
+                },
+                {"type": "text", "text": prompt},
+            ],
+            schema,
+        )
+
+    async def _complete(
+        self, content: list[dict[str, Any]], schema: dict[str, Any]
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "model": self._model,
             "max_tokens": 16000,
             "output_config": {"format": {"type": "json_schema", "schema": schema}},
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": base64.standard_b64encode(pdf).decode("ascii"),
-                            },
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
-                }
-            ],
+            "messages": [{"role": "user", "content": content}],
         }
         if self._inference_geo:
             params["inference_geo"] = self._inference_geo
@@ -304,3 +359,33 @@ class AnthropicLensProvider:
         for finding in findings:
             finding.page = page_no
         return findings
+
+    async def parse_email_parts_list(
+        self, body_text: str, attachment_filenames: list[str]
+    ) -> list[RawLineItem]:
+        """M3.4 — text-LLM parts-list parse of an RFQ email body (AI-LENS §3).
+        Same EU ``inference_geo`` routing as every Lens call; the guard in
+        :mod:`app.email_parts` enforces never-hallucinate on the result."""
+        filenames = "\n".join(attachment_filenames) or "(none)"
+        payload = await self._complete(
+            [
+                {
+                    "type": "text",
+                    "text": (
+                        f"{_PARTS_LIST_PROMPT}\n\nATTACHMENT FILENAMES:\n{filenames}"
+                        f"\n\nEMAIL BODY:\n{body_text}"
+                    ),
+                }
+            ],
+            _PARTS_LIST_SCHEMA,
+        )
+        items: list[RawLineItem] = []
+        invalid = 0
+        for item in payload.get("items", []):
+            try:
+                items.append(RawLineItem.model_validate(item))
+            except ValidationError:
+                invalid += 1
+        if invalid:
+            logger.warning("lens_provider_invalid_line_items", extra={"invalid": invalid})
+        return items

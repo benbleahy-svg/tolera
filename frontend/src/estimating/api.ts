@@ -10,6 +10,8 @@ import { useAuth } from '@clerk/clerk-react';
 import { apiFetch, type TokenGetter } from '../api/client';
 import type {
   AddOnCreateBody,
+  BulkCreatePrefill,
+  BulkCreateRowBody,
   AddOnDefOut,
   ClassNode,
   ComponentCosting,
@@ -111,6 +113,9 @@ export interface EstimatingApi {
     body: { standard_lead_time_days?: number | null; tiers: ExpediteTierBody[] },
   ) => Promise<unknown>;
   getQuoteTotals: (quoteId: string) => Promise<QuoteTotals>;
+  // M3.4 — Bulk Create Line Items (prefill + explicit Accept)
+  getBulkCreatePrefill: (quoteId: string) => Promise<BulkCreatePrefill>;
+  bulkCreateLineItems: (quoteId: string, rows: BulkCreateRowBody[]) => Promise<QuoteSummary>;
 }
 
 /** Build an estimating API client bound to the current Clerk session token. */
@@ -197,6 +202,9 @@ export function useEstimatingApi(): EstimatingApi {
         }),
       refreshPricing: (quoteId) =>
         apiFetch(`/api/quotes/${quoteId}/refresh-pricing`, token, { method: 'POST' }),
+      getBulkCreatePrefill: (quoteId) => apiFetch(`/api/quotes/${quoteId}/bulk-create`, token),
+      bulkCreateLineItems: (quoteId, rows) =>
+        apiFetch(`/api/quotes/${quoteId}/bulk-create`, token, { method: 'POST', body: { rows } }),
       listAddOnDefs: () => apiFetch('/api/add-on-defs', token),
       addAddOn: (componentId, body) =>
         apiFetch(`/api/components/${componentId}/add-ons`, token, { method: 'POST', body }),

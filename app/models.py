@@ -635,6 +635,11 @@ class RequestForQuote(Base):
     # Conversion state: set once the ingest task has built the draft quote.
     quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     processed_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # M3.4 — the guarded parts-list suggestion the body-parse task persists
+    # (``{status, prompt_version, parsed_at, dropped, error_code, items[]}``,
+    # app.email_parts._payload). A suggestion snapshot, org-scoped with the row;
+    # NULL until the parse task has run. Additive (lean-extend precedent).
+    suggested_line_items: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = _ts()
 
 

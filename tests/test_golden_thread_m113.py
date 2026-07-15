@@ -6,21 +6,27 @@
   pricing **exactly** against ``fixtures/golden/*.pricing.json`` — all six
   Demo E figures (incl. 2.160,84 €), the Zuschlagskalkulation chain, and the
   CH/CHF region fixture.
-* The golden-thread integration test: seed org (M1.12 catalog) → create
-  quote → line item → seeded material + ops → costing → pricing → VAT
-  totals — the thread M3/M4/M5 make progressively more real.
+* The golden-thread integration test: **since M3.4 the thread enters through
+  real intake** — the fixture ``.eml`` hits the Mailgun webhook (M3.3), the
+  Lens body-parse suggestion prefills Bulk Create, the explicit Accept creates
+  the line item (M3.4) — then seeded material + ops → costing → pricing → VAT
+  totals reproduce the same figures as the M1 direct-create entry.
 * Determinism: re-running a fixture on a fresh org reproduces the figure.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.lens import RawLineItem
+from app.main import create_app
 from app.models import MembershipRole
-from tests.conftest import Seeder, authed
+from tests.conftest import Seeder, app_role_url, authed
 from tests.golden_harness import (
     FIXTURES_DIR,
     assert_matches_golden,
@@ -28,8 +34,11 @@ from tests.golden_harness import (
     load_golden,
     run_pricing_fixture,
 )
+from tests.support import build_settings, eager_celery, post_mailgun_webhook
 
 ADMIN = [MembershipRole.admin]
+
+THREAD_SIGNING_KEY = "golden-thread-signing-key"
 
 
 @pytest.mark.parametrize("name", fixture_names())
@@ -46,17 +55,79 @@ def test_goldens_are_deterministic(app_client: TestClient, seeder: Seeder) -> No
     assert_matches_golden(run_pricing_fixture(app_client, seeder, name), golden, f"{name}-rerun")
 
 
-def test_golden_thread_end_to_end(app_client: TestClient, seeder: Seeder) -> None:
-    """The M1 exit thread: seeded catalog → quote → line → seeded material +
-    op → costing → pricing (Zuschlag chain) → net + MwSt. + gross."""
+class _ThreadPartsListProvider:
+    """The thread's scripted Lens body parse: suggests the fixture's one part
+    (its number exists only in the attachment filename — guard-legal) with the
+    body's "Losgroessen 1, 5 und 20 Stueck" quantities."""
+
+    async def parse_email_parts_list(
+        self, body_text: str, attachment_filenames: list[str]
+    ) -> list[RawLineItem]:
+        return [RawLineItem(part_number="cube-20mm", quantities=[1, 5, 20], confidence=0.9)]
+
+
+@pytest.fixture
+def thread_intake_client(tenancy_db: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """An app client with real intake wired: Mailgun key set, Celery eager,
+    the vision extraction stubbed (M3.1's suite owns it), and the scripted
+    parts-list provider registered."""
+    from app import lens_provider
+
+    monkeypatch.setattr(
+        "app.email_ingest._enqueue_lens_extract",
+        lambda org_id, part_id, file_id: None,
+    )
+    lens_provider.register(_ThreadPartsListProvider())  # type: ignore[arg-type]
+    settings = build_settings(database_url=tenancy_db, app_database_url=app_role_url(tenancy_db))
+    settings.mailgun_webhook_signing_key = THREAD_SIGNING_KEY
+    try:
+        with eager_celery(), TestClient(create_app(settings)) as client:
+            yield client
+    finally:
+        lens_provider.register(None)
+
+
+def test_golden_thread_end_to_end(thread_intake_client: TestClient, seeder: Seeder) -> None:
+    """The golden thread, entering through REAL intake since M3.4: the fixture
+    ``.eml`` → Mailgun webhook → draft quote (M3.3) → Lens prefill → explicit
+    Bulk-Create Accept (M3.4) → seeded material + op → costing → pricing
+    (Zuschlag chain) → net + MwSt. + gross — the same Demo E figures as the
+    M1 direct-create entry."""
+    app_client = thread_intake_client
     org = seeder.org("golden-thread-close")
     user = seeder.user("thread@golden.example")
     seeder.membership(user, org, ADMIN)
     seeder.configure_catalog(org)
 
+    # Intake: the RFQ email (1.4301, Losgroessen 1/5/20, print attached).
+    eml = (FIXTURES_DIR / "email" / "rfq-sample.eml").read_bytes()
+    ingest = post_mailgun_webhook(
+        app_client,
+        eml,
+        recipient="golden-thread-close@rfq.tolera.eu",
+        sender="einkauf@kunde-beispiel.de",
+        signing_key=THREAD_SIGNING_KEY,
+    )
+    assert ingest.status_code == 200, ingest.text
+    quote_id = ingest.json()["quote_id"]
+    assert quote_id is not None
+
     with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
-        quote_id = app_client.post("/api/quotes", json={}).json()["id"]
-        item = app_client.post(f"/api/quotes/{quote_id}/items").json()["items"][0]
+        # Lens prefilled the Bulk Create dialog from the email body…
+        prefill = app_client.get(f"/api/quotes/{quote_id}/bulk-create").json()
+        assert prefill["status"] == "completed"
+        assert prefill["found_in"] == "original-rfq.eml"
+        [row] = prefill["rows"]
+        assert row["quantities"] == [1, 5, 20]
+        assert row["matched_filenames"] == ["cube-20mm-print.pdf"]
+
+        # …and only the explicit Accept creates the line item (AI-Governor).
+        accepted: dict[str, Any] = app_client.post(
+            f"/api/quotes/{quote_id}/bulk-create",
+            json={"rows": [{"part_number": row["part_number"], "quantities": row["quantities"]}]},
+        ).json()
+        item = accepted["items"][0]
+        assert [b["quantity"] for b in item["quantities"]] == [1, 5, 20]
         component_id = str(item["root_component_id"])
 
         # seeded material: 1.4301 → X5CrNi18-10 (AISI 304)

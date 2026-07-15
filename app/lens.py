@@ -92,6 +92,25 @@ class RawFinding(BaseModel):
     page: int | None = None
 
 
+class RawLineItem(BaseModel):
+    """One provider-suggested email parts-list line (M3.4 — AI-LENS §3),
+    validated at the seam before the guard in :mod:`app.email_parts` sees it.
+
+    ``requested_date_raw`` is the verbatim body snippet the date came from —
+    the guarded claim; ``requested_date`` is its ISO-8601 normalization (the
+    transformed channel, unguarded — the ``normalized_value`` precedent)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    part_number: str
+    revision: str | None = None
+    description: str | None = None
+    quantities: list[int] = Field(default_factory=list)
+    requested_date: str | None = None
+    requested_date_raw: str | None = None
+    confidence: float = Field(ge=0, le=1)
+
+
 class LensProvider(Protocol):
     """The configurable model seam (spec ``#lens-models``): Anthropic Claude in
     production (:mod:`app.lens_provider`), a scripted fake in the gating tests."""

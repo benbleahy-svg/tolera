@@ -189,6 +189,37 @@ export interface QuoteSummary {
   items: QuoteItemSummary[];
 }
 
+// ---- Bulk Create Line Items (M3.4 — spec #wingman, DemoB/04) ---- //
+
+/** One suggestion row + its file-distribution preview (GET prefill). */
+export interface BulkCreatePrefillRow {
+  part_number: string;
+  revision: string | null;
+  description: string | null;
+  quantities: number[];
+  requested_date: string | null;
+  confidence: number;
+  matched_part_id: string | null;
+  matched_filenames: string[];
+}
+
+export interface BulkCreatePrefill {
+  status: 'none' | 'pending' | 'completed' | 'failed';
+  found_in: string | null;
+  rfq_files: { filename: string; original_rfq: boolean }[];
+  rows: BulkCreatePrefillRow[];
+}
+
+/** One dialog row at Accept time — the editable columns plus the reviewed
+ * file-distribution binding (null = let the server match). */
+export interface BulkCreateRowBody {
+  part_number: string;
+  revision?: string | null;
+  description?: string | null;
+  quantities: number[];
+  matched_part_id?: string | null;
+}
+
 export interface OperationCreateBody {
   operation_def_id?: string;
   name?: string;

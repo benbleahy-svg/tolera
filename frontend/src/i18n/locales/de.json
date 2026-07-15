@@ -697,5 +697,32 @@
     "type_thread": "Gewinde",
     "type_hole": "Bohrung",
     "add_type_placeholder": "z. B. length"
+  },
+  "bulk_create": {
+    "title": "Positionen gesammelt anlegen",
+    "open_button": "Positionen gesammelt anlegen",
+    "items_found_in": "Positionen gefunden in {{file}}",
+    "intro": "Prüfen Sie die RFQ-Dateien und übertragen Sie die Stückliste in die Tabelle unten.",
+    "intro_defaults": "Die Teilenummer ist erforderlich; leere Stückzahlen werden auf 1 gesetzt.",
+    "rfq_files": "RFQ-Dateien",
+    "original_rfq": "ORIGINAL-RFQ",
+    "autofilled": "Positionsdaten automatisch ausgefüllt",
+    "found_in": "Gefunden in {{file}}",
+    "parse_failed": "Automatisches Ausfüllen war für diese Anfrage nicht verfügbar — bitte Stückliste manuell erfassen.",
+    "col_row": "Zeile",
+    "col_part_number": "Teilenummer*",
+    "col_revision": "Rev",
+    "col_description": "Bezeichnung",
+    "col_quantities": "Stückzahlen",
+    "part_number_input": "Teilenummer, Zeile {{row}}",
+    "revision_input": "Revision, Zeile {{row}}",
+    "description_input": "Bezeichnung, Zeile {{row}}",
+    "quantities_input": "Stückzahlen, Zeile {{row}}",
+    "quantities_placeholder": "z. B. 1, 10, 50",
+    "add_row": "Zeile hinzufügen",
+    "create_line_items": "Positionen anlegen",
+    "parse_pending": "Die RFQ-E-Mail wird auf eine Stückliste analysiert …",
+    "matched_files": "Dateien: {{files}}",
+    "quantities_ignored": "Einige Eingaben sind keine ganzen Zahlen und werden ignoriert."
   }
 }
