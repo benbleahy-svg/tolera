@@ -1100,7 +1100,10 @@ _PCT_FIELD = Field(ge=0, le=10000)
 class PricingItemPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: Annotated[str, Field(min_length=1, max_length=200)]
+    # Attach a Configure-library def (snapshot-on-attach, same copy semantics
+    # as quote creation); when set, every other field comes from the def.
+    source_def_id: uuid.UUID | None = None
+    name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
     calc_type: CalcType = CalcType.markup
     category: CostCategory = CostCategory.general
     is_custom: bool = False
@@ -1133,7 +1136,8 @@ class PricingItemCellUpdate(BaseModel):
 class DiscountPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: Annotated[str, Field(min_length=1, max_length=200)]
+    source_def_id: uuid.UUID | None = None
+    name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
     formula: Annotated[str | None, Field(max_length=100_000)] = None
     default_pct: Annotated[Decimal | None, Field(ge=0, le=100)] = None
 
@@ -1491,14 +1495,35 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
             amounts += amount if amount is not None else _ZERO
         return _q4(cost_total + amounts)
 
+    def total_markup(brk: ComponentQuantity) -> tuple[Decimal | None, Decimal | None]:
+        """Total Markup (spec #costing output rows, DemoE 09): the pre-discount
+        price delta over Total Estimated Cost, as amount + %. Display-only —
+        derived from the same 4-dp figures the other output rows use."""
+        pre_discount = total_excl_discounts(brk)
+        if pre_discount is None or brk.material_cost is None:
+            return None, None
+        cost_total = (
+            brk.material_cost
+            + (brk.inside_cost or _ZERO)
+            + (brk.outside_cost or _ZERO)
+            + (brk.purchased_component_cost or _ZERO)
+            + (brk.child_override_cost or _ZERO)
+        )
+        amount = _q4(pre_discount - cost_total)
+        pct = _q4(amount / cost_total * _HUNDRED) if cost_total != _ZERO else None
+        return amount, pct
+
     totals = []
     for brk in env.breaks:
         required_total = required_add_ons_total(brk)
+        markup_amount_total, markup_pct_total = total_markup(brk)
         totals.append(
             {
                 "quantity": brk.quantity,
                 "unit_cost": brk.unit_cost,
                 "total_excl_discounts": total_excl_discounts(brk),
+                "total_markup": markup_amount_total,
+                "total_markup_pct": markup_pct_total,
                 "calc_unit_price": brk.calc_unit_price,
                 "manual_unit_price": brk.manual_unit_price,
                 "unit_price": brk.unit_price,
@@ -1552,9 +1577,6 @@ async def add_pricing_item(
 ) -> Any:
     component = await _get_component_or_404(session, component_id)
     await _lock_editable(session, component)
-    _validate_item_shape(payload)
-    if payload.calc_type is CalcType.target_margin:
-        await _reject_duplicate_target_margin(session, component_id)
     max_position = max(
         (
             i.position
@@ -1566,12 +1588,37 @@ async def add_pricing_item(
         ),
         default=-1,
     )
-    item = PricingItem(
-        org_id=principal.active_org_id,
-        component_id=component_id,
-        position=max_position + 1,
-        **payload.model_dump(),
-    )
+    if payload.source_def_id is not None:
+        # add-from-library: the same snapshot-on-attach copy as quote creation,
+        # but estimator-chosen — Refresh Pricing must not re-snapshot it, so
+        # is_from_factory stays False.
+        item_def = await session.get(PricingItemDef, payload.source_def_id)
+        if item_def is None or item_def.deleted_at is not None:
+            raise AppError(
+                "not_found",
+                "Pricing item definition not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        if item_def.calc_type is CalcType.target_margin:
+            await _reject_duplicate_target_margin(session, component_id)
+        item = _snapshot_item(item_def, principal.active_org_id, component_id, max_position + 1)
+        item.is_from_factory = False
+    else:
+        if payload.name is None:
+            raise AppError(
+                "name_required",
+                "A pricing item needs a name (or a source_def_id).",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+        _validate_item_shape(payload)
+        if payload.calc_type is CalcType.target_margin:
+            await _reject_duplicate_target_margin(session, component_id)
+        item = PricingItem(
+            org_id=principal.active_org_id,
+            component_id=component_id,
+            position=max_position + 1,
+            **payload.model_dump(exclude={"source_def_id"}),
+        )
     session.add(item)
     await session.flush()
     await reprice_component(session, principal.active_org_id, component_id)
@@ -1711,7 +1758,6 @@ async def add_discount(
 ) -> Any:
     component = await _get_component_or_404(session, component_id)
     await _lock_editable(session, component)
-    _validate_pricing_formula(payload.formula, "discount")
     max_position = max(
         (
             d.position
@@ -1721,12 +1767,32 @@ async def add_discount(
         ),
         default=-1,
     )
-    discount = Discount(
-        org_id=principal.active_org_id,
-        component_id=component_id,
-        position=max_position + 1,
-        **payload.model_dump(),
-    )
+    if payload.source_def_id is not None:
+        discount_def = await session.get(DiscountDef, payload.source_def_id)
+        if discount_def is None or discount_def.deleted_at is not None:
+            raise AppError(
+                "not_found",
+                "Discount definition not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        discount = _snapshot_discount(
+            discount_def, principal.active_org_id, component_id, max_position + 1
+        )
+        discount.is_from_factory = False
+    else:
+        if payload.name is None:
+            raise AppError(
+                "name_required",
+                "A discount needs a name (or a source_def_id).",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+        _validate_pricing_formula(payload.formula, "discount")
+        discount = Discount(
+            org_id=principal.active_org_id,
+            component_id=component_id,
+            position=max_position + 1,
+            **payload.model_dump(exclude={"source_def_id"}),
+        )
     session.add(discount)
     await session.flush()
     await reprice_component(session, principal.active_org_id, component_id)
@@ -1746,7 +1812,14 @@ async def update_discount(
     component = await _get_component_or_404(session, discount.component_id)
     await _lock_editable(session, component)
     _validate_pricing_formula(payload.formula, "discount")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True, exclude={"source_def_id"})
+    if "name" in updates and updates["name"] is None:
+        raise AppError(
+            "name_required",
+            "A discount name cannot be cleared.",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+    for key, value in updates.items():
         setattr(discount, key, value)
     await session.flush()
     await reprice_component(session, principal.active_org_id, discount.component_id)
