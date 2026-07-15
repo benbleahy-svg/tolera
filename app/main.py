@@ -20,7 +20,9 @@ from .config import Settings, get_settings
 from .config_completeness import config_completeness_router
 from .custom_tables import custom_tables_router
 from .db import make_engine, make_sessionmaker
+from .email_connections import router as email_connections_router
 from .email_ingest import ingest_router
+from .email_threads import router as email_threads_router
 from .errors import register_exception_handlers
 from .file_split import split_router
 from .health import router as health_router
@@ -92,6 +94,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(config_completeness_router)
     app.include_router(collab_router)
     app.include_router(ingest_router)
+    app.include_router(email_connections_router)
+    app.include_router(email_threads_router)
 
     return app
 

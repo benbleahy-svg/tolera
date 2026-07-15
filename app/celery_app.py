@@ -16,7 +16,7 @@ celery_app = Celery(
     "tolera",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks", "app.file_split", "app.email_ingest"],
+    include=["app.tasks", "app.file_split", "app.email_ingest", "app.email_sync"],
 )
 
 celery_app.conf.update(
@@ -28,4 +28,18 @@ celery_app.conf.update(
     task_soft_time_limit=270,  # soft timeout (s)
     worker_max_tasks_per_child=200,
     result_expires=3600,
+    # M3.5 — the inbound-mail poll ("Celery task every 5 min", spec
+    # #email-connectivity). Sync tasks ride a dedicated "email" queue so the
+    # worker serving it can cap concurrency (spec build note: N active users
+    # must not flood the provider APIs).
+    beat_schedule={
+        "email-sync": {
+            "task": "app.email_sync_all",
+            "schedule": settings.email_sync_interval_seconds,
+        },
+    },
+    task_routes={
+        "app.email_sync_all": {"queue": "email"},
+        "app.email_sync_connection": {"queue": "email"},
+    },
 )

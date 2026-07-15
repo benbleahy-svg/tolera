@@ -29,6 +29,10 @@ def _settings(**overrides: Any) -> Settings:
         "environment": "test",
         "clerk_jwks_url": JWKS_URL,
         "clerk_jwt_issuer": ISSUER,
+        # Hermetic: Settings reads .env/env vars, so a developer machine with
+        # CLERK_AUTHORIZED_PARTIES configured would otherwise fail the
+        # no-azp-claim tests. Tests that exercise the azp guard override this.
+        "clerk_authorized_parties": "",
     }
     return Settings(**{**base, **overrides})
 

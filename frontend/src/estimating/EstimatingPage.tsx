@@ -16,6 +16,7 @@ import { ApiError } from '../api/client';
 import { PartMatchesChip } from '../parts/MatchingParts';
 import { useHasPermission } from '../session/session';
 import { AddOnsSection } from './AddOnsSection';
+import { CommunicationsSection } from './CommunicationsSection';
 import { BulkCreateDialog } from './BulkCreateDialog';
 import { useEstimatingApi } from './api';
 import { ChangeProcessModal } from './ChangeProcessModal';
@@ -444,6 +445,10 @@ export function EstimatingPage() {
           )}
 
           {totals && <QuoteTotalsPanel totals={totals} />}
+
+          {/* Unified communications timeline (M3.5) — email round-trips on
+              this quote; send box needs quote_edit (canEdit). */}
+          {quoteId && <CommunicationsSection quoteId={quoteId} canSend={canEdit} />}
         </>
       )}
 
