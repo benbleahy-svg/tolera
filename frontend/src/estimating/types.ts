@@ -336,6 +336,8 @@ export interface PricingTotalsRow {
   quantity: number;
   unit_cost: string | null;
   total_excl_discounts: string | null;
+  total_markup: string | null;
+  total_markup_pct: string | null;
   calc_unit_price: string | null;
   manual_unit_price: string | null;
   unit_price: string | null;
@@ -442,13 +444,44 @@ export interface PricingSummary {
   totals: PricingTotalsRow[];
 }
 
-export interface PricingItemCreateBody {
+/** Ad-hoc pricing-item fields (also the PATCH body). */
+export interface PricingItemFields {
   name: string;
-  calc_type: CalcType;
+  calc_type?: CalcType;
   category?: PricingCategory;
   is_custom?: boolean;
   custom_category_name?: string | null;
   color?: string | null;
   formula?: string | null;
   default_pct?: string | null;
+}
+
+/** Create either FROM the Configure library (snapshot-on-attach — the def
+ * supplies every field server-side) OR ad-hoc — never a mix. */
+export type PricingItemCreateBody = { source_def_id: string } | PricingItemFields;
+
+export type PricingItemUpdateBody = PricingItemFields;
+
+export type DiscountCreateBody =
+  | { source_def_id: string }
+  | { name: string; default_pct?: string | null };
+
+/** Configure-library defs offered by the on-quote Add flows. */
+export interface PricingItemDefLite {
+  id: string;
+  name: string;
+  calc_type: CalcType;
+  category: PricingCategory;
+  is_custom: boolean;
+  custom_category_name: string | null;
+  color: string | null;
+  formula: string | null;
+  default_pct: string | null;
+}
+
+export interface DiscountDefLite {
+  id: string;
+  name: string;
+  formula: string | null;
+  default_pct: string | null;
 }

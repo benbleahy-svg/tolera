@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { KalkEditor } from './KalkEditor';
 import type {
   KalkCheckResult,
   KalkDeclaredVariable,
@@ -22,6 +23,8 @@ import type {
 } from './types';
 
 interface Props {
+  /** Formula owner (operation name) for the editor header. */
+  name?: string;
   formula: string | null;
   variableOverrides: Record<string, VariableOverrideValue>;
   loadReport: () => Promise<KalkQtyReport[]>;
@@ -158,6 +161,7 @@ function draftsToOverrides(
 }
 
 export function KalkSection({
+  name,
   formula,
   variableOverrides,
   loadReport,
@@ -168,8 +172,8 @@ export function KalkSection({
 }: Props) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState(formula ?? '');
-  const [checkResult, setCheckResult] = useState<KalkCheckResult | null>(null);
   const [report, setReport] = useState<KalkQtyReport[] | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   const [overrideDrafts, setOverrideDrafts] = useState<Record<string, DraftValue>>(() =>
     toDrafts(variableOverrides),
   );
@@ -192,8 +196,21 @@ export function KalkSection({
   const first = report?.[0] ?? null;
   const quantities = (report ?? []).map((r) => r.quantity);
   // runtime/setup_time override via the manual-minutes pair above, never here
-  const variables = (first?.declared_variables ?? []).filter(
+  const allVariables = (first?.declared_variables ?? []).filter(
     (v) => v.name !== 'runtime' && v.name !== 'setup_time',
+  );
+  // default_visible=False hides a variable from the quote-side panel unless the
+  // estimator opts in ("Show hidden variables", spec op-def Variables table);
+  // a hidden variable with a PERSISTED override (or an in-progress draft)
+  // stays visible until its removal is actually saved — an override must
+  // never be invisible state.
+  const hasOverride = (name: string) =>
+    overrideDrafts[name] !== undefined || variableOverrides[name] !== undefined;
+  const hiddenCount = allVariables.filter(
+    (v) => v.default_visible === false && !hasOverride(v.name),
+  ).length;
+  const variables = allVariables.filter(
+    (v) => showHidden || v.default_visible !== false || hasOverride(v.name),
   );
   const grouped = new Set((first?.variable_groups ?? []).flatMap((g) => g.members));
   const ungrouped = variables.filter((v) => !grouped.has(v.name));
@@ -224,50 +241,14 @@ export function KalkSection({
 
   return (
     <section className="est-kalk">
-      <h4>{t('kalk.formula')}</h4>
-      <textarea
-        className="est-kalk-editor"
-        spellCheck={false}
-        rows={8}
+      <KalkEditor
         value={draft}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          setCheckResult(null);
-        }}
-        placeholder={t('kalk.formula_placeholder')}
+        onChange={setDraft}
+        name={name}
+        onCheck={onCheck}
+        disabled={disabled}
       />
-      {checkResult && (
-        <p className={checkResult.ok ? 'est-kalk-ok' : 'est-kalk-errors'} role="status">
-          {checkResult.ok
-            ? t('kalk.check_ok')
-            : checkResult.errors
-                .map((err) =>
-                  err.line !== null
-                    ? t('kalk.error_at_line', { line: err.line, message: err.message })
-                    : err.message,
-                )
-                .join('\n')}
-        </p>
-      )}
       <div className="est-actions">
-        <button
-          type="button"
-          onClick={() =>
-            void onCheck(draft)
-              .then(setCheckResult)
-              .catch(() =>
-                setCheckResult({
-                  ok: false,
-                  errors: [
-                    { code: 'check_failed', message: t('kalk.check_failed'), line: null, col: null },
-                  ],
-                }),
-              )
-          }
-          disabled={draft.trim() === ''}
-        >
-          {t('kalk.check')}
-        </button>
         <button
           type="button"
           disabled={disabled}
@@ -280,6 +261,16 @@ export function KalkSection({
       {formula && first && (
         <>
           <h4>{t('kalk.variables')}</h4>
+          {hiddenCount > 0 && (
+            <label className="est-show-hidden">
+              <input
+                type="checkbox"
+                checked={showHidden}
+                onChange={(e) => setShowHidden(e.target.checked)}
+              />
+              {t('kalk.show_hidden_variables', { count: hiddenCount })}
+            </label>
+          )}
           {first.errors.length > 0 && (
             <p className="est-kalk-errors" role="alert">
               {first.errors
@@ -306,7 +297,7 @@ export function KalkSection({
               <button
                 type="button"
                 disabled={disabled}
-                onClick={() => onSaveOverrides(draftsToOverrides(overrideDrafts, variables))}
+                onClick={() => onSaveOverrides(draftsToOverrides(overrideDrafts, allVariables))}
               >
                 {t('kalk.save_overrides')}
               </button>

@@ -758,3 +758,118 @@ def test_pricing_isolated_across_orgs(app_client: TestClient, seeder: Seeder) ->
             ).status_code
             == 404
         )
+
+
+# --------------------------------------------------------------------------- #
+# M1-UI-recon — Total Markup output row + add-from-library (source_def_id)
+# --------------------------------------------------------------------------- #
+def test_totals_expose_total_markup(app_client: TestClient, seeder: Seeder) -> None:
+    """Total Markup (DemoE 09, spec #costing output rows): the pre-discount
+    price delta over Total Estimated Cost, as amount + %."""
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        component = _new_component(app_client)
+        _add_manual_op(app_client, component, "CNC Bearbeitung", "100.0000")
+        _add_pricing_item(
+            app_client, component, name="General Markup", calc_type="markup", default_pct="20"
+        )
+        row = _total_row(_pricing(app_client, component), 1)
+        assert Decimal(row["total_excl_discounts"]) == Decimal("120.0000")
+        assert Decimal(row["total_markup"]) == Decimal("20.0000")
+        assert Decimal(row["total_markup_pct"]) == Decimal("20.0000")
+
+
+def test_total_markup_none_before_reprice(app_client: TestClient, seeder: Seeder) -> None:
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        component = _new_component(app_client)
+        row = _total_row(_pricing(app_client, component), 1)
+        assert row["total_markup"] is None
+        assert row["total_markup_pct"] is None
+
+
+def test_add_pricing_item_from_def_snapshots(app_client: TestClient, seeder: Seeder) -> None:
+    """Add-from-library: source_def_id copies the def (snapshot-on-attach) but
+    is estimator-chosen, so is_from_factory stays False (Refresh Pricing must
+    not re-snapshot an explicit choice)."""
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        component = _new_component(app_client)  # created before the def exists
+        def_res = app_client.post(
+            "/api/pricing-item-defs",
+            json={"name": "Marge Bibliothek", "calc_type": "margin", "default_pct": "25"},
+        )
+        assert def_res.status_code == 201, def_res.text
+        def_id = def_res.json()["id"]
+
+        item = _add_pricing_item(app_client, component, source_def_id=def_id)
+        assert item["name"] == "Marge Bibliothek"
+        assert item["calc_type"] == "margin"
+        assert Decimal(item["default_pct"]) == Decimal("25")
+        assert item["source_def_id"] == def_id
+        assert item["is_from_factory"] is False
+
+
+def test_add_pricing_item_from_unknown_def_404(app_client: TestClient, seeder: Seeder) -> None:
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        component = _new_component(app_client)
+        res = app_client.post(
+            f"/api/components/{component}/pricing-items",
+            json={"source_def_id": str(uuid.uuid4())},
+        )
+        assert res.status_code == 404
+
+
+def test_add_pricing_item_needs_name_or_def(app_client: TestClient, seeder: Seeder) -> None:
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        component = _new_component(app_client)
+        res = app_client.post(f"/api/components/{component}/pricing-items", json={})
+        assert res.status_code == 422
+
+
+def test_add_discount_from_def_snapshots(app_client: TestClient, seeder: Seeder) -> None:
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        component = _new_component(app_client)
+        def_res = app_client.post(
+            "/api/discount-defs", json={"name": "Treuerabatt", "default_pct": "5"}
+        )
+        assert def_res.status_code == 201, def_res.text
+        def_id = def_res.json()["id"]
+
+        res = app_client.post(
+            f"/api/components/{component}/discounts", json={"source_def_id": def_id}
+        )
+        assert res.status_code == 201, res.text
+        discounts = _pricing(app_client, component)["discounts"]
+        attached = next(d for d in discounts if d["source_def_id"] == def_id)
+        assert attached["name"] == "Treuerabatt"
+        assert Decimal(attached["default_pct"]) == Decimal("5")
+        assert attached["is_from_factory"] is False
+
+
+def test_add_discount_needs_name_or_def(app_client: TestClient, seeder: Seeder) -> None:
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        component = _new_component(app_client)
+        res = app_client.post(f"/api/components/{component}/discounts", json={})
+        assert res.status_code == 422
+
+
+def test_add_from_def_isolated_across_orgs(app_client: TestClient, seeder: Seeder) -> None:
+    """Org B cannot attach org A's def to its own component (RLS)."""
+    org_a, user_a = _org_admin(seeder, "org-a")
+    org_b, user_b = _org_admin(seeder, "org-b")
+    with authed(app_client, user_id=user_a, org_id=org_a, roles=ADMIN):
+        def_res = app_client.post(
+            "/api/pricing-item-defs", json={"name": "Org A Markup", "calc_type": "markup"}
+        )
+        def_id = def_res.json()["id"]
+    with authed(app_client, user_id=user_b, org_id=org_b, roles=ADMIN):
+        component = _new_component(app_client)
+        res = app_client.post(
+            f"/api/components/{component}/pricing-items", json={"source_def_id": def_id}
+        )
+        assert res.status_code == 404

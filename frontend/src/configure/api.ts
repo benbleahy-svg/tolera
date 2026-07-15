@@ -76,12 +76,20 @@ export interface ConfigCompleteness {
   unrated_materials: number;
 }
 
+export interface OperationDefUpdateBody {
+  name?: string;
+  run_rate?: string | null;
+  labour_rate?: string | null;
+  setup_cost?: string | null;
+  setup_time_mins?: string | null;
+  surcharge_pct?: string;
+  cost_formula?: string | null;
+}
+
 export interface ConfigureApi {
   listOperationDefs: (q: string) => Promise<import('../estimating/types').OperationDefOut[]>;
-  updateOperationDef: (
-    defId: string,
-    body: { run_rate?: string | null; labour_rate?: string | null },
-  ) => Promise<unknown>;
+  updateOperationDef: (defId: string, body: OperationDefUpdateBody) => Promise<unknown>;
+  kalkCheck: (formula: string) => Promise<import('../estimating/types').KalkCheckResult>;
   getConfigCompleteness: () => Promise<ConfigCompleteness>;
   applyRateToAll: (runRate: string) => Promise<{ updated: number }>;
   listTables: () => Promise<CustomTableOut[]>;
@@ -115,6 +123,8 @@ export function useConfigureApi(): ConfigureApi {
       listOperationDefs: (q) => apiFetch(`/api/operation-defs?q=${encodeURIComponent(q)}`, token),
       updateOperationDef: (defId, body) =>
         apiFetch(`/api/operation-defs/${defId}`, token, { method: 'PATCH', body }),
+      kalkCheck: (formula) =>
+        apiFetch('/api/kalk/check', token, { method: 'POST', body: { formula } }),
       getConfigCompleteness: () => apiFetch('/api/config-completeness', token),
       applyRateToAll: (runRate) =>
         apiFetch('/api/operation-defs/apply-rate', token, {

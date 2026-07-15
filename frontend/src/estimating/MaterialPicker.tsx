@@ -97,7 +97,8 @@ export function MaterialPicker({
       <span className="est-field-label">{t('estimating.material')}</span>
       {selected ? (
         <span className="est-material-selected">
-          <span title={selectedPath ?? undefined}>{selected.display_name}</span>
+          {/* full hierarchical path inline (frames show "Metal / Aluminum / …") */}
+          <span>{selectedPath ?? selected.display_name}</span>
           <button type="button" onClick={startEdit} disabled={disabled}>
             {t('estimating.edit_material_properties')}
           </button>

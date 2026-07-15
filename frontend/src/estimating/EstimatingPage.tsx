@@ -198,6 +198,22 @@ export function EstimatingPage() {
   const currentProcess = processes.find((p) => p.id === costing?.process_id) ?? null;
   const editable = canEdit && quote.status === 'draft';
 
+  // quantity → make quantity for the Yield / Make Quantity footer rows
+  const makeQuantities: Record<number, number> = Object.fromEntries(
+    (quote.items[itemIndex]?.quantities ?? []).map((q) => [q.quantity, q.make_quantity]),
+  );
+
+  const refreshPricing = () => {
+    setError(null);
+    api
+      .refreshPricing(quoteId)
+      .then(() => {
+        if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+        loadPricing();
+      })
+      .catch(fail);
+  };
+
   return (
     <main className="est-page">
       <header className="est-header">
@@ -269,22 +285,6 @@ export function EstimatingPage() {
           <button type="button" onClick={() => setChangingProcess(true)} disabled={!editable}>
             {t('estimating.change_process')}
           </button>
-          <button
-            type="button"
-            disabled={!editable}
-            onClick={() => {
-              setError(null);
-              api
-                .refreshPricing(quoteId)
-                .then(() => {
-                  if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
-                  loadPricing();
-                })
-                .catch(fail);
-            }}
-          >
-            {t('pricing.refresh_pricing')}
-          </button>
           <MaterialPicker
             selected={material}
             selectedPath={material?.path ?? null}
@@ -313,8 +313,10 @@ export function EstimatingPage() {
       {costing && (
         <>
           <OperationsSection
+            sectionId="materials"
             title={t('estimating.materials')}
             addLabel={t('estimating.add_material_operation')}
+            summaryLabel={t('estimating.material_summary')}
             category="material"
             operations={costing.operations}
             quantities={costing.quantities}
@@ -340,11 +342,14 @@ export function EstimatingPage() {
             disabled={!editable}
           />
           <OperationsSection
+            sectionId="operations"
             title={t('estimating.operations')}
             addLabel={t('estimating.add_operation')}
+            summaryLabel={t('estimating.operation_summary')}
             category="operation"
             operations={costing.operations}
             quantities={costing.quantities}
+            makeQuantities={makeQuantities}
             formatMoney={formatMoney}
             searchDefs={(q) => api.listOperationDefs(q)}
             onAddFromDef={(defId) =>
@@ -374,13 +379,16 @@ export function EstimatingPage() {
               onAddItem={(body) =>
                 componentId && applyPricing(api.addPricingItem(componentId, body))
               }
+              onUpdateItem={(id, body) => applyPricing(api.updatePricingItem(id, body))}
               onRemoveItem={(id) => applyPricing(api.removePricingItem(id))}
+              onReorderItems={(ids) =>
+                componentId && applyPricing(api.reorderPricingItems(componentId, ids))
+              }
               onItemPctOverride={(id, quantity, manualPct) =>
                 applyPricing(api.setPricingItemPct(id, quantity, manualPct))
               }
-              onAddDiscount={(name, defaultPct) =>
-                componentId &&
-                applyPricing(api.addDiscount(componentId, { name, default_pct: defaultPct }))
+              onAddDiscount={(body) =>
+                componentId && applyPricing(api.addDiscount(componentId, body))
               }
               onRemoveDiscount={(id) => applyPricing(api.removeDiscount(id))}
               onDiscountPctOverride={(id, quantity, manualPct) =>
@@ -390,6 +398,10 @@ export function EstimatingPage() {
                 componentId &&
                 applyPricing(api.setUnitPriceOverride(componentId, quantity, manualUnitPrice))
               }
+              onRefreshPricing={refreshPricing}
+              loadItemDefs={api.listPricingItemDefs}
+              loadDiscountDefs={api.listDiscountDefs}
+              onKalkCheck={api.kalkCheck}
             />
           )}
 
@@ -484,9 +496,20 @@ export function EstimatingPage() {
         <ChangeProcessModal
           processes={processes}
           currentProcessId={costing?.process_id ?? null}
-          onCommit={(processId, keep) => {
+          currentMaterial={material}
+          searchMaterials={(q) => api.searchMaterials(q)}
+          onCommit={(processId, keep, materialId) => {
             setChangingProcess(false);
-            if (componentId) apply(api.setComponentProcess(componentId, processId, keep));
+            if (!componentId) return;
+            apply(
+              api
+                .setComponentProcess(componentId, processId, keep)
+                .then((next) =>
+                  materialId !== undefined
+                    ? api.setComponentMaterial(componentId, materialId)
+                    : next,
+                ),
+            );
           }}
           onClose={() => setChangingProcess(false)}
         />

@@ -68,6 +68,8 @@ function summary(): PricingSummary {
         quantity: 1,
         unit_cost: '1000.0000',
         total_excl_discounts: '2000.0000',
+        total_markup: null,
+        total_markup_pct: null,
         calc_unit_price: '2000.00',
         manual_unit_price: null,
         unit_price: '1800.00',

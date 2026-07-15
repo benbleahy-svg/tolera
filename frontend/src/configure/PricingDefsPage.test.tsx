@@ -84,7 +84,7 @@ describe('PricingDefsPage', () => {
     await screen.findByText('General Markup');
     await userEvent.click(screen.getByRole('button', { name: 'Neue Preisposition' }));
     await userEvent.type(screen.getByLabelText('Name'), 'Zielmarge');
-    await userEvent.selectOptions(screen.getByLabelText('Berechnungsart'), 'target_margin');
+    await userEvent.click(screen.getByRole('radio', { name: 'Zielmarge' }));
     await userEvent.type(screen.getByLabelText('Prozentsatz (%)'), '20');
     await userEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }));
     await waitFor(() =>

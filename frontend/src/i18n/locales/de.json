@@ -278,7 +278,19 @@
     "missing_rate": "Satz fehlt",
     "configure_rates_link": "Sätze konfigurieren →",
     "missing_rates_banner_one": "Stundensätze nicht gesetzt — Kosten erscheinen als 0,00 € (1 Position).",
-    "missing_rates_banner_other": "Stundensätze nicht gesetzt — Kosten erscheinen als 0,00 € ({{count}} Positionen)."
+    "missing_rates_banner_other": "Stundensätze nicht gesetzt — Kosten erscheinen als 0,00 € ({{count}} Positionen).",
+    "setup_time_col": "Rüstzeit",
+    "run_time_col": "Laufzeit",
+    "material_summary": "Materialsumme",
+    "operation_summary": "Summe Arbeitsgänge",
+    "yield_row": "Ausbeute (%)",
+    "make_quantity_row": "Fertigungsmenge",
+    "show_unit_values": "Stückwerte anzeigen",
+    "display_options": "Anzeigeoptionen",
+    "collapse_section": "{{title}} einklappen",
+    "expand_section": "{{title}} ausklappen",
+    "change_process_title": "Prozess und Werkstoff ändern",
+    "process_search_placeholder": "Prozess filtern …"
   },
   "kalk": {
     "formula": "Kalk-Formel",
@@ -290,7 +302,9 @@
     "variables": "Variablen",
     "calculated_option": "Berechnet: {{value}}",
     "save_overrides": "Variablen übernehmen",
-    "check_failed": "Prüfung fehlgeschlagen — bitte erneut versuchen."
+    "check_failed": "Prüfung fehlgeschlagen — bitte erneut versuchen.",
+    "formula_titled": "Kalk-Formel — {{name}}",
+    "show_hidden_variables": "Ausgeblendete Variablen anzeigen ({{count}})"
   },
   "configure": {
     "custom_tables": "Eigene Tabellen",
@@ -326,7 +340,11 @@
     "rates_banner_one": "1 Arbeitsgang ohne Stundensatz — Kosten erscheinen als 0,00 €.",
     "rates_banner_other": "{{count}} Arbeitsgänge ohne Stundensatz — Kosten erscheinen als 0,00 €.",
     "rates_banner_materials_one": "1 Werkstoff ohne Kostensatz.",
-    "rates_banner_materials_other": "{{count}} Werkstoffe ohne Kostensatz."
+    "rates_banner_materials_other": "{{count}} Werkstoffe ohne Kostensatz.",
+    "op_def_drawer": "Arbeitsgang bearbeiten — {{name}}",
+    "edit_op_def_label": "{{name}} bearbeiten",
+    "export_csv": "CSV exportieren",
+    "export_csv_label": "Tabelle {{name}} als CSV exportieren"
   },
   "pricing": {
     "refresh_pricing": "Preise aktualisieren",
@@ -369,7 +387,7 @@
     "total_excl_discounts": "Gesamt (ohne Rabatte)",
     "unit_price_excl_discounts": "Stückpreis (ohne Rabatte)",
     "unit_price_override_label": "Stückpreis-Override für Losgröße {{quantity}}",
-    "total_profit": "Gewinn / Marge",
+    "total_profit": "Gewinn",
     "add_discount": "RABATT HINZUFÜGEN",
     "discount_name": "Rabattname",
     "discount_pct": "Rabatt (%)",
@@ -402,7 +420,25 @@
     "apply_to_all": "AUF ALLE ANWENDEN",
     "quote_totals_title": "Angebotssumme",
     "net_total": "Netto",
-    "gross_total": "Brutto"
+    "gross_total": "Brutto",
+    "actions_menu": "AKTIONEN",
+    "total_markup": "Gesamtaufschlag",
+    "profit_margin": "Gewinnmarge",
+    "edit_item_title": "Preisformel — {{name}}",
+    "edit_item_label": "{{name}} bearbeiten",
+    "reorder_handle_label": "{{name}} verschieben",
+    "from_library": "Aus der Bibliothek",
+    "create_new": "Neu erstellen",
+    "add_from_library_label": "{{name}} aus der Bibliothek hinzufügen",
+    "color_swatch_label": "Farbe {{color}}",
+    "color_maroon": "Dunkelrot",
+    "color_orange": "Orange",
+    "color_gold": "Gold",
+    "color_green": "Grün",
+    "color_teal": "Türkis",
+    "color_blue": "Blau",
+    "color_purple": "Violett",
+    "color_grey": "Grau"
   },
   "viewer": {
     "back_to_parts": "← Teile",

@@ -839,3 +839,29 @@ The check runs through the org-pinned session, so it reads only the active org's
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*
+
+## [2026-07-15] M1 UI reconciliation — phone-built blocks (M1.7/M1.9/M1.10) rebuilt to the demo frames
+
+**Context.** PRs #16/#18/#19 were built in cloud sessions whose checkouts had no demo screenshots (committed 2026-07-14) and no PP KB (gitignored). A three-agent audit against the frames found the semantics/math faithful but the visual anatomy and interaction chrome drifted. Remediated in one pass: estimating-grid anatomy (Setup/Run Time columns, per-unit beneath qty totals, Yield/Make-Quantity footers, in-table ADD buttons, empty-state skeleton), shared collapsible section chrome + Display-Options gear, line-numbered Kalk editor chrome reused by drawer/pricing/Configure, pricing-item edit path (expand ↗ → "Preisformel — <name>"), pricing-stack drag-reorder, Total Markup output row, ACTIONS ▾ menu, add-from-library flows (`source_def_id` on the pricing-item/discount create endpoints), variable visibility (`default_visible` + Show-hidden toggle), Custom-Tables CSV export, Update-Process-and-Material modal, calc-type radios + 8 fixed swatches.
+
+**Assumed (cheap to reverse):**
+- An estimator's mid-quote add-from-library sets `is_from_factory = False` — Refresh Pricing never re-snapshots an explicit choice (factory-attached rows keep `True` and refresh as before).
+- Total Markup is a display-only derivation: `total_excl_discounts − Total Estimated Cost` (amount, 4 dp) and its % over cost — no persisted column.
+- Operations rows keep ↑/↓ reorder (tests + a11y); pricing items got the drag handle the frames show. Unify later if PP-parity on operations matters.
+- Kalk editor ships line numbers + CHECK chrome without version history (see OPEN below).
+
+## [2026-07-15] OPEN: Material Calculator button (estimating Materials section)
+
+The frames show `MATERIAL CALCULATOR` beside `ADD MATERIAL OPERATION`; the KB feature is Online-Metals-backed (US). The DACH replacement (thyssenkrupp materials4me feed) is decided for M6.7b. **Recommended default (applied):** no button until M6.7b lands, then it opens the feed-backed calculator. Alternative: disabled placeholder now.
+
+## [2026-07-15] OPEN: REQUESTED FINISHES multi-select + ACTIONS ▾ on the costing-inputs band
+
+Spec `#partview` (costing-inputs row: PROCESS · MATERIAL · REQUESTED FINISHES · ACTIONS ▾) — no build-plan block claims Requested Finishes; finishes as data exist on operations (`is_finish`). Needs an owner (suggest: the quote-detail block that also owns the line-item sidebar). Not built in the reconciliation pass.
+
+## [2026-07-15] OPEN: op-def Variables table + Kalk editor versions/last-saved-by
+
+The spec's operation-definition editor shows a Variables table (VARIABLE | VALUE | VISIBILITY eyes) and the Kalk editor chrome lists last-saved-by + a Versions link. Both need backend surface that doesn't exist: a def-level formula evaluation endpoint (to enumerate declared variables without a quote operation) and a formula-version store. The reconciliation pass shipped the def editor (name/rates/formula + CHECK) and quote-side visibility filtering only. **Recommended:** def-evaluation endpoint as a small M4-adjacent block; version store decided together with Lens correction history (similar shape).
+
+## [2026-07-15] OPEN: estimating route shape — `/quotes/edit/:id/:lineItemId` + line-item sidebar
+
+Spec `#partview` routes per line item with a left sidebar; the built page is `/quotes/:quoteId` with a line-item select (deferral previously only a code comment — now logged). Belongs to the quote-detail screen block; revisit when that block lands.
