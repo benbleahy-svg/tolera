@@ -76,7 +76,7 @@ describe('RulesPage', () => {
     renderWithProviders(<RulesPage />);
     expect(await screen.findByText('All tight dimension tolerances')).toBeInTheDocument();
     const row = screen.getByText('All tight dimension tolerances').closest('tr')!;
-    expect(row).toHaveTextContent('OR');
+    expect(row).toHaveTextContent('ODER'); // logical_operator localized (German-first)
     expect(row).toHaveTextContent('1'); // one signal
     expect(row).toHaveTextContent('2'); // two resolutions
   });

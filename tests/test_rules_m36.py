@@ -80,8 +80,9 @@ class TestWorkedRulesRoundTrip:
         assert serialize_rules(rules) == text
 
     def test_fixture_is_re_unitized_to_metric(self) -> None:
-        """DACH §7: thresholds in mm — the 5-thou tight tolerance is 0.13 mm and
-        no query in the golden set carries imperial units."""
+        """DACH §7: thresholds in mm — the tight-tolerance rule compares
+        smallest_delta ≤ 0.13 mm (5 thou re-unit'd) in every one of its
+        signals, and no query in the golden set carries imperial units."""
         payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
         units = {
             q["units"]
@@ -91,14 +92,28 @@ class TestWorkedRulesRoundTrip:
             for q in group["queries"]
         }
         assert "in" not in units
-        text = FIXTURE.read_text(encoding="utf-8")
-        assert '"value":0.13' in text.replace(" ", "")
+        tight = next(r for r in payload if r["name"] == "All tight dimension tolerances")
+        assert len(tight["signals"]) == 17  # 4 tolerance + 13 control-frame paths
+        for signal in tight["signals"]:
+            (query,) = signal["groups"][0]["queries"]
+            assert query["value"] == 0.13
+            assert query["units"] == "mm"
+            assert query["value_type"] == "distance"
+        envelope = next(r for r in payload if r["name"] == "Machine envelope exceeded")
+        (env_query,) = envelope["signals"][0]["groups"][0]["queries"]
+        assert env_query["value"] == 305  # 12 in → mm bed limit
+        assert env_query["units"] == "mm"
 
     def test_german_finish_keywords_present(self) -> None:
-        """DACH §7 keyword rules carry German terms mapped alongside English."""
-        text = FIXTURE.read_text(encoding="utf-8")
+        """DACH §7: the finish-keyword rule's own keyword list carries the
+        German terms alongside English, at the exact AST location the
+        evaluator will read."""
+        payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        finish = next(r for r in payload if r["name"] == "Finish keyword adds finishing operation")
+        (query,) = finish["signals"][0]["groups"][0]["queries"]
+        assert query["operator"] == "includesCaseInsensitive"
         for keyword in ("eloxier", "entgrat", "passivier", "schleif"):
-            assert keyword in text
+            assert any(keyword in item for item in query["value"])
 
     def test_export_of_empty_set_is_empty_array(self) -> None:
         assert serialize_rules([]) == "[]"
@@ -397,7 +412,16 @@ def test_import_rejects_bad_payloads_with_error_envelope(
         invalid = app_client.post("/api/rules/import", json={"rules_json": bad_schema})
         assert invalid.status_code == 422
         assert invalid.json()["code"] == "invalid_rules_json"
-        # A rejected import writes nothing (all-or-nothing paste-in).
+        # All-or-nothing paste-in: a valid rule ahead of an invalid one must
+        # not be persisted either.
+        bad_second = _minimal_rule(
+            uuid="00000000-0000-4000-8000-0000000000bb", logical_operator="XOR"
+        )
+        mixed = app_client.post(
+            "/api/rules/import",
+            json={"rules_json": json.dumps([_minimal_rule(), bad_second])},
+        )
+        assert mixed.status_code == 422
         assert app_client.get("/api/rules").json() == []
 
 

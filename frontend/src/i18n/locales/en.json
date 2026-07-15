@@ -328,7 +328,7 @@
     "rates_banner_materials_one": "1 material has no cost rate.",
     "rates_banner_materials_other": "{{count}} materials have no cost rate.",
     "rules": "Review rules",
-    "rules_hint": "Requirements-review rules — the whole rule set exports as one JSON string and imports by paste-in (portable and diffable). The rule editor arrives with M3.8."
+    "rules_hint": "Requirements-review rules — the whole rule set exports as one JSON string and imports by paste-in (portable and diffable)."
   },
   "pricing": {
     "refresh_pricing": "Refresh Pricing",
@@ -780,6 +780,8 @@
     "export_label": "Export (JSON string)",
     "import_label": "Import (paste JSON string)",
     "import_button": "Import",
-    "import_result": "Import complete: {{created}} created, {{updated}} updated."
+    "import_result": "Import complete: {{created}} created, {{updated}} updated.",
+    "op_and": "AND",
+    "op_or": "OR"
   }
 }

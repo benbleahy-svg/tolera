@@ -91,7 +91,7 @@ export function RulesPage() {
             {rules.map((rule) => (
               <tr key={rule.id}>
                 <td title={rule.description}>{rule.name}</td>
-                <td>{rule.logical_operator}</td>
+                <td>{t(`rules.op_${rule.logical_operator.toLowerCase()}`)}</td>
                 <td>{rule.signals.length}</td>
                 <td>{rule.resolutions.length}</td>
                 <td>{rule.is_active ? t('common.yes') : t('common.no')}</td>

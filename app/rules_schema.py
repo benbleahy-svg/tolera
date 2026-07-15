@@ -87,7 +87,13 @@ INTERROGATION_PATH = re.compile(
     r"^(three_axis_mill|sheet_metal|tube_laser|lathe)\.[a-z0-9_]+(\.[a-z0-9_]+)*$"
 )
 
-NUMERIC_OPERATORS = ("lessThanOrEqual", "greaterThanOrEqual", "equals")
+#: Which operators each filter_type admits — one map so a future operator
+#: can't be added to one branch and forgotten in another.
+FILTER_TYPE_OPERATORS: dict[str, tuple[str, ...]] = {
+    "numeric": ("lessThanOrEqual", "greaterThanOrEqual", "equals"),
+    "boolean": ("equals",),
+    "string": ("equals", "includesCaseInsensitive", "regex"),
+}
 
 QueryOperator = Literal[
     "lessThanOrEqual", "greaterThanOrEqual", "equals", "includesCaseInsensitive", "regex"
@@ -130,21 +136,16 @@ class Query(BaseModel):
                 re.compile(self.value)
             except re.error as exc:
                 raise ValueError(f"invalid regex pattern: {exc}") from exc
+        if self.operator not in FILTER_TYPE_OPERATORS[self.filter_type]:
+            raise ValueError(f"a {self.filter_type} filter does not support {self.operator}")
         if self.filter_type == "numeric":
             if isinstance(self.value, bool) or not isinstance(self.value, int | float):
                 raise ValueError("a numeric filter needs a numeric value")
-            if self.operator not in NUMERIC_OPERATORS:
-                raise ValueError("a numeric filter needs a numeric operator")
         elif self.filter_type == "boolean":
             if not isinstance(self.value, bool):
                 raise ValueError("a boolean filter needs a true/false value")
-            if self.operator != "equals":
-                raise ValueError("a boolean filter only supports equals")
-        else:
-            if not isinstance(self.value, str | list):
-                raise ValueError("a string filter needs a string or keyword-list value")
-            if self.operator not in ("equals", "includesCaseInsensitive", "regex"):
-                raise ValueError("a string filter needs a string operator")
+        elif not isinstance(self.value, str | list):
+            raise ValueError("a string filter needs a string or keyword-list value")
         return self
 
 
