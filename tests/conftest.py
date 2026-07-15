@@ -226,6 +226,20 @@ class Seeder:
     def part(self, org_id: uuid.UUID) -> uuid.UUID:
         return self._loop.run_until_complete(self._part(org_id))
 
+    def sql(self, statement: str, params: dict[str, object] | None = None) -> None:
+        """Run one raw statement as the owner (bypasses RLS) — for planting
+        states no API mutates yet (e.g. an accepted finding before M3.2).
+
+        This connection sees every org: callers must self-scope the statement
+        (target rows by primary key, or filter by the intended ``org_id``) —
+        the same convention ``_status_events`` follows on the owner engine."""
+
+        async def _run() -> None:
+            async with self._engine.begin() as conn:
+                await conn.execute(text(statement), params or {})
+
+        self._loop.run_until_complete(_run())
+
     def bom_child(
         self,
         org_id: uuid.UUID,

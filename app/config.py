@@ -128,6 +128,23 @@ class Settings(BaseSettings):
         if self.storage_backend == "s3" and not self.s3_bucket:
             raise ValueError("S3_BUCKET must be set when STORAGE_BACKEND=s3.")
 
+    # --- Lens / AI (M3.1 — spec #lens-models, #ai-settings) ---
+    # Provider is configurable, never hard-coded (build-plan M3.1 Decisions).
+    # v1 = "anthropic": the Claude API under a zero-data-retention agreement
+    # (spec #ai-settings). The model is PINNED (M3 test plan: pinned model +
+    # versioned prompts); claude-opus-4-8 — Fable-tier is excluded because it
+    # is unavailable under zero data retention. Key is empty by default: the
+    # gating tests mock the provider, live extraction requires it in .env.
+    lens_provider: str = "anthropic"
+    lens_model: str = "claude-opus-4-8"
+    anthropic_api_key: str = ""
+    # Inference-region routing for the DPA default path (DACH delta). Passed
+    # through as the API's `inference_geo`; empty = provider default. The API
+    # accepts only "us" | "global" today (no EU geo yet — verified 2026-07-15;
+    # DECISIONS.md), so the GDPR basis is the zero-data-retention DPA (spec
+    # #ai-settings) and this stays the seam to flip when an EU geo ships.
+    lens_inference_geo: str = ""
+
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"
     default_locale: str = "de-DE"
