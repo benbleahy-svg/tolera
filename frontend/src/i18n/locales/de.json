@@ -326,7 +326,9 @@
     "rates_banner_one": "1 Arbeitsgang ohne Stundensatz — Kosten erscheinen als 0,00 €.",
     "rates_banner_other": "{{count}} Arbeitsgänge ohne Stundensatz — Kosten erscheinen als 0,00 €.",
     "rates_banner_materials_one": "1 Werkstoff ohne Kostensatz.",
-    "rates_banner_materials_other": "{{count}} Werkstoffe ohne Kostensatz."
+    "rates_banner_materials_other": "{{count}} Werkstoffe ohne Kostensatz.",
+    "rules": "Prüfregeln",
+    "rules_hint": "Regeln der Angebotsprüfung — der gesamte Regelsatz wird als eine JSON-Zeichenkette exportiert und per Einfügen importiert (portabel und diff-fähig). Der Regel-Editor folgt in M3.8."
   },
   "pricing": {
     "refresh_pricing": "Preise aktualisieren",
@@ -767,5 +769,17 @@
     "outbound": "Gesendet",
     "inbound": "Empfangen",
     "connect_failed": "Verbindung fehlgeschlagen oder abgebrochen."
+  },
+  "rules": {
+    "name": "Name",
+    "combine": "Verknüpfung",
+    "signals": "Signale",
+    "resolutions": "Auflösungen",
+    "active": "Aktiv",
+    "empty": "Noch keine Regeln — Regelsatz unten einfügen.",
+    "export_label": "Export (JSON-Zeichenkette)",
+    "import_label": "Import (JSON-Zeichenkette einfügen)",
+    "import_button": "Importieren",
+    "import_result": "Import abgeschlossen: {{created}} erstellt, {{updated}} aktualisiert."
   }
 }

@@ -76,6 +76,21 @@ export interface ConfigCompleteness {
   unrated_materials: number;
 }
 
+/** A review rule row — the canonical AST fields + internal id/is_active
+ * (M3.6, spec #rules-schema). The AST is opaque JSON here; the Create Rule
+ * editor arrives with M3.8. */
+export interface RuleOut {
+  id: string;
+  uuid: string;
+  name: string;
+  description: string;
+  logical_operator: 'AND' | 'OR';
+  signals: { logical_operator: string; groups: unknown[] }[];
+  resolutions: { type: string; parameters: unknown[]; custom_label: string | null }[];
+  default_assignee_id: string | null;
+  is_active: boolean;
+}
+
 export interface ConfigureApi {
   listOperationDefs: (q: string) => Promise<import('../estimating/types').OperationDefOut[]>;
   updateOperationDef: (
@@ -105,6 +120,9 @@ export interface ConfigureApi {
     formula?: string | null;
   }) => Promise<DiscountDefOut>;
   deleteDiscountDef: (defId: string) => Promise<void>;
+  listRules: () => Promise<RuleOut[]>;
+  exportRules: () => Promise<{ rules_json: string; count: number }>;
+  importRules: (rulesJson: string) => Promise<{ created: number; updated: number }>;
 }
 
 export function useConfigureApi(): ConfigureApi {
@@ -148,6 +166,10 @@ export function useConfigureApi(): ConfigureApi {
         apiFetch('/api/discount-defs', token, { method: 'POST', body }),
       deleteDiscountDef: (defId) =>
         apiFetch(`/api/discount-defs/${defId}`, token, { method: 'DELETE' }),
+      listRules: () => apiFetch('/api/rules', token),
+      exportRules: () => apiFetch('/api/rules/export', token),
+      importRules: (rulesJson) =>
+        apiFetch('/api/rules/import', token, { method: 'POST', body: { rules_json: rulesJson } }),
     };
   }, [getToken]);
 }

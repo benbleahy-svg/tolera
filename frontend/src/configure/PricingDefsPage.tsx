@@ -159,6 +159,7 @@ export function PricingDefsPage() {
         <Link to="/configure">{t('configure.custom_tables')}</Link>
         <span aria-current="page">{t('configure.pricing')}</span>
         <Link to="/configure/operations">{t('configure.operations')}</Link>
+        <Link to="/configure/rules">{t('configure.rules')}</Link>
       </nav>
       <header className="est-header">
         <h2>{t('configure.pricing')}</h2>
