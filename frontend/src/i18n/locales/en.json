@@ -697,5 +697,32 @@
     "type_thread": "Thread",
     "type_hole": "Hole",
     "add_type_placeholder": "e.g. length"
+  },
+  "bulk_create": {
+    "title": "Bulk Create Line Items",
+    "open_button": "Bulk create line items",
+    "items_found_in": "Line items found in {{file}}",
+    "intro": "View your RFQ files and paste or type in information from the parts list into the spreadsheet below.",
+    "intro_defaults": "Part number is required and blank quantities will default to 1.",
+    "rfq_files": "RFQ files",
+    "original_rfq": "ORIGINAL RFQ",
+    "autofilled": "Line item information autofilled",
+    "found_in": "Found in {{file}}",
+    "parse_failed": "Automatic prefill was not available for this RFQ — enter the parts list manually.",
+    "col_row": "Row",
+    "col_part_number": "Part number*",
+    "col_revision": "Rev",
+    "col_description": "Description",
+    "col_quantities": "Quantities",
+    "part_number_input": "Part number, row {{row}}",
+    "revision_input": "Revision, row {{row}}",
+    "description_input": "Description, row {{row}}",
+    "quantities_input": "Quantities, row {{row}}",
+    "quantities_placeholder": "e.g. 1, 10, 50",
+    "add_row": "Add row",
+    "create_line_items": "Create line items",
+    "parse_pending": "Analyzing the RFQ email for a parts list …",
+    "matched_files": "Files: {{files}}",
+    "quantities_ignored": "Some entries are not whole numbers and will be ignored."
   }
 }

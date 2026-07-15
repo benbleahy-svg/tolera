@@ -81,6 +81,7 @@ module = [
     "app.lens_extract",
     "app.part_index",
     "app.email_ingest",
+    "app.email_parts",
 ]
 disallow_untyped_decorators = false
 disallow_subclassing_any = false

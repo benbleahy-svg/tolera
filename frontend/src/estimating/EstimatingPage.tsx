@@ -16,6 +16,7 @@ import { ApiError } from '../api/client';
 import { PartMatchesChip } from '../parts/MatchingParts';
 import { useHasPermission } from '../session/session';
 import { AddOnsSection } from './AddOnsSection';
+import { BulkCreateDialog } from './BulkCreateDialog';
 import { useEstimatingApi } from './api';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { LeadTimesSection } from './LeadTimesSection';
@@ -25,6 +26,7 @@ import { OperationsSection } from './OperationsSection';
 import { PricingSection } from './PricingSection';
 import { QuoteTotalsPanel } from './QuoteTotalsPanel';
 import type {
+  BulkCreatePrefill,
   ComponentCosting,
   MaterialSearchHit,
   OperationOut,
@@ -50,6 +52,8 @@ export function EstimatingPage() {
   const [material, setMaterial] = useState<MaterialSearchHit | null>(null);
   const [drawerOpId, setDrawerOpId] = useState<string | null>(null);
   const [changingProcess, setChangingProcess] = useState(false);
+  const [bulkCreating, setBulkCreating] = useState(false);
+  const [bulkPrefill, setBulkPrefill] = useState<BulkCreatePrefill | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
@@ -63,6 +67,12 @@ export function EstimatingPage() {
     if (!quoteId) return;
     api.getQuote(quoteId).then(setQuote).catch(fail);
     api.listProcesses().then(setProcesses).catch(fail);
+    // Lens suggestion availability drives the entry link's purple hint
+    // ("Line items found in <eml>" — DemoB); absence is not an error.
+    api
+      .getBulkCreatePrefill(quoteId)
+      .then(setBulkPrefill)
+      .catch(() => setBulkPrefill(null));
   }, [api, quoteId, fail]);
 
   const loadPricing = useCallback(() => {
@@ -225,6 +235,33 @@ export function EstimatingPage() {
             }}
           />
         )}
+        <span className="bulk-create-entry">
+          <button
+            type="button"
+            className={
+              bulkPrefill?.status === 'completed' &&
+              bulkPrefill.rows.length > 0 &&
+              quote.items.length === 0
+                ? 'bulk-create-open has-suggestions'
+                : 'bulk-create-open'
+            }
+            onClick={() => setBulkCreating(true)}
+            disabled={!editable}
+          >
+            {t('bulk_create.open_button')}
+          </button>
+          {bulkPrefill?.status === 'completed' &&
+            bulkPrefill.rows.length > 0 &&
+            bulkPrefill.found_in &&
+            // The purple hint is an INTAKE affordance — once line items
+            // exist, its suggestions are consumed and it must not keep
+            // advertising them (CodeRabbit minor).
+            quote.items.length === 0 && (
+              <span className="bulk-create-hint">
+                {t('bulk_create.items_found_in', { file: bulkPrefill.found_in })}
+              </span>
+            )}
+        </span>
         <div className="est-assignments">
           <span className="est-field-label">{t('estimating.process')}</span>
           <span>{currentProcess?.name ?? t('estimating.no_process')}</span>
@@ -414,6 +451,28 @@ export function EstimatingPage() {
           onSaveOverrides={(overrides) =>
             apply(api.setVariableOverrides(drawerOp.id, overrides))
           }
+        />
+      )}
+      {bulkCreating && (
+        <BulkCreateDialog
+          quoteId={quoteId}
+          getPrefill={api.getBulkCreatePrefill}
+          create={api.bulkCreateLineItems}
+          onCreated={(next) => {
+            setBulkCreating(false);
+            setQuote(next);
+            // Newly created items may already carry files/quantities; pricing
+            // and costing follow the (possibly new) selected item. The header
+            // hint refreshes too — its suggestions were just consumed.
+            if (quoteId) {
+              api.getQuoteTotals(quoteId).then(setTotals).catch(fail);
+              api
+                .getBulkCreatePrefill(quoteId)
+                .then(setBulkPrefill)
+                .catch(() => setBulkPrefill(null));
+            }
+          }}
+          onClose={() => setBulkCreating(false)}
         />
       )}
       {changingProcess && (

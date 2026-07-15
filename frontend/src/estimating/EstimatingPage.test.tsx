@@ -42,6 +42,10 @@ const setAddOnPrice = vi.fn();
 const setLeadTime = vi.fn();
 const setExpediteOptions = vi.fn();
 const applyLeadTimesToAll = vi.fn();
+const getBulkCreatePrefill = vi.fn(() =>
+  Promise.resolve({ status: 'none', found_in: null, rfq_files: [], rows: [] }),
+);
+const bulkCreateLineItems = vi.fn();
 const getQuoteTotals = vi.fn(() =>
   Promise.resolve({
     currency: 'EUR',
@@ -99,6 +103,8 @@ vi.mock('./api', () => ({
     setExpediteOptions,
     applyLeadTimesToAll,
     getQuoteTotals,
+    getBulkCreatePrefill,
+    bulkCreateLineItems,
   }),
 }));
 

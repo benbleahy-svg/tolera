@@ -602,6 +602,19 @@ def _enqueue_lens_extract(org_id: uuid.UUID, part_id: uuid.UUID, file_id: uuid.U
         )
 
 
+def _enqueue_body_parse(org_id: uuid.UUID, rfq_id: uuid.UUID) -> None:
+    """Post-commit parts-list parse enqueue (M3.4 — the Bulk Create prefill).
+    Same posture as ``_enqueue_lens_extract``: never raises — a broker outage
+    (or, under eager test Celery, an inline task failure) must not fail the
+    already-committed ingest; the dialog just opens without suggestions."""
+    from .email_parts import email_parts_parse_task
+
+    try:
+        email_parts_parse_task.delay(str(org_id), str(rfq_id))
+    except Exception:
+        logger.exception("body_parse_enqueue_failed", extra={"org_id": str(org_id)})
+
+
 def _split_sender_name(sender_name: str | None) -> tuple[str | None, str | None]:
     """Display name → (first, last) — a best-effort prefill the estimator can
     correct; German RFQs often carry a department or company here."""
@@ -799,6 +812,8 @@ async def run_rfq_ingest(
         # Transaction committed — only now queue extraction on committed rows.
         for part_id, file_id in to_extract:
             _enqueue_lens_extract(org_id, part_id, file_id)
+        # …and the email-body parts-list parse (M3.4 Bulk Create prefill).
+        _enqueue_body_parse(org_id, rfq_id)
         return {
             "quote_id": str(quote_id),
             "quote_number": quote_number,

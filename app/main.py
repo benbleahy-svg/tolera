@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from .accounts import accounts_router, contacts_router
 from .addons import addons_router
+from .bulk_create import bulk_create_router
 from .collab import collab_router
 from .config import Settings, get_settings
 from .config_completeness import config_completeness_router
@@ -81,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(extract_router)
     app.include_router(findings_router)
     app.include_router(quotes_router)
+    app.include_router(bulk_create_router)
     app.include_router(saved_views_router)
     app.include_router(materials_router)
     app.include_router(operations_router)
