@@ -210,6 +210,43 @@ class TestAcceptClickToFill:
             assert resp.status_code == 422
             assert resp.json()["code"] == "apply_mismatch"
 
+    def test_accept_angle_to_axis_is_422(self, app_client: TestClient, seeder: Seeder) -> None:
+        """An angle is not a length — 90° must never land as 90 mm."""
+        org, admin, part_id, file_id = _setup(app_client, seeder, "m32-angle")
+        finding_id = _plant_finding(
+            seeder, org, file_id, category="dimensions", type_="angle", value="90", units="deg"
+        )
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            resp = app_client.post(
+                f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}/accept",
+                json={"apply_to": "size_x"},
+            )
+            assert resp.status_code == 422
+            assert resp.json()["code"] == "apply_mismatch"
+            # A bare accept of an angle is a plain acknowledge, no axis demanded.
+            plain = app_client.post(
+                f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}/accept"
+            )
+            assert plain.status_code == 200, plain.text
+            assert plain.json()["applied_field"] is None
+
+    def test_replace_then_accept_applies_corrected_value(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """The corrected value must not dead-end: an edited finding still fills."""
+        org, admin, part_id, file_id = _setup(app_client, seeder, "m32-edit-apply")
+        finding_id = _plant_finding(
+            seeder, org, file_id, category="dimensions", type_="length", value="3.500", units="mm"
+        )
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            base = f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}"
+            assert app_client.post(f"{base}/replace", json={"value": "35"}).status_code == 200
+            resp = app_client.post(f"{base}/accept", json={"apply_to": "size_z"})
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["finding"]["status"] == "edited"  # stays human-edited
+            geom = app_client.get(f"/api/parts/{part_id}/geometry").json()
+            assert geom["size_z"] == pytest.approx(35.0)
+
     def test_accept_non_fill_finding_just_accepts(
         self, app_client: TestClient, seeder: Seeder
     ) -> None:

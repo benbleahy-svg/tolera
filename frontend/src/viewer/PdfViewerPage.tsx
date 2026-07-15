@@ -1043,7 +1043,14 @@ export function PdfViewerPage() {
                   }
                   whiteouts={
                     (docRotation + (pageRotations[page] ?? 0)) % 360 === 0
-                      ? [...whiteouts, ...lensWhiteouts]
+                      ? // Lens toggles force the active flag on, so while one is
+                        // on, hand-drawn sections join only if their own switch
+                        // is (a Lens toggle must not force-reveal them); with no
+                        // Lens sections the M2.4 behaviour is untouched
+                        // (outlines when inactive).
+                        lensWhiteouts.length > 0
+                        ? [...(whiteoutActive ? whiteouts : []), ...lensWhiteouts]
+                        : whiteouts
                       : []
                   }
                   tool={

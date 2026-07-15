@@ -2285,6 +2285,8 @@ class ExtractionCorrection(Base):
             name="fk_extraction_correction_finding_org",
         ),
         Index("ix_extraction_correction_org_file", "org_id", "source_file_id"),
+        # Keeps the SET NULL FK's referencing-row scan cheap on re-run deletes.
+        Index("ix_extraction_correction_org_finding", "org_id", "finding_id"),
     )
 
     id: Mapped[uuid.UUID] = _pk()

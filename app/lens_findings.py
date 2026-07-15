@@ -52,6 +52,9 @@ _IDENTITY_TARGETS: dict[str, str] = {
     "description": "description",
 }
 _AXIS_TARGETS = ("size_x", "size_y", "size_z")
+# Only a *length-like* dimension may fill a size axis — an angle (deg) written
+# as mm would be silently wrong (ship-review 2026-07-15).
+_AXIS_SOURCE_TYPES = ("length", "diameter", "radius")
 
 
 class AcceptIn(BaseModel):
@@ -167,7 +170,7 @@ def _resolve_apply_target(finding: ExtractionFinding, apply_to: ApplyTarget | No
     if apply_to is None:
         if finding.type in _IDENTITY_TARGETS:
             return _IDENTITY_TARGETS[finding.type]
-        if finding.category is FindingCategory.dimensions:
+        if finding.type in _AXIS_SOURCE_TYPES:
             raise AppError(
                 "apply_target_required",
                 "Eine Bemaßung braucht eine Zielachse (size_x/size_y/size_z).",
@@ -183,8 +186,8 @@ def _resolve_apply_target(finding: ExtractionFinding, apply_to: ApplyTarget | No
                 status_code=422,
             )
         return apply_to
-    # Axis target: only a dimension finding carries a fillable length.
-    if finding.category is not FindingCategory.dimensions:
+    # Axis target: only a length-like dimension carries a fillable length.
+    if finding.category is not FindingCategory.dimensions or finding.type not in _AXIS_SOURCE_TYPES:
         raise AppError(
             "apply_mismatch",
             f"Ein Fund vom Typ '{finding.type}' kann nicht nach '{apply_to}' übernommen werden.",
@@ -199,15 +202,28 @@ async def _apply_to_part(
     """Write the accepted value where it belongs — the same paths the manual
     editors use (PATCH part / PATCH geometry), so calc-vs-override and the
     metric-storage contract hold identically."""
-    value = finding.normalized_value or finding.value
-    if value is None:
-        raise AppError("empty_value", "Der Fund enthält keinen Wert.", status_code=422)
     if target in _IDENTITY_TARGETS:
+        value = finding.normalized_value or finding.value
+        if value is None:
+            raise AppError("empty_value", "Der Fund enthält keinen Wert.", status_code=422)
         setattr(part, target, value)
         return
-    # Geometry axis: evaluate with the finding's unit as default (mm fallback,
-    # DACH) — stored metric, override provenance recorded (parts._apply_dim).
-    unit = finding.units if finding.units in ("mm", "in") else "mm"
+    # Geometry axis: the RAW print value, interpreted in the finding's unit —
+    # `normalized_value` has no pinned unit semantics yet, so trusting it here
+    # could double-convert an inch print (ship-review 2026-07-15). Stored
+    # metric with override provenance (parts._apply_dim). No unit on the
+    # finding = the document default, mm-native (DACH); any other unit string
+    # is not a length and must not be written as one.
+    value = finding.value
+    if value is None:
+        raise AppError("empty_value", "Der Fund enthält keinen Wert.", status_code=422)
+    if finding.units not in ("mm", "in", None):
+        raise AppError(
+            "invalid_units",
+            f"Einheit '{finding.units}' kann nicht als Länge übernommen werden.",
+            status_code=422,
+        )
+    unit = finding.units or "mm"
     geom = await _get_or_create_geometry(session, part)
     overrides = dict(geom.overrides or {})
     try:

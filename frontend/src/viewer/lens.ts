@@ -44,6 +44,9 @@ export type IdentityType = (typeof IDENTITY_TYPES)[number];
 
 export type Axis = 'size_x' | 'size_y' | 'size_z';
 
+/** Only length-like dimensions may fill a size axis (an angle is not a length). */
+export const AXIS_SOURCE_TYPES = ['length', 'diameter', 'radius'] as const;
+
 export type SectionKey = 'quote_setup' | 'requirements' | 'features' | 'dimensions';
 
 export interface ChipGroup {
@@ -208,6 +211,11 @@ export function fillTarget(
   if ((IDENTITY_TYPES as readonly string[]).includes(finding.type)) {
     return { kind: 'identity', field: finding.type as IdentityType };
   }
-  if (finding.category === 'dimensions') return { kind: 'axis' };
+  if (
+    finding.category === 'dimensions' &&
+    (AXIS_SOURCE_TYPES as readonly string[]).includes(finding.type)
+  ) {
+    return { kind: 'axis' };
+  }
   return { kind: 'none' };
 }

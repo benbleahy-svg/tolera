@@ -247,6 +247,9 @@ function FindingChip({
   const [editValue, setEditValue] = useState('');
   const finding = chip.finding;
   const target = fillTarget(finding);
+  // Suggested AND edited findings offer the fill action — a replace would
+  // otherwise dead-end the corrected value (ship-review 2026-07-15).
+  const canApply = finding.status === 'suggested' || finding.status === 'edited';
 
   return (
     <span className="lens-chip-wrap">
@@ -269,12 +272,12 @@ function FindingChip({
             </p>
           )}
           <div className="lens-popover-actions">
-            {target.kind === 'identity' && finding.status === 'suggested' && (
+            {target.kind === 'identity' && canApply && (
               <button type="button" onClick={() => onAccept(finding)}>
                 {t('lens.accept')}
               </button>
             )}
-            {target.kind === 'axis' && finding.status === 'suggested' && (
+            {target.kind === 'axis' && canApply && (
               <span className="lens-axis-actions">
                 {t('lens.apply_as')}
                 {(['size_x', 'size_y', 'size_z'] as const).map((axis) => (

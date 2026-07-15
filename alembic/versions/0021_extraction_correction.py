@@ -73,6 +73,12 @@ def upgrade() -> None:
         "CREATE INDEX ix_extraction_correction_org_file"
         " ON extraction_correction (org_id, source_file_id)"
     )
+    # The SET NULL FK is checked on every finding delete (each Lens re-run
+    # bulk-deletes suggested rows) — keep that referencing-row scan indexed.
+    op.execute(
+        "CREATE INDEX ix_extraction_correction_org_finding"
+        " ON extraction_correction (org_id, finding_id)"
+    )
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON extraction_correction TO {APP_ROLE}")
     op.execute("ALTER TABLE extraction_correction ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE extraction_correction FORCE ROW LEVEL SECURITY")
