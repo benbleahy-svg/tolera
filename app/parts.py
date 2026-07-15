@@ -564,10 +564,9 @@ async def upload_library_parts(
             part.name = stem or primary.filename
             created.append(part)
         await session.flush()
-    except AppError:
-        await _discard_blobs(storage, stored_keys)
-        raise
-    except IntegrityError:
+    except Exception:
+        # ANY failure (validation, DB, driver, storage) discards the blobs
+        # written so far — the rows roll back with the session either way.
         await _discard_blobs(storage, stored_keys)
         raise
 
@@ -806,9 +805,6 @@ async def upload_part_files(
             validated=validated,
             stored_keys=stored_keys,
         )
-    except AppError:
-        await _discard_blobs(storage, stored_keys)
-        raise
     except IntegrityError as exc:
         await _discard_blobs(storage, stored_keys)
         if "uq_part_file_one_primary" in str(exc.orig):
@@ -817,6 +813,10 @@ async def upload_part_files(
                 "Another file became the PRIMARY for this part; retry.",
                 status_code=status.HTTP_409_CONFLICT,
             ) from exc
+        raise
+    except Exception:
+        # ANY other failure discards the blobs written so far (rows roll back).
+        await _discard_blobs(storage, stored_keys)
         raise
 
     return [_part_file_out(row) for row in rows]
