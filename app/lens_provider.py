@@ -27,9 +27,10 @@ from .lens import PROMPT_VERSION, LensProvider, RawFinding
 
 logger = logging.getLogger("app.lens_provider")
 
-#: The Claude API caps requests at 32 MB; base64 expands the PDF by 4/3, so a
-#: raw document above ~24 MB cannot fit regardless of prompt size.
-MAX_PROVIDER_PDF_BYTES = 24 * 1024 * 1024
+#: The Claude API caps requests at 32 MB; base64 expands the PDF by 4/3, and
+#: prompt/schema/JSON framing rides on top — 20 MiB raw (~26.7 MiB encoded)
+#: leaves real headroom under the cap.
+MAX_PROVIDER_PDF_BYTES = 20 * 1024 * 1024
 
 
 class LensProviderError(Exception):
