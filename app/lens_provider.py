@@ -27,6 +27,17 @@ from .lens import PROMPT_VERSION, LensProvider, RawFinding
 
 logger = logging.getLogger("app.lens_provider")
 
+
+class LensProviderError(Exception):
+    """A deterministic model outcome (refusal, truncation, malformed JSON) —
+    retrying is waste, so the task maps this to a bound failure dict instead of
+    letting ``BaseTask``'s infra retries burn identical API calls."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 _registered: LensProvider | None = None
 
 
@@ -232,8 +243,19 @@ class AnthropicLensProvider:
         if self._inference_geo:
             params["inference_geo"] = self._inference_geo
         response = await self._client.messages.create(**params)
-        text = next(block.text for block in response.content if block.type == "text")
-        return dict(json.loads(text))
+        # Deterministic non-answers must not hit infra retries (ship-review):
+        # a refusal has empty content; max_tokens means truncated (broken) JSON.
+        if response.stop_reason == "refusal":
+            raise LensProviderError("provider_refusal")
+        if response.stop_reason == "max_tokens":
+            raise LensProviderError("provider_truncated")
+        text = next((block.text for block in response.content if block.type == "text"), None)
+        if text is None:
+            raise LensProviderError("provider_empty_response")
+        try:
+            return dict(json.loads(text))
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise LensProviderError("provider_invalid_json") from exc
 
     def _parse_findings(self, payload: dict[str, Any]) -> list[RawFinding]:
         findings: list[RawFinding] = []

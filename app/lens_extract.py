@@ -30,7 +30,7 @@ from typing import Annotated, Any, cast
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
@@ -40,6 +40,7 @@ from .db import make_engine, make_sessionmaker, org_scoped_session
 from .deps import get_session, get_storage
 from .errors import AppError
 from .lens import NotExtractableError, extract_page_texts, run_document_extraction
+from .lens_provider import LensProviderError
 from .lens_provider import resolve as resolve_lens_provider
 from .models import ExtractionFinding, FindingStatus, Part, PartFile
 from .parts import _get_part_file_or_404
@@ -102,6 +103,14 @@ async def run_extraction(
             provider = resolve_lens_provider()
             result = await run_document_extraction(provider, pdf)
 
+            # Serialize concurrent runs on the same file (double-click POST →
+            # two workers): without this, B's delete can run before A's inserts
+            # commit and BOTH suggested sets survive — breaking the
+            # replace-suggested contract (ship-review). Held until commit.
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"lens_extract:{file_id}"},
+            )
             # Replace prior *suggested* rows only (human-touched rows survive).
             await session.execute(
                 delete(ExtractionFinding).where(
@@ -155,7 +164,12 @@ def _run_on_own_loop(coro: Any) -> Any:
         return pool.submit(asyncio.run, coro).result()
 
 
-@celery_app.task(base=BaseTask, name="app.lens_extract", bind=True)
+# Time limit overrides the global 300 s: a 10-print-page document makes up to
+# 12 sequential vision-model calls (quote-setup + classify + 10 pages), which
+# a realistic drawing pack cannot finish in 5 minutes (ship-review).
+@celery_app.task(
+    base=BaseTask, name="app.lens_extract", bind=True, soft_time_limit=1500, time_limit=1800
+)
 def lens_extract_task(self: Any, org_id: str, part_id: str, file_id: str) -> dict[str, Any]:
     """Celery wrapper around :func:`run_extraction` (idempotent, §5)."""
     binding = {"org_id": org_id, "file_id": file_id}
@@ -175,10 +189,13 @@ def lens_extract_task(self: Any, org_id: str, part_id: str, file_id: str) -> dic
                 file_id=uuid.UUID(file_id),
             )
         )
-    except (NotExtractableError, SourceFileGoneError) as exc:
+    except (NotExtractableError, LensProviderError, SourceFileGoneError) as exc:
         # Deterministic rejections RETURN a bound failure dict (never retry,
         # never Celery-FAILURE — that state's payload can't carry the binding).
-        code = exc.code if isinstance(exc, NotExtractableError) else "source_file_gone"
+        if isinstance(exc, NotExtractableError | LensProviderError):
+            code = exc.code
+        else:
+            code = "source_file_gone"
         logger.info(
             "lens_extract_rejected",
             extra={"code": code, "task_id": task_id, "part_id": part_id, **binding},
@@ -290,8 +307,10 @@ def _status_from_result(result: AsyncResult, file_id: uuid.UUID) -> ExtractStatu
     """Map Celery state onto the contract, binding task meta to this file."""
     state = result.state
     info = result.info
-    if isinstance(info, dict) and info.get("file_id") not in (None, str(file_id)):
-        # Real task id, another file (possibly another org): answer as unknown.
+    if isinstance(info, dict) and info.get("file_id") != str(file_id):
+        # Real task id, another file/task type (possibly another org): same
+        # answer as an unknown id. Strict key-required binding (tighter than
+        # the M2.5 form) — every dict this task stores carries file_id.
         raise AppError("not_found", "Task not found.", status_code=status.HTTP_404_NOT_FOUND)
     if state == "SUCCESS":
         if info.get("failed"):

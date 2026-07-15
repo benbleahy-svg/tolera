@@ -39,6 +39,7 @@ from app.lens import (
     hallucination_guard,
     run_document_extraction,
 )
+from app.lens_provider import AnthropicLensProvider, LensProviderError
 from app.models import FindingCategory, MembershipRole
 from tests.conftest import Seeder, authed
 
@@ -138,7 +139,24 @@ class TestHallucinationGuard:
 
     def test_text_on_another_page_is_not_hallucinated(self) -> None:
         # "Wrong existing string" is allowed by spec — only *invented* values die.
-        kept, _ = hallucination_guard([_finding(raw_text="Ø10 H7", page=1)], self.PAGES)
+        kept, _ = hallucination_guard(
+            [_finding(raw_text="Ø10 H7", value="Ø10 H7", page=1)], self.PAGES
+        )
+        assert len(kept) == 1
+
+    def test_invented_value_riding_a_real_raw_text_is_dropped(self) -> None:
+        # Ship-review 🔴: BOTH claims must be on the print — a genuine snippet
+        # must not smuggle in a fabricated value (normalized_value is the
+        # legitimate transform channel and stays unguarded).
+        kept, dropped = hallucination_guard(
+            [_finding(raw_text="Werkstoff: 1.4301", value="1.7225")], self.PAGES
+        )
+        assert not kept and len(dropped) == 1
+
+    def test_normalized_value_is_not_guarded(self) -> None:
+        kept, _ = hallucination_guard(
+            [_finding(raw_text="Ø10 H7", value=None, normalized_value="10.0")], self.PAGES
+        )
         assert len(kept) == 1
 
 
@@ -198,8 +216,8 @@ class TestRunDocumentExtraction:
         dim = _finding(
             category=FindingCategory.dimensions,
             type="length",
-            raw_text="Halter",
-            value="120",
+            raw_text="Halter 4711",
+            value="4711",
             units=None,
             role="basic",
         )
@@ -214,8 +232,8 @@ class TestRunDocumentExtraction:
         dim = _finding(
             category=FindingCategory.dimensions,
             type="length",
-            raw_text="4711",
-            value="4.5",
+            raw_text="Halter 4711",
+            value="4711",
             units=None,
         )
         provider = FakeProvider(quote_setup=[doc_units], requirements={1: [dim]}, print_pages={1})
@@ -243,6 +261,49 @@ class TestRunDocumentExtraction:
         assert len(texts) == 1
         assert "Halter 4711" in texts[0]
         assert "1.4301" in texts[0]
+
+
+# --------------------------------------------------------------------------- #
+# Anthropic provider: deterministic non-answers must not retry (ship-review)
+# --------------------------------------------------------------------------- #
+class _StubResponse:
+    def __init__(self, stop_reason: str, text: str | None) -> None:
+        self.stop_reason = stop_reason
+        self.content = [] if text is None else [type("B", (), {"type": "text", "text": text})()]
+
+
+class TestAnthropicProviderGuards:
+    def _provider(self, response: _StubResponse) -> AnthropicLensProvider:
+        provider = AnthropicLensProvider(
+            api_key="test-key", model="claude-opus-4-8", inference_geo="eu"
+        )
+
+        async def fake_create(**kwargs: object) -> _StubResponse:
+            return response
+
+        provider._client.messages.create = fake_create  # type: ignore[assignment,method-assign]
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_refusal_maps_to_a_deterministic_error(self) -> None:
+        provider = self._provider(_StubResponse("refusal", None))
+        with pytest.raises(LensProviderError) as exc:
+            await provider.classify_print_pages(HALTER_PDF, ["x"])
+        assert exc.value.code == "provider_refusal"
+
+    @pytest.mark.asyncio
+    async def test_truncated_output_maps_to_a_deterministic_error(self) -> None:
+        provider = self._provider(_StubResponse("max_tokens", '{"is_print": [tru'))
+        with pytest.raises(LensProviderError) as exc:
+            await provider.classify_print_pages(HALTER_PDF, ["x"])
+        assert exc.value.code == "provider_truncated"
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_maps_to_a_deterministic_error(self) -> None:
+        provider = self._provider(_StubResponse("end_turn", "not json"))
+        with pytest.raises(LensProviderError) as exc:
+            await provider.classify_print_pages(HALTER_PDF, ["x"])
+        assert exc.value.code == "provider_invalid_json"
 
 
 # --------------------------------------------------------------------------- #
@@ -300,7 +361,7 @@ def fake_provider() -> Iterator[FakeProvider]:
                     category=FindingCategory.dimensions,
                     type="length",
                     raw_text="Halter 4711",
-                    value="120",
+                    value="4711",
                     units=None,
                     role="basic",
                     tolerance={"kind": "bilateral", "upper": "0.1", "lower": "-0.1"},

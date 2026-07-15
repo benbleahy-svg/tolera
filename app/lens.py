@@ -146,9 +146,12 @@ def hallucination_guard(
     """The never-hallucinate constraint (spec ``#lens-models``): a value absent
     from the print is never emitted. Returns ``(kept, dropped)``.
 
-    A finding's provenance claim is its ``raw_text`` (verbatim snippet), falling
-    back to ``value``; the claim must occur in the document's text layer,
-    whitespace-normalized. The check is document-wide, not page-scoped — the
+    A finding claims print content through ``raw_text`` (verbatim snippet) AND
+    ``value`` — **every** claim that is set must occur in the document's text
+    layer, whitespace-normalized. Checking only one would let an invented
+    ``value`` ride in on a genuine ``raw_text`` (ship-review finding); the
+    legitimate channel for transformed values is ``normalized_value``, which is
+    deliberately NOT guarded. The check is document-wide, not page-scoped — the
     model "may pick a wrong existing string but must never invent one", so text
     from another page is a wrong-but-real pick, not a hallucination. Findings
     with no textual claim at all (pure region boxes) pass — they assert
@@ -158,8 +161,8 @@ def hallucination_guard(
     kept: list[RawFinding] = []
     dropped: list[RawFinding] = []
     for finding in findings:
-        claim = finding.raw_text or finding.value
-        if claim is None or _normalize(claim) in document:
+        claims = [c for c in (finding.raw_text, finding.value) if c is not None]
+        if all(_normalize(claim) in document for claim in claims):
             kept.append(finding)
         else:
             dropped.append(finding)

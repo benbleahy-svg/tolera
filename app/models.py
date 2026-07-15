@@ -2167,11 +2167,13 @@ class ExtractionFinding(Base):
             name="fk_extraction_finding_file_org",
             ondelete="CASCADE",
         ),
+        # No ondelete here: the DDL (0019) uses the column-list form
+        # ``ON DELETE SET NULL (component_id)`` — nulling only component_id,
+        # not org_id — which the ORM can't express (the 0017 precedent).
         ForeignKeyConstraint(
             ["org_id", "component_id"],
             ["component.org_id", "component.id"],
             name="fk_extraction_finding_component_org",
-            ondelete="SET NULL",
         ),
         CheckConstraint(
             "confidence >= 0 AND confidence <= 1", name="ck_extraction_finding_confidence"
