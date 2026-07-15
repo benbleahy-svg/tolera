@@ -242,6 +242,19 @@ def test_parse_overlong_message_id_falls_back_to_surrogate() -> None:
     assert parsed.message_id.startswith("sha256:")
 
 
+def test_parse_naive_utc_date_normalized_to_aware() -> None:
+    """`-0000` parses to a NAIVE datetime — the stored instant must not depend
+    on the session timezone (CodeRabbit)."""
+    msg = EmailMessage()
+    msg["From"] = SENDER
+    msg["To"] = RECIPIENT
+    msg["Subject"] = "Anfrage"
+    msg["Date"] = "Sun, 12 Jul 2026 09:00:00 -0000"
+    msg.set_content("Hallo.")
+    parsed = parse_rfq_email(msg.as_bytes())
+    assert parsed.sent_at is not None and parsed.sent_at.tzinfo is not None
+
+
 def test_parse_missing_message_id_gets_content_hash_surrogate() -> None:
     msg = EmailMessage()
     msg["From"] = SENDER
@@ -261,20 +274,34 @@ def test_parse_missing_message_id_gets_content_hash_surrogate() -> None:
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def eager_celery() -> Iterator[None]:
-    """Run tasks inline (M2.5/M3.1 precedent) so the webhook's enqueue executes."""
+    """Run tasks inline (M2.5/M3.1 precedent) so the webhook's enqueue executes.
+
+    ``result_backend`` must be swapped to the in-process cache: CI has no
+    Redis service, and the redelivery guard's ``AsyncResult`` would otherwise
+    hit the real backend and retry-loop on ConnectionError."""
     previous = {
         key: celery_app.conf[key]
-        for key in ("task_always_eager", "task_store_eager_result", "task_eager_propagates")
+        for key in (
+            "task_always_eager",
+            "task_store_eager_result",
+            "task_eager_propagates",
+            "result_backend",
+        )
     }
     celery_app.conf.update(
         task_always_eager=True,
         task_store_eager_result=True,
         task_eager_propagates=True,
+        result_backend="cache+memory://",
     )
+    # The backend is a cached property — drop any cached instance so the
+    # config change takes effect now and can't leak into later tests.
+    celery_app.__dict__.pop("backend", None)
     try:
         yield
     finally:
         celery_app.conf.update(**previous)
+        celery_app.__dict__.pop("backend", None)
 
 
 @pytest.fixture
@@ -533,6 +560,41 @@ def test_webhook_rejects_replayed_token(
     replay = _post_webhook(ingest_client, ZIP_EML.read_bytes(), fields=fields)
     assert first.status_code == 200
     assert replay.status_code == 401
+
+
+def test_webhook_rejects_blank_body_mime(
+    ingest_client: TestClient, seeder: Seeder, eager_celery: None
+) -> None:
+    _seed_org_with_member(seeder)
+    resp = _post_webhook(ingest_client, b"   ")
+    # A blank message can never become an RFQ — permanent reject, nothing persisted.
+    assert resp.status_code == 406
+
+
+def test_webhook_reenqueues_unprocessed_duplicate(
+    ingest_client: TestClient, seeder: Seeder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Broker-outage recovery (no eager celery here): the gate row exists but
+    the task was never published/completed — Mailgun's retry must re-publish,
+    not return early and strand the RFQ."""
+    _seed_org_with_member(seeder)
+    delays: list[tuple[str, str]] = []
+
+    class _StubTask:
+        @staticmethod
+        def delay(org_id: str, rfq_id: str) -> None:
+            delays.append((org_id, rfq_id))
+
+    monkeypatch.setattr("app.email_ingest.rfq_ingest_task", _StubTask)
+    raw = SAMPLE_EML.read_bytes()
+
+    first = _post_webhook(ingest_client, raw)
+    second = _post_webhook(ingest_client, raw)
+    assert first.json()["status"] == "created"
+    assert second.json()["status"] == "duplicate"
+    # The task never ran (stubbed) → the duplicate branch re-publishes it.
+    assert len(delays) == 2
+    assert delays[0] == delays[1]
 
 
 def test_webhook_fails_closed_when_unconfigured(tenancy_db: str, seeder: Seeder) -> None:

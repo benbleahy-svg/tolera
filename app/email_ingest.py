@@ -149,6 +149,32 @@ class _TokenReplayCache:
 _token_replay_cache = _TokenReplayCache()
 
 
+async def _token_replayed(token: str, redis_url: str) -> bool:
+    """Shared single-use token check: Redis ``SET NX`` + TTL, so one signed
+    token is accepted once across ALL workers/replicas (CodeRabbit major —
+    the in-process cache alone is per-process). Falls back to the in-process
+    cache when Redis is unreachable: this gate is defence-in-depth, and the
+    durable Message-Id dedupe sits behind it, so a Redis outage must degrade
+    the guard, not take ingest down."""
+    try:
+        import redis.asyncio as aioredis
+
+        client = aioredis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1)
+        try:
+            stored = await client.set(
+                f"mailgun-webhook-token:{token}",
+                "1",
+                nx=True,
+                ex=int(SIGNATURE_MAX_AGE_SECONDS * 2),
+            )
+            return not stored
+        finally:
+            await client.aclose()
+    except Exception:  # Redis down/misconfigured — degrade, don't refuse mail
+        logger.warning("token_replay_cache_fallback", extra={"reason": "redis_unavailable"})
+        return _token_replay_cache.seen_before(token)
+
+
 # --------------------------------------------------------------------------- #
 # Pure helpers — .eml parsing (stdlib email) + ZIP recursion
 # --------------------------------------------------------------------------- #
@@ -338,6 +364,10 @@ def parse_rfq_email(raw: bytes, *, max_member_bytes: int = DEFAULT_MAX_MEMBER_BY
             sent_at = parsedate_to_datetime(str(msg["Date"]))
         except ValueError:
             sent_at = None
+        # parsedate_to_datetime returns a NAIVE datetime for "-0000"; the
+        # stored instant must not depend on the session timezone (CodeRabbit).
+        if sent_at is not None and sent_at.tzinfo is None:
+            sent_at = sent_at.replace(tzinfo=UTC)
     body = msg.get_body(preferencelist=("plain",))
     body_text = str(body.get_content()) if body is not None else ""
 
@@ -424,14 +454,22 @@ async def mailgun_inbound(
             "Signaturprüfung fehlgeschlagen.",
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
-    if _token_replay_cache.seen_before(token):
+    if await _token_replayed(token, settings.redis_url):
         # The signature doesn't bind the payload — reject token reuse so a
         # captured (timestamp, token, signature) can't be re-posted with a
-        # crafted body inside the freshness window (🟡4).
+        # crafted body inside the freshness window (🟡4; shared via Redis).
         raise AppError(
             "replayed_token",
             "Signatur-Token wurde bereits verwendet.",
             status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+    if not body_mime.strip():
+        # A blank message can never become an RFQ — permanent reject (406),
+        # never a persisted empty ORIGINAL RFQ (CodeRabbit).
+        raise AppError(
+            "empty_message",
+            "Leere Nachricht — kein MIME-Inhalt übermittelt.",
+            status_code=status.HTTP_406_NOT_ACCEPTABLE,
         )
     slug = slug_from_recipient(recipient)
     sessionmaker: async_sessionmaker[Any] = request.app.state.sessionmaker
@@ -471,14 +509,22 @@ async def mailgun_inbound(
             if duplicate is None:  # pragma: no cover — the index just fired
                 raise
     if duplicate is not None:
+        dup_rfq_id, dup_quote_id = duplicate
+        if dup_quote_id is None:
+            # Gate row exists but ingest never completed — a broker outage
+            # after the commit would otherwise strand it forever (CodeRabbit
+            # outbox finding). Mailgun's own retries become the publish
+            # retries; the task is idempotent (FOR UPDATE + processed_on), so
+            # re-publishing while a first delivery is still running is a no-op.
+            rfq_ingest_task.delay(str(org_id), str(dup_rfq_id))
         logger.info(
             "rfq_ingest_duplicate",
-            extra={"org_id": str(org_id), "rfq_id": str(duplicate[0])},
+            extra={"org_id": str(org_id), "rfq_id": str(dup_rfq_id)},
         )
         return {
             "status": "duplicate",
-            "rfq_id": str(duplicate[0]),
-            "quote_id": str(duplicate[1]) if duplicate[1] else None,
+            "rfq_id": str(dup_rfq_id),
+            "quote_id": str(dup_quote_id) if dup_quote_id else None,
         }
 
     rfq_ingest_task.delay(str(org_id), str(rfq_id))
