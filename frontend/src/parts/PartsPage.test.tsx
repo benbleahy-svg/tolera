@@ -65,7 +65,7 @@ describe('PartsPage (Part Library, M2.12)', () => {
     await renderWithProviders(<PartsPage />);
 
     expect(await screen.findByText('Halter-4711.step')).toBeInTheDocument();
-    expect(screen.getByText('HALTER-4711 · Rev B')).toBeInTheDocument();
+    expect(screen.getByText('HALTER-4711 · Rev. B')).toBeInTheDocument();
     expect(screen.getByText('CNC-Fräsen')).toBeInTheDocument();
     // German-first chrome: tabs + upload.
     expect(screen.getByRole('tab', { name: 'Team-Teile' })).toBeInTheDocument();
@@ -133,12 +133,15 @@ describe('PartsPage (Part Library, M2.12)', () => {
     expect(mergeParts).toHaveBeenCalledWith(['cad', 'pdf'], 'cad');
   });
 
-  it('shows the shared-with-me empty state (M6)', async () => {
+  it('shows the shared-with-me empty state without write chrome (M6)', async () => {
     await renderWithProviders(<PartsPage />);
     await userEvent.click(screen.getByRole('tab', { name: 'Für mich freigegeben' }));
     expect(
       screen.getByText('Externe Freigaben folgen mit der Lieferanten-Kollaboration.'),
     ).toBeInTheDocument();
+    // Upload/Select belong to Team Parts only — a shared upload would vanish.
+    expect(screen.queryByText('Neues Teil hochladen')).not.toBeInTheDocument();
+    expect(screen.queryByText('Teile auswählen')).not.toBeInTheDocument();
   });
 
   it('hides write chrome without quote_edit', async () => {

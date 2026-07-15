@@ -218,7 +218,10 @@ export function EstimatingPage() {
             componentId={componentId ?? undefined}
             editable={editable}
             onImported={() => {
-              if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+              if (componentId) {
+                api.getCosting(componentId).then(setCosting).catch(fail);
+                loadPricing(); // pricing always follows costs (M1.10)
+              }
             }}
           />
         )}

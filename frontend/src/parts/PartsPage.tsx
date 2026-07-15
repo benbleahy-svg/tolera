@@ -129,7 +129,7 @@ export function PartsPage() {
           onChange={(e) => setQuery(e.target.value)}
           aria-label={t('parts.library.search_placeholder')}
         />
-        {canEdit && tab !== 'archived' && (
+        {canEdit && tab === 'team' && (
           <>
             <button
               type="button"
@@ -177,6 +177,7 @@ export function PartsPage() {
               setTab(key);
               setSelecting(false);
               setChecked(new Set());
+              setConfirmDelete(null); // never leave a delete armed across tabs
             }}
           >
             {t(`parts.library.tab_${key}`)}
@@ -205,7 +206,25 @@ export function PartsPage() {
             type="button"
             className="btn btn-ghost"
             disabled={busy}
-            onClick={() => run(Promise.all(checkedIds.map((id) => api.archivePart(id))))}
+            onClick={() =>
+              run(
+                // allSettled: report a partial failure instead of hiding which
+                // archives already succeeded behind Promise.all's first reject.
+                Promise.allSettled(checkedIds.map((id) => api.archivePart(id))).then(
+                  (results) => {
+                    const failed = results.filter((r) => r.status === 'rejected').length;
+                    if (failed > 0) {
+                      throw new Error(
+                        t('parts.library.archive_failed', {
+                          failed,
+                          total: results.length,
+                        }),
+                      );
+                    }
+                  },
+                ),
+              )
+            }
           >
             {t('parts.library.archive')}
           </button>
@@ -232,7 +251,10 @@ export function PartsPage() {
                     className="part-card-check"
                     checked={checked.has(part.id)}
                     onChange={() => toggleChecked(part.id)}
-                    aria-label={t('parts.library.select_part')}
+                    aria-label={t('parts.library.select_part_named', {
+                      name:
+                        part.primary_filename ?? part.name ?? part.part_number ?? part.id,
+                    })}
                   />
                 )}
                 <button
@@ -252,7 +274,9 @@ export function PartsPage() {
                   </span>
                   <span className="part-card-meta">
                     {part.part_number ?? '—'}
-                    {part.revision ? ` · Rev ${part.revision}` : ''}
+                    {part.revision
+                      ? ` · ${t('parts.library.rev_short', { revision: part.revision })}`
+                      : ''}
                   </span>
                   {part.process && <span className="crm-chip">{part.process}</span>}
                 </button>

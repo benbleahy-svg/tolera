@@ -12,7 +12,7 @@
  * imported without a click).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
@@ -35,15 +35,16 @@ interface ChipProps {
 
 export function PartMatchesChip({ partId, componentId, editable, onImported }: ChipProps) {
   const { t } = useTranslation();
-  const api = usePartsApi();
+  // Destructured so the effect depends on the function, not the wrapper object
+  // (an unstable wrapper identity must not clear-and-refetch on every render).
+  const { getMatches } = usePartsApi();
   const [matches, setMatches] = useState<PartMatches | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setMatches(null);
-    api
-      .getMatches(partId)
+    getMatches(partId)
       .then((m) => {
         if (!cancelled) setMatches(m);
       })
@@ -53,7 +54,7 @@ export function PartMatchesChip({ partId, componentId, editable, onImported }: C
     return () => {
       cancelled = true;
     };
-  }, [api, partId]);
+  }, [getMatches, partId]);
 
   if (!matches || matches.total === 0) return null;
   return (
@@ -96,18 +97,41 @@ export function MatchingPartsModal({
 }: ModalProps) {
   const { t } = useTranslation();
   const api = usePartsApi();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<string | null>(
     matches.buckets.find((b) => b.count > 0)?.key ?? null,
   );
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
 
+  // Focus management (the CreateAccountModal pattern): move focus into the
+  // dialog on open, trap Tab inside it, restore the opener's focus on close.
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
+      if (event.key === 'Tab' && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      opener?.focus();
+    };
   }, [onClose]);
 
   const importFrom = (sourceComponentId: string) => {
@@ -138,6 +162,8 @@ export function MatchingPartsModal({
         aria-label={t('parts.match.title', { count: matches.total })}
         className="crm-modal match-modal"
         data-testid="matching-parts-modal"
+        ref={dialogRef}
+        tabIndex={-1}
       >
         <header className="match-modal-header">
           <p className="match-modal-kicker">{t('parts.match.kicker')}</p>
@@ -241,7 +267,9 @@ function MatchCardView({ card, canImport, importing, onImport }: CardProps) {
       <header>
         <strong>
           {card.part_number ?? card.name ?? '—'}
-          {card.revision ? ` · Rev ${card.revision}` : ''}
+          {card.revision
+            ? ` · ${t('parts.match.revision_short', { revision: card.revision })}`
+            : ''}
         </strong>
         {card.archived && <span className="crm-chip">{t('parts.library.badge_archived')}</span>}
       </header>
