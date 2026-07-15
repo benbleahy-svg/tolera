@@ -2200,6 +2200,8 @@ class ExtractionFinding(Base):
         CheckConstraint(
             "confidence >= 0 AND confidence <= 1", name="ck_extraction_finding_confidence"
         ),
+        # Correction rows FK the (org_id, id) pair (added in 0021).
+        UniqueConstraint("org_id", "id", name="uq_extraction_finding_org_id_id"),
         # Findings are listed per file (Found-in-Files panel) and per component.
         Index("ix_extraction_finding_org_file", "org_id", "source_file_id"),
         Index("ix_extraction_finding_org_component", "org_id", "component_id"),
@@ -2225,5 +2227,76 @@ class ExtractionFinding(Base):
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
     status: Mapped[FindingStatus] = mapped_column(
         _finding_status_enum, nullable=False, server_default=FindingStatus.suggested.value
+    )
+    created_at: Mapped[datetime] = _ts()
+
+
+class CorrectionType(enum.StrEnum):
+    """The three training labels (spec ``#wingman`` §3 / AI-LENS-ENGINE §7):
+    false positive, wrong-value, false negative."""
+
+    mark_inaccurate = "mark_inaccurate"
+    # The member shadows str.replace on the class — fine for an enum (members
+    # are class-level), but mypy flags the base-class clash.
+    replace = "replace"  # type: ignore[assignment]
+    add_missing = "add_missing"
+
+
+_correction_type_enum = Enum(
+    CorrectionType,
+    name="correction_type",
+    create_type=False,
+    values_callable=lambda enum_cls: [member.value for member in enum_cls],
+)
+
+
+class ExtractionCorrection(Base):
+    """One user correction on a Lens finding — the training label
+    (M3.2 — spec ``#wingman`` §3; AI-LENS-ENGINE §7).
+
+    Persists ``{finding, predicted, corrected, tenant, file_ref, source_region}``:
+    ``predicted`` snapshots the finding as the model emitted it (NULL for
+    ``add_missing`` — there was no prediction); ``corrected`` is what the human
+    said instead (NULL for ``mark_inaccurate`` — the label IS "this is wrong").
+    ``page``/``bbox`` carry the source region for retraining/QA.
+
+    **Per-tenant storage** (DECISIONS.md 2026-07-15): org-scoped RLS rows; a
+    global/anonymised pool is a later opt-in, not built here. Labels must
+    outlive their finding (they feed the M3.11 eval set), so ``finding_id``
+    nulls on finding deletion while the snapshot stays; but they must NOT
+    outlive their source *file* — corrections carry print content, and file
+    deletion is GDPR erasure (the 0020 cascade precedent).
+    """
+
+    __tablename__ = "extraction_correction"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "source_file_id"],
+            ["part_file.org_id", "part_file.id"],
+            name="fk_extraction_correction_file_org",
+            ondelete="CASCADE",
+        ),
+        # Column-list SET NULL (finding_id only, not org_id) — DDL-only form
+        # the ORM can't express (the 0017/0019 precedent).
+        ForeignKeyConstraint(
+            ["org_id", "finding_id"],
+            ["extraction_finding.org_id", "extraction_finding.id"],
+            name="fk_extraction_correction_finding_org",
+        ),
+        Index("ix_extraction_correction_org_file", "org_id", "source_file_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    finding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    source_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    correction_type: Mapped[CorrectionType] = mapped_column(_correction_type_enum, nullable=False)
+    predicted: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    corrected: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    page: Mapped[int | None] = mapped_column(Integer)
+    bbox: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
     )
     created_at: Mapped[datetime] = _ts()
