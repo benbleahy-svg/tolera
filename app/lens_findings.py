@@ -271,8 +271,11 @@ async def accept_finding(
     payload: AcceptIn | None = None,
 ) -> FindingActionOut:
     """Explicit Accept: flip the suggestion to ``accepted`` and fill the target
-    part field — one transaction, so the two can never diverge. Idempotent on
-    an already-accepted finding; a rejected one is gone from the panel (409)."""
+    part field — one transaction, so the two can never diverge. Accept hands
+    ownership of the filled field to the human: an already-accepted finding is
+    a pure no-op acknowledge (a retry must never re-run the part write over a
+    later manual edit — the UI re-offers fill only on suggested/edited).
+    A rejected one is gone from the panel (409)."""
     finding = await _get_finding_or_404(session, part_id, file_id, finding_id)
     if finding.status is FindingStatus.rejected:
         raise AppError(
@@ -280,7 +283,11 @@ async def accept_finding(
             "Ein als ungenau markierter Fund kann nicht übernommen werden.",
             status_code=status.HTTP_409_CONFLICT,
         )
+    # Validate the target even when the write below is skipped — a contract
+    # violation (part_number → size_x) stays 422 no matter the status.
     target = _resolve_apply_target(finding, payload.apply_to if payload else None)
+    if finding.status is FindingStatus.accepted:
+        return FindingActionOut(finding=_finding_out(finding), applied_field=None)
     if target is not None:
         part = await session.get(Part, part_id, with_for_update=True)
         if part is None:  # deleted between the finding gate and this lock
@@ -301,7 +308,14 @@ async def reject_finding(
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> FindingActionOut:
     """ "Mark as inaccurate": remove the wrong finding and persist the
-    false-positive label. Idempotent — a second reject adds no second label."""
+    false-positive label. Idempotent — a second reject adds no second label.
+
+    Allowed on an accepted finding (a late false-positive is still training
+    signal — the panel offers it on every non-rejected chip), but the part
+    field written at accept is human-owned by then and is NEVER silently
+    mutated here: un-applying is lossy (no pre-accept snapshot exists) and an
+    un-gated part write would break the explicit-Accept invariant. The user
+    corrects the field in the Part-Fields tab beside the panel."""
     finding = await _get_finding_or_404(session, part_id, file_id, finding_id)
     if finding.status is not FindingStatus.rejected:
         session.add(
@@ -333,7 +347,12 @@ async def replace_finding(
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> FindingActionOut:
     """The user supplies the right value: persist the ``{predicted, corrected}``
-    pair, then edit the finding in place (status ``edited`` — survives re-runs)."""
+    pair, then edit the finding in place (status ``edited`` — survives re-runs).
+
+    Allowed on an accepted finding; the part field it filled is not touched
+    (human-owned since accept, see ``reject_finding``). ``edited`` re-arms the
+    fill affordance, so applying the corrected value stays an explicit,
+    human-gated accept — never an automatic side effect of the correction."""
     finding = await _get_finding_or_404(session, part_id, file_id, finding_id)
     if finding.status is FindingStatus.rejected:
         raise AppError(

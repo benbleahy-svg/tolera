@@ -264,14 +264,63 @@ class TestAcceptClickToFill:
             assert resp.json()["finding"]["status"] == "accepted"
 
     def test_reaccept_is_idempotent(self, app_client: TestClient, seeder: Seeder) -> None:
+        """A retried accept must not re-run the part write: a manual edit made
+        after the original accept survives (the field is human-owned)."""
         org, admin, part_id, file_id = _setup(app_client, seeder, "m32-reaccept")
         finding_id = _plant_finding(seeder, org, file_id)
         with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
             url = f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}/accept"
             assert app_client.post(url).status_code == 200
+            patched = app_client.patch(f"/api/parts/{part_id}", json={"part_number": "MANUAL-1"})
+            assert patched.status_code == 200, patched.text
+
             resp = app_client.post(url)
             assert resp.status_code == 200
             assert resp.json()["finding"]["status"] == "accepted"
+            assert resp.json()["applied_field"] is None  # no re-apply
+            assert app_client.get(f"/api/parts/{part_id}").json()["part_number"] == "MANUAL-1"
+
+            # Contract errors stay 422 even on the no-op path.
+            bad = app_client.post(url, json={"apply_to": "size_x"})
+            assert bad.status_code == 422
+            assert bad.json()["code"] == "apply_mismatch"
+
+    def test_reject_after_accept_keeps_part_field(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """A late false-positive label never un-writes the accepted value:
+        the part field is human-owned after accept (explicit-Accept invariant;
+        no pre-accept snapshot exists to restore losslessly)."""
+        org, admin, part_id, file_id = _setup(app_client, seeder, "m32-rej-after-acc")
+        finding_id = _plant_finding(seeder, org, file_id)  # part_number PP-1212-006
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            base = f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}"
+            assert app_client.post(f"{base}/accept").status_code == 200
+            resp = app_client.post(f"{base}/reject")
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["finding"]["status"] == "rejected"
+            assert app_client.get(f"/api/parts/{part_id}").json()["part_number"] == "PP-1212-006"
+
+    def test_replace_after_accept_refills_only_on_explicit_accept(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """Correcting an accepted finding records the label and edits the
+        finding, but the part field only changes on the explicit re-accept."""
+        org, admin, part_id, file_id = _setup(app_client, seeder, "m32-repl-after-acc")
+        finding_id = _plant_finding(seeder, org, file_id)  # part_number PP-1212-006
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            base = f"/api/parts/{part_id}/files/{file_id}/findings/{finding_id}"
+            assert app_client.post(f"{base}/accept").status_code == 200
+            replaced = app_client.post(f"{base}/replace", json={"value": "PP-1212-007"})
+            assert replaced.status_code == 200, replaced.text
+            assert replaced.json()["finding"]["status"] == "edited"
+            # The correction alone never touches the part (AI-Governor).
+            assert app_client.get(f"/api/parts/{part_id}").json()["part_number"] == "PP-1212-006"
+
+            resp = app_client.post(f"{base}/accept")
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["applied_field"] == "part_number"
+            assert app_client.get(f"/api/parts/{part_id}").json()["part_number"] == "PP-1212-007"
 
     def test_accept_rejected_finding_is_409(self, app_client: TestClient, seeder: Seeder) -> None:
         org, admin, part_id, file_id = _setup(app_client, seeder, "m32-acc-rej")

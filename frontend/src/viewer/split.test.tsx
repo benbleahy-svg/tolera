@@ -10,7 +10,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { renderWithProviders } from '../test/render';
-import { partPanelStubs, stableLensApi } from '../test/lensStubs';
+import { partPanelStubs } from '../test/lensStubs';
 
 const loadedDoc = {
   pageCount: 3,
@@ -89,9 +89,12 @@ vi.mock('../parts/api', () => ({
 // M3.2: the page now mounts the Found-in-Files panel — quiet shared stubs
 // (the panel's own behaviour is covered in found-in-files.test.tsx).
 
-vi.mock('./lens-api', () => ({
-  useLensApi: () => stableLensApi,
-}));
+vi.mock('./lens-api', async () => {
+  // Hoist-safe: the factory imports the stub itself instead of closing over
+  // this file's static import (vitest hoists mock factories above it).
+  const { stableLensApi } = await import('../test/lensStubs');
+  return { useLensApi: () => stableLensApi };
+});
 
 
 // the page reads params via useParams — provide a route wrapper
