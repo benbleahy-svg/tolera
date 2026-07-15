@@ -7,6 +7,9 @@
  * shape is ever persisted.
  */
 
+/** A 3D point / vector in model units (mm for STEP). */
+export type Vec3 = readonly [number, number, number];
+
 /**
  * A B-rep topological face, as an inclusive triangle range into the owning
  * body's `indices` buffer (triangle t spans indices[3t … 3t+2]). This is what

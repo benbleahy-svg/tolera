@@ -15,6 +15,8 @@ import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
+import type { Annotation as CollabAnnotation } from '../collab/api';
+import { type BoundSelection, CollaborationPanel } from '../collab/CollaborationPanel';
 import { usePartsApi, type PartFile } from '../parts/api';
 import { AnnotationOverlay } from './AnnotationOverlay';
 import { MeasureOverlay, type MeasureTool } from './MeasureOverlay';
@@ -1083,6 +1085,30 @@ export function PdfViewerPage() {
             ›
           </button>
         </footer>
+      )}
+      {partId && (
+        <CollaborationPanel
+          partId={partId}
+          selection={
+            fileId
+              ? {
+                  kind: 'region',
+                  geometry_ref: {
+                    file_id: fileId,
+                    page: currentPage,
+                    rect: { x: 0, y: 0, width: 0, height: 0 },
+                  },
+                  label: t('viewer.pdf_region_ordinal', { n: currentPage }),
+                }
+              : (null as BoundSelection | null)
+          }
+          onFocusAnnotation={(annotation: CollabAnnotation) => {
+            const page = annotation.geometry_ref.page;
+            if (annotation.kind === 'region' && page && annotation.geometry_ref.file_id === fileId) {
+              setCurrentPage(page);
+            }
+          }}
+        />
       )}
     </main>
   );

@@ -135,6 +135,11 @@ const listFiles = vi.fn(() =>
 
 const stableApi = { fetchFileBytes, listFiles, getAnnotations, putAnnotations };
 
+vi.mock('../collab/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../collab/api')>()),
+  useCollabApi: () => new Proxy({}, { get: () => () => Promise.resolve([]) }),
+}));
+
 vi.mock('../parts/api', () => ({
   // the real hook is useMemo-stable; an unstable mock would retrigger the
   // page's load effect on every render

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -23,6 +23,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -1928,3 +1929,196 @@ class FileAnnotationLayer(Base):
     )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+# --------------------------------------------------------------------------- #
+# Collaboration (M2.11, spec #collab / DB-SCHEMA "collaboration / sourcing")
+# --------------------------------------------------------------------------- #
+
+
+class TaskStatus(enum.StrEnum):
+    """Task lifecycle (DB-SCHEMA ``task_status``). ``overdue`` is derived from a
+    passed ``due_date`` at read time; stored state is ``open`` until resolved."""
+
+    open = "open"
+    overdue = "overdue"
+    resolved = "resolved"
+
+
+_task_status_enum = Enum(TaskStatus, name="task_status", create_type=False)
+
+
+class Channel(Base):
+    """A collaboration channel on a part (spec #collab). ``scope='team'`` is the
+    single internal channel (one per part); ``scope='external'`` are per
+    vendor/customer channels (many, optionally ``label``-named). Anchored to a
+    part (the viewer's subject); ``quote_id`` optionally ties it to a quote."""
+
+    __tablename__ = "channel"
+    __table_args__ = (
+        CheckConstraint("scope IN ('team', 'external')", name="ck_channel_scope"),
+        UniqueConstraint("org_id", "id", name="uq_channel_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "part_id"],
+            ["part.org_id", "part.id"],
+            name="fk_channel_part_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_channel_quote_org",
+            ondelete="SET NULL",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    scope: Mapped[str] = mapped_column(String, nullable=False, server_default="team")
+    label: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+
+
+class Annotation(Base):
+    """A feature/region locator a message can bind to (spec #collab annotation
+    suite). ``kind='face'`` → ``geometry_ref = {file_id, entity{bodyId,kind,index}}``
+    (the M2.7 ``EntityRef``); ``kind='region'`` → ``{file_id, page, rect}`` (M2.2
+    pdf-unit coords). Clicking a bound message re-opens the file zoomed to it."""
+
+    __tablename__ = "annotation"
+    __table_args__ = (
+        CheckConstraint("kind IN ('face', 'region')", name="ck_annotation_kind"),
+        UniqueConstraint("org_id", "id", name="uq_annotation_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "part_id"],
+            ["part.org_id", "part.id"],
+            name="fk_annotation_part_org",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    geometry_ref: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+
+
+class Message(Base):
+    """A message in a channel (spec #collab). May bind an ``annotation`` (post a
+    message on a picked face/region), reply to a ``parent`` message, and
+    ``@mention`` teammates (``mentions`` = app_user ids → notifications). Edit
+    stamps ``edited_at``; Delete tombstones (``deleted_at``, body cleared) so
+    replies survive. ``author_id`` FKs the org-less ``app_user`` (membership
+    validated at the edge)."""
+
+    __tablename__ = "message"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_message_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "channel_id"],
+            ["channel.org_id", "channel.id"],
+            name="fk_message_channel_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "annotation_id"],
+            ["annotation.org_id", "annotation.id"],
+            name="fk_message_annotation_org",
+            ondelete="SET NULL",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "parent_id"],
+            ["message.org_id", "message.id"],
+            name="fk_message_parent_org",
+            ondelete="SET NULL",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
+    )
+    annotation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    mentions: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+
+
+class Task(Base):
+    """A task (spec #collab Assign Task → surfaces on the Dashboard). Optionally
+    bound to a part/quote/annotation; ``assignee_id``/``created_by`` FK the
+    org-less ``app_user`` (active-membership validated at the edge). ``status``
+    starts ``open``; ``overdue`` is derived from ``due_date`` at read time."""
+
+    __tablename__ = "task"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "part_id"],
+            ["part.org_id", "part.id"],
+            name="fk_task_part_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_task_quote_org",
+            ondelete="SET NULL",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "annotation_id"],
+            ["annotation.org_id", "annotation.id"],
+            name="fk_task_annotation_org",
+            ondelete="SET NULL",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    annotation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
+    )
+    message: Mapped[str | None] = mapped_column(Text)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    status: Mapped[TaskStatus] = mapped_column(
+        _task_status_enum, nullable=False, server_default=TaskStatus.open.value
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+
+
+class Notification(Base):
+    """A per-recipient notification (spec #collab: @mention → email/notification;
+    Assign Task notifies the assignee). ``kind`` ∈ ``mention`` | ``task_assigned``;
+    ``payload`` carries the deep-link context. ``org_id`` is the source org."""
+
+    __tablename__ = "notification"
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
