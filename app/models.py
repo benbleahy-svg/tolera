@@ -588,6 +588,11 @@ class RequestForQuote(Base):
     __tablename__ = "request_for_quote"
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
     __table_args__ = (
+        # Mirror migration 0022 so a metadata-created schema (tests) carries
+        # the same integrity rule (CodeRabbit).
+        CheckConstraint(
+            "eml_size_bytes IS NULL OR eml_size_bytes >= 0", name="ck_rfq_eml_size_nonneg"
+        ),
         # Composite-FK target so part_file.(org_id, rfq_id) pins same-org.
         UniqueConstraint("org_id", "id", name="uq_rfq_org_id_id"),
         # The converted quote must live in THIS org (fk added in migration —

@@ -183,6 +183,16 @@ def test_parse_nested_zip_recurses_one_level_down() -> None:
     assert [a.filename for a in parsed.attachments] == ["innen.step"]
 
 
+def test_parse_triple_nested_zip_stops_recursing() -> None:
+    innermost = _zip_of({"innen.step": _step_bytes()})
+    middle = _zip_of({"inner.zip": innermost})
+    raw = _eml_with_zip(_zip_of({"middle.zip": middle}))
+    parsed = parse_rfq_email(raw)
+    # Past MAX_ZIP_DEPTH the archive is kept opaque, not recursed further.
+    assert [a.filename for a in parsed.attachments] == ["inner.zip"]
+    assert parsed.attachments[0].payload == innermost
+
+
 def test_parse_zip_member_count_capped() -> None:
     step = _step_bytes()
     many = _zip_of({f"teil-{i:03d}.step": step for i in range(250)})

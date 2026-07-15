@@ -115,6 +115,15 @@ def upgrade() -> None:
 
     # Slug → org id for the signature-authenticated webhook (docstring above).
     # STRICT: NULL slug returns NULL without running the body.
+    #
+    # Threat-model note (CodeRabbit flagged the APP_ROLE grant as cross-tenant):
+    # this design's RLS keys on the app-set GUC `app.current_org_id` — any
+    # session holding APP_ROLE can already SET it to any org, so RLS here
+    # guards against *application bugs* (a forgotten scope), not against
+    # arbitrary SQL under the app role. slug→id is therefore strictly less
+    # capability than the role already has; a dedicated ingest role would add
+    # a second DSN/engine without moving the actual trust boundary. The
+    # function stays single-purpose, PUBLIC-revoked, and returns only the id.
     op.execute(
         """
         CREATE FUNCTION resolve_org_id_by_slug(p_slug text) RETURNS uuid

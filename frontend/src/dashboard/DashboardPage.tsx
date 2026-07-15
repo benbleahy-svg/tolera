@@ -75,8 +75,13 @@ export function DashboardPage(): React.ReactElement {
   };
 
   const markRead = async (n: Notification) => {
-    await api.markNotification(n.id, true);
-    await reload();
+    try {
+      await api.markNotification(n.id, true);
+      // Only the notification list changed — don't refetch tasks/members.
+      setNotifications(await api.listNotifications());
+    } catch {
+      setError(t('collab.load_error'));
+    }
   };
 
   return (
