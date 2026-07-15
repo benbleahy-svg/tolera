@@ -703,17 +703,35 @@ def authed(
 
 @pytest.fixture
 def eager_celery() -> Iterator[None]:
-    """Run Celery tasks eagerly in-process (M2.5/M2.12 async-work tests)."""
+    """Run Celery tasks eagerly in-process (M2.5/M2.12 async-work tests).
+
+    Results land in an in-process memory backend: CI has no Redis, and a
+    result-store ConnectionError would otherwise retry-and-raise straight
+    through the eager ``.delay()`` into the request under test."""
     from app.celery_app import celery_app
 
     saved = {
         key: celery_app.conf[key]
-        for key in ("task_always_eager", "task_store_eager_result", "task_eager_propagates")
+        for key in (
+            "task_always_eager",
+            "task_store_eager_result",
+            "task_eager_propagates",
+            "result_backend",
+        )
     }
     celery_app.conf.update(
-        task_always_eager=True, task_store_eager_result=True, task_eager_propagates=True
+        task_always_eager=True,
+        task_store_eager_result=True,
+        # Task errors surface as task state, never as an exception inside the
+        # enqueuing request (the M2.5 posture; assertions read DB effects).
+        task_eager_propagates=False,
+        result_backend="cache+memory://",
     )
+    # The backend is a cached property — drop any cached instance so the config
+    # change takes effect now and can't leak into later tests after restore.
+    celery_app.__dict__.pop("backend", None)
     try:
         yield
     finally:
         celery_app.conf.update(**saved)
+        celery_app.__dict__.pop("backend", None)
