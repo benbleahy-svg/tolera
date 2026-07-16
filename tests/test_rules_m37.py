@@ -510,7 +510,33 @@ class TestNormalization:
 # --------------------------------------------------------------------------- #
 # 5. ISO GPS symbology (§7) + the remaining operators
 # --------------------------------------------------------------------------- #
+#: The 13 ISO 1101 control-frame characteristics, spelled out here rather than
+#: read from ``_ISO_GPS_SYMBOLS`` — deriving the expectation from the mapping
+#: under test makes a dropped symbol silently untested and a swapped pair
+#: (⏥→perpendicularity, ⊥→flatness) still pass, since both sides move together.
+_ISO_GPS_ORACLE = {
+    "⏤": "straightness",
+    "⏥": "flatness",
+    "○": "circularity",
+    "⌭": "cylindricity",
+    "⌒": "profile_of_line",
+    "⌓": "profile_of_surface",
+    "∥": "parallelism",
+    "⊥": "perpendicularity",
+    "⌖": "position",
+    "◎": "concentricity",
+    "⌯": "symmetry",
+    "↗": "runout",
+    "⌰": "total_runout",
+}
+
+
 class TestIsoGpsAndOperators:
+    def test_iso_gps_catalogue_matches_the_13_characteristics(self) -> None:
+        """§7: the catalogue itself, against an independent oracle."""
+        assert len(_ISO_GPS_ORACLE) == 13
+        assert _ISO_GPS_SYMBOLS == _ISO_GPS_ORACLE
+
     def test_control_frame_matches_by_iso_gps_symbol(self, worked_rules: list[RuleSchema]) -> None:
         """§7: control-frame signals interpret ISO GPS symbology. A print emits
         the symbol (⏥), not the English word."""
@@ -520,7 +546,7 @@ class TestIsoGpsAndOperators:
 
     def test_each_iso_gps_symbol_maps_to_its_path(self) -> None:
         """Every symbol resolves to its own characteristic's collection."""
-        for symbol, characteristic in _ISO_GPS_SYMBOLS.items():
+        for symbol, characteristic in _ISO_GPS_ORACLE.items():
             rule = _single_group_rule(
                 f"{characteristic}_control_frames",
                 [_query(["value"], "lessThanOrEqual", 0.1, "distance", "numeric", "mm")],
