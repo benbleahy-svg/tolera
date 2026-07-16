@@ -105,6 +105,45 @@ export interface PartGeometry {
   overrides: Record<string, { input: string; unit: string }>;
 }
 
+/** One GeometryService run on a part's PRIMARY CAD file (M4.1). */
+export interface InterrogationRun {
+  id: string;
+  part_id: string;
+  file_id: string;
+  family: string | null;
+  material_id: string | null;
+  /** Versioned geometry signature (`gs1:<sha256>`), set once the body parsed. */
+  geom_hash: string | null;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  error_code: string | null;
+  error_detail: string | null;
+  result: {
+    dimensions: {
+      size_x: number;
+      size_y: number;
+      size_z: number;
+      max_dim: number;
+      med_dim: number;
+      min_dim: number;
+      area: number;
+      volume: number;
+      weight: number | null;
+      bbox_source: 'obb' | 'aabb';
+    };
+  } | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/** The part's interrogation state: `none` until a CAD PRIMARY queues a run;
+ * `queued`/`running` render as the "interrogating…" state. */
+export interface InterrogationStatus {
+  part_id: string;
+  status: 'none' | InterrogationRun['status'];
+  run: InterrogationRun | null;
+}
+
 /** Task state for a server-side PDF split, as the viewer's toasts consume it. */
 export interface SplitStatus {
   state: 'queued' | 'in_progress' | 'succeeded' | 'failed';
@@ -123,6 +162,8 @@ export interface PartsApi {
     changes: Partial<Pick<Part, 'name' | 'part_number' | 'revision' | 'description'>>,
   ) => Promise<Part>;
   getGeometry: (partId: string) => Promise<PartGeometry>;
+  /** Latest interrogation run for a part (M4.1: the interrogating… state). */
+  getInterrogation: (partId: string) => Promise<InterrogationStatus>;
   /** Set manual dims; values evaluate server-side (math + units, stored metric). */
   updateGeometry: (
     partId: string,
@@ -191,6 +232,7 @@ export function usePartsApi(): PartsApi {
       updatePart: (id, changes) =>
         apiFetch(`/api/parts/${id}`, token, { method: 'PATCH', body: changes }),
       getGeometry: (partId) => apiFetch(`/api/parts/${partId}/geometry`, token),
+      getInterrogation: (partId) => apiFetch(`/api/parts/${partId}/interrogation`, token),
       updateGeometry: (partId, changes) =>
         apiFetch(`/api/parts/${partId}/geometry`, token, { method: 'PATCH', body: changes }),
       uploadLibraryParts: (files) => {

@@ -44,9 +44,20 @@ dev = [
     "httpx>=0.28.0",
     "ruff>=0.8.0",
 ]
+# M4.1 — GeometryService (OCCT via the OCP bindings; DECISIONS.md 2026-07-16:
+# pythonocc-core has no pip wheels). A separate group because the wheel pulls in
+# vtk (~102 MB): the Celery worker image installs it, the API image must NOT
+# (interrogation runs on workers only — GEOMETRY.md §0).
+geometry = [
+    "cadquery-ocp>=7.9,<7.10",
+]
 
 [tool.uv]
 package = false
+# Local dev + CI get the geometry engine (tests exercise it); production images
+# opt in explicitly (Dockerfile: API prod uses --no-default-groups, worker adds
+# --group geometry).
+default-groups = ["dev", "geometry"]
 
 # ---------------------------------------------------------------------------
 # Ruff — lint + format (CI runs `ruff check .` and `ruff format --check .`).
@@ -79,6 +90,12 @@ exclude = ['(^|/)(alembic|clerk-react|clerk-nextjs|ui-prototype|frontend|e2e)/',
 module = ["celery.*"]
 ignore_missing_imports = true
 
+# OCP (cadquery-ocp) ships no stubs; the OCCT bindings are confined to
+# app/geometry/occt.py behind the typed GeometryService contract.
+[[tool.mypy.overrides]]
+module = ["OCP.*"]
+ignore_missing_imports = true
+
 # aioboto3 / boto3 ship incomplete stubs; the async S3 client is dynamic.
 [[tool.mypy.overrides]]
 module = ["aioboto3.*", "boto3.*", "botocore.*"]
@@ -90,6 +107,7 @@ module = [
     "app.tasks",
     "app.celery_app",
     "app.file_split",
+    "app.interrogation",
     "app.lens_extract",
     "app.part_index",
     "app.email_ingest",

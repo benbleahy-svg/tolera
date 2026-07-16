@@ -19,6 +19,15 @@
 
 ---
 
+## [2026-07-16] M4.1 — geometry signature frozen as `gs1` (6-digit quantization, version-prefixed)
+
+**Status:** RESOLVED (M4.1 build; cheap-to-reverse knobs noted, re-validation pending real fixtures)
+**Question:** M4.0 proved the recipe but left tuning knobs open ("pick and freeze the quantization with the real fixtures"; `Bnd_OBB` approximation; how stored hashes survive a future recipe change).
+**Decision:** (1) The production signature is **`gs1:<sha256>`** — `ShapeUpgrade_UnifySameDomain` canonicalization → quantized (volume, area, OBB-sorted dims, face/edge-type histograms, per-type areas) at **6 significant digits** (the M4.0 verdict recipe; 4/6/8 all passed the stability cases). The **version prefix** is stored in `part.geom_hash` / `interrogation_run.geom_hash`, so a later `gs2` re-index can never silently mismatch old hashes. (2) Dims (`size_*`, `max/med/min_dim`) take the **tighter of OBB/AABB by volume** (`Bnd_OBB` is PCA-approximate and can exceed the AABB — GEOMETRY.md §1), with the winning box recorded in `part_geometry.raw.dimensions.bbox_source`. Deliberate deviation from the catalog's third fallback ("X of axis-aligned bbox", per-axis): when the AABB wins it fills the *optimal-bbox* precedence slot, so its dims are **sorted descending** (`size_x`=max … `size_z`=min) — one consistent rule keeps `size_*` ≡ `max/med/min_dim` for Kalk regardless of which box won. (3) The interrogation cache key is `(org_id, geom_hash, family, inputs_hash)` per spec §5.4; **weight is always recomputed** from the requesting run's density so a cache hit can't carry another material's weight; `inputs_hash=''` until M4.8. (4) When the Fechner fixtures land, the [2026-07-12] fixtures OPEN re-validates the 6-digit choice — bump to `gs2` if it moves.
+**Affects:** M4.1 (`app/geometry/`), M4.11 (Part-Library Exact-Geometric bucket), M2.12 (match buckets read `part.geom_hash`)
+
+---
+
 ## [2026-07-16] M4.0 — OCCT capability probe verdict: GO with OCCT; signature is topology-tolerant
 
 **Status:** RESOLVED (M4.0 spike output; the map is the artifact)

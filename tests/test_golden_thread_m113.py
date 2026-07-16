@@ -155,7 +155,38 @@ def test_golden_thread_end_to_end(thread_intake_client: TestClient, seeder: Seed
             )
             assert res.status_code == 200, res.text
 
-        # pricing: the seeded Zuschlagskalkulation chain prices the thread
+        # M4.1 — the thread's dims become REAL: the STEP body is uploaded and
+        # promoted to PRIMARY (the print arrived first via intake, so the swap
+        # is the trigger), interrogation runs, and the part's geometry now
+        # comes from GeometryService.analyze(), not hand-entered dims. The
+        # material set above (1.4301 @ 7.90 g/cm3) resolves weight.
+        part_id = item["part_id"]
+        step = (FIXTURES_DIR / "cad" / "cube-20mm.step").read_bytes()
+        with eager_celery():
+            up = app_client.post(
+                f"/api/parts/{part_id}/files",
+                files=[("files", ("cube-20mm.step", step, "application/step"))],
+            )
+            assert up.status_code == 201, up.text
+            [step_file] = [f for f in up.json() if f["filename"] == "cube-20mm.step"]
+            promoted = app_client.post(f"/api/parts/{part_id}/files/{step_file['id']}/primary")
+            assert promoted.status_code == 200, promoted.text
+        interrogation = app_client.get(f"/api/parts/{part_id}/interrogation").json()
+        assert interrogation["status"] == "succeeded"
+        geom = app_client.get(f"/api/parts/{part_id}/geometry").json()
+        # Geometry asserts use the Part-2 relative tolerance (0.1%), never
+        # exact float equality — kernel/platform rounding is not a failure.
+        assert (geom["size_x"], geom["size_y"], geom["size_z"]) == pytest.approx(
+            (20.0, 20.0, 20.0), rel=1e-3
+        )
+        assert geom["volume"] == pytest.approx(8000.0, rel=1e-3)
+        assert geom["area"] == pytest.approx(2400.0, rel=1e-3)
+        # 8000 mm3 / 1000 x 7.90 g/cm3
+        assert geom["weight"] == pytest.approx(63.2, rel=1e-3)
+
+        # pricing: the seeded Zuschlagskalkulation chain prices the thread —
+        # the SAME figures as before interrogation (the geometry→Kalk contract
+        # held; the thread only got more real).
         summary = app_client.get(f"/api/components/{component_id}/pricing").json()
         row = next(t for t in summary["totals"] if t["quantity"] == 1)
         assert Decimal(row["unit_price"]) == Decimal("261.80")

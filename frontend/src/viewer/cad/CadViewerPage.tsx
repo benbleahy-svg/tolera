@@ -24,6 +24,7 @@ import { Link } from 'react-router-dom';
 import type { Annotation } from '../../collab/api';
 import { type BoundSelection, CollaborationPanel } from '../../collab/CollaborationPanel';
 import { usePartsApi, type PartFile } from '../../parts/api';
+import { InterrogationPanel } from './InterrogationPanel';
 import { measure, type MeasurePick, type MeasureResult } from './measure';
 import {
   formatAngle,
@@ -541,7 +542,7 @@ export function CadViewerPage({
               </ul>
             </>
           ) : (
-            <p className="cad-features-pending">{t('viewer.cad_features_pending')}</p>
+            <InterrogationPanel partId={file.part_id} displayOpts={displayOpts} />
           )}
         </aside>
 
