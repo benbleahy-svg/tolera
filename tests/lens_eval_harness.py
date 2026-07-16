@@ -59,8 +59,10 @@ def _norm(text: str) -> str:
 
 
 def _as_float(value: str | None) -> float | None:
-    """Parse the first number out of a value (``"Ø10,0 mm"`` → ``10.0``),
-    tolerating a German decimal comma. ``None`` when there is no number."""
+    """Parse the first scalar out of a value (``"Ø10,0 mm"`` → ``10.0``),
+    reading a German decimal comma. Intended for dimensional scalars, not
+    grouped numbers (no thousands-separator handling). ``None`` when there is
+    no number."""
     if value is None:
         return None
     match = re.search(r"-?\d+(?:[.,]\d+)?", value)
@@ -282,31 +284,50 @@ class RunMetrics:
         return out
 
 
-def score_findings(
-    predicted: list[Any],
-    labels: list[Any],
-    *,
-    classification: float | None = None,
-) -> RunMetrics:
-    """Score one (or an aggregate) prediction/label set into per-category +
-    micro-averaged overall metrics."""
+def category_counts(predicted: list[Any], labels: list[Any]) -> dict[str, Counts]:
+    """TP/FP/FN per category for **one document** — predictions matched only
+    against that document's labels. Aggregate across documents by summing these
+    (``Counts.__add__``), never by pooling finding lists: pooling would let a
+    prediction on print A satisfy a label on print B, which can only inflate the
+    score (a hallucinated duplicate could mask a real miss). Per-document counts
+    summed give an honest micro-average."""
     preds = [to_comparable(p) for p in predicted]
     labs = [to_comparable(label) for label in labels]
     categories = sorted({c.category for c in preds} | {c.category for c in labs})
-    by_category: dict[str, Metrics] = {}
-    total = Counts()
-    for cat in categories:
-        counts = match_counts(
+    return {
+        cat: match_counts(
             [p for p in preds if p.category == cat],
             [label for label in labs if label.category == cat],
         )
-        by_category[cat] = precision_recall_f1(counts)
+        for cat in categories
+    }
+
+
+def metrics_from_counts(
+    by_category_counts: dict[str, Counts], *, classification: float | None = None
+) -> RunMetrics:
+    """Build per-category + micro-averaged overall metrics from summed counts."""
+    by_category = {cat: precision_recall_f1(c) for cat, c in by_category_counts.items()}
+    total = Counts()
+    for counts in by_category_counts.values():
         total += counts
     return RunMetrics(
         classification=classification,
         overall=precision_recall_f1(total),
         by_category=by_category,
     )
+
+
+def score_findings(
+    predicted: list[Any],
+    labels: list[Any],
+    *,
+    classification: float | None = None,
+) -> RunMetrics:
+    """Score one document's prediction/label set into per-category +
+    micro-averaged overall metrics. For a multi-document run, sum
+    :func:`category_counts` per document and call :func:`metrics_from_counts`."""
+    return metrics_from_counts(category_counts(predicted, labels), classification=classification)
 
 
 def classification_accuracy(

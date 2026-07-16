@@ -23,17 +23,19 @@ import json
 import pytest
 
 from app.config import get_settings
-from app.lens import run_document_extraction
+from app.lens import PROMPT_VERSION, run_document_extraction
 from app.lens_provider import make_provider
 from tests.lens_eval_harness import (
     DOCUMENT_EXTRACTION,
     GATED_METRICS,
+    Counts,
+    category_counts,
     classification_accuracy,
     compare_to_baseline,
     fixture_names,
     load_baseline,
     load_fixture,
-    score_findings,
+    metrics_from_counts,
 )
 
 pytestmark = pytest.mark.eval
@@ -54,19 +56,23 @@ async def test_lens_extraction_quality_gate(capsys: pytest.CaptureFixture[str]) 
     baseline = load_baseline()
     settings = get_settings()
 
-    all_predicted: list[object] = []
-    all_labels: list[object] = []
-    correct_pages = 0
-    total_pages = 0
-
     scored_fixtures = [
         name for name in fixture_names() if load_fixture(name).pipeline == DOCUMENT_EXTRACTION
     ]
+    # A vacuous gate is worse than no gate: refuse to go green having scored
+    # nothing (e.g. every fixture retagged off document-extraction).
+    assert scored_fixtures, "no document-extraction fixtures to score"
+
+    agg: dict[str, Counts] = {}
+    correct_pages = 0
+    total_pages = 0
     for name in scored_fixtures:
         fx = load_fixture(name)
         result = await run_document_extraction(provider, fx.pdf_bytes)  # type: ignore[arg-type]
-        all_predicted.extend(result.findings)
-        all_labels.extend(fx.findings)
+        # Score each document independently and SUM the counts — never pool the
+        # finding lists (a prediction on print A must not satisfy a label on B).
+        for cat, counts in category_counts(result.findings, fx.findings).items():
+            agg[cat] = agg.get(cat, Counts()) + counts
         correct_pages += round(
             classification_accuracy(set(result.print_pages), fx.print_pages, fx.pages_total)
             * fx.pages_total
@@ -74,11 +80,11 @@ async def test_lens_extraction_quality_gate(capsys: pytest.CaptureFixture[str]) 
         total_pages += fx.pages_total
 
     classification = correct_pages / total_pages if total_pages else None
-    run = score_findings(all_predicted, all_labels, classification=classification)
+    run = metrics_from_counts(agg, classification=classification)
 
     report = {
         "model": settings.lens_model,
-        "prompt_version": baseline.get("prompt_version"),
+        "prompt_version": PROMPT_VERSION,
         "fixtures": scored_fixtures,
         "metrics": run.flat(),
         "targets": baseline.get("targets"),

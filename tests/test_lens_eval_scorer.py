@@ -20,12 +20,14 @@ from tests.lens_eval_harness import (
     Comparable,
     Counts,
     LabelledFinding,
+    category_counts,
     classification_accuracy,
     compare_to_baseline,
     fixture_names,
     load_baseline,
     load_fixture,
     match_counts,
+    metrics_from_counts,
     precision_recall_f1,
     score_findings,
     to_comparable,
@@ -173,6 +175,46 @@ class TestScoreFindings:
         flat = run.flat()
         for key in GATED_METRICS:
             assert key in flat
+
+
+class TestPerDocumentAggregation:
+    """Multi-document runs must sum per-document counts, never pool findings —
+    pooling lets a prediction on print A satisfy a label on print B, masking a
+    real miss with a hallucinated duplicate elsewhere (fresh-eyes review)."""
+
+    @staticmethod
+    def _docs() -> list[tuple[list[Comparable], list[LabelledFinding]]]:
+        return [
+            # Doc A: a real material + a hallucinated duplicate, one label.
+            (
+                [
+                    Comparable("quote_setup", "material", value="1.4301"),
+                    Comparable("quote_setup", "material", value="1.4301"),
+                ],
+                [LabelledFinding("quote_setup", "material", value="1.4301")],
+            ),
+            # Doc B: the model MISSED material; the label is unmatched.
+            ([], [LabelledFinding("quote_setup", "material", value="1.4301")]),
+        ]
+
+    def test_summed_counts_catch_the_miss(self) -> None:
+        agg: dict[str, Counts] = {}
+        for preds, labels in self._docs():
+            for cat, counts in category_counts(preds, labels).items():
+                agg[cat] = agg.get(cat, Counts()) + counts
+        run = metrics_from_counts(agg)
+        # A: tp1 fp1 fn0 ; B: tp0 fp0 fn1 → summed tp1 fp1 fn1
+        assert run.overall.precision == 0.5
+        assert run.overall.recall == 0.5
+
+    def test_pooling_would_have_masked_it(self) -> None:
+        # The rejected approach, pinned as a regression guard: pooling scores a
+        # false perfect (tp2) — proving per-document summation is not cosmetic.
+        preds = [p for docs in self._docs() for p in docs[0]]
+        labels = [label for docs in self._docs() for label in docs[1]]
+        pooled = score_findings(preds, labels)
+        assert pooled.overall.precision == 1.0
+        assert pooled.overall.recall == 1.0
 
 
 class TestClassificationAccuracy:
