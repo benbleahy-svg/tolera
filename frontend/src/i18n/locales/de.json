@@ -620,7 +620,13 @@
     "interrogation_failed": "Geometrieanalyse fehlgeschlagen.",
     "interrogation_failed_multi_body": "Baugruppe erkannt — Einzelteile werden erst nach der Zerlegung analysiert.",
     "interrogation_load_failed": "Analyse-Status konnte nicht geladen werden.",
-    "interrogation_features_pending": "Merkmalserkennung folgt (M4.2+)."
+    "interrogation_features_pending": "Merkmalserkennung folgt (M4.4+).",
+    "sheetmetal_title": "Blechanalyse – Ergebnisse",
+    "sheetmetal_thickness": "Blechdicke",
+    "sheetmetal_flat_area": "Fläche (Abwicklung)",
+    "sheetmetal_unfolded": "Abwicklungsmaße",
+    "sheetmetal_bends": "Anzahl Biegungen",
+    "sheetmetal_flat_pattern": "Abwicklung (Vorschau)"
   },
   "collab": {
     "title": "Zusammenarbeit",

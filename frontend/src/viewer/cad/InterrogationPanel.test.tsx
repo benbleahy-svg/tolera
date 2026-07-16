@@ -113,4 +113,78 @@ describe('InterrogationPanel', () => {
       expect(screen.getByText(/Noch keine Geometrieanalyse/)).toBeInTheDocument();
     });
   });
+
+  it('renders the sheet-metal results block with the flat-pattern thumbnail (M4.2)', async () => {
+    // The bracket fixture's analytic values (goldens.json).
+    const sheet = succeeded();
+    sheet.run!.family = 'SHEET_METAL';
+    sheet.run!.result = {
+      ...sheet.run!.result!,
+      family: 'SHEET_METAL',
+      family_scalars: {
+        thickness: 2,
+        bend_count: 1,
+        flat_area: 4814.16,
+        total_cut_length: 292.57,
+        pierce_count: 0,
+        size_x: 95.87,
+        size_y: 50,
+        flat_pattern: {
+          size_x: 95.87,
+          size_y: 50,
+          bend_lines: [{ position: 57.94, angle: 90 }],
+        },
+      },
+      features: [
+        {
+          name: 'bend',
+          properties: { radius: 3, angle: 90, length: 50, k_factor: 0.369 },
+          geometry_refs: [],
+        },
+      ],
+    };
+    getInterrogation.mockResolvedValue(sheet);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Blechanalyse – Ergebnisse')).toBeInTheDocument();
+    });
+    // The four block attributes (DemoA/8), German-first, mm/mm² primary.
+    expect(screen.getByText('Blechdicke')).toBeInTheDocument();
+    expect(screen.getByText(/2,00\s*mm/)).toBeInTheDocument();
+    expect(screen.getByText('Fläche (Abwicklung)')).toBeInTheDocument();
+    expect(screen.getByText('Abwicklungsmaße')).toBeInTheDocument();
+    expect(screen.getByText(/95,87\s*mm\s*×\s*50,00\s*mm/)).toBeInTheDocument();
+    expect(screen.getByText('Anzahl Biegungen')).toBeInTheDocument();
+    // The flat-pattern thumbnail renders (acceptance) with its bend line.
+    const thumb = screen.getByRole('img', { name: /Abwicklung/ });
+    expect(thumb.querySelector('rect')).not.toBeNull();
+    expect(thumb.querySelectorAll('line')).toHaveLength(1);
+    // The generic pending note is replaced by the family block.
+    expect(screen.queryByText(/Merkmalserkennung folgt/)).not.toBeInTheDocument();
+  });
+
+  it('omits unfolded dims and thumbnail when the recognizer could not unfold', async () => {
+    const sheet = succeeded();
+    sheet.run!.family = 'SHEET_METAL';
+    sheet.run!.result = {
+      ...sheet.run!.result!,
+      family: 'SHEET_METAL',
+      family_scalars: {
+        thickness: 1.5,
+        bend_count: 4,
+        flat_area: 1000,
+        total_cut_length: 140,
+        pierce_count: 0,
+      },
+      features: [],
+    };
+    getInterrogation.mockResolvedValue(sheet);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Blechanalyse – Ergebnisse')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Blechdicke')).toBeInTheDocument();
+    expect(screen.queryByText('Abwicklungsmaße')).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /Abwicklung/ })).not.toBeInTheDocument();
+  });
 });

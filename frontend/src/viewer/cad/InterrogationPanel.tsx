@@ -10,7 +10,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { usePartsApi, type InterrogationStatus } from '../../parts/api';
+import {
+  usePartsApi,
+  type InterrogationStatus,
+  type SheetMetalScalars,
+} from '../../parts/api';
 import {
   formatArea,
   formatLength,
@@ -18,6 +22,7 @@ import {
   formatVolume,
   type DisplayOptions,
 } from './measureFormat';
+import { SheetMetalResults } from './SheetMetalResults';
 
 /** Default poll cadence while a run is in flight. */
 export const POLL_INTERVAL_MS = 3000;
@@ -92,8 +97,16 @@ export function InterrogationPanel({
   }
 
   const dims = status.run.result.dimensions;
+  const scalars = status.run.result.family_scalars;
+  const sheetMetal =
+    status.run.result.family === 'SHEET_METAL' && scalars != null && 'thickness' in scalars
+      ? (scalars as SheetMetalScalars)
+      : null;
   return (
     <div className="cad-interrogation-result">
+      {sheetMetal != null && (
+        <SheetMetalResults scalars={sheetMetal} displayOpts={displayOpts} />
+      )}
       <section className="cad-readout-block">
         <h3>{t('viewer.interrogation_dims')}</h3>
         <dl>
@@ -119,8 +132,10 @@ export function InterrogationPanel({
           </div>
         </dl>
       </section>
-      {/* The per-family feature list itself is M4.2+ — say so under the dims. */}
-      <p className="cad-features-pending">{t('viewer.interrogation_features_pending')}</p>
+      {/* Families without a recognizer yet (M4.4+) keep the pending note. */}
+      {sheetMetal == null && (
+        <p className="cad-features-pending">{t('viewer.interrogation_features_pending')}</p>
+      )}
     </div>
   );
 }

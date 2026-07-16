@@ -39,6 +39,7 @@ from .db import make_engine, make_sessionmaker, org_scoped_session, run_after_co
 from .deps import get_session
 from .errors import AppError
 from .file_types import FileCategory
+from .geometry import RECOGNIZED_FAMILIES
 from .models import (
     Component,
     InterrogationRun,
@@ -47,6 +48,7 @@ from .models import (
     Part,
     PartFile,
     PartGeometry,
+    Process,
     ProcessFamily,
 )
 from .storage import ObjectStorage
@@ -103,6 +105,23 @@ async def resolve_part_material_id(session: AsyncSession, part_id: uuid.UUID) ->
     return rows[0] if len(rows) == 1 else None
 
 
+async def resolve_part_family(session: AsyncSession, part_id: uuid.UUID) -> str | None:
+    """The part's unambiguous recognizer family, if any (M4.2 — the
+    ``resolve_part_material_id`` precedent): exactly one distinct
+    recognizer-backed process family across its quote components → that one;
+    zero or several → ``None`` (the dims-only pass, never a guessed family)."""
+    rows = (
+        await session.scalars(
+            select(Process.family)
+            .join(Component, Component.process_id == Process.id)
+            .where(Component.part_id == part_id)
+            .distinct()
+        )
+    ).all()
+    families = [str(f) for f in rows if str(f) in RECOGNIZED_FAMILIES]
+    return families[0] if len(families) == 1 else None
+
+
 async def enqueue_interrogation(
     session: AsyncSession,
     *,
@@ -119,6 +138,8 @@ async def enqueue_interrogation(
     recovery path."""
     if material_id is None:
         material_id = await resolve_part_material_id(session, part.id)
+    if family is None:
+        family = await resolve_part_family(session, part.id)
     run = InterrogationRun(
         org_id=part.org_id,
         part_id=part.id,
@@ -140,6 +161,46 @@ async def maybe_enqueue_for_primary(
     if part.primary_file_id != file.id or FileCategory(file.file_type) != FileCategory.brep_cad:
         return None
     return await enqueue_interrogation(session, part=part, file=file)
+
+
+async def maybe_enqueue_for_process(
+    session: AsyncSession, component: Component
+) -> InterrogationRun | None:
+    """Spec ``#sheetmetal``: "When a sheet-metal process is set, an
+    interrogation block shows the auto-detected flat pattern + attributes" —
+    assigning a recognizer-family process (re-)interrogates the part's PRIMARY
+    CAD with that family. Skips when an equivalent run for (part, file, family)
+    already exists, so re-assignments never pile up duplicate jobs."""
+    if component.process_id is None:
+        return None
+    family = await session.scalar(select(Process.family).where(Process.id == component.process_id))
+    if family is None or str(family) not in RECOGNIZED_FAMILIES:
+        return None
+    part = await session.get(Part, component.part_id)
+    if part is None or part.deleted_at is not None or part.primary_file_id is None:
+        return None
+    pf = await session.get(PartFile, part.primary_file_id)
+    if pf is None or FileCategory(pf.file_type) != FileCategory.brep_cad:
+        return None
+    existing = await session.scalar(
+        select(InterrogationRun.id)
+        .where(
+            InterrogationRun.part_id == part.id,
+            InterrogationRun.file_id == pf.id,
+            InterrogationRun.family == str(family),
+            InterrogationRun.status.in_(
+                [
+                    InterrogationStatus.queued,
+                    InterrogationStatus.running,
+                    InterrogationStatus.succeeded,
+                ]
+            ),
+        )
+        .limit(1)
+    )
+    if existing is not None:
+        return None
+    return await enqueue_interrogation(session, part=part, file=pf, family=str(family))
 
 
 async def clear_extracted_geometry(session: AsyncSession, part: Part) -> None:
