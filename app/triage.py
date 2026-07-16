@@ -189,11 +189,14 @@ def scan_compliance(text: str, export_controlled: bool) -> list[dict[str, Any]]:
 #: cheap-to-reverse, tuned so the spec example (7 parts -> ~2-3 hrs) holds.
 _PROCESS_BASE_MIN = {"machining": 22, "sheet": 16, "print": 18, "unknown": 20}
 
+#: Each pattern anchors EVERY alternative at a word boundary (the group sits
+#: inside the ``\b``), so "worksheet"/"laserjet" can't false-positive while the
+#: German stems still prefix-match ("fräsen", "frästeil").
 _MATERIAL_PROCESS_HINTS = (
-    (re.compile(r"\bblech|sheet|laser|abkant|biege|stanz", re.I), "sheet", "Blechbearbeitung"),
-    (re.compile(r"\bdreh|turn|drehteil", re.I), "machining", "Drehen"),
-    (re.compile(r"\bfräs|mill|cnc", re.I), "machining", "CNC-Fräsen"),
-    (re.compile(r"\beloxal|eloxier|anodis|anodize", re.I), "machining", "Eloxieren"),
+    (re.compile(r"\b(?:blech|sheet|laser|abkant|biege|stanz)", re.I), "sheet", "Blechbearbeitung"),
+    (re.compile(r"\b(?:dreh|turn|drehteil)", re.I), "machining", "Drehen"),
+    (re.compile(r"\b(?:fräs|mill|cnc)", re.I), "machining", "CNC-Fräsen"),
+    (re.compile(r"\b(?:eloxal|eloxier|anodis|anodize)", re.I), "machining", "Eloxieren"),
 )
 
 
@@ -665,13 +668,18 @@ async def run_generate_triage_brief(
             need_by_signal=snap["need_by_signal"],
         )
 
-        # Phase 3 — persist (short txn).
-        from .models import Quote
+        # Phase 3 — persist (short txn). The brief is a triage-time signal for a
+        # *new* RFQ; re-validate under the row lock that the quote is still an
+        # unstarted draft, so a quote opened/sent between the snapshot and now
+        # (variable AI latency) is never overwritten with a stale brief.
+        from .models import Quote, QuoteStatus
 
         async with org_scoped_session(sessionmaker, org_id) as session:
             quote = await session.get(Quote, quote_id, with_for_update=True)
             if quote is None:
                 return {"failed": True, "error_code": "quote_gone"}
+            if quote.status != QuoteStatus.draft:
+                return {"skipped": "not_draft", "ai": brief["ai"]["reason"]}
             quote.triage_brief = brief
         return {
             "ok": True,

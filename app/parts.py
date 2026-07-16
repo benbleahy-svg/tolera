@@ -824,13 +824,18 @@ async def upload_part_files(
     # (run_after_commit): the triage task opens its own connection and re-reads
     # committed rows, so enqueuing before this request commits would race the
     # task into reading the pre-upload state (the _enqueue_pdf_text precedent).
-    from .triage import enqueue_triage_brief, find_rerun_target
+    # Best-effort — the re-run must never fail the upload or orphan blobs, so a
+    # lookup error is logged and swallowed rather than propagated.
+    try:
+        from .triage import enqueue_triage_brief, find_rerun_target
 
-    rerun_quote_id = await find_rerun_target(session, part_id)
-    if rerun_quote_id is not None:
-        run_after_commit(
-            session, partial(enqueue_triage_brief, principal.active_org_id, rerun_quote_id)
-        )
+        rerun_quote_id = await find_rerun_target(session, part_id)
+        if rerun_quote_id is not None:
+            run_after_commit(
+                session, partial(enqueue_triage_brief, principal.active_org_id, rerun_quote_id)
+            )
+    except Exception:
+        logger.warning("triage_rerun_lookup_failed", extra={"part_id": str(part_id)})
 
     return [_part_file_out(row) for row in rows]
 

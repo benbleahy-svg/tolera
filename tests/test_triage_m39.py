@@ -294,8 +294,17 @@ def test_rerun_target_gated_on_unopened_quote(
         try:
             sm = make_sessionmaker(engine)
             async with org_scoped_session(sm, org_id) as session:
+                # Scope the lookup to this quote's RFQ so a stray part_file
+                # from another seeded test can never be picked up.
                 part_id = (
-                    await session.scalars(text("SELECT part_id FROM part_file LIMIT 1"))
+                    await session.scalars(
+                        text(
+                            "SELECT pf.part_id FROM part_file pf "
+                            "JOIN request_for_quote rfq ON rfq.id = pf.rfq_id "
+                            "WHERE rfq.quote_id = :quote LIMIT 1"
+                        ),
+                        {"quote": str(quote_id)},
+                    )
                 ).one()
                 return await find_rerun_target(session, cast("uuid.UUID", part_id))
         finally:
@@ -345,7 +354,8 @@ def test_ai_flags_absent_row_defaults_all_enabled(tenancy_db: str, seeder: Seede
 
     flags = asyncio.run(_flags())
     assert flags.master_enabled is True
-    assert flags.triage_enabled is True
+    assert flags.triage_brief_enabled is True  # the exact flag the gate reads
+    assert flags.triage_enabled is True  # master AND triage_brief
 
 
 # --------------------------------------------------------------------------- #
