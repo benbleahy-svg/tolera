@@ -609,7 +609,17 @@
     "cad_face_left": "Left",
     "cad_face_right": "Right",
     "cad_face_top": "Top",
-    "cad_face_bottom": "Bottom"
+    "cad_face_bottom": "Bottom",
+    "interrogating": "Interrogating geometry …",
+    "interrogation_dims": "Dimensions (analyzed)",
+    "interrogation_size": "Size (X × Y × Z)",
+    "interrogation_area": "Surface area",
+    "interrogation_volume": "Volume",
+    "interrogation_weight": "Weight",
+    "interrogation_none": "No geometry analysis yet.",
+    "interrogation_failed": "Geometry interrogation failed.",
+    "interrogation_failed_multi_body": "Assembly detected — bodies are analyzed after decomposition.",
+    "interrogation_load_failed": "Could not load the interrogation status."
   },
   "collab": {
     "title": "Collaboration",

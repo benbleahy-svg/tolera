@@ -609,7 +609,17 @@
     "cad_face_left": "Links",
     "cad_face_right": "Rechts",
     "cad_face_top": "Oben",
-    "cad_face_bottom": "Unten"
+    "cad_face_bottom": "Unten",
+    "interrogating": "Geometrie wird analysiert …",
+    "interrogation_dims": "Abmessungen (Analyse)",
+    "interrogation_size": "Größe (X × Y × Z)",
+    "interrogation_area": "Oberfläche",
+    "interrogation_volume": "Volumen",
+    "interrogation_weight": "Gewicht",
+    "interrogation_none": "Noch keine Geometrieanalyse.",
+    "interrogation_failed": "Geometrieanalyse fehlgeschlagen.",
+    "interrogation_failed_multi_body": "Baugruppe erkannt — Einzelteile werden erst nach der Zerlegung analysiert.",
+    "interrogation_load_failed": "Analyse-Status konnte nicht geladen werden."
   },
   "collab": {
     "title": "Zusammenarbeit",

@@ -26,6 +26,7 @@ from .email_threads import router as email_threads_router
 from .errors import register_exception_handlers
 from .file_split import split_router
 from .health import router as health_router
+from .interrogation import interrogation_router
 from .lens_extract import extract_router
 from .lens_findings import findings_router
 from .logging import configure_logging
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(accounts_router)
     app.include_router(contacts_router)
     app.include_router(parts_router)
+    app.include_router(interrogation_router)
     app.include_router(part_library_router)
     app.include_router(split_router)
     app.include_router(extract_router)

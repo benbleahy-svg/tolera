@@ -16,7 +16,10 @@ const fetchFileBytes = vi.fn();
 // Stable reference — the real usePartsApi is useMemo-memoized, so the CAD load
 // effect (keyed on `api`) runs once. A fresh object per render would re-fire it
 // on every re-render and clobber viewer state (e.g. an isolate selection).
-const partsApiValue = { fetchFileBytes };
+const getInterrogation = vi.fn(() =>
+  Promise.resolve({ part_id: 'part-1', status: 'none', run: null }),
+);
+const partsApiValue = { fetchFileBytes, getInterrogation };
 vi.mock('../../collab/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../collab/api')>()),
   useCollabApi: () => new Proxy({}, { get: () => () => Promise.resolve([]) }),
@@ -164,12 +167,13 @@ describe('CadViewerPage', () => {
     expect(screen.getByText('Körper 2')).toBeInTheDocument();
   });
 
-  it('has a Geometric Features tab with the M4 empty state', async () => {
+  it('has a Geometric Features tab backed by the interrogation state (M4.1)', async () => {
     loadMesh.mockResolvedValue(model(['Deckel']));
     await renderWithProviders(<CadViewerPage file={file} />);
     await screen.findByText('Deckel');
     await userEvent.click(screen.getByRole('tab', { name: 'Geometrische Merkmale' }));
-    expect(screen.getByText('Geometrische Analyse steht noch aus (M4).')).toBeInTheDocument();
+    // No run yet for this part → the panel's none state.
+    expect(await screen.findByText('Noch keine Geometrieanalyse.')).toBeInTheDocument();
   });
 
   it('fills the whole-file readout from the loaded model', async () => {

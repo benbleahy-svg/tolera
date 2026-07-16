@@ -23,6 +23,7 @@ celery_app = Celery(
     include=[
         "app.tasks",
         "app.file_split",
+        "app.interrogation",
         "app.email_ingest",
         "app.email_sync",
         "app.lens_extract",

@@ -2788,3 +2788,91 @@ class ReviewItem(Base):
     )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+# --------------------------------------------------------------------------- #
+# M4.1 — interrogation runs (GeometryService job state + result cache)
+# --------------------------------------------------------------------------- #
+class InterrogationStatus(enum.StrEnum):
+    """Lifecycle of one interrogation job — powers the part view's
+    ``interrogating…`` state (INTERROGATION-ENGINE-SPEC §5.6)."""
+
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+
+
+class InterrogationRun(Base):
+    """One GeometryService job on a part's PRIMARY CAD file (M4.1).
+
+    The spec's persist+cache step (INTERROGATION-ENGINE-SPEC §5.4): the
+    AnalysisResult is cached keyed by ``(geom_hash, family, inputs_hash)`` —
+    org-scoped, so the viewer and costing share one run and an identical body
+    re-uploaded in the same org can reuse a finished result, never across orgs.
+    ``family`` is nullable in M4.1 (core-dims pass is family-agnostic; the
+    per-family recognizers land M4.2+). ``inputs_hash`` is ``''`` until custom
+    interrogations (M4.8) hash their resolved threshold sets. The dims
+    extraction ALSO lands in ``part_geometry.raw`` (the canonical output cache);
+    this row carries job state, error taxonomy, and the audit copy.
+
+    ``file_id`` is pinned to the same part via the composite FK onto
+    ``part_file (id, part_id)`` and CASCADEs with the file (a deleted file's
+    runs are meaningless); org isolation rides the same-org part FK + RLS."""
+
+    __tablename__ = "interrogation_run"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "part_id"],
+            ["part.org_id", "part.id"],
+            name="fk_interrogation_run_part_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "part_id"],
+            ["part_file.id", "part_file.part_id"],
+            name="fk_interrogation_run_file_part",
+            ondelete="CASCADE",
+            # The M2.12 merge re-parents part_file.part_id onto the surviving
+            # part; historical runs follow their file instead of blocking it.
+            onupdate="CASCADE",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="ck_interrogation_run_status",
+        ),
+        # Latest-run-per-part lookup (the status endpoint).
+        Index("ix_interrogation_run_org_part_created", "org_id", "part_id", "created_at"),
+        # The §5.4 cache probe: finished result for an identical body+inputs.
+        Index(
+            "ix_interrogation_run_cache",
+            "org_id",
+            "geom_hash",
+            "family",
+            "inputs_hash",
+            postgresql_where=text("status = 'succeeded'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    family: Mapped[str | None] = mapped_column(Text)
+    #: Versioned geometry signature (``gs1:<sha256>``) — set once the body parsed.
+    geom_hash: Mapped[str | None] = mapped_column(Text)
+    inputs_hash: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    #: Density source used for ``weight`` (caller-resolved; engine never invents).
+    material_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=InterrogationStatus.queued
+    )
+    #: Machine-readable failure: multi_body | parse_error | file_too_large | internal.
+    error_code: Mapped[str | None] = mapped_column(Text)
+    error_detail: Mapped[str | None] = mapped_column(Text)
+    #: The AnalysisResult (dimensions block in M4.1), as persisted JSON.
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _ts()
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

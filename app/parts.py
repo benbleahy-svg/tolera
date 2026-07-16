@@ -78,6 +78,7 @@ from .file_types import (
     primary_rank,
     sniff_matches_extension,
 )
+from .interrogation import maybe_enqueue_for_primary
 from .models import (
     Component,
     FileAnnotationLayer,
@@ -950,6 +951,10 @@ async def _store_files_on_part(
     await session.flush()
     _assign_primary_if_absent(part, rows)
     await session.flush()
+    # A brep_cad file that just became PRIMARY is the part's geometry source of
+    # truth → auto-interrogate (M4.1; post-commit enqueue like pdf_text).
+    for row in rows:
+        await maybe_enqueue_for_primary(session, part, row)
     return rows
 
 
@@ -1205,6 +1210,8 @@ async def set_primary_file(
     target.role = FileRole.primary
     part.primary_file_id = target.id
     await session.flush()
+    # The new PRIMARY is the geometry source of truth — re-interrogate if CAD (M4.1).
+    await maybe_enqueue_for_primary(session, part, target)
     return _part_file_out(target)
 
 
