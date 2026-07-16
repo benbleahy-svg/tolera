@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from anthropic import APIConnectionError, AuthenticationError, PermissionDeniedError
 
 from app.config import get_settings
 from app.lens import PROMPT_VERSION, run_document_extraction
@@ -71,7 +72,16 @@ async def test_lens_extraction_quality_gate(capsys: pytest.CaptureFixture[str]) 
         fx = load_fixture(name)
         try:
             result = await run_document_extraction(provider, fx.pdf_bytes)  # type: ignore[arg-type]
-        except Exception as exc:  # one bad fixture must not discard the rest
+        except (AuthenticationError, PermissionDeniedError, APIConnectionError) as exc:
+            # The provider is unreachable/unauthenticated → the QUALITY gate
+            # simply can't run (bad/absent key, network). That's a SKIP, not a
+            # quality failure — otherwise every M3-lens PR and nightly goes red
+            # on infra, not on a regression. Surfaces the fix (the secret).
+            pytest.skip(
+                f"Lens provider unavailable ({type(exc).__name__}) — live eval cannot run; "
+                "check the ANTHROPIC_API_KEY CI secret is valid"
+            )
+        except Exception as exc:  # a real per-fixture bug must not discard the rest
             # Keep scoring the others so the report still emits; fail at the end.
             errors.append(f"{name}: {exc!r}")
             continue
