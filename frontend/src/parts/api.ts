@@ -106,6 +106,36 @@ export interface PartGeometry {
 }
 
 /** One GeometryService run on a part's PRIMARY CAD file (M4.1). */
+/** One recognized feature (INTERROGATION-ENGINE-SPEC §2): `bend` in M4.2;
+ * the milling/lathe/tube catalogs follow (M4.4–M4.6). */
+export interface InterrogationFeature {
+  name: string;
+  properties: Record<string, number>;
+  /** Face/edge ids for the viewer overlay — empty until the mesh export lands. */
+  geometry_refs: string[];
+}
+
+/** Sheet-metal `family_scalars` (M4.2) — the recognizer emits only what it
+ * measured: `size_x`/`size_y`/`flat_pattern` are absent when the body is
+ * outside the v1 analytic-unfold envelope (never fabricated). */
+export interface SheetMetalScalars {
+  thickness: number;
+  bend_count: number;
+  /** Mid-surface flat-pattern area, mm². */
+  flat_area: number;
+  /** Flat-pattern contour length (outer + cutouts), mm. */
+  total_cut_length: number;
+  pierce_count: number;
+  /** Unfolded (developed) size, mm — k-factor unfold. */
+  size_x?: number;
+  size_y?: number;
+  flat_pattern?: {
+    size_x: number;
+    size_y: number;
+    bend_lines: { position: number; angle: number }[];
+  };
+}
+
 export interface InterrogationRun {
   id: string;
   part_id: string;
@@ -118,6 +148,7 @@ export interface InterrogationRun {
   error_code: string | null;
   error_detail: string | null;
   result: {
+    family?: string | null;
     dimensions: {
       size_x: number;
       size_y: number;
@@ -130,6 +161,8 @@ export interface InterrogationRun {
       weight: number | null;
       bbox_source: 'obb' | 'aabb';
     };
+    family_scalars?: SheetMetalScalars | Record<string, never>;
+    features?: InterrogationFeature[];
   } | null;
   created_at: string;
   started_at: string | null;
