@@ -941,4 +941,9 @@ async def set_component_process(
             await session.delete(operation)
     component.process_id = payload.process_id
     await session.flush()
+    # M4.2 (spec #sheetmetal): a recognizer-family process queues a family
+    # interrogation of the part's PRIMARY CAD — the viewer's results block.
+    from .interrogation import maybe_enqueue_for_process
+
+    await maybe_enqueue_for_process(session, component)
     return await _component_costing(session, component)
