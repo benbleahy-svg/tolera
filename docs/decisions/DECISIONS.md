@@ -19,6 +19,45 @@
 
 ---
 
+## [2026-07-16] OPEN: M3.8 — does an unresolved review item block Draft→Sent?
+
+**Status:** OPEN (M3.8 ships the conservative default — the count is surfaced, send is **not** blocked; nothing is stuck)
+**Question:** Two spec lines disagree, so the ladder does not settle it.
+- `#rules` (tier 2, the feature's own section): "The unresolved count drives the quote's **Outstanding Work / Incomplete Quote Items**" — i.e. *informational*, exactly what M3.8 implemented (`WorkflowTracker.unresolved_review_item_count`).
+- `#rules-accept` (tier 2, same document): "the dual-use rule fires and **blocks send pending review**" — i.e. a hard gate on Draft→Sent.
+- `#export-control` (tier 2, marked **decision**): export-controlled / EU dual-use is "**flag + audit, no hard block** in v1". That is written about *access* to flagged records, not about sending, so it neither clearly grants nor clearly denies the gate.
+
+There is also no way to express "this rule blocks send" in the canonical AST: the §3 resolution catalogue has no `BLOCK_SEND`, and `rule` carries no such flag. So "the dual-use rule blocks send" is only implementable as a blanket rule — *any* unresolved review item blocks Draft→Sent — which is a much larger claim than the sentence makes.
+
+**Options considered:**
+- **(a) Nothing blocks; the unresolved count is informational ← shipped default.** Matches `#rules` literally and the "no hard block in v1" posture. Risk: a dual-use part can be sent with the flag unresolved — the exact thing `#rules-accept` names.
+- **(b) Any unresolved review item blocks Draft→Sent.** Satisfies `#rules-accept` and is the only shape the AST can express. But it is a real workflow gate: with the §7 starter library seeded, the "Fehlendes Modell oder fehlende Zeichnung" rule fires on nearly every part that arrives without a print, so **every such quote becomes unsendable** until someone clears it. It would also put a rules-engine dependency in the middle of the M1 golden thread's send step.
+- **(c) A per-rule `blocks_send` flag.** Matches the sentence's intent precisely and blocks only what the shop marks. But it is an **M3.6 schema + canonical-AST change** (a new field in the portable JSON contract), which is expensive to reverse and not M3.8's to make.
+
+**Recommended default:** (c) as the eventual answer, (a) until then — do not turn the whole starter library into a send gate by accident. If Fechner wants the dual-use gate before (c) lands, (b) scoped to a hard-coded rule uuid is a two-line stopgap.
+**Why it is not a halt:** the ladder is ambiguous rather than silent, and the conservative reading is the feature section's own words; nothing downstream is blocked, and the count is already surfaced for the UI. Per §6.2 the block continued.
+**Affects:** M3.8 (`quote_lifecycle.transition` send guard), M3.6 (if (c)), `SEED-AND-FIXTURES §7`, Demo C's acceptance line.
+
+---
+
+## [2026-07-16] OPEN: M3.6/M3.8 — "no material specified" has no addressable document_path
+
+**Status:** OPEN (M3.8 seeds the other four §7 starters; nothing is stuck)
+**Question:** `SEED-AND-FIXTURES §7` names five starter rules. Four are expressible against M3.6's `document_path` catalogue and are seeded (`configure_seed._starter_rules`). The fifth — *no material specified → block send* — is **not addressable**: the catalogue (spec `#rules-paths`) exposes `part`, `files`, `text`, the tolerance/control-frame collections and the interrogation families, but **nothing for the component's material or the line item**. M3.7's `EvaluationContext` carries `line_item`/`quote` fields that are inert for precisely this reason, and its docstring already flags that cataloguing them "is a schema change, M3.6's domain".
+
+`#rules-signals` §2 *does* list "Line-item information — minimum / maximum requested quantity" and "Quote information — the account" as signal categories, so the catalogue is knowingly narrower than the signal model it implements. This is the first starter rule to fall through that gap.
+
+**Options considered:**
+- **(a) Add `component` / `line_item` document_paths to the catalogue** (material_id, min/max qty, account). Faithful to §2, unblocks the rule — but it widens the **portable AST contract** (M3.6), which every exported rule set is written against.
+- **(b) Approximate with `text`** (flag prints with no material callout). Cheap, and wrong: absence of a keyword is not absence of a material.
+- **(c) Leave it unseeded ← shipped.** The other four starters ship; this one waits for (a).
+
+**Recommended default:** (a), as part of the same change that resolves the `blocks_send` question above — both are M3.6 catalogue/schema work and are cheaper done together than twice.
+**Why it is not a halt:** it removes one seeded example, not a capability; the engine, the lifecycle and the other four starters are unaffected. Expensive to reverse (it is the portable AST contract), so it is logged rather than guessed — CLAUDE.md §6.1.
+**Affects:** M3.6 (`rules_schema` catalogue), M3.8 (`configure_seed._starter_rules`), `SEED-AND-FIXTURES §7`.
+
+---
+
 ## [2026-07-16] OPEN: M3.7 `smallest_delta` — does a unilateral `+X/-0` count as a tight tolerance?
 
 **Status:** OPEN (M3.7 ships a default; nothing is blocked — cheap to reverse)

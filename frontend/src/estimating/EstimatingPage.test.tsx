@@ -67,6 +67,9 @@ vi.mock('../parts/MatchingParts', () => ({ PartMatchesChip: () => null }));
 // The communications timeline (M3.5) has its own suite; stub it here so the
 // page render never touches Clerk via useEmailApi.
 vi.mock('./CommunicationsSection', () => ({ CommunicationsSection: () => null }));
+// M3.8's panel resolves its own API hook (and therefore Clerk); this page
+// test is about the estimating grid, and the panel has its own suite.
+vi.mock('../review/ReviewItemsPanel', () => ({ ReviewItemsPanel: () => null }));
 
 // Mock the estimating API module so the page never touches Clerk/network.
 vi.mock('./api', () => ({

@@ -92,6 +92,7 @@ module = [
     "app.email_ingest",
     "app.email_parts",
     "app.email_sync",
+    "app.review_items",
 ]
 disallow_untyped_decorators = false
 disallow_subclassing_any = false

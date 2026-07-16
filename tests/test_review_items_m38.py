@@ -19,6 +19,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.models import MembershipRole
@@ -723,3 +724,191 @@ class TestCollaboration:
 
             messages = app_client.get(f"/api/review-items/{review['id']}/messages").json()
             assert len(messages) == 1, "the discussion outlives the resolution"
+
+
+# --------------------------------------------------------------------------- #
+# 8. The post-extraction trigger (§6.1) — "after AI/interrogation finishes"
+# --------------------------------------------------------------------------- #
+class TestPostExtractionTrigger:
+    """The task chain, not the HTTP endpoint: extraction is what changes the
+    data the rules read, so it is what must re-run them."""
+
+    def test_extraction_success_dispatches_generation_for_the_part(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app import lens_extract
+
+        dispatched: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            lens_extract,
+            "_run_on_own_loop",
+            lambda coro: (coro.close(), {"skipped": False, "finding_count": 3})[1],
+        )
+        monkeypatch.setattr(
+            "app.review_items.review_items_generate_task.delay",
+            lambda org_id, part_id: dispatched.append((org_id, part_id)),
+        )
+        org, part = str(uuid.uuid4()), str(uuid.uuid4())
+
+        lens_extract.lens_extract_task(org, part, str(uuid.uuid4()))
+
+        assert dispatched == [(org, part)], "a completed extraction re-runs the rules"
+
+    def test_a_skipped_extraction_does_not_dispatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An export-controlled part is skipped before any provider call — no
+        findings changed, so there is nothing to re-evaluate."""
+        from app import lens_extract
+
+        dispatched: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            lens_extract,
+            "_run_on_own_loop",
+            lambda coro: (coro.close(), {"skipped": True, "reason": "export_controlled"})[1],
+        )
+        monkeypatch.setattr(
+            "app.review_items.review_items_generate_task.delay",
+            lambda org_id, part_id: dispatched.append((org_id, part_id)),
+        )
+
+        lens_extract.lens_extract_task(str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4()))
+
+        assert dispatched == []
+
+    def test_a_broker_failure_never_fails_a_committed_extraction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review items are derived data: the extraction's findings are already
+        committed, so a dispatch hiccup must not turn a success into a retry."""
+        from app import lens_extract
+
+        monkeypatch.setattr(
+            lens_extract,
+            "_run_on_own_loop",
+            lambda coro: (coro.close(), {"skipped": False, "finding_count": 1})[1],
+        )
+
+        def boom(org_id: str, part_id: str) -> None:
+            raise RuntimeError("broker down")
+
+        monkeypatch.setattr("app.review_items.review_items_generate_task.delay", boom)
+
+        out = lens_extract.lens_extract_task(
+            str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+        )
+
+        assert out["skipped"] is False, "the extraction still reports its success"
+
+
+# --------------------------------------------------------------------------- #
+# 9. The seeded starter rule library (SEED-AND-FIXTURES §7 / spec #rules)
+# --------------------------------------------------------------------------- #
+class TestStarterRuleLibrary:
+    def test_the_library_is_seeded_in_german(self, app_client: TestClient, seeder: Seeder) -> None:
+        """DECISIONS 2026-07-16: German strings, Fechner reviews later."""
+        org, user = _org_with(seeder, "seed-a", ADMIN)
+        seeder.configure_catalog(org)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            names = [r["name"] for r in app_client.get("/api/rules").json()]
+
+        assert "Ausfuhrkontrolle prüfen (Dual-Use)" in names
+        assert "Enge Toleranz — Senior-Schätzer" in names
+        assert "Fehlendes Modell oder fehlende Zeichnung" in names
+        assert "Entgraten gefordert" in names
+
+    def test_re_seeding_creates_nothing_and_keeps_admin_edits(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """A re-seed must never silently revert a shop's tuning."""
+        org, user = _org_with(seeder, "seed-b", ADMIN)
+        first = seeder.configure_catalog(org)
+        assert first.rules_created >= 4
+
+        seeder.sql(
+            "UPDATE rule SET name = :name WHERE org_id = :org AND name = :old",
+            {
+                "name": "Entgraten (angepasst)",
+                "org": str(org),
+                "old": "Entgraten gefordert",
+            },
+        )
+        again = seeder.configure_catalog(org)
+        assert again.rules_created == 0, "idempotent"
+
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            names = [r["name"] for r in app_client.get("/api/rules").json()]
+        assert "Entgraten (angepasst)" in names, "the admin's edit survived the re-seed"
+
+    def test_the_seeded_missing_file_rule_fires_end_to_end(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """Demo C, in miniature: a seeded rule flags a real part, and its
+        configured resolution closes it."""
+        org, user = _org_with(seeder, "seed-c", ADMIN)
+        seeder.configure_catalog(org)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            _, _, component_id, _ = _new_quote_item(app_client)
+
+            created = _generate(app_client, component_id)
+            names = [i["rule_name"] for i in created]
+            assert "Fehlendes Modell oder fehlende Zeichnung" in names
+
+            item = next(
+                i for i in created if i["rule_name"] == "Fehlendes Modell oder fehlende Zeichnung"
+            )
+            res = app_client.post(
+                f"/api/review-items/{item['id']}/resolve",
+                json={"resolution_type": "RESOLVE", "custom_label": "Kunde kontaktiert"},
+            )
+            assert res.status_code == 200, res.text
+            assert res.json()["resolution_label"] == "Kunde kontaktiert"
+
+    def test_the_seeded_deburr_rule_adds_the_seeded_operation(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """§7's German finish keywords map to the seeded Operation Library ids —
+        the whole point of seeding the rule and the op together."""
+        org, user = _org_with(seeder, "seed-d", ADMIN)
+        seeder.configure_catalog(org)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            _, _, component_id, part_id = _new_quote_item(app_client)
+            file_id = seeder.part_file(
+                org, uuid.UUID(part_id), "zeichnung.pdf", file_type="document"
+            )
+            seeder.sql(
+                "UPDATE part_file SET pdf_text = :t WHERE id = :id",
+                {"t": "Alle Kanten brechen und entgraten.", "id": str(file_id)},
+            )
+
+            created = _generate(app_client, component_id)
+            item = next(i for i in created if i["rule_name"] == "Entgraten gefordert")
+
+            res = app_client.post(
+                f"/api/review-items/{item['id']}/resolve",
+                json={"resolution_type": "ADD_OPERATION"},
+            )
+            assert res.status_code == 200, res.text
+
+            ops = app_client.get(f"/api/components/{component_id}/costing").json()["operations"]
+            assert [o["name"] for o in ops] == ["Entgraten"]
+
+    def test_the_seeded_dual_use_rule_fires_on_a_flagged_print(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        """§7 DACH: the ITAR framing is replaced by an EU dual-use rule."""
+        org, user = _org_with(seeder, "seed-e", ADMIN)
+        seeder.configure_catalog(org)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            _, _, component_id, part_id = _new_quote_item(app_client)
+            file_id = seeder.part_file(
+                org, uuid.UUID(part_id), "zeichnung.pdf", file_type="document"
+            )
+            seeder.sql(
+                "UPDATE part_file SET pdf_text = :t WHERE id = :id",
+                {
+                    "t": "Achtung: Ausfuhrgenehmigung erforderlich (EG 428/2009).",
+                    "id": str(file_id),
+                },
+            )
+
+            names = [i["rule_name"] for i in _generate(app_client, component_id)]
+            assert "Ausfuhrkontrolle prüfen (Dual-Use)" in names

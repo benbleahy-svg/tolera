@@ -22,7 +22,10 @@ Lens layer takes toward Kalk (CLAUDE.md §5).
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid as uuid_mod
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -30,11 +33,13 @@ from fastapi import APIRouter, Depends
 from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .auth import Principal
 from .authz import Permission, require
+from .celery_app import celery_app
 from .costing import recalculate_component
+from .db import org_scoped_session
 from .deps import get_session
 from .errors import AppError
 from .file_types import FileCategory
@@ -62,6 +67,10 @@ from .models import (
 from .operations import attach_operation_from_def
 from .rules_eval import EvaluationContext, evaluate_rules
 from .rules_schema import Resolution, RuleSchema
+from .task_resources import resolve as resolve_task_resources
+from .tasks import BaseTask
+
+logger = logging.getLogger(__name__)
 
 review_items_router = APIRouter(prefix="/api", tags=["review-items"])
 
@@ -883,3 +892,59 @@ async def post_to_thread(
         body=message.body or "",
         created_at=message.created_at,
     )
+
+
+# --------------------------------------------------------------------------- #
+# post-extraction trigger (§6.1)
+# --------------------------------------------------------------------------- #
+def _run_on_own_loop(coro: Any) -> Any:
+    """Run ``coro`` whether or not a loop is running (worker vs eager tests) —
+    the M2.5 pattern (see ``file_split._run_on_own_loop``)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+async def _generate_for_part(db_url: str, org_id: uuid_mod.UUID, part_id: uuid_mod.UUID) -> int:
+    """Regenerate review items for every component built on ``part_id``."""
+    engine = create_async_engine(db_url)
+    try:
+        sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+        async with org_scoped_session(sessionmaker, org_id) as session:
+            components = (
+                (await session.execute(select(Component).where(Component.part_id == part_id)))
+                .scalars()
+                .all()
+            )
+            total = 0
+            for component in components:
+                total += len(await generate_for_component(session, org_id, component))
+            return total
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(base=BaseTask, name="app.review_items_generate", bind=True)
+def review_items_generate_task(self: Any, org_id: str, part_id: str) -> dict[str, Any]:
+    """§6.1: "after AI/interrogation finishes, matching rules create review
+    items". Chained from ``lens_extract_task`` — extraction is what changes the
+    data the rules read, so it is what must re-run them.
+
+    Safe to re-run: :func:`generate_for_component` reconciles rather than
+    inserts, so a Celery redelivery converges on the same rows. That is why this
+    needs no ``AsyncResult`` guard of its own (unlike the extraction task, whose
+    findings are append-only).
+    """
+    db_url, _ = resolve_task_resources()
+    count = _run_on_own_loop(
+        _generate_for_part(db_url, uuid_mod.UUID(org_id), uuid_mod.UUID(part_id))
+    )
+    # Counts only — a rule name can quote print content (§5 logging).
+    logger.info(
+        "review_items_generated",
+        extra={"org_id": org_id, "part_id": part_id, "review_item_count": count},
+    )
+    return {"org_id": org_id, "part_id": part_id, "review_item_count": count}
