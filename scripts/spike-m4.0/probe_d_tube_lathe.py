@@ -15,9 +15,11 @@ import sys
 from pathlib import Path
 
 from common import aabb_dims, faces, read_step
+from OCP.Bnd import Bnd_Box
 from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+from OCP.BRepBndLib import BRepBndLib
 from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
 from OCP.TopExp import TopExp_Explorer
@@ -80,9 +82,12 @@ def classify_tube(shape) -> dict:
     axis_idx = dims.index(max(dims))
     normal = [0, 0, 0]
     normal[axis_idx] = 1
-    origin = [0.0, 0.0, 0.0]
-    # section plane must cut through the solid regardless of where it sits
-    origin[axis_idx] = dims[axis_idx] / 2.0
+    # section at the true bbox midpoint so the cut lands inside the solid even
+    # when the fixture is not anchored at the origin
+    box = Bnd_Box()
+    BRepBndLib.Add_s(shape, box, False)
+    lo, hi = box.CornerMin(), box.CornerMax()
+    origin = [(lo.X() + hi.X()) / 2, (lo.Y() + hi.Y()) / 2, (lo.Z() + hi.Z()) / 2]
 
     edges = section_edges(shape, origin, normal)
     kinds = [edge_kind(e) for e in edges]

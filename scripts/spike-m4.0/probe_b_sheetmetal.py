@@ -46,7 +46,7 @@ def cyl_info(face):
 
 
 def detect_thickness(shape) -> float:
-    """Smallest positive offset between anti-parallel planar face pairs."""
+    """Smallest positive offset between parallel (incl. anti-parallel) planar face pairs."""
     planes = [plane_info(f) for f in faces(shape) if BRepAdaptor_Surface(f).GetType() == PLANE]
     best = None
     for i, (n1, p1) in enumerate(planes):

@@ -133,7 +133,7 @@ def main() -> int:
     out = Path("scripts/spike-m4.0/results")
     out.mkdir(exist_ok=True)
     (out / "probe_a.json").write_text(json.dumps(results, indent=2, default=str) + "\n")
-    return 0 if (failures == 0) else 1
+    return 0 if (failures == 0 and stable) else 1
 
 
 if __name__ == "__main__":

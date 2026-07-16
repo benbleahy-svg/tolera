@@ -1,0 +1,8 @@
+== M4.0 probes in production tolera-worker image ==
+arch: aarch64  python: Python 3.12.13  extra system pkg: libgl1
+probe_a_dims_signature: PASS
+probe_b_sheetmetal: PASS
+probe_c_milling: PASS
+probe_d_tube_lathe: PASS
+probe_e_decompose: PASS
+probe_f_tessellation: PASS

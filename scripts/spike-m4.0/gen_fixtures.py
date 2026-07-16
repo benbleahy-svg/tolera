@@ -301,6 +301,9 @@ def main() -> int:
     outdir.mkdir(parents=True, exist_ok=True)
     goldens: dict[str, dict] = {}
 
+    # cube-20mm.step and plate-hole-20x20x10-d8.step are pre-existing (M1.13/M2.6)
+    # fixtures the probes also read — regenerating into a fresh outdir needs both
+    # copied in, or probe_a/probe_d will fail on the missing files.
     solids = {
         "bracket-L-60x40x2-r3.step": bracket,
         "block-milled-80x50x20.step": milled_block,

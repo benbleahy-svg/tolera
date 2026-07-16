@@ -26,10 +26,10 @@ work or a mini-spike remains · `✗` no OCCT support (in-house heuristic or Spa
 | Item | Verdict | Evidence / note |
 |---|---|---|
 | OCCT 7.9 via pip (`cadquery-ocp` 7.9.3, OCP bindings) | ✓ | Wheels for cp312 macOS arm64 + manylinux_2_31 x86_64/aarch64. `uv run` PEP 723 probes install and pass locally; linux container run below. pythonocc-core has **no** pip wheels (conda-forge only; PyPI stub is dead 0.16) → binding = **OCP**, see DECISIONS [2026-07-16]. API is 1:1 OCCT C++; a later pythonocc/Spatial move is mechanical behind `GeometryService`. |
-| Linux (Hetzner path) | ✓ | **All six probes pass inside the production `tolera-worker` image** (python:3.12-slim base, linux/aarch64) after `pip install cadquery-ocp` + **`apt-get install libgl1`** — OCP links libGL even headless (vtk linkage); that one system package goes into the worker Dockerfile in M4.1. x86_64: the manylinux_2_31 wheel is published; not executed in this spike (local amd64 image pull stalled) — verify on first Hetzner deploy. |
-| Cross-platform hash determinism | ✓ | The signature fingerprint is **byte-identical on macOS arm64 and linux aarch64** for cube/bracket/shaft fixtures — safe to index in the Part Library regardless of where it was computed. |
+| Linux (Hetzner path) | ✓ | **All six probes pass inside the production `tolera-worker` image** (python:3.12-slim base, linux/aarch64) after `pip install cadquery-ocp` + **`apt-get install libgl1`** — OCP links libGL even headless (vtk linkage); that one system package goes into the worker Dockerfile in M4.1. Run log: `results/linux_worker_run.txt`. x86_64: the manylinux_2_31 wheel is published; not executed in this spike (local amd64 image pull stalled) — verify on first Hetzner deploy. |
+| Cross-platform hash determinism | ✓ | The signature fingerprint is **byte-identical on macOS arm64 and linux aarch64** for five fixtures — safe to index in the Part Library regardless of where it was computed. Evidence: `results/hashes_linux.json` vs `results/hashes_macos.json`. |
 | Dependency weight | note | `cadquery-ocp` wheel ~60 MB + transitive **vtk ~102 MB** + libgl1. Acceptable for the worker image; keep OCP out of the API image (interrogation runs on Celery workers only). |
-| STEP read/write round-trip | ✓ | Volume/area/topology preserved to ≤1e-14 rel. (probe a). STEP-only solids per spec v2.15 (`#geometry-engine`); SLDPRT stays out until Spatial. |
+| STEP read/write round-trip | ✓ | Re-exported solids fingerprint identically (probe a re-export case), and volumes of all read-back fixtures match their analytic goldens to ≤3e-14 rel. STEP-only solids per spec v2.15 (`#geometry-engine`); SLDPRT stays out until Spatial. |
 
 ## 1. Core dimensions (`PartGeometry` §1 — all families)
 
@@ -68,8 +68,9 @@ confirm); (iv) exact file hash rides alongside for Exact-File match, unaffected.
 
 ## 3. Sheet Metal (`analyze_sheet_metal`) — verdict: **OCCT-sufficient for M4.1/M4.2 core; mini-spike flagged for complex unfold** (matches build-plan M4.2)
 
-Probe b on the L-bracket fixture (t=2, r=3, 90°, width 50): thickness, bend and unfold all
-recovered exactly.
+Probe b on the L-bracket fixture (t=2, r=3, 90°, width 50): thickness and all bend
+parameters recovered exactly from the B-rep; the developed length then composes to the
+analytic golden via the spec k-factor (flat-leg measurement itself is M4.2 recognizer work).
 
 | Scalar | Verdict | Evidence / note |
 |---|---|---|
@@ -90,7 +91,7 @@ Probe c on the milled-block fixture (pocket 40×20×8, 2× through Ø8, blind Ø
 | Holes (through/blind, Ø, depth) | ✓ | Full-cylinder faces + span test: 2 through Ø8.000, 1 blind Ø6.000 depth 10.000 exact; blind-bottom plane correctly attributed to its bore, not counted as pocket floor. |
 | Pockets | ~ | Prismatic floor detection exact (depth 8.000, area 800). General pockets, transitions (fillets/chamfers), tapered walls, tight corners = recognizer work on B-rep topology. |
 | `setups[]` / `setup_count` | ~ | Machine-direction inputs (face normals, hole axes → {±Z} on fixture) proven; the allocation heuristic itself is in-house → M4.4 (may need its own mini-spike, per build plan). |
-| `runtime` | ✗ OCCT | **No OCCT support — expected finding.** In-house heuristic from removal volume (probed: 8693.36 mm³ exact), feature counts, material. Surface honestly. |
+| `runtime` | ✗ OCCT | **No OCCT support — expected finding.** In-house heuristic from removal volume (probed: 8693.36 mm³, within bbox read-tolerance of the analytic 8693.36), feature counts, material. Surface honestly. |
 | `confidence` | ✓ | Ours to emit; low confidence → manual override is the designed path (sub-spec §6). 5-axis not auto-costed. |
 
 ## 5. Lathe (`analyze_lathe`) — verdict: **OCCT-sufficient at the v2.15 scope (attributes + stock recommendation; no feature tree)**
