@@ -106,7 +106,15 @@ disallow_subclassing_any = false
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-ra"
+# `not eval` deselects the M3.11 live Lens quality suite by default — it calls
+# the model, so it must not run on every PR (block M3.11). The dedicated
+# `lens-eval` workflow opts back in with `pytest -m eval`. The model-free
+# scorer meta-test (`test_lens_eval_scorer.py`) is NOT marked, so it still
+# gates every PR.
+addopts = "-ra -m 'not eval'"
+markers = [
+    "eval: live Lens extraction quality suite (calls the model; cost-gated, run via `-m eval`)",
+]
 filterwarnings = [
     # Starlette's TestClient prefers the (not-yet-pinned) httpx2; harmless here.
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",

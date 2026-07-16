@@ -1,0 +1,17 @@
+{
+  "provisional": true,
+  "note": "Seeded from the spec targets (AI-LENS §7: classification ~95%, recall ~65%, precision ~85%). The first real eval-suite run against the pinned model recalibrates `metrics` from its report; until then the gate = current >= target - margin. Recalibrate when the Fechner labelled packages land (DECISIONS: Fixture packages).",
+  "model": "claude-opus-4-8",
+  "prompt_version": "lens-extract-v1",
+  "margin": 0.1,
+  "targets": {
+    "classification": 0.95,
+    "overall.recall": 0.65,
+    "overall.precision": 0.85
+  },
+  "metrics": {
+    "classification": 0.95,
+    "overall.recall": 0.65,
+    "overall.precision": 0.85
+  }
+}

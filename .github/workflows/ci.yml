@@ -85,8 +85,7 @@ jobs:
       - run: npm run test
       - run: npm run build
 
-  # eval-suite:  # ENABLE AT M3.11 — Lens extraction quality gate.
-  #   Scores precision/recall/F1 per field category vs. spec thresholds at temperature 0 + pinned model.
-  #   Gates on thresholds + regression-vs-baseline, NOT exact-match of model output.
-  #   runs-on: ubuntu-latest
-  #   steps: [ ... ]
+  # Lens extraction quality gate (M3.11) lives in its OWN workflow — `lens-eval.yml`.
+  # It calls the model, so it must NOT run on every PR (cost); it runs on M3-lens
+  # PRs + nightly. The model-free scorer meta-test (`test_lens_eval_scorer.py`)
+  # still gates every PR here in `backend` (it is not marked `eval`).

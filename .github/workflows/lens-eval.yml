@@ -1,0 +1,58 @@
+# Lens extraction quality gate (M3.11 — the probabilistic test track).
+#
+# NOT part of `ci.yml`: this suite calls the model, so it must not run on every
+# PR (block M3.11 acceptance: "does not run on every PR (cost)"). It runs where
+# cost is acceptable:
+#   * nightly  — catch prompt/model drift over time,
+#   * PRs that touch the Lens extraction path (paths filter below),
+#   * on demand (workflow_dispatch).
+#
+# The gate scores the labelled fixture set through the *pinned model + versioned
+# prompt* and fails only on a regression vs `fixtures/lens-eval/baseline.json`
+# beyond its margin — never exact-match. The model-free scorer meta-test gates
+# every PR separately in `ci.yml` (it is not marked `eval`).
+#
+# Requires the `ANTHROPIC_API_KEY` repo secret. Absent it (e.g. a fork PR), the
+# suite SKIPS rather than fails — so the gate never blocks on a missing secret.
+name: Lens eval
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # nightly, 03:17 UTC
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "app/lens.py"
+      - "app/lens_provider.py"
+      - "app/lens_extract.py"
+      - "tests/lens_eval_harness.py"
+      - "tests/test_lens_eval_suite.py"
+      - "fixtures/lens-eval/**"
+      - ".github/workflows/lens-eval.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: lens-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval-suite:
+    runs-on: ubuntu-latest
+    env:
+      # Pinned model + versioned prompt carry repeatability (temperature-0 is
+      # superseded on this model generation — app/lens_provider.py). Keep in
+      # sync with fixtures/lens-eval/baseline.json.
+      LENS_MODEL: claude-opus-4-8
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync deps
+        run: uv sync --all-extras --dev
+      # No Postgres: run_document_extraction is a pure two-pass call, no DB.
+      # `-m eval` opts INTO the suite that the default `-m 'not eval'` deselects.
+      - name: Lens extraction quality gate
+        run: uv run pytest -m eval -q -s tests/test_lens_eval_suite.py
