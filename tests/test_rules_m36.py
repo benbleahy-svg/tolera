@@ -501,3 +501,68 @@ def test_custom_validator_rejection_returns_envelope_not_500(
         )
         assert nan_resp.status_code == 422
         assert nan_resp.json()["code"] == "invalid_rules_json"
+
+
+# --------------------------------------------------------------------------- #
+# Import-time ReDoS reject (DECISIONS.md 2026-07-16, option (b))
+# --------------------------------------------------------------------------- #
+def _regex_rule(pattern: str) -> dict[str, object]:
+    rule = _minimal_rule()
+    group = rule["signals"][0]["groups"][0]  # type: ignore[index]
+    group["document_path"] = "text"
+    group["queries"] = [
+        {
+            "field_name": ["raw_text"],
+            "operator": "regex",
+            "value": pattern,
+            "value_type": "string",
+            "filter_type": "string",
+            "units": None,
+        }
+    ]
+    return rule
+
+
+class TestCatastrophicPatternsAreRejectedAtImport:
+    """Option (b) — defence in depth over the evaluator's timeout (option (a)).
+
+    (a) already makes a runaway pattern *safe*: it fails closed at evaluation.
+    But it fails closed **silently** — the shop's rule just never fires, which
+    is a support mystery. (b) exists for feedback timing: tell the author at
+    config time, while they are looking at the pattern.
+    """
+
+    def test_a_catastrophic_pattern_is_rejected_with_an_actionable_message(self) -> None:
+        with pytest.raises(ValidationError, match=r"zu lange"):
+            _parse_one(_regex_rule("^(a|a)+$"))
+
+    def test_rejection_names_the_pattern_so_the_author_can_find_it(self) -> None:
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_one(_regex_rule("^(a|a)+$"))
+        assert "^(a|a)+$" in str(excinfo.value)
+
+
+class TestLegitimatePatternsSurviveTheRejectHeuristic:
+    """The false-positive guard, and the reason (b) is empirical rather than a
+    static nested-quantifier check: the ``regex`` engine *optimizes away* the
+    classic nested-quantifier shapes, so rejecting them by structure would
+    reject patterns that are provably fine (< 1 ms at 4096 chars, measured).
+    """
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            r"^(a+)+$",  # the DECISIONS entry's own probe — optimized away
+            r"^(\d+[ -]?)+$",  # the "easy to author by accident" shape
+            r"(x+x+)+y",
+            r"^SPX-[A-Za-z0-9-]+$",  # §5 rule-7, the spec's own pattern
+            r"1\.\d{4}",  # Werkstoffnummer
+            r"(DIN|EN|ISO)\s*\d+",
+        ],
+    )
+    def test_pattern_imports_cleanly(self, pattern: str) -> None:
+        assert _parse_one(_regex_rule(pattern)), f"{pattern!r} is safe and must not be rejected"
+
+    def test_the_nine_worked_rules_still_import(self) -> None:
+        """The golden set is the contract — (b) must not break it."""
+        assert len(parse_rules_json(FIXTURE.read_text(encoding="utf-8"))) == 9
