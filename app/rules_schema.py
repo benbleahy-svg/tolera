@@ -24,10 +24,11 @@ the unit (RULES-ENGINE-SPEC §2/§7).
 from __future__ import annotations
 
 import json
-import re
+import re  # internal, developer-authored patterns only (INTERROGATION_PATH)
 import uuid as uuid_mod
 from typing import Annotated, Literal
 
+import regex  # the engine that executes org-authored rule patterns
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -87,6 +88,52 @@ INTERROGATION_PATH = re.compile(
     r"^(three_axis_mill|sheet_metal|tube_laser|lathe)\.[a-z0-9_]+(\.[a-z0-9_]+)*$"
 )
 
+# --------------------------------------------------------------------------- #
+# Import-time ReDoS reject (DECISIONS.md 2026-07-16, option (b))
+# --------------------------------------------------------------------------- #
+#: Budget for a single probe of an authored pattern. Small: this runs per regex
+#: query on the import path, and a *safe* pattern returns in microseconds — only
+#: a pathological one ever spends the budget.
+_PROBE_TIMEOUT_SECONDS = 0.1
+
+#: Adversarial probes: long runs that fail to match only at the very end, which
+#: is the shape that forces a backtracking engine to explore every partition.
+#: Deliberately generic — this is a best-effort early warning, not the
+#: guarantee. The guarantee is option (a), the enforced timeout in
+#: ``app.rules_eval._search_bounded``; a pattern whose blow-up these probes miss
+#: is still contained there, just later and more quietly.
+_REDOS_PROBES = (
+    "a" * 64 + "!",
+    "1" * 64 + "!",
+    "ab" * 32 + "!",
+    "1-" * 32 + "!",
+    " " * 64 + "!",
+)
+
+
+def _rejects_as_catastrophic(pattern: str) -> bool:
+    """Does ``pattern`` blow up on an adversarial probe within the budget?
+
+    **Empirical, not structural** — and that distinction is the whole design.
+    The obvious reading of option (b) is "reject nested quantifiers", but the
+    ``regex`` engine *optimizes those away*: ``^(a+)+$`` and ``(\\d+[ -]?)+``
+    (the very pattern the DECISIONS entry was written about) both return in
+    under a millisecond against a 4096-char probe. A structural check would
+    reject provably-safe patterns and train authors to route around it. Running
+    the pattern instead rejects only what actually misbehaves *on the engine
+    that will execute it*.
+    """
+    for probe in _REDOS_PROBES:
+        try:
+            regex.search(pattern, probe, flags=regex.MULTILINE, timeout=_PROBE_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return True
+        except regex.error:
+            # Not our failure to report: the compile check above owns it.
+            return False
+    return False
+
+
 #: Which operators each filter_type admits — one map so a future operator
 #: can't be added to one branch and forgotten in another.
 FILTER_TYPE_OPERATORS: dict[str, tuple[str, ...]] = {
@@ -133,9 +180,25 @@ class Query(BaseModel):
             if not isinstance(self.value, str):
                 raise ValueError("a regex query's value must be a pattern string")
             try:
-                re.compile(self.value)
-            except re.error as exc:
+                # Validate with the engine that will EXECUTE this pattern
+                # (``app.rules_eval._search_bounded``), not stdlib ``re``:
+                # validating with a different engine than the one that runs it
+                # is how a set imports clean and then never fires.
+                regex.compile(self.value)
+            except regex.error as exc:
                 raise ValueError(f"invalid regex pattern: {exc}") from exc
+            # Option (b): reject at config time, while the author is looking at
+            # the pattern. The evaluator's timeout (option (a)) already makes a
+            # runaway pattern *safe*, but it fails closed silently — the rule
+            # merely never fires, which surfaces as a support mystery weeks
+            # later. Refusing the paste is the honest moment to say so.
+            if _rejects_as_catastrophic(self.value):
+                raise ValueError(
+                    f"das Regex-Muster {self.value!r} braucht zu lange und wurde abgelehnt: "
+                    "Es kann bei bestimmten Zeichenketten katastrophal zurücksetzen "
+                    "(ReDoS) und die Regelauswertung blockieren. Bitte verschachtelte "
+                    "Quantoren und überlappende Alternativen vermeiden (z. B. '(a|a)+')."
+                )
         if self.operator not in FILTER_TYPE_OPERATORS[self.filter_type]:
             raise ValueError(f"a {self.filter_type} filter does not support {self.operator}")
         if self.filter_type == "numeric":

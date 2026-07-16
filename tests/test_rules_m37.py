@@ -12,13 +12,24 @@ golden: each is asserted against a matching and a non-matching component.
 from __future__ import annotations
 
 import json
+import logging
+import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
+import regex
 
-from app.rules_eval import _ISO_GPS_SYMBOLS, EvaluationContext, evaluate_rule, evaluate_rules
+from app.logging import JsonFormatter
+from app.rules_eval import (
+    _ISO_GPS_SYMBOLS,
+    REGEX_TIMEOUT_SECONDS,
+    EvaluationContext,
+    _compare_string,
+    evaluate_rule,
+    evaluate_rules,
+)
 from app.rules_schema import RuleSchema, parse_rules_json
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "rules" / "worked-rules.json"
@@ -834,3 +845,100 @@ def test_fixture_is_the_nine_worked_rules(worked_rules: list[RuleSchema]) -> Non
     """Guard the golden: the evaluator's contract is the §5 set."""
     assert len(worked_rules) == 9
     assert json.loads(FIXTURE.read_text(encoding="utf-8"))[0]["signals"], "fixture carries AST"
+
+
+# --------------------------------------------------------------------------- #
+# ReDoS containment (DECISIONS.md 2026-07-16, option (a) — bound the match)
+# --------------------------------------------------------------------------- #
+class TestRegexIsBounded:
+    """A rule's ``regex`` runs an ORG-authored pattern over CUSTOMER-supplied
+    print text, so an accidental backtracking pattern must not hang a worker.
+
+    **The invariant under test is "evaluation is bounded", not "the timeout
+    fires."** Two mechanisms deliver it and the caller cannot tell them apart:
+    the ``regex`` engine optimizes most catastrophic shapes away outright, and
+    the enforced ``timeout=`` cuts off whatever it cannot. Which one acts is a
+    property of the engine build — ``^(a|a)+$`` backtracks on macOS/arm64 but is
+    optimized away on Linux/x86_64 (CI), same ``regex`` version — so asserting
+    on the *mechanism* makes the suite fail per-platform for no reason. The
+    tests below assert the bound, and inject the timeout where the fail-closed
+    contract itself is what needs proving.
+    """
+
+    @pytest.mark.parametrize(
+        ("pattern", "text"),
+        [
+            ("^(a|a)+$", "a" * 4096 + "!"),  # backtracks on some builds, optimized on others
+            ("^(a+)+$", "a" * 4096 + "!"),  # the DECISIONS entry's own probe
+            (r"^(\d+[ -]?)+$", "1" * 4096 + "x"),  # the "authored by accident" shape
+            ("(x+x+)+y", "x" * 4096 + "z"),
+        ],
+    )
+    def test_a_catastrophic_pattern_cannot_hang_evaluation(self, pattern: str, text: str) -> None:
+        """Under stdlib ``re`` these are the shapes that hang a worker — the
+        DECISIONS entry measured 7.79 s at 28 chars, doubling per character.
+        Here they are 4096 chars and must all resolve within the budget."""
+        started = time.perf_counter()
+        assert _compare_string(text, "regex", pattern) is False, (
+            "an undecidable pattern must not fire the rule"
+        )
+        elapsed = time.perf_counter() - started
+        assert elapsed < REGEX_TIMEOUT_SECONDS * 4, (
+            f"{pattern!r} ran {elapsed:.2f}s — evaluation is not bounded"
+        )
+
+    def test_the_engine_is_handed_the_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The guarantee is the ``timeout=`` argument reaching the engine. A
+        swap back to stdlib ``re`` (which silently accepts no timeout) or a
+        dropped kwarg would disarm every other test here without failing it."""
+        seen: dict[str, Any] = {}
+
+        def spy(pattern: str, text: str, **kwargs: Any) -> None:
+            seen.update(kwargs)
+            return None
+
+        monkeypatch.setattr(regex, "search", spy)
+        assert _compare_string("irgendein Text", "regex", "muster") is False
+        assert seen.get("timeout") == REGEX_TIMEOUT_SECONDS, "the budget must reach the engine"
+
+    def test_a_timed_out_match_fails_closed_and_is_logged_without_the_print_text(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The fail-closed + log contract, with the timeout **injected**.
+
+        Provoking a real timeout would bind this test to one engine build's
+        optimizer (see the class docstring). What we own — and must pin — is the
+        behaviour *given* a timeout: the rule does not fire, the pattern is
+        reported so its author can find it, and the customer's print text never
+        reaches the log (CLAUDE.md §5). Asserted against the **rendered JSON
+        line**, since the shipped payload is what must not leak.
+        """
+
+        def timed_out(pattern: str, text: str, **kwargs: Any) -> None:
+            raise TimeoutError("regex timed out")
+
+        monkeypatch.setattr(regex, "search", timed_out)
+        text = "a" * 4096 + "GEHEIM-KUNDENTEXT!"
+        with caplog.at_level(logging.WARNING, logger="app.rules_eval"):
+            assert _compare_string(text, "regex", "^(a|a)+$") is False, "must fail closed"
+        assert caplog.records, "a timed-out rule regex must be observable"
+
+        emitted = JsonFormatter().format(caplog.records[-1])
+        payload = json.loads(emitted)
+        assert payload["rule_regex"] == "^(a|a)+$", "the culprit pattern must be findable"
+        assert payload["text_length"] == len(text)
+        assert "GEHEIM-KUNDENTEXT" not in emitted, "customer print text must never be logged"
+        assert "aaaa" not in emitted
+
+
+class TestRegexSemanticsSurviveTheEngineSwap:
+    """The M3.7 contract must be unchanged by moving ``re`` → ``regex``."""
+
+    def test_multiline_anchors_still_bind_per_line(self) -> None:
+        assert _compare_string("ISO 2768-m\nSPX-1234-A\n", "regex", "^SPX-[A-Za-z0-9-]+$") is True
+        assert _compare_string("Nach SPX-1234-A fertigen", "regex", "^SPX-[A-Za-z0-9-]+$") is False
+
+    def test_an_uncompilable_pattern_fails_closed(self) -> None:
+        """M3.6 validates patterns at import, but a rule row predating this
+        change (or any engine disagreement) must not raise mid-evaluation."""
+        assert _compare_string("anything", "regex", "(unclosed") is False
