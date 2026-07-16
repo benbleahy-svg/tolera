@@ -13,16 +13,12 @@ import { useTranslation } from 'react-i18next';
 
 import { useConfigureApi } from '../configure/api';
 import {
+  RULE_SEED_DOCUMENT_PATHS,
   type SuggestedActionOut,
   suggestionSeed,
   useRuleSuggestApi,
 } from '../review/api';
 import { CreateRuleModal, type NewRule } from '../review/CreateRuleModal';
-
-// The pre-seeded condition uses the `text` signal; the other singletons are
-// offered so the human can re-pick. The full #rules-paths tree is the Configure
-// → Rules surface's job (M3.6); the pre-seed only needs a valid starting path.
-const DOCUMENT_PATHS = ['text', 'part', 'files'];
 
 export function SuggestedActionsStrip(): React.ReactElement | null {
   const { t } = useTranslation();
@@ -83,7 +79,7 @@ export function SuggestedActionsStrip(): React.ReactElement | null {
       </ul>
       {editing && (
         <CreateRuleModal
-          documentPaths={DOCUMENT_PATHS}
+          documentPaths={RULE_SEED_DOCUMENT_PATHS}
           suggestion={suggestionSeed(editing.payload)}
           onCreate={create}
           onClose={() => setEditing(null)}

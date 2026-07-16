@@ -72,6 +72,10 @@ RULE_SUGGEST_PROMPT_VERSION = "rule-suggest-v1"
 DEFAULT_THRESHOLD = 3
 DEFAULT_WINDOW_DAYS = 90
 
+#: Per-request Anthropic timeout for the (advisory) sentence enrichment — kept
+#: well under the scan task's soft limit so a hung provider degrades gracefully.
+ENRICH_TIMEOUT_SECONDS = 30.0
+
 #: German process-family labels for the suggestion copy (German-first UI). Falls
 #: back to the enum value for any family not listed.
 _FAMILY_LABELS_DE: dict[ProcessFamily, str] = {
@@ -210,11 +214,13 @@ def build_payload(pattern: RuleSuggestionPattern, *, sentence: str) -> dict[str,
             "material_class": pattern.material_class_name,
             "part_count": pattern.part_count,
         },
-        # The pre-seed for M3.8's Create Rule modal. Deterministic; the human
-        # edits it before CREATE RULE. No rule is created here.
+        # The pre-seed for M3.8's Create Rule modal. Fully DETERMINISTIC (the
+        # human edits it before CREATE RULE) — the ``description`` must not be the
+        # AI-enriched ``sentence`` (that can vary run to run in the nightly scan);
+        # it uses the deterministic sentence so the pre-seed is stable.
         "rule_draft": {
             "name": rule_name,
-            "description": sentence,
+            "description": deterministic_sentence(pattern),
             "operation_def_id": str(pattern.operation_def_id),
             "operation_name": pattern.operation_name,
             "process_family": pattern.process_family.value,
@@ -286,10 +292,13 @@ async def suggestion_for_component(
 
     # The op_defs manually present on THIS component — the ones the estimator
     # just touched — restrict which pattern the drawer surfaces.
+    # Every domain read is explicitly org-scoped (defense in depth over RLS;
+    # CLAUDE.md §5) — never rely on the GUC alone for a cross-tenant boundary.
     op_def_ids = set(
         (
             await session.execute(
                 select(Operation.operation_def_id).where(
+                    Operation.org_id == org_id,
                     Operation.component_id == component.id,
                     Operation.added_manually.is_(True),
                     Operation.operation_def_id.is_not(None),
@@ -299,8 +308,8 @@ async def suggestion_for_component(
         .scalars()
         .all()
     )
-    class_id = await _material_class_id(session, component.material_id)
-    family = await _process_family(session, component.process_id)
+    class_id = await _material_class_id(session, org_id, component.material_id)
+    family = await _process_family(session, org_id, component.process_id)
 
     match: RuleSuggestionPattern | None = None
     for pattern in patterns:
@@ -318,6 +327,7 @@ async def suggestion_for_component(
     # reappears on the drawer (the upsert left a dismissed row untouched).
     row = await session.scalar(
         select(SuggestedAction).where(
+            SuggestedAction.org_id == org_id,
             SuggestedAction.dedup_key == match.dedup_key,
             SuggestedAction.status == SuggestedActionStatus.open.value,
         )
@@ -330,18 +340,24 @@ async def suggestion_for_component(
     return {**row.payload, "suggested_action_id": str(row.id)}
 
 
-async def _material_class_id(session: AsyncSession, material_id: uuid.UUID) -> uuid.UUID | None:
+async def _material_class_id(
+    session: AsyncSession, org_id: uuid.UUID, material_id: uuid.UUID
+) -> uuid.UUID | None:
     class_id = await session.scalar(
         select(MaterialClass.id)
         .join(MaterialFamily, MaterialFamily.class_id == MaterialClass.id)
         .join(Material, Material.family_id == MaterialFamily.id)
-        .where(Material.id == material_id)
+        .where(Material.id == material_id, Material.org_id == org_id)
     )
     return class_id
 
 
-async def _process_family(session: AsyncSession, process_id: uuid.UUID) -> ProcessFamily | None:
-    fam = await session.scalar(select(Process.family).where(Process.id == process_id))
+async def _process_family(
+    session: AsyncSession, org_id: uuid.UUID, process_id: uuid.UUID
+) -> ProcessFamily | None:
+    fam = await session.scalar(
+        select(Process.family).where(Process.id == process_id, Process.org_id == org_id)
+    )
     return ProcessFamily(fam) if fam is not None else None
 
 
@@ -408,7 +424,10 @@ class AnthropicRuleSuggestEnricher:
     def __init__(self, *, api_key: str, model: str, inference_geo: str | None) -> None:
         from anthropic import AsyncAnthropic
 
-        self._client = AsyncAnthropic(api_key=api_key)
+        # Bound the per-request timeout well under the Celery task's soft limit
+        # (the SDK default is 10 min, which could outlive the 360s task) so a
+        # hung provider degrades to the deterministic sentence, not a killed scan.
+        self._client = AsyncAnthropic(api_key=api_key, timeout=ENRICH_TIMEOUT_SECONDS)
         self._model = model
         self._inference_geo = inference_geo
 
@@ -451,6 +470,8 @@ class AnthropicRuleSuggestEnricher:
 async def _enriched_sentence(pattern: RuleSuggestionPattern) -> str:
     """The Claude sentence, or the deterministic one on any failure (the AI
     touch is advisory — a degraded provider never blocks a suggestion)."""
+    import anthropic
+
     fallback = deterministic_sentence(pattern)
     try:
         out = await resolve().suggest(
@@ -462,7 +483,11 @@ async def _enriched_sentence(pattern: RuleSuggestionPattern) -> str:
                 "window_days": DEFAULT_WINDOW_DAYS,
             }
         )
-    except (LensProviderError, RuntimeError, AttributeError) as exc:
+    except (LensProviderError, RuntimeError, AttributeError, anthropic.APIError) as exc:
+        # anthropic.APIError covers connection/timeout/rate-limit/5xx from the
+        # live call (not just the stop_reason cases the enricher maps itself), so
+        # a flaky provider degrades to the deterministic sentence, never kills
+        # the scan.
         code = exc.code if isinstance(exc, LensProviderError) else "provider_unavailable"
         logger.info("rule_suggest_enrich_skipped", extra={"code": code})
         return fallback
@@ -522,12 +547,35 @@ async def _list_scan_org_ids(db_url: str) -> list[uuid.UUID]:
     base=BaseTask,
     name="app.scan_rule_suggestions",
     bind=True,
+    soft_time_limit=60,
+    time_limit=90,
+)
+def scan_rule_suggestions_task(self: Any) -> dict[str, Any]:
+    """Nightly beat entry point: **fan out** one scan task per org (the
+    ``email_sync_all`` pattern). The dispatcher only enumerates org ids and
+    enqueues — the LLM enrichment happens inside each per-org task, so no single
+    bounded task serializes every org's provider latency (spec: "Nightly Celery
+    job scans for patterns per org")."""
+    from .task_resources import resolve as resolve_task_resources
+
+    db_url, _storage = resolve_task_resources()
+    org_ids = _run_on_own_loop(_list_scan_org_ids(db_url))
+    for org_id in org_ids:
+        scan_rule_suggestions_org_task.delay(str(org_id))
+    logger.info("rule_suggest_scan_fanout", extra={"orgs": len(org_ids)})
+    return {"orgs": len(org_ids)}
+
+
+@celery_app.task(
+    base=BaseTask,
+    name="app.scan_rule_suggestions_org",
+    bind=True,
     soft_time_limit=300,
     time_limit=360,
 )
-def scan_rule_suggestions_task(self: Any) -> dict[str, Any]:
-    """Nightly beat entry point: fan out one scan per org (spec: "Nightly Celery
-    job scans for patterns per org")."""
+def scan_rule_suggestions_org_task(self: Any, org_id: str) -> dict[str, Any]:
+    """One org's scan (detect → enrich → upsert). Idempotent, so a redeliver is
+    safe; the AI gate is re-checked inside ``run_scan_org``."""
     task_id = self.request.id
     if task_id is not None:
         prior = AsyncResult(task_id, app=celery_app)
@@ -536,10 +584,8 @@ def scan_rule_suggestions_task(self: Any) -> dict[str, Any]:
     from .task_resources import resolve as resolve_task_resources
 
     db_url, _storage = resolve_task_resources()
-    org_ids = _run_on_own_loop(_list_scan_org_ids(db_url))
-    total = 0
-    for org_id in org_ids:
-        result = cast("dict[str, Any]", _run_on_own_loop(run_scan_org(db_url, org_id=org_id)))
-        total += int(result.get("suggestions", 0))
-    logger.info("rule_suggest_scan", extra={"orgs": len(org_ids), "suggestions": total})
-    return {"orgs": len(org_ids), "suggestions": total}
+    result = cast(
+        "dict[str, Any]", _run_on_own_loop(run_scan_org(db_url, org_id=uuid.UUID(org_id)))
+    )
+    logger.info("rule_suggest_scan_org", extra={**result})
+    return result

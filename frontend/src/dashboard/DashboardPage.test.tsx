@@ -67,16 +67,16 @@ vi.mock('../collab/api', async () => {
 
 // The M3.10 suggested-actions strip renders inside the dashboard; stub its API
 // so this suite stays focused on notifications/tasks (the strip has its own).
+// Stable object per the real useMemo hook — a fresh object each render would
+// re-fire the strip's load effect in a loop.
+const ruleSuggestApi = {
+  listSuggestedActions: vi.fn().mockResolvedValue([]),
+  dismissSuggestedAction: vi.fn(),
+  getRuleSuggestion: vi.fn(),
+};
 vi.mock('../review/api', async () => {
   const actual = await vi.importActual<typeof import('../review/api')>('../review/api');
-  return {
-    ...actual,
-    useRuleSuggestApi: () => ({
-      listSuggestedActions: vi.fn().mockResolvedValue([]),
-      dismissSuggestedAction: vi.fn(),
-      getRuleSuggestion: vi.fn(),
-    }),
-  };
+  return { ...actual, useRuleSuggestApi: () => ruleSuggestApi };
 });
 
 vi.mock('../configure/api', () => ({

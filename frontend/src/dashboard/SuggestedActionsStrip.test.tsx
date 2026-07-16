@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -58,6 +58,10 @@ function suggestion(overrides: Record<string, unknown> = {}) {
 }
 
 describe('SuggestedActionsStrip', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('renders an open suggestion and opens the Create Rule dialog pre-seeded', async () => {
     listSuggestedActions.mockResolvedValue([suggestion()]);
     await renderWithProviders(<SuggestedActionsStrip />);

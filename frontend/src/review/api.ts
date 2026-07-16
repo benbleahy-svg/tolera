@@ -166,6 +166,11 @@ export interface SuggestedActionOut {
   created_at: string;
 }
 
+// The document paths offered when a rule is seeded from an M3.10 suggestion. The
+// pre-seeded condition uses `text`; the other singletons let the human re-pick.
+// The full #rules-paths tree is the Configure → Rules surface's job (M3.6).
+export const RULE_SEED_DOCUMENT_PATHS = ['text', 'part', 'files'];
+
 export interface RuleSuggestApi {
   listSuggestedActions: () => Promise<SuggestedActionOut[]>;
   dismissSuggestedAction: (id: string) => Promise<SuggestedActionOut>;
@@ -180,8 +185,10 @@ export function useRuleSuggestApi(): RuleSuggestApi {
       listSuggestedActions: () => apiFetch('/api/suggested-actions', token),
       dismissSuggestedAction: (id) =>
         apiFetch(`/api/suggested-actions/${id}/dismiss`, token, { method: 'POST' }),
+      // POST, not GET: the probe upserts suggested_action rows (a mutation), so
+      // it must not be a prefetchable/retriable safe GET.
       getRuleSuggestion: (componentId) =>
-        apiFetch(`/api/components/${componentId}/rule-suggestion`, token),
+        apiFetch(`/api/components/${componentId}/rule-suggestion`, token, { method: 'POST' }),
     };
   }, [getToken]);
 }

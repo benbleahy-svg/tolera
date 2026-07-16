@@ -72,17 +72,16 @@ vi.mock('./CommunicationsSection', () => ({ CommunicationsSection: () => null })
 vi.mock('../review/ReviewItemsPanel', () => ({ ReviewItemsPanel: () => null }));
 
 // M3.10 hooks the page uses for the rule-suggestion chip; stub so the render
-// never touches Clerk. Rule-suggest probing is covered by its own suites.
+// never touches Clerk. Rule-suggest probing is covered by its own suites. Stable
+// object per the real useMemo hook (a fresh object each render is a dep churn).
+const ruleSuggestApi = {
+  listSuggestedActions: vi.fn().mockResolvedValue([]),
+  dismissSuggestedAction: vi.fn(),
+  getRuleSuggestion: vi.fn().mockResolvedValue({ suggestion: null }),
+};
 vi.mock('../review/api', async () => {
   const actual = await vi.importActual<typeof import('../review/api')>('../review/api');
-  return {
-    ...actual,
-    useRuleSuggestApi: () => ({
-      listSuggestedActions: vi.fn().mockResolvedValue([]),
-      dismissSuggestedAction: vi.fn(),
-      getRuleSuggestion: vi.fn().mockResolvedValue({ suggestion: null }),
-    }),
-  };
+  return { ...actual, useRuleSuggestApi: () => ruleSuggestApi };
 });
 vi.mock('../configure/api', () => ({ useConfigureApi: () => ({ importRules: vi.fn() }) }));
 

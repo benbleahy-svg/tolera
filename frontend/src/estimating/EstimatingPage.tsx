@@ -8,7 +8,7 @@
  * with later blocks; this page is the Materials & Operations slice.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -16,6 +16,7 @@ import { ApiError } from '../api/client';
 import { useConfigureApi } from '../configure/api';
 import { PartMatchesChip } from '../parts/MatchingParts';
 import {
+  RULE_SEED_DOCUMENT_PATHS,
   type RuleSuggestionPayload,
   suggestionSeed,
   useRuleSuggestApi,
@@ -95,8 +96,16 @@ export function EstimatingPage() {
     if (quoteId) api.getQuoteTotals(quoteId).then(setTotals).catch(fail);
   }, [api, componentId, quoteId, fail]);
 
+  // Guards the async rule-suggestion probe against a line-item switch (M3.10):
+  // a probe fired for component A must not paint A's chip after the user moved
+  // to component B.
+  const activeComponentRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!componentId) return;
+    // Switching line items: drop any chip from the previous component.
+    activeComponentRef.current = componentId;
+    setRuleSuggestion(null);
     api.getCosting(componentId).then(setCosting).catch(fail);
     loadPricing();
   }, [api, componentId, fail, loadPricing]);
@@ -137,10 +146,14 @@ export function EstimatingPage() {
         .then((costingNext) => {
           setCosting(costingNext);
           loadPricing();
-          if (componentId) {
+          const probed = componentId;
+          if (probed) {
             suggestApi
-              .getRuleSuggestion(componentId)
-              .then((r) => setRuleSuggestion(r.suggestion))
+              .getRuleSuggestion(probed)
+              .then((r) => {
+                // Ignore a stale probe if the user has since switched line items.
+                if (activeComponentRef.current === probed) setRuleSuggestion(r.suggestion);
+              })
               .catch(() => undefined);
           }
         })
@@ -368,7 +381,7 @@ export function EstimatingPage() {
       )}
       {seedingRule && ruleSuggestion && (
         <CreateRuleModal
-          documentPaths={['text', 'part', 'files']}
+          documentPaths={RULE_SEED_DOCUMENT_PATHS}
           suggestion={suggestionSeed(ruleSuggestion)}
           onCreate={async (rule: NewRule) => {
             // No rule until this call — the human clicked CREATE RULE.

@@ -71,7 +71,7 @@ def _manual_add(
 
 
 def _drawer(client: TestClient, component_id: str) -> dict[str, Any] | None:
-    res = client.get(f"/api/components/{component_id}/rule-suggestion")
+    res = client.post(f"/api/components/{component_id}/rule-suggestion")
     assert res.status_code == 200, res.text
     suggestion: dict[str, Any] | None = res.json()["suggestion"]
     return suggestion
@@ -174,8 +174,8 @@ def test_rule_added_operations_do_not_count(app_client: TestClient, seeder: Any)
         _manual_add(app_client, comps[2], process_id=proc, material_id=material, op_def_id=op)
         seeder.sql(
             "UPDATE operation SET added_manually = false "
-            "WHERE component_id = :cid AND operation_def_id = :op",
-            {"cid": uuid.UUID(comps[2]), "op": uuid.UUID(op)},
+            "WHERE org_id = :org AND component_id = :cid AND operation_def_id = :op",
+            {"org": org, "cid": uuid.UUID(comps[2]), "op": uuid.UUID(op)},
         )
         assert _drawer(app_client, comps[2]) is None
 
@@ -236,6 +236,25 @@ def test_suppressed_when_flag_off(app_client: TestClient, seeder: Any) -> None:
             c = _new_component(app_client)
             _manual_add(app_client, c, process_id=proc, material_id=material, op_def_id=op)
         assert _drawer(app_client, c) is None
+        assert app_client.get("/api/suggested-actions").json() == []
+
+
+def test_list_is_gated_after_a_suggestion_was_persisted(
+    app_client: TestClient, seeder: Any
+) -> None:
+    """A suggestion persisted while enabled must vanish from the strip once the
+    flag is turned off — the list endpoint re-checks the gate."""
+    user, org = _setup(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        proc, op = _process_id(app_client), _op_def_id(app_client)
+        material = next(iter(_materials_by_class(app_client).values()))[0]
+        for _ in range(3):
+            c = _new_component(app_client)
+            _manual_add(app_client, c, process_id=proc, material_id=material, op_def_id=op)
+        _drawer(app_client, c)  # persist an open suggestion while enabled
+        assert len(app_client.get("/api/suggested-actions").json()) == 1
+
+        _set_ai_flag(seeder, org, "rule_suggest_enabled", False)
         assert app_client.get("/api/suggested-actions").json() == []
 
 
