@@ -418,8 +418,29 @@ async def create_nest(
         )
 
     comp_settings = {cs.component_id: cs for cs in payload.component_settings}
+    # explicit cost-distribution is all-or-none: a partial set would silently
+    # zero the unlisted components (fresh-eyes review)
+    explicit_pcts = [
+        cs.cost_distribution_pct
+        for cs in payload.component_settings
+        if cs.cost_distribution_pct is not None
+    ]
+    if explicit_pcts and len(explicit_pcts) != len(unique_ids):
+        raise AppError(
+            "validation_error",
+            "Set a cost-distribution percentage for every nested component or none.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
     set_id = str(uuid.uuid4())
-    existing = len(await _quote_nests(session, quote.id))
+    # next free label number — a plain count would reuse numbers after a delete
+    existing = max(
+        (
+            int(n.label.rsplit("#", 1)[1])
+            for n in await _quote_nests(session, quote.id)
+            if n.label and n.label.rsplit("#", 1)[-1].isdigit()
+        ),
+        default=0,
+    )
     created: list[Nest] = []
     for offset, quantity in enumerate(sorted(break_set)):
         stock_in = stock_by_qty[quantity]
@@ -543,12 +564,24 @@ async def delete_nest(
     """Deletes the whole associated per-break set (KB: deleting one nest of a
     multi-make-quantity set deletes the others)."""
     quote = await _quote_or_404(session, quote_id, lock=True)
+    if not _is_editable(quote):
+        # deleting a nest recalculates costs — a sent quote's figures must not
+        # drift (the same draft gate every costing mutation carries)
+        raise AppError(
+            "quote_locked",
+            "Nests can only be deleted while the quote is a draft.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
     nests = await _quote_nests(session, quote.id)
     target = next((n for n in nests if n.id == nest_id), None)
     if target is None:
         raise AppError("not_found", "Nest not found.", status_code=status.HTTP_404_NOT_FOUND)
     set_id = (target.config or {}).get("set_id")
-    doomed = [n for n in nests if n.id == nest_id or (n.config or {}).get("set_id") == set_id]
+    doomed = [
+        n
+        for n in nests
+        if n.id == nest_id or (set_id is not None and (n.config or {}).get("set_id") == set_id)
+    ]
     affected: set[str] = set()
     for nest in doomed:
         affected.update((nest.config or {}).get("component_ids", []))

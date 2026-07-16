@@ -31,8 +31,9 @@ recomputable from ``config``, nothing baked into schema):
 
 Money follows the repo convention: ``Decimal`` quantized to 4 dp,
 ``ROUND_HALF_UP`` (the ``kalk_output_to_calc`` pattern); geometry stays float
-mm/mm². Allocation gives the last component the remainder so the per-component
-costs sum *exactly* to the material cost (no rounding drift).
+mm/mm². Allocation gives the largest-weight component the rounding remainder
+so the per-component costs sum *exactly* to the material cost (no drift, and a
+0 %-share component can never go negative).
 """
 
 from __future__ import annotations
@@ -85,13 +86,15 @@ class ComponentResult:
 @dataclass(frozen=True)
 class NestResult:
     net_sheet_used: float
-    charged_sheets: float
+    # a count of sheets, not money (the money is material_cost below)
+    charged_sheets: float  # nosemgrep: semgrep.money-float-in-pydantic
     gross_sheets: int
     material_cost: Decimal
     used_area_mm2: float
     scrap_area_mm2: float
     drop_area_mm2: float
-    total_contour_length_mm: float
+    # geometry (mm), not money
+    total_contour_length_mm: float  # nosemgrep: semgrep.money-float-in-pydantic
     components: list[ComponentResult]
 
 
@@ -140,25 +143,36 @@ def compute_nest(
     )
 
     # cost distribution: explicit percentages (normalised over their sum) win;
-    # default is the spec's "Area of parts" method on true flat areas
+    # default is the spec's "Area of parts" method on true flat areas.
+    # Explicit pcts are all-or-none — mixing would silently zero the implicit
+    # components (the API validates this too; belt and braces here).
     explicit = [c.cost_distribution_pct for c in components]
     if any(p is not None for p in explicit):
+        if any(p is None for p in explicit):
+            raise ValueError("cost distribution percentages must be set for all components or none")
         weights = [p if p is not None else Decimal(0) for p in explicit]
     else:
         weights = [Decimal(repr(c.flat_area_mm2 * c.make_qty)) for c in components]
     total_weight = sum(weights)
     if total_weight <= 0:
         raise ValueError("cost distribution weights must sum to a positive value")
+    if any(w < 0 for w in weights):
+        raise ValueError("cost distribution weights must not be negative")
 
+    # The largest-weight component takes the rounding remainder so the parts
+    # sum EXACTLY to material_cost; pinning it to the largest (not the last)
+    # keeps a 0 %-share component from absorbing negative rounding dust.
+    remainder_index = max(range(len(components)), key=lambda i: weights[i])
+    allocations = [
+        (material_cost * (weights[i] / total_weight)).quantize(_CENT4, rounding=ROUND_HALF_UP)
+        for i in range(len(components))
+    ]
+    allocations[remainder_index] = material_cost - sum(
+        a for i, a in enumerate(allocations) if i != remainder_index
+    )
     results: list[ComponentResult] = []
-    allocated_so_far = Decimal(0)
     for i, comp in enumerate(components):
         share = weights[i] / total_weight
-        if i == len(components) - 1:
-            allocated = material_cost - allocated_so_far  # remainder: exact sum
-        else:
-            allocated = (material_cost * share).quantize(_CENT4, rounding=ROUND_HALF_UP)
-        allocated_so_far += allocated
         results.append(
             ComponentResult(
                 key=comp.key,
@@ -166,7 +180,7 @@ def compute_nest(
                 effective_area_mm2=_effective_area(comp, settings),
                 used_area_mm2=comp.flat_area_mm2 * comp.make_qty,
                 cost_share_pct=(share * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
-                allocated_cost=allocated,
+                allocated_cost=allocations[i],
             )
         )
 

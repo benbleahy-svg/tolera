@@ -384,6 +384,24 @@ def test_nested_component_locks_quantities_and_material_op(
         assert res.status_code == 409
         assert res.json()["code"] == "nest_locked"
 
+        # Change Process would delete/orphan the nested router either way —
+        # locked in both variants (fresh-eyes review)
+        other_process = app_client.get("/api/processes").json()[0]["id"]
+        for keep in (True, False):
+            res = app_client.patch(
+                f"/api/components/{a['component_id']}/process",
+                json={"process_id": other_process, "keep_operations": keep},
+            )
+            assert res.status_code == 409
+            assert res.json()["code"] == "nest_locked"
+
+        # reassigning the material breaks the nest's same-material premise
+        res = app_client.patch(
+            f"/api/components/{a['component_id']}/material", json={"material_id": None}
+        )
+        assert res.status_code == 409
+        assert res.json()["code"] == "nest_locked"
+
         # deleting the nest unlocks both
         nest_id = app_client.get(f"/api/quotes/{quote_id}/nesting").json()["nests"][0]["id"]
         app_client.delete(f"/api/quotes/{quote_id}/nests/{nest_id}")
@@ -394,6 +412,31 @@ def test_nested_component_locks_quantities_and_material_op(
             ).status_code
             == 200
         )
+
+
+def test_partial_cost_distribution_rejected(app_client: TestClient, seeder: Seeder) -> None:
+    """Explicit distribution percentages are all-or-none — a partial set would
+    silently zero the unlisted components' material cost."""
+    org, admin = _org_with_admin(seeder, "nest-partial-pct")
+    seeder.configure_catalog(org)
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        quote_id = app_client.post("/api/quotes", json={}).json()["id"]
+        material = _material_id(app_client)
+        a = _sheet_line(app_client, quote_id, material, quantities=[10])
+        b = _sheet_line(app_client, quote_id, material, quantities=[10])
+        res = app_client.post(
+            f"/api/quotes/{quote_id}/nests",
+            json={
+                "component_ids": [a["component_id"], b["component_id"]],
+                "stock": [{**STOCK, "quantity": 10}],
+                "settings": SETTINGS,
+                "component_settings": [
+                    {"component_id": a["component_id"], "cost_distribution_pct": "60"}
+                ],
+            },
+        )
+        assert res.status_code == 422
+        assert "percentage" in res.json()["message"].lower()
 
 
 # --------------------------------------------------------------------------- #

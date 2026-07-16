@@ -173,6 +173,44 @@ class TestDistributionOverrides:
         assert by_key["A"].allocated_cost == Decimal("150.0000")
         assert by_key["B"].allocated_cost == Decimal("100.0000")
 
+    def test_mixed_explicit_and_implicit_pcts_rejected(self) -> None:
+        a = NestComponent(
+            key="A",
+            flat_x_mm=200.0,
+            flat_y_mm=100.0,
+            flat_area_mm2=18_000.0,
+            contour_length_mm=620.0,
+            make_qty=100,
+            cost_distribution_pct=Decimal("60"),
+        )
+        with pytest.raises(ValueError, match="all components or none"):
+            compute_nest([a, COMP_B], STOCK, SETTINGS)
+
+    def test_zero_share_component_never_goes_negative(self) -> None:
+        # the rounding remainder lands on the LARGEST weight, so an explicit
+        # 0 % component cannot absorb negative dust
+        comps = [
+            NestComponent(
+                key=key,
+                flat_x_mm=200.0,
+                flat_y_mm=100.0,
+                flat_area_mm2=18_000.0,
+                contour_length_mm=620.0,
+                make_qty=10,
+                cost_distribution_pct=pct,
+            )
+            for key, pct in (
+                ("A", Decimal("33.33")),
+                ("B", Decimal("66.67")),
+                ("C", Decimal("0")),
+            )
+        ]
+        result = compute_nest(comps, STOCK, SETTINGS)
+        by_key = {c.key: c for c in result.components}
+        assert by_key["C"].allocated_cost == Decimal("0.0000")
+        assert all(c.allocated_cost >= 0 for c in result.components)
+        assert sum(c.allocated_cost for c in result.components) == result.material_cost
+
     def test_partial_pcts_are_normalised(self) -> None:
         # pcts that do not sum to 100 are normalised over their sum
         a = NestComponent(

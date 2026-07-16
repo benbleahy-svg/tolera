@@ -41,6 +41,9 @@ def upgrade() -> None:
         """
     )
     op.execute("CREATE INDEX ix_nest_org_quote ON nest (org_id, quote_id)")
+    # membership/locking checks probe config @> {"component_ids": [...]} on
+    # every quantity change / material-op delete — give the containment a GIN
+    op.execute("CREATE INDEX ix_nest_config_gin ON nest USING gin (config jsonb_path_ops)")
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON nest TO {APP_ROLE}")
     op.execute("ALTER TABLE nest ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE nest FORCE ROW LEVEL SECURITY")
