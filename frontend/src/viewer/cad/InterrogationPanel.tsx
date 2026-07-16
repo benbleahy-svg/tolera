@@ -50,7 +50,12 @@ export function InterrogationPanel({
           timer = setTimeout(poll, pollIntervalMs);
         }
       } catch {
-        if (!cancelled) setFailedToLoad(true);
+        if (!cancelled) {
+          // Transient fetch failures must not strand the panel: surface the
+          // load-failed note but keep polling — the run continues server-side.
+          setFailedToLoad(true);
+          timer = setTimeout(poll, pollIntervalMs);
+        }
       }
     };
     void poll();
@@ -115,7 +120,7 @@ export function InterrogationPanel({
         </dl>
       </section>
       {/* The per-family feature list itself is M4.2+ — say so under the dims. */}
-      <p className="cad-features-pending">{t('viewer.cad_features_pending')}</p>
+      <p className="cad-features-pending">{t('viewer.interrogation_features_pending')}</p>
     </div>
   );
 }

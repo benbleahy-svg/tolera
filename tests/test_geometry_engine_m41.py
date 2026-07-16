@@ -147,6 +147,7 @@ def test_signature_is_placement_invariant() -> None:
     with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as dst:
         writer.Write(dst.name)
         rotated_bytes = Path(dst.name).read_bytes()
+    Path(dst.name).unlink()
 
     engine = get_engine()
     assert engine.compute_signature(rotated_bytes) == engine.compute_signature(

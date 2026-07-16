@@ -174,10 +174,15 @@ def test_golden_thread_end_to_end(thread_intake_client: TestClient, seeder: Seed
         interrogation = app_client.get(f"/api/parts/{part_id}/interrogation").json()
         assert interrogation["status"] == "succeeded"
         geom = app_client.get(f"/api/parts/{part_id}/geometry").json()
-        assert (geom["size_x"], geom["size_y"], geom["size_z"]) == (20.0, 20.0, 20.0)
-        assert geom["volume"] == 8000.0
-        assert geom["area"] == 2400.0
-        assert geom["weight"] == 63.2  # 8000 mm3 / 1000 x 7.90 g/cm3
+        # Geometry asserts use the Part-2 relative tolerance (0.1%), never
+        # exact float equality — kernel/platform rounding is not a failure.
+        assert (geom["size_x"], geom["size_y"], geom["size_z"]) == pytest.approx(
+            (20.0, 20.0, 20.0), rel=1e-3
+        )
+        assert geom["volume"] == pytest.approx(8000.0, rel=1e-3)
+        assert geom["area"] == pytest.approx(2400.0, rel=1e-3)
+        # 8000 mm3 / 1000 x 7.90 g/cm3
+        assert geom["weight"] == pytest.approx(63.2, rel=1e-3)
 
         # pricing: the seeded Zuschlagskalkulation chain prices the thread —
         # the SAME figures as before interrogation (the geometry→Kalk contract

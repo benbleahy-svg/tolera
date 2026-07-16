@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import tempfile
 from collections import Counter
 from typing import Any
@@ -41,6 +42,7 @@ from .contract import (
     SIGNATURE_VERSION,
     AnalysisResult,
     Dimensions,
+    GeometryError,
     MultiBodyError,
     StepParseError,
 )
@@ -92,7 +94,10 @@ def _read_step(step_bytes: bytes) -> TopoDS_Shape:
         raise StepParseError("STEP transfer produced no shapes")
     shape = reader.OneShape()
     solids = _count(shape, TopAbs_SOLID)
-    if solids != 1:
+    if solids == 0:
+        # Surface/wireframe-only STEP: not an assembly — a body we can't interrogate.
+        raise StepParseError("STEP contains no solid body")
+    if solids > 1:
         raise MultiBodyError(solids)
     return shape
 
@@ -207,6 +212,8 @@ class OcctGeometryService:
         density_g_cm3: float | None = None,
         inputs: dict[str, Any] | None = None,
     ) -> AnalysisResult:
+        if density_g_cm3 is not None and not (math.isfinite(density_g_cm3) and density_g_cm3 > 0):
+            raise GeometryError(f"density must be a positive finite g/cm3, got {density_g_cm3}")
         shape = _read_step(step_bytes)
         volume, area = _volume_area(shape)
         dims, bbox_source = _winning_box(shape)

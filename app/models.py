@@ -2844,6 +2844,8 @@ class InterrogationRun(Base):
         ),
         # Latest-run-per-part lookup (the status endpoint).
         Index("ix_interrogation_run_org_part_created", "org_id", "part_id", "created_at"),
+        # part_file hard-deletes cascade here; index the FK they check.
+        Index("ix_interrogation_run_file", "file_id"),
         # The §5.4 cache probe: finished result for an identical body+inputs.
         Index(
             "ix_interrogation_run_cache",
@@ -2864,6 +2866,8 @@ class InterrogationRun(Base):
     geom_hash: Mapped[str | None] = mapped_column(Text)
     inputs_hash: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     #: Density source used for ``weight`` (caller-resolved; engine never invents).
+    #: Same-org FK added in migration 0029 only: column-list ``ON DELETE SET
+    #: NULL (material_id)`` is PG15+ DDL the ORM can't express (0017 precedent).
     material_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=InterrogationStatus.queued

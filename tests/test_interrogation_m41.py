@@ -107,6 +107,63 @@ def test_interrogation_never_clobbers_manual_override(
         assert _close(geom["volume"], 8000.0)
 
 
+def test_clearing_override_restores_extraction(app_client: TestClient, seeder: Seeder) -> None:
+    """COALESCE(override, raw): dropping a human override falls back to the
+    interrogation extraction instead of discarding the machine's answer."""
+    org, admin = _org_with_admin(seeder, "interrogate-clear-override")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        part_id = _create_part(app_client)
+        with eager_celery():
+            app_client.post(f"/api/parts/{part_id}/files", files=[_step_upload("cube.step", CUBE)])
+        app_client.patch(f"/api/parts/{part_id}/geometry", json={"size_x": "99"})
+        assert app_client.get(f"/api/parts/{part_id}/geometry").json()["size_x"] == 99.0
+
+        cleared = app_client.patch(f"/api/parts/{part_id}/geometry", json={"size_x": None})
+        assert cleared.status_code == 200, cleared.text
+        geom = app_client.get(f"/api/parts/{part_id}/geometry").json()
+        assert _close(geom["size_x"], 20.0)  # back to the extraction
+        assert "size_x" not in geom["overrides"]
+
+
+def test_primary_swap_clears_stale_geometry(app_client: TestClient, seeder: Seeder) -> None:
+    """Swapping PRIMARY invalidates the old file's extraction in the same
+    transaction — a failing new body (assembly) must not leave the previous
+    file's dims/signature live for matching or costing."""
+    org, admin = _org_with_admin(seeder, "interrogate-swap-stale")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        part_id = _create_part(app_client)
+        with eager_celery():
+            app_client.post(f"/api/parts/{part_id}/files", files=[_step_upload("cube.step", CUBE)])
+        assert _close(app_client.get(f"/api/parts/{part_id}/geometry").json()["volume"], 8000.0)
+
+        # Manual override set before the swap must survive the invalidation.
+        app_client.patch(f"/api/parts/{part_id}/geometry", json={"weight": "42"})
+
+        with eager_celery():
+            up = app_client.post(
+                f"/api/parts/{part_id}/files", files=[_step_upload("asm.step", ASSEMBLY)]
+            )
+            [asm_file] = up.json()
+            swapped = app_client.post(f"/api/parts/{part_id}/files/{asm_file['id']}/primary")
+            assert swapped.status_code == 200, swapped.text
+
+        status = app_client.get(f"/api/parts/{part_id}/interrogation").json()
+        assert status["status"] == "failed"
+        assert status["run"]["error_code"] == "multi_body"
+        geom = app_client.get(f"/api/parts/{part_id}/geometry").json()
+        assert geom["volume"] is None  # stale extraction cleared
+        assert geom["size_x"] is None
+        assert geom["weight"] == 42.0  # the human's entry survives
+
+        # Swapping back to the CAD body re-interrogates (cache) and refills.
+        files = app_client.get(f"/api/parts/{part_id}/files").json()
+        cube_file = next(f for f in files if f["filename"] == "cube.step")
+        with eager_celery():
+            app_client.post(f"/api/parts/{part_id}/files/{cube_file['id']}/primary")
+        geom = app_client.get(f"/api/parts/{part_id}/geometry").json()
+        assert _close(geom["volume"], 8000.0)
+
+
 def test_queued_state_before_worker_runs(app_client: TestClient, seeder: Seeder) -> None:
     """Without a worker the run stays ``queued`` — the ``interrogating…``
     state the part view shows (INTERROGATION-ENGINE-SPEC §5.6). (No broker in

@@ -78,7 +78,7 @@ from .file_types import (
     primary_rank,
     sniff_matches_extension,
 )
-from .interrogation import maybe_enqueue_for_primary
+from .interrogation import clear_extracted_geometry, maybe_enqueue_for_primary
 from .models import (
     Component,
     FileAnnotationLayer,
@@ -695,10 +695,16 @@ def _apply_dim(
     unit: str,
 ) -> None:
     """Evaluate one manual dim and store it (metric) + record its override provenance;
-    ``None`` clears the dim. Raises :class:`DimensionError` on bad math / a negative."""
+    ``None`` clears the dim. Raises :class:`DimensionError` on bad math / a negative.
+
+    Clearing an override restores the interrogation extraction (M4.1): the
+    effective value is ``COALESCE(override, raw)``, so dropping the human entry
+    falls back to ``geom.raw`` rather than discarding the machine's answer."""
     if raw is None:
-        setattr(geom, field, None)
         overrides.pop(field, None)
+        raw_dims = (geom.raw or {}).get("dimensions") or {}
+        extracted = raw_dims.get(field)
+        setattr(geom, field, None if extracted is None else Decimal(str(round(extracted, 6))))
         return
     value = evaluator(raw)
     if value < 0:
@@ -1210,7 +1216,11 @@ async def set_primary_file(
     target.role = FileRole.primary
     part.primary_file_id = target.id
     await session.flush()
-    # The new PRIMARY is the geometry source of truth — re-interrogate if CAD (M4.1).
+    # The new PRIMARY is the geometry source of truth (M4.1): the old file's
+    # signature/dims are stale the moment the pointer moves — clear them in
+    # this transaction (overrides survive), then re-interrogate if CAD. A
+    # non-CAD PRIMARY simply leaves the part without extracted geometry.
+    await clear_extracted_geometry(session, part)
     await maybe_enqueue_for_primary(session, part, target)
     return _part_file_out(target)
 

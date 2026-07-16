@@ -92,7 +92,7 @@ describe('InterrogationPanel', () => {
     // formatter (kg) — German decimal comma.
     expect(screen.getByText(/0,063\s*kg/)).toBeInTheDocument();
     // The per-family feature list stays a pending note (M4.2+).
-    expect(screen.getByText(/Geometrische Analyse steht noch aus/)).toBeInTheDocument();
+    expect(screen.getByText(/Merkmalserkennung folgt/)).toBeInTheDocument();
   });
 
   it('explains a multi-body failure', async () => {

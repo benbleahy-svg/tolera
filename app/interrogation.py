@@ -113,7 +113,10 @@ async def enqueue_interrogation(
 ) -> InterrogationRun:
     """Create a queued run and hand it to Celery post-commit (the pdf_text
     precedent: a rolled-back request enqueues nothing; a broker outage must
-    not fail the request — the run stays ``queued`` for a later sweep)."""
+    not fail the request — the run stays ``queued``). TODO(M4.2+): a staleness
+    sweep for runs stranded ``queued``/``running`` by a broker outage or a
+    retry-exhausted worker crash; until then the manual re-trigger is the
+    recovery path."""
     if material_id is None:
         material_id = await resolve_part_material_id(session, part.id)
     run = InterrogationRun(
@@ -137,6 +140,22 @@ async def maybe_enqueue_for_primary(
     if part.primary_file_id != file.id or FileCategory(file.file_type) != FileCategory.brep_cad:
         return None
     return await enqueue_interrogation(session, part=part, file=file)
+
+
+async def clear_extracted_geometry(session: AsyncSession, part: Part) -> None:
+    """Drop the extraction when the PRIMARY changes: the old file's signature
+    and dims no longer describe this part. Manual overrides survive (they are
+    the human's, not the file's); a queued run for the new PRIMARY refills the
+    raw side on success — and a non-CAD PRIMARY simply has no geometry."""
+    part.geom_hash = None
+    geom = await session.scalar(select(PartGeometry).where(PartGeometry.part_id == part.id))
+    if geom is None:
+        return
+    overrides = geom.overrides or {}
+    for field in _ALL_FIELDS:
+        if field not in overrides:
+            setattr(geom, field, None)
+    geom.raw = None
 
 
 def _enqueue_task(org_id: uuid.UUID, run_id: uuid.UUID) -> None:
@@ -255,23 +274,44 @@ async def run_interrogation(
                 .limit(1)
             )
             if cached is not None and cached.result is not None:
-                result = dict(cached.result)
+                # Deep-enough copy: ``dimensions`` is mutated below (weight), and a
+                # shallow dict would alias the cached run's stored JSON — any future
+                # JSONB mutation-tracking would then rewrite the OLDER run's audit
+                # copy with this run's density-derived weight.
+                result = {**cached.result, "dimensions": dict(cached.result["dimensions"])}
                 result.pop("cached_from", None)
                 result["cached_from"] = str(cached.id)
             else:
-                analysis = geometry.analyze(blob, family=run.family, density_g_cm3=density)
+                try:
+                    analysis = geometry.analyze(blob, family=run.family, density_g_cm3=density)
+                except MultiBodyError as exc:
+                    return _fail(run, "multi_body", str(exc))
+                except StepParseError as exc:
+                    return _fail(run, "parse_error", str(exc))
+                except GeometryError as exc:
+                    return _fail(run, "internal", str(exc))
                 result = asdict(analysis)
             # Weight is derived arithmetic — always recomputed from THIS run's
             # density so a cache hit can't carry another material's weight.
             dims = result["dimensions"]
             dims["weight"] = dims["volume"] / 1000.0 * density if density is not None else None
 
+            # Lock the part before persisting: (a) serializes against a manual-dim
+            # PATCH (which locks the same row) so an override committed mid-run is
+            # never overwritten with raw; (b) lets us verify this run's file is
+            # STILL the PRIMARY — a run for file A finishing after the PRIMARY
+            # swapped to file B must not stamp A's geometry onto the part.
+            part = await session.get(Part, run.part_id, with_for_update=True)
+            if part is None or part.deleted_at is not None:
+                return _fail(run, "part_gone", "The part was deleted before the run finished.")
+            if part.primary_file_id != run.file_id:
+                return _fail(
+                    run, "superseded", "The PRIMARY file changed while this run was in flight."
+                )
             run.result = result
             run.status = InterrogationStatus.succeeded
             run.finished_at = datetime.now(UTC)
-            part = await session.get(Part, run.part_id)
-            if part is not None:
-                part.geom_hash = geom_hash
+            part.geom_hash = geom_hash
             await _apply_to_geometry(session, run, result)
             return {
                 "run_id": str(run.id),
@@ -374,11 +414,20 @@ async def get_interrogation_status(
     part_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> InterrogationStatusOut:
-    """The latest interrogation run for a part (``none`` when no run exists)."""
-    await _get_part_or_404(session, part_id)
+    """The latest interrogation run for the part's CURRENT PRIMARY file.
+
+    Scoped to ``part.primary_file_id`` so a swap to a different (or non-CAD)
+    PRIMARY never keeps reporting the previous file's result — ``none`` until
+    the new PRIMARY has a run of its own."""
+    part = await _get_part_or_404(session, part_id)
+    if part.primary_file_id is None:
+        return InterrogationStatusOut(part_id=part_id, status="none", run=None)
     run = await session.scalar(
         select(InterrogationRun)
-        .where(InterrogationRun.part_id == part_id)
+        .where(
+            InterrogationRun.part_id == part_id,
+            InterrogationRun.file_id == part.primary_file_id,
+        )
         .order_by(InterrogationRun.created_at.desc(), InterrogationRun.id.desc())
         .limit(1)
     )
@@ -400,7 +449,7 @@ async def trigger_interrogation(
     if payload.family is not None and payload.family not in set(ProcessFamily):
         raise AppError(
             "unknown_family",
-            f"family must be one of {sorted(ProcessFamily)}.",
+            f"family must be one of {', '.join(sorted(f.value for f in ProcessFamily))}.",
             status_code=422,
         )
     if part.primary_file_id is None:

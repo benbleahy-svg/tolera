@@ -59,7 +59,15 @@ def upgrade() -> None:
             CONSTRAINT fk_interrogation_run_file_part
                 FOREIGN KEY (file_id, part_id)
                 REFERENCES part_file (id, part_id)
-                ON DELETE CASCADE ON UPDATE CASCADE
+                ON DELETE CASCADE ON UPDATE CASCADE,
+            -- Same-org pin for the weight's density provenance. Column-list
+            -- SET NULL (PG15+, the 0017 source_file_id precedent — the ORM
+            -- can't express it): deleting a material clears material_id only,
+            -- never org_id, and must not block material lifecycle.
+            CONSTRAINT fk_interrogation_run_material_org
+                FOREIGN KEY (org_id, material_id)
+                REFERENCES material (org_id, id)
+                ON DELETE SET NULL (material_id)
         )
         """
     )
@@ -76,6 +84,8 @@ def upgrade() -> None:
             WHERE status = 'succeeded'
         """
     )
+    # part_file hard-deletes cascade here; without this the FK check seq-scans.
+    op.execute("CREATE INDEX ix_interrogation_run_file ON interrogation_run (file_id)")
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON interrogation_run TO {APP_ROLE}")
     op.execute("ALTER TABLE interrogation_run ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE interrogation_run FORCE ROW LEVEL SECURITY")
