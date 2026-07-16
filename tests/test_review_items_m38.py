@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import MembershipRole
+from app.models import MembershipRole, MembershipStatus
 from tests.conftest import Seeder, authed
 
 ADMIN = [MembershipRole.admin]
@@ -912,3 +912,103 @@ class TestStarterRuleLibrary:
 
             names = [i["rule_name"] for i in _generate(app_client, component_id)]
             assert "Ausfuhrkontrolle prüfen (Dual-Use)" in names
+
+
+# --------------------------------------------------------------------------- #
+# 10. Review findings (2026-07-16) — regressions for the fixes they prompted
+# --------------------------------------------------------------------------- #
+class TestAssignmentRequiresAnActiveMembership:
+    """A disabled member (sessions revoked) or a pending invitee is not somewhere
+    work can be routed. The helper is named ``_is_active_member`` and backs
+    default assignment, reassignment and ASSIGN_ESTIMATOR; it checked only that a
+    membership row existed, so it accepted both."""
+
+    def test_a_disabled_default_assignee_is_not_assigned(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        org, user = _org_with(seeder, "susp-a", ADMIN)
+        gone = seeder.user("beurlaubt@susp-a.example.test")
+        seeder.membership(gone, org, ESTIMATOR, status=MembershipStatus.disabled)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            _import_rules(app_client, [_rule(default_assignee_id=str(gone))])
+            _, _, component_id, _ = _new_quote_item(app_client)
+
+            created = _generate(app_client, component_id)
+            assert len(created) == 1, "the item still exists"
+            assert created[0]["assignee_id"] is None
+
+    def test_a_pending_member_cannot_be_assigned_manually(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        org, user = _org_with(seeder, "susp-b", ADMIN)
+        gone = seeder.user("eingeladen@susp-b.example.test")
+        # pending = invited, not yet accepted — not yet a colleague to route to.
+        seeder.membership(gone, org, ESTIMATOR, status=MembershipStatus.pending)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            _import_rules(app_client, [_rule()])
+            _, _, component_id, _ = _new_quote_item(app_client)
+            item = _generate(app_client, component_id)[0]
+
+            res = app_client.patch(
+                f"/api/review-items/{item['id']}", json={"assignee_id": str(gone)}
+            )
+            assert res.status_code == 422, res.text
+
+    def test_a_disabled_estimator_fails_the_assign_estimator_resolution(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        org, user = _org_with(seeder, "susp-c", ADMIN)
+        gone = seeder.user("deaktiviert@susp-c.example.test")
+        seeder.membership(gone, org, ESTIMATOR, status=MembershipStatus.disabled)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            _import_rules(
+                app_client,
+                [
+                    _rule(
+                        resolutions=[
+                            {
+                                "type": "ASSIGN_ESTIMATOR",
+                                "parameters": [{"name": "estimator_id", "value": str(gone)}],
+                                "custom_label": None,
+                            }
+                        ]
+                    )
+                ],
+            )
+            _, _, component_id, _ = _new_quote_item(app_client)
+            item = _generate(app_client, component_id)[0]
+
+            res = app_client.post(
+                f"/api/review-items/{item['id']}/resolve",
+                json={"resolution_type": "ASSIGN_ESTIMATOR"},
+            )
+            assert res.status_code == 422, res.text
+            assert _items_for(app_client, component_id)[0]["status"] == "open", (
+                "a failed effect must not close the item"
+            )
+
+
+class TestSeededTightToleranceUnits:
+    """The angular threshold is its own number: sharing the linear 0.13 would
+    print "0,13 mm" in the description while comparing degrees."""
+
+    def test_angular_and_linear_thresholds_are_distinct_and_metric(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        org, user = _org_with(seeder, "unit-a", ADMIN)
+        seeder.configure_catalog(org)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            rule = next(
+                r
+                for r in app_client.get("/api/rules").json()
+                if r["name"] == "Enge Toleranz — Senior-Schätzer"
+            )
+
+        by_units: dict[str, set[float]] = {}
+        for signal in rule["signals"]:
+            query = signal["groups"][0]["queries"][0]
+            by_units.setdefault(query["units"], set()).add(query["value"])
+
+        assert by_units["mm"] == {0.13}, "PP's 5 thou re-unit'd (§7 DACH)"
+        assert by_units["deg"] == {0.5}, "the angular threshold is not the linear scalar"
+        assert "in" not in by_units, "metric-native: never inches"

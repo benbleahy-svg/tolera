@@ -477,7 +477,7 @@ async def attach_operation_from_def(
         calc_setup_mins=op_def.setup_time_mins,
         # Outside-process defs are outside services by construction.
         is_outside_service=(
-            op_def.is_outside_service or op_def.calculation_mode is CalculationMode.outside_process
+            op_def.is_outside_service or op_def.calculation_mode == CalculationMode.outside_process
         ),
         is_finish=op_def.is_finish,
         surcharge_pct=op_def.surcharge_pct,

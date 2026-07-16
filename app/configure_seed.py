@@ -735,9 +735,20 @@ _TIGHT_TOLERANCE_PATHS = (
 )
 
 #: PP's 5-thou tight-tolerance threshold, re-unit'd (§7 DACH: "PP 5-thou →
-#: 0.13 mm"). Angular paths compare in deg; 0.13 deg is a tight angle too, so
-#: the same scalar reads sensibly on both — the unit is what differs.
+#: 0.13 mm"). **Linear paths only.**
 _TIGHT_TOLERANCE_MM = 0.13
+
+#: The angular threshold is a SEPARATE number, not the linear one reused. §7
+#: re-units PP's 5 thou to 0.13 mm and says nothing about angles, so sharing the
+#: scalar would be a coincidence of digits rather than a decision — and it would
+#: print "0.13 mm" in the rule's description while comparing degrees.
+#: 0.5° is the seeded default: ISO 2768-m's angular general tolerance is ±1° for
+#: the shortest leg, so half of it means "tighter than the general tolerance the
+#: shop already assumes", which is what the rule is for. ASSUMED — the ladder is
+#: silent on an angular threshold; shop-specific and cheap to retune, and
+#: Fechner's real numbers arrive with the starter-rule review (DECISIONS
+#: 2026-07-12).
+_TIGHT_ANGLE_DEG = 0.5
 
 #: Stable identities so a re-seed reconciles the same rows rather than minting
 #: duplicates (``rule.uuid`` is the portable upsert key, M3.6).
@@ -796,6 +807,7 @@ def _files_signal(field: str) -> dict[str, Any]:
 
 
 def _tolerance_signal(document_path: str) -> dict[str, Any]:
+    angular = document_path == "angular_tolerances"
     return {
         "logical_operator": "AND",
         "groups": [
@@ -806,12 +818,10 @@ def _tolerance_signal(document_path: str) -> dict[str, Any]:
                     {
                         "field_name": ["smallest_delta"],
                         "operator": "lessThanOrEqual",
-                        "value": _TIGHT_TOLERANCE_MM,
-                        "value_type": "angle"
-                        if document_path == "angular_tolerances"
-                        else "distance",
+                        "value": _TIGHT_ANGLE_DEG if angular else _TIGHT_TOLERANCE_MM,
+                        "value_type": "angle" if angular else "distance",
                         "filter_type": "numeric",
-                        "units": "deg" if document_path == "angular_tolerances" else "mm",
+                        "units": "deg" if angular else "mm",
                     }
                 ],
                 "count_query": None,
@@ -865,7 +875,8 @@ def _starter_rules(deburr_op_def_id: uuid.UUID | None) -> list[dict[str, Any]]:
             "uuid": str(_RULE_UUIDS["tight_tolerance"]),
             "name": "Enge Toleranz — Senior-Schätzer",
             "description": (
-                f"Mindestens eine Toleranz ≤ {_TIGHT_TOLERANCE_MM} mm — "
+                f"Mindestens eine Toleranz ≤ {_TIGHT_TOLERANCE_MM} mm "
+                f"(bzw. ≤ {_TIGHT_ANGLE_DEG}° bei Winkeln) — "
                 "vor der Kalkulation von einem Senior-Schätzer prüfen lassen."
             ),
             "logical_operator": "OR",

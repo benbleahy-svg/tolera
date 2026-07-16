@@ -32,7 +32,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .auth import Principal
@@ -48,6 +48,7 @@ from .models import (
     Component,
     ExtractionFinding,
     FindingStatus,
+    MembershipStatus,
     Message,
     Notification,
     Operation,
@@ -283,10 +284,17 @@ async def _is_active_member(
 ) -> bool:
     """``Rule.default_assignee_id`` is un-FK'd on purpose — an imported rule set
     may name a user who does not exist here (M3.6 defers the check to
-    "assignment time", which is this). The ``collab.py`` membership guard."""
+    "assignment time", which is this). The ``collab.py`` membership guard.
+
+    **Active**, not merely present: a suspended member is not someone work can be
+    routed to, and every caller here is routing work (default assignment,
+    reassignment, ASSIGN_ESTIMATOR). ``collab._require_active_member`` draws the
+    same line."""
     found = await session.scalar(
         select(UserOrgMembership.id).where(
-            UserOrgMembership.user_id == user_id, UserOrgMembership.org_id == org_id
+            UserOrgMembership.user_id == user_id,
+            UserOrgMembership.org_id == org_id,
+            UserOrgMembership.status == MembershipStatus.active,
         )
     )
     return found is not None
@@ -325,6 +333,14 @@ async def generate_for_component(
     naming the withdrawal case; leaving stale items would make an estimator burn
     down work the drawing no longer asks for. Cheap to reverse (one branch).
     """
+    # Serialize concurrent reconciliations of the same component (two uploads →
+    # two extractions → two generate tasks). Without this both can observe "no
+    # item", both insert, and one dies on `uq_review_item_component_rule`. The
+    # M3.1 precedent (`lens_extract`'s replace-suggested lock); held to commit.
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"review_items:{component.id}"},
+    )
     quote_item = await session.scalar(
         select(QuoteItem).where(QuoteItem.root_component_id == component.id)
     )
@@ -547,8 +563,23 @@ async def _component_or_404(session: AsyncSession, component_id: uuid_mod.UUID) 
     return component
 
 
-async def _item_or_404(session: AsyncSession, item_id: uuid_mod.UUID) -> ReviewItem:
-    item = await session.get(ReviewItem, item_id)
+async def _item_or_404(
+    session: AsyncSession, item_id: uuid_mod.UUID, *, for_update: bool = False
+) -> ReviewItem:
+    """``for_update`` claims the row for a resolve: without it two concurrent
+    resolves (or one racing SET ALL) both read ``status == 'open'``, both pass
+    the guard, and both apply the effects — two operations on the router, two
+    notifications. The lock makes the open→resolved transition the serialization
+    point (the ``_lock_editable_quote`` precedent)."""
+    if for_update:
+        item = await session.scalar(
+            select(ReviewItem)
+            .where(ReviewItem.id == item_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    else:
+        item = await session.get(ReviewItem, item_id)
     if item is None:
         raise AppError(
             code="not_found",
@@ -709,7 +740,7 @@ async def resolve_review_item(
 ) -> ReviewItemOut:
     """§6.5: the user selects one configured resolution → it mutates the
     quote/router as applicable → the item closes."""
-    item = await _item_or_404(session, item_id)
+    item = await _item_or_404(session, item_id, for_update=True)
     rule = await _rule_or_404(session, item.rule_id)
     await _resolve(
         session,
@@ -746,6 +777,9 @@ async def set_all(
                     ReviewItem.status == ReviewItemStatus.open.value,
                 )
                 .order_by(ReviewItem.created_at)
+                # Same claim as the single resolve, in a stable order so two
+                # concurrent SET ALLs queue rather than deadlock.
+                .with_for_update()
             )
         )
         .scalars()

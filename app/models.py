@@ -2629,9 +2629,31 @@ class ReviewItem(Base):
         UniqueConstraint("org_id", "id", name="uq_review_item_org_id_id"),
         UniqueConstraint("org_id", "component_id", "rule_id", name="uq_review_item_component_rule"),
         CheckConstraint("status IN ('open', 'resolved')", name="ck_review_item_status"),
+        CheckConstraint(
+            "resolution_type IS NULL OR resolution_type IN "
+            "('NO_QUOTE', 'RESOLVE', 'ADD_OPERATION', 'SET_PROCESS', 'ASSIGN_ESTIMATOR')",
+            name="ck_review_item_resolution_type",
+        ),
+        # A resolved item without its decision is an audit hole; an open one
+        # carrying a decision is a contradiction. Mirrors migration 0026.
+        CheckConstraint(
+            "(status = 'open' AND resolution_type IS NULL AND resolved_at IS NULL"
+            " AND resolved_by IS NULL)"
+            " OR (status = 'resolved' AND resolution_type IS NOT NULL"
+            " AND resolved_at IS NOT NULL)",
+            name="ck_review_item_resolved_is_complete",
+        ),
         Index("ix_review_item_org_quote_status", "org_id", "quote_id", "status"),
         Index("ix_review_item_org_component", "org_id", "component_id"),
         Index("ix_review_item_org_assignee", "org_id", "assignee_id"),
+        # §6.4's "up to 5 past parts this rule flagged", newest first.
+        Index(
+            "ix_review_item_org_rule_resolved",
+            "org_id",
+            "rule_id",
+            text("resolved_at DESC"),
+            postgresql_where=text("status = 'resolved'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()

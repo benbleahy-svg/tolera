@@ -94,6 +94,10 @@ export function CreateRuleModal({
   >([]);
   const [assigneeId, setAssigneeId] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  // Minted once per dialog, not per render: crypto.randomUUID() is impure, so
+  // calling it inside the useMemo below would change the rule's identity on
+  // every keystroke.
+  const [ruleUuid] = useState(() => crypto.randomUUID());
   const [error, setError] = useState<string | null>(null);
 
   /** Numeric while a threshold is being compared; keyword otherwise. */
@@ -121,7 +125,7 @@ export function CreateRuleModal({
           units: null,
         };
     return {
-      uuid: crypto.randomUUID(),
+      uuid: ruleUuid,
       name: name.trim(),
       description: description.trim(),
       logical_operator: 'OR',
@@ -149,6 +153,7 @@ export function CreateRuleModal({
     name,
     numeric,
     resolutions,
+    ruleUuid,
     units,
     value,
   ]);

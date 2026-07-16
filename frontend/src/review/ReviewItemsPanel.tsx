@@ -41,7 +41,9 @@ export function ReviewItemsPanel({ componentId, members = [], onResolved }: Prop
   const api = useReviewApi();
   const [items, setItems] = useState<ReviewItemOut[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  // A set, not one id: two concurrent resolutions must not clear each
+  // other's pending state (the second would re-enable the first's buttons).
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   const [onlyUnresolved, setOnlyUnresolved] = useState(true);
   const [assignee, setAssignee] = useState<string>(ANY);
   const [type, setType] = useState<string>(ANY);
@@ -73,7 +75,7 @@ export function ReviewItemsPanel({ componentId, members = [], onResolved }: Prop
   const unresolved = items.filter((i) => i.status === 'open').length;
 
   const resolve = async (item: ReviewItemOut, option: ResolutionOption) => {
-    setBusy(item.id);
+    setBusy((prev) => new Set(prev).add(item.id));
     try {
       const updated = await api.resolve(item.id, option.type, option.custom_label);
       setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
@@ -82,7 +84,11 @@ export function ReviewItemsPanel({ componentId, members = [], onResolved }: Prop
     } catch {
       setError(t('review.resolve_failed'));
     } finally {
-      setBusy(null);
+      setBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
     }
   };
 
@@ -148,7 +154,7 @@ export function ReviewItemsPanel({ componentId, members = [], onResolved }: Prop
               key={item.id}
               item={item}
               members={members}
-              busy={busy === item.id}
+              busy={busy.has(item.id)}
               onResolve={(option) => resolve(item, option)}
               onReassign={(userId) => reassign(item, userId)}
             />

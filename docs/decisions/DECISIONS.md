@@ -19,6 +19,24 @@
 
 ---
 
+## [2026-07-16] OPEN: M3.8 — does a resolved review item suppress the same rule's next occurrence?
+
+**Status:** OPEN (M3.8 ships one-decision-per-rule-per-component; nothing is stuck)
+**Question:** `uq_review_item_component_rule` (`org_id, component_id, rule_id`) makes generation idempotent — the point of the constraint, since Lens re-runs on every upload and re-evaluation must converge rather than accumulate. But it also means a **resolved** item is a permanent verdict for that (component, rule) pair: if the rule matches again later, no new item appears.
+
+That is right when the decision is about the *part* ("Fremdvergabe", "Kunde kontaktiert" — still true next week). It is wrong when the *evidence* changes underneath it: a **new print revision** is uploaded, Lens re-extracts, and the tight-tolerance rule matches a **different, tighter** callout — the estimator's earlier "geprüft" was about the old drawing, and the new one is silently never flagged. Raised in review of #48 (CodeRabbit, 🟠 Major).
+
+**Options considered:**
+- **(a) One decision per (component, rule) ← shipped.** Simplest, and matches §6's framing of a decision as being *about the part*. Silently under-reports on a revision.
+- **(b) Reconcile only against *open* items; a resolved one does not block a new occurrence.** Catches the revision case. But with no notion of "the same occurrence", the rule re-fires after *every* re-extraction, re-opening work the estimator just closed — the false-positive firehose §6's build/test loop warns about. Needs an occurrence key (finding ids? a content hash?) that nothing currently produces.
+- **(c) Withdraw resolved items when their evidence changes** (re-open on a new *file revision*, not on every re-extraction). Closest to the intent; needs a revision signal M2's file pipeline has but the generator does not read yet.
+
+**Recommended default:** (c) once the generator can see a file-revision boundary (M2.1's revision compare already models one). Until then (a), which errs toward *not* nagging rather than toward re-opening closed work.
+**Why it is not a halt:** the failure mode needs a re-revised print *and* a changed finding to matter, no shop has authored rules yet, and today the constraint is what makes the post-extraction trigger safe to re-run. Changing it later is a migration + one branch in `generate_for_component`. Logged rather than quietly assumed.
+**Affects:** M3.8 (`review_items.generate_for_component`, migration 0026's unique constraint), M2 (revision signal), M3.10.
+
+---
+
 ## [2026-07-16] OPEN: M3.8 — does an unresolved review item block Draft→Sent?
 
 **Status:** OPEN (M3.8 ships the conservative default — the count is surfaced, send is **not** blocked; nothing is stuck)
@@ -36,6 +54,7 @@ There is also no way to express "this rule blocks send" in the canonical AST: th
 
 **Recommended default:** (c) as the eventual answer, (a) until then — do not turn the whole starter library into a send gate by accident. If Fechner wants the dual-use gate before (c) lands, (b) scoped to a hard-coded rule uuid is a two-line stopgap.
 **Why it is not a halt:** the ladder is ambiguous rather than silent, and the conservative reading is the feature section's own words; nothing downstream is blocked, and the count is already surfaced for the UI. Per §6.2 the block continued.
+**Counter-argument (review of #48, CodeRabbit 🔴):** "sending a flagged quote is not safely reversible" — an email to the customer cannot be recalled, so the asymmetry favours (b)/(c) over (a). That is the strongest case for resolving this before the pilot, and it is why this entry is flagged in the PR body rather than buried. It does not change the shipped default: (b) would make every print-less quote unsendable, which is a bigger, *also* unreviewed behaviour change, and (c) is the M3.6 work this recommends.
 **Affects:** M3.8 (`quote_lifecycle.transition` send guard), M3.6 (if (c)), `SEED-AND-FIXTURES §7`, Demo C's acceptance line.
 
 ---

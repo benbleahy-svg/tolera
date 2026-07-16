@@ -385,7 +385,11 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
     unresolved_review_items = await session.scalar(
         select(func.count())
         .select_from(ReviewItem)
-        .where(ReviewItem.quote_id == quote.id, ReviewItem.status == "open")
+        .where(
+            ReviewItem.org_id == quote.org_id,
+            ReviewItem.quote_id == quote.id,
+            ReviewItem.status == "open",
+        )
     )
     tracker = WorkflowTracker(
         rfq_received_at=quote.rfq_received_date,
