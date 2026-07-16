@@ -295,6 +295,30 @@ def test_identical_body_reuses_cached_result(app_client: TestClient, seeder: See
         assert _close(geom_b["volume"], 8000.0)
 
 
+def test_duplicate_delivery_never_overwrites_success(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """Celery acks late → the broker may deliver a run twice. A redelivery of
+    an already-succeeded run must skip (row claimed FOR UPDATE), never re-run
+    or downgrade the committed result."""
+    from app.interrogation import interrogate_part_task
+
+    org, admin = _org_with_admin(seeder, "interrogate-duplicate")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        part_id = _create_part(app_client)
+        with eager_celery():
+            app_client.post(f"/api/parts/{part_id}/files", files=[_step_upload("cube.step", CUBE)])
+        run = app_client.get(f"/api/parts/{part_id}/interrogation").json()["run"]
+        assert run["status"] == "succeeded"
+
+        # Second delivery of the SAME task message.
+        out = interrogate_part_task.run(str(org), run["id"])
+        assert out == {"skipped": "already_succeeded", "run_id": run["id"]}
+        after = app_client.get(f"/api/parts/{part_id}/interrogation").json()["run"]
+        assert after["status"] == "succeeded"
+        assert after["finished_at"] == run["finished_at"]  # untouched, not re-run
+
+
 def test_interrogation_is_org_scoped(app_client: TestClient, seeder: Seeder) -> None:
     org_a, admin_a = _org_with_admin(seeder, "interrogate-org-a")
     org_b, admin_b = _org_with_admin(seeder, "interrogate-org-b")

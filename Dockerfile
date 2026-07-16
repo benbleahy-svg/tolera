@@ -11,6 +11,11 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH"
 COPY --from=ghcr.io/astral-sh/uv:0.11.23 /uv /uvx /bin/
+# Production processes never run as root: the API serves untrusted uploads and
+# the worker parses untrusted STEP files through OCP/VTK. Fixed UID/GID; the
+# dev target stays root so `docker compose exec` remains frictionless.
+RUN groupadd --gid 10001 tolera && \
+    useradd --uid 10001 --gid tolera --no-create-home --shell /usr/sbin/nologin tolera
 WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
 
@@ -30,6 +35,7 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY scripts ./scripts
+USER tolera
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
@@ -40,4 +46,5 @@ RUN uv sync --frozen --no-default-groups --group geometry
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
+USER tolera
 CMD ["celery", "-A", "app.celery_app", "worker", "-Q", "celery,email", "--loglevel=INFO"]

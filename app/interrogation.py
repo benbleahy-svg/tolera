@@ -218,7 +218,12 @@ async def run_interrogation(
     try:
         sessionmaker = make_sessionmaker(engine)
         async with org_scoped_session(sessionmaker, org_id) as session:
-            run = await session.get(InterrogationRun, run_id)
+            # Claim the run row FOR UPDATE before any work: Celery acks late, so
+            # the broker may deliver the same run twice. The second delivery
+            # blocks here until the first commits, then re-reads ``succeeded``
+            # and skips — a committed success is never overwritten. A crash
+            # redelivery (row left ``running``, lock long gone) reclaims it.
+            run = await session.get(InterrogationRun, run_id, with_for_update=True)
             if run is None:
                 return {"skipped": "run_gone", "run_id": str(run_id)}
             if run.status == InterrogationStatus.succeeded:
