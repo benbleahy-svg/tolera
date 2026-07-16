@@ -26,8 +26,9 @@ work or a mini-spike remains · `✗` no OCCT support (in-house heuristic or Spa
 | Item | Verdict | Evidence / note |
 |---|---|---|
 | OCCT 7.9 via pip (`cadquery-ocp` 7.9.3, OCP bindings) | ✓ | Wheels for cp312 macOS arm64 + manylinux_2_31 x86_64/aarch64. `uv run` PEP 723 probes install and pass locally; linux container run below. pythonocc-core has **no** pip wheels (conda-forge only; PyPI stub is dead 0.16) → binding = **OCP**, see DECISIONS [2026-07-16]. API is 1:1 OCCT C++; a later pythonocc/Spatial move is mechanical behind `GeometryService`. |
-| Linux (Hetzner path) | ✓ | `docker run --platform linux/amd64 python:3.12-slim` + `pip install cadquery-ocp` runs the smoke probe (STEP model → write → re-read → exact volume). No system GL packages needed for headless interrogation. |
-| Dependency weight | note | `cadquery-ocp` wheel ~60 MB + transitive **vtk ~102 MB**. Acceptable for the worker image; keep OCP out of the API image (interrogation runs on Celery workers only). |
+| Linux (Hetzner path) | ✓ | **All six probes pass inside the production `tolera-worker` image** (python:3.12-slim base, linux/aarch64) after `pip install cadquery-ocp` + **`apt-get install libgl1`** — OCP links libGL even headless (vtk linkage); that one system package goes into the worker Dockerfile in M4.1. x86_64: the manylinux_2_31 wheel is published; not executed in this spike (local amd64 image pull stalled) — verify on first Hetzner deploy. |
+| Cross-platform hash determinism | ✓ | The signature fingerprint is **byte-identical on macOS arm64 and linux aarch64** for cube/bracket/shaft fixtures — safe to index in the Part Library regardless of where it was computed. |
+| Dependency weight | note | `cadquery-ocp` wheel ~60 MB + transitive **vtk ~102 MB** + libgl1. Acceptable for the worker image; keep OCP out of the API image (interrogation runs on Celery workers only). |
 | STEP read/write round-trip | ✓ | Volume/area/topology preserved to ≤1e-14 rel. (probe a). STEP-only solids per spec v2.15 (`#geometry-engine`); SLDPRT stays out until Spatial. |
 
 ## 1. Core dimensions (`PartGeometry` §1 — all families)
