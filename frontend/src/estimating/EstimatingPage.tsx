@@ -39,6 +39,7 @@ import type {
   BulkCreatePrefill,
   ComponentCosting,
   MaterialSearchHit,
+  NestingOverview,
   OperationOut,
   OperationUpdateBody,
   PricingSummary,
@@ -68,6 +69,7 @@ export function EstimatingPage() {
   const [seedingRule, setSeedingRule] = useState(false);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkPrefill, setBulkPrefill] = useState<BulkCreatePrefill | null>(null);
+  const [nesting, setNesting] = useState<NestingOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
@@ -87,6 +89,12 @@ export function EstimatingPage() {
       .getBulkCreatePrefill(quoteId)
       .then(setBulkPrefill)
       .catch(() => setBulkPrefill(null));
+    // M4.3 — nest eligibility for the banner + NESTABLE/NESTED badge; a quote
+    // with no sheet-metal components just gets an empty overview.
+    api
+      .getNestingOverview(quoteId)
+      .then(setNesting)
+      .catch(() => setNesting(null));
   }, [api, quoteId, fail]);
 
   const loadPricing = useCallback(() => {
@@ -397,6 +405,29 @@ export function EstimatingPage() {
         />
       )}
 
+      {/* M4.3 (DemoA/12): the nest-eligibility banner on a sheet-metal part.
+          Warnings detail stays M4.7 — this is the eligible/nested state only. */}
+      {(() => {
+        const nestRow = nesting?.sheet_metal.find((r) => r.component_id === componentId);
+        if (!nestRow || (!nestRow.eligible && !nestRow.nest_id)) return null;
+        return (
+          <p className="nesting-banner" role="status">
+            {nestRow.nest_id ? (
+              <>
+                <span className="nesting-badge nested">{t('nesting.badge_nested')}</span>{' '}
+                {t('nesting.banner_nested', { label: nestRow.nest_label ?? '' })}
+              </>
+            ) : (
+              <>
+                <span className="nesting-badge">{t('nesting.badge_nestable')}</span>{' '}
+                {t('nesting.banner_eligible')}
+              </>
+            )}{' '}
+            <Link to={`/quotes/${quoteId}/nesting`}>{t('nesting.open_module')}</Link>
+          </p>
+        );
+      })()}
+
       {costing && (
         <>
           <OperationsSection
@@ -587,6 +618,11 @@ export function EstimatingPage() {
                 .getBulkCreatePrefill(quoteId)
                 .then(setBulkPrefill)
                 .catch(() => setBulkPrefill(null));
+              // new line items may be nest-eligible — refresh the banner data
+              api
+                .getNestingOverview(quoteId)
+                .then(setNesting)
+                .catch(() => setNesting(null));
             }
           }}
           onClose={() => setBulkCreating(false)}

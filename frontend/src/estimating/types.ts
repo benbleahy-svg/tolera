@@ -485,3 +485,96 @@ export interface DiscountDefLite {
   formula: string | null;
   default_pct: string | null;
 }
+
+// --------------------------------------------------------------------------
+// M4.3 — multi-component sheet-metal nesting (spec #nesting)
+// --------------------------------------------------------------------------
+export interface NestingOverviewRow {
+  component_id: string;
+  part_id: string;
+  part_number: string | null;
+  part_name: string | null;
+  item_id: string;
+  position: number;
+  material_id: string | null;
+  material_name: string | null;
+  thickness_mm: number | null;
+  flat_x_mm: number | null;
+  flat_y_mm: number | null;
+  flat_area_mm2: number | null;
+  contour_length_mm: number | null;
+  quantities: number[];
+  make_quantities: number[];
+  eligible: boolean;
+  nest_id: string | null;
+  nest_label: string | null;
+}
+
+export interface NestComponentResult {
+  component_id: string;
+  parts_per_sheet: number;
+  used_area_mm2: number;
+  cost_share_pct: string;
+  allocated_cost: string;
+}
+
+export interface NestResultOut {
+  net_sheet_used: number;
+  charged_sheets: number;
+  gross_sheets: number;
+  material_cost: string;
+  currency: string;
+  used_area_mm2: number;
+  scrap_area_mm2: number;
+  drop_area_mm2: number;
+  total_contour_length_mm: number;
+  components: NestComponentResult[];
+}
+
+export interface NestOut {
+  id: string;
+  label: string | null;
+  kind: string | null;
+  set_id: string | null;
+  quantity: number | null;
+  config: {
+    thickness_mm?: number;
+    stock?: {
+      length_mm: number;
+      width_mm: number;
+      erp_code: string;
+      sheet_cost: string;
+      currency: string;
+    };
+    component_ids?: string[];
+  } | null;
+  result: NestResultOut | null;
+}
+
+export interface NestingOverview {
+  sheet_metal: NestingOverviewRow[];
+  linear_metal: NestingOverviewRow[];
+  nests: NestOut[];
+}
+
+export interface NestStockBody {
+  quantity: number;
+  length_mm: number;
+  width_mm: number;
+  erp_code: string;
+  sheet_cost: string;
+}
+
+export interface NestCreateBody {
+  component_ids: string[];
+  stock: NestStockBody[];
+  settings: {
+    edge_buffer_mm: number;
+    clearance_mm: number;
+    kerf_mm: number;
+    drop_threshold_pct: number;
+    distribution_method: string;
+    allow_mixed_thickness: boolean;
+  };
+  component_settings: { component_id: string; cost_distribution_pct?: string | null }[];
+}

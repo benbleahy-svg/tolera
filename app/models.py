@@ -1435,6 +1435,54 @@ class QuoteCell(Base):
     updated_at: Mapped[datetime] = _updated_ts()
 
 
+class Nest(Base):
+    """A multi-component sheet nest (M4.3; spec ``#nesting``; DB-SCHEMA ``nest``).
+
+    One row = one stock sheet type x **one quantity break** — nesting same-item
+    components with multiple make quantities creates one nest per break, tied
+    together by ``config.set_id`` (the "Associated with N other nests" set;
+    deleting one deletes the set, per KB multi-component-sheet-metal-nesting).
+
+    ``config`` is the prepare-form input, verbatim: ``set_id``, ``quantity``
+    (the break), ``material_id``, ``thickness_mm``, ``stock`` (length/width mm,
+    ERP code, ``sheet_cost`` + ``currency``), ``settings`` (edge buffer,
+    clearance, kerf, drop threshold %, distribution method, grain direction),
+    and ``components`` (the per-component snapshot the math ran on: flat dims,
+    flat area, contour, make qty, cost-distribution %). ``result`` is the
+    computed ``NestResult``: net/charged/gross sheets, ``material_cost``,
+    used/scrap/drop areas, total contour, and the per-component allocation.
+    Both are recomputable via ``app.nesting_math`` — nothing is baked in.
+
+    Money inside the JSON follows the repo convention: 4-dp decimal strings +
+    explicit ``currency``. Components are referenced by id in ``config``; the
+    membership + locking checks go through ``quote_id`` (a nest never outlives
+    its quote)."""
+
+    __tablename__ = "nest"
+    __table_args__ = (
+        CheckConstraint("kind IN ('sheet', 'linear')", name="ck_nest_kind"),
+        # same-org pin (the quote_item precedent) — a nest can never reference
+        # another org's quote; MATCH SIMPLE skips the check while quote_id is NULL
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_nest_quote_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_nest_org_quote", "org_id", "quote_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: Display name, sequential per quote ("Nest #1").
+    label: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str | None] = mapped_column(Text)
+    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _ts()
+
+
 class CustomTable(Base):
     """An org Custom Table backing Kalk ``table_var``/``table_lookup`` (spec
     ``#kalk-tables``, ``#customcat``; DECISIONS.md 2026-07-08). ``columns`` is

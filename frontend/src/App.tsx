@@ -17,6 +17,7 @@ import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
 import { DashboardPage } from './dashboard/DashboardPage';
 import { EstimatingPage } from './estimating/EstimatingPage';
+import { NestingPage } from './estimating/NestingPage';
 import { PartsPage } from './parts/PartsPage';
 import { FileViewerPage } from './viewer/FileViewerPage';
 import { QuotesPage } from './quotes/QuotesPage';
@@ -48,6 +49,8 @@ export default function App() {
         <Route path="/quotes" element={<QuotesPage />} />
         {/* Line-item estimating view — the M1.7 Materials & Operations slice. */}
         <Route path="/quotes/:quoteId" element={<EstimatingPage />} />
+        {/* Multi-component sheet-metal nesting (M4.3, spec #nesting). */}
+        <Route path="/quotes/:quoteId/nesting" element={<NestingPage />} />
         {/* Configure lands on Custom Tables (M1.9); the full Configure section
             (operation library pages, …) grows a sub-nav with M1.12. */}
         <Route path="/configure" element={<CustomTablesPage />} />

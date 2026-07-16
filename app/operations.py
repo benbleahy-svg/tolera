@@ -725,6 +725,11 @@ async def remove_operation(
     operation = await _get_operation_or_404(session, operation_id)
     component = await _get_component_or_404(session, operation.component_id)
     await _lock_editable_quote(session, component)
+    if operation.category is OpCategory.material:
+        # M4.3: the nestable (material) op is locked while nested (KB FAQ)
+        from .nesting import ensure_component_not_nested
+
+        await ensure_component_not_nested(session, component.id)
     await session.delete(operation)  # cells cascade
     await session.flush()
 
@@ -907,6 +912,12 @@ async def set_component_material(
 ) -> ComponentCosting:
     component = await _get_component_or_404(session, component_id)
     await _lock_editable_quote(session, component)
+    # M4.3: same-material is a nest's compatibility premise — reassigning the
+    # material of a nested component would silently invalidate the shared
+    # costing (fresh-eyes review; KB locking rule).
+    from .nesting import ensure_component_not_nested
+
+    await ensure_component_not_nested(session, component.id)
     if payload.material_id is not None:
         material = await session.get(Material, payload.material_id)
         if material is None:
@@ -927,6 +938,12 @@ async def set_component_process(
 ) -> ComponentCosting:
     component = await _get_component_or_404(session, component_id)
     await _lock_editable_quote(session, component)
+    # M4.3: a process change deletes ops (UPDATE) or moves the component off
+    # the sheet-metal family either way — both orphan a nest, so it is locked
+    # like quantities and the nestable op (fresh-eyes review; KB locking rule).
+    from .nesting import ensure_component_not_nested
+
+    await ensure_component_not_nested(session, component.id)
     if payload.process_id is not None:
         process = await session.get(Process, payload.process_id)
         if process is None or process.deleted_at is not None:

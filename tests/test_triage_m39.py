@@ -156,7 +156,9 @@ def _seed_quote_with_rfq(
     rfq_id = uuid.uuid4()
     req_date: date | None = None
     if requested_days is not None:
-        req_date = date.today() + timedelta(days=requested_days)
+        # UTC, matching the task's clock — date.today() is the local date and
+        # drifts a day ahead of UTC between 22:00Z and midnight Z under CEST.
+        req_date = datetime.now(UTC).date() + timedelta(days=requested_days)
     seeder.sql(
         "INSERT INTO request_for_quote "
         "(id, org_id, quote_id, subject, description, requested_delivery_date, "

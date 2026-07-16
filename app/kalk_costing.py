@@ -58,6 +58,7 @@ from .models import (
     CustomTableRow,
     Material,
     MaterialFamily,
+    Nest,
     OpCategory,
     Operation,
     OperationDef,
@@ -119,6 +120,9 @@ class KalkEnv:
     quantities: list[int] = field(default_factory=list)  # deliver (bom) quantities
     make_quantities: list[int] = field(default_factory=list)
     def_names: dict[uuid.UUID, str] = field(default_factory=dict)
+    #: M4.3 — this component's nesting-module results per quantity break,
+    #: served to formulas via ``manual_nest()`` (KALK-REFERENCE analyzers).
+    nest_values: dict[int, dict[str, float]] = field(default_factory=dict)
 
 
 async def load_kalk_env(
@@ -142,6 +146,36 @@ async def load_kalk_env(
     )
     def_rows = (await session.execute(select(OperationDef.id, OperationDef.name))).tuples().all()
     ordered = sorted(breaks, key=lambda b: b.quantity)
+    nests = (
+        await session.scalars(
+            select(Nest).where(Nest.config.contains({"component_ids": [str(component.id)]}))
+        )
+    ).all()
+    nest_values: dict[int, dict[str, float]] = {}
+    for nest in nests:
+        config, result = nest.config or {}, nest.result or {}
+        quantity = config.get("quantity")
+        mine = next(
+            (c for c in result.get("components", []) if c.get("component_id") == str(component.id)),
+            None,
+        )
+        if quantity is None or mine is None:
+            continue
+        material_cost = Decimal(result.get("material_cost", "0"))
+        allocated = Decimal(mine.get("allocated_cost", "0"))
+        # full-precision share so COST recomputed from the drawer variables
+        # reproduces the allocation (result JSON carries the 2-dp display pct)
+        share_pct = float(allocated / material_cost * 100) if material_cost else 0.0
+        nest_values[int(quantity)] = {
+            "sheet_cost": float(Decimal(config.get("stock", {}).get("sheet_cost", "0"))),
+            "number_of_sheets": float(result.get("charged_sheets", 0.0)),
+            "net_sheet_used": float(result.get("net_sheet_used", 0.0)),
+            "parts_per_sheet": float(mine.get("parts_per_sheet", 0.0)),
+            "cost_share_pct": share_pct,
+            "allocated_cost": float(allocated),
+            "sheet_length_mm": float(config.get("stock", {}).get("length_mm", 0.0)),
+            "sheet_width_mm": float(config.get("stock", {}).get("width_mm", 0.0)),
+        }
     return KalkEnv(
         provider=await load_table_provider(session),
         part=part,
@@ -157,7 +191,31 @@ async def load_kalk_env(
             b.make_quantity if b.make_quantity is not None else b.quantity for b in ordered
         ],
         def_names=dict(def_rows),
+        nest_values=nest_values,
     )
+
+
+def kalk_nest_object(env: KalkEnv, break_qty: int) -> KalkObject:
+    """``manual_nest()`` — the nesting-module results for this component at
+    this break (M4.3). Never raises on an un-nested part: formulas fall back
+    on ``nested`` / zero defaults so the drawer stays evaluable."""
+    data = env.nest_values.get(break_qty)
+    if data is None:
+        return KalkObject(
+            "nest",
+            {
+                "nested": False,
+                "sheet_cost": 0.0,
+                "number_of_sheets": 0.0,
+                "net_sheet_used": 0.0,
+                "parts_per_sheet": 0.0,
+                "cost_share_pct": 0.0,
+                "allocated_cost": 0.0,
+                "sheet_length_mm": 0.0,
+                "sheet_width_mm": 0.0,
+            },
+        )
+    return KalkObject("nest", {"nested": True, **data})
 
 
 def build_part_object(env: KalkEnv, make_qty: int, deliver_qty: int) -> KalkObject:
@@ -294,6 +352,7 @@ def evaluate_cell(
             "op_def": KalkObject("op_def", {"name": def_name or op.name, "erp_code": None}),
             "line_item": KalkObject("line_item", {"is_export_controlled": env.export_controlled}),
             "quantity": make_qty,
+            "manual_nest": lambda: kalk_nest_object(env, break_qty),
         },
         quantity=break_qty,
         overrides=overrides,
@@ -438,6 +497,7 @@ async def operation_kalk_report(
                     "line_item", {"is_export_controlled": env.export_controlled}
                 ),
                 "quantity": make_qty,
+                "manual_nest": lambda brk_qty=brk.quantity: kalk_nest_object(env, brk_qty),
             },
             quantity=brk.quantity,  # override key = the UI-visible break value
             overrides=overrides,
