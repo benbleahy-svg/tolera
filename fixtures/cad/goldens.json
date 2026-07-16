@@ -38,7 +38,62 @@
     "unfolded_size": [
       95.87170834425405,
       50.0
-    ]
+    ],
+    "bends": [
+      {
+        "radius": 3.0,
+        "angle_deg": 90.0,
+        "line_length": 50.0,
+        "k_factor": 0.3690228147639203
+      }
+    ],
+    "bend_line_positions": [
+      57.93585417212702
+    ],
+    "flat_area": 4814.15926535898,
+    "total_cut_length": 292.5663706143592,
+    "pierce_count": 0
+  },
+  "bracket-Z3-3bend-t2-r3.step": {
+    "family": "sheet_metal",
+    "volume": 12514.24765903028,
+    "area": 13254.778623945153,
+    "thickness": 2.0,
+    "bend_count": 3,
+    "bends": [
+      {
+        "radius": 3.0,
+        "angle_deg": 90.0,
+        "line_length": 50.0,
+        "k_factor": 0.3690228147639203
+      },
+      {
+        "radius": 3.0,
+        "angle_deg": 90.0,
+        "line_length": 50.0,
+        "k_factor": 0.3690228147639203
+      },
+      {
+        "radius": 3.0,
+        "angle_deg": 45.0,
+        "line_length": 50.0,
+        "k_factor": 0.3690228147639203
+      }
+    ],
+    "k_factor": 0.3690228147639203,
+    "developed_length": 124.67927086063511,
+    "unfolded_size": [
+      124.67927086063511,
+      50.0
+    ],
+    "bend_line_positions": [
+      42.93585417212702,
+      78.80756251638107,
+      108.2113437745716
+    ],
+    "flat_area": 6257.12382951514,
+    "total_cut_length": 370.2654824574365,
+    "pierce_count": 1
   },
   "block-milled-80x50x20.step": {
     "family": "milling",

@@ -116,6 +116,142 @@ def bracket() -> tuple[object, dict]:
         "k_factor": k,
         "developed_length": 55 + 35 + bend_allowance,
         "unfolded_size": [55 + 35 + bend_allowance, 50.0],
+        # M4.2 additions (analytic): mid-surface flat area = volume/t; cut length
+        # = flat-pattern perimeter at the mid-line (2*dev_mid + 2*width)
+        "bends": [{"radius": 3.0, "angle_deg": 90.0, "line_length": 50.0, "k_factor": k}],
+        "bend_line_positions": [55 + bend_allowance / 2],
+        "flat_area": (55 * 2 + 35 * 2 + (math.pi / 4) * (25 - 9)) * 50 / 2,
+        "total_cut_length": 2 * (90 + (math.pi / 2) * 4) + 2 * 50,
+        "pierce_count": 0,
+    }
+    return shape, golden
+
+
+# --- 1b. Sheet-metal bend chain (M4.2): generic turtle builder + 3-bend fixture ---
+def bend_chain_profile(flats: list[float], bends: list[tuple[float, int]], t: float, r: float):
+    """Outline edges (XZ plane, y=0) for a sheet strip: flats[i] are the FLAT
+    panel lengths between bend tangents; bends[i] = (angle_deg, direction) with
+    +1 bending toward the sheet's top skin, -1 away. Inner radius r, thickness t.
+    Returns closed profile edges for ``prism_from_profile``."""
+
+    def perp(v):
+        return (-v[1], v[0])
+
+    def rot(v, a):
+        c, s = math.cos(a), math.sin(a)
+        return (v[0] * c - v[1] * s, v[0] * s + v[1] * c)
+
+    def add(a, b):
+        return (a[0] + b[0], a[1] + b[1])
+
+    def mul(v, k):
+        return (v[0] * k, v[1] * k)
+
+    p = (0.0, 0.0)
+    h = (1.0, 0.0)
+    bottom: list[tuple] = []  # ('line', p1, p2) | ('arc', p1, pmid, p2), 2D
+    top: list[tuple] = []
+    for i, flat in enumerate(flats):
+        n = perp(h)
+        p_end = add(p, mul(h, flat))
+        bottom.append(("line", p, p_end))
+        top.append(("line", add(p, mul(n, t)), add(p_end, mul(n, t))))
+        p = p_end
+        if i < len(bends):
+            angle_deg, direction = bends[i]
+            sweep = direction * math.radians(angle_deg)
+            n = perp(h)
+            centre = add(p, mul(n, r + t if direction > 0 else -r))
+
+            def about(q, ang, c=centre):
+                return add(c, rot((q[0] - c[0], q[1] - c[1]), ang))
+
+            p_top = add(p, mul(n, t))
+            bottom.append(("arc", p, about(p, sweep / 2), about(p, sweep)))
+            top.append(("arc", p_top, about(p_top, sweep / 2), about(p_top, sweep)))
+            p = about(p, sweep)
+            h = rot(h, sweep)
+    # close the outline: bottom forward → far cap → top reversed → near cap
+    n = perp(h)
+    segs = list(bottom)
+    segs.append(("line", p, add(p, mul(n, t))))
+    for seg in reversed(top):
+        if seg[0] == "line":
+            segs.append(("line", seg[2], seg[1]))
+        else:
+            segs.append(("arc", seg[3], seg[2], seg[1]))
+    segs.append(("line", top[0][1], bottom[0][1]))
+
+    def p3(q):
+        return (q[0], 0.0, q[1])
+
+    edges = []
+    for seg in segs:
+        if seg[0] == "line":
+            edges.append(edge_line(p3(seg[1]), p3(seg[2])))
+        else:
+            edges.append(edge_arc(p3(seg[1]), p3(seg[2]), p3(seg[3])))
+    return edges
+
+
+def bracket_z3() -> tuple[object, dict]:
+    """3-bend strip (M4.2 acceptance fixture): mixed bend directions (up/down/up),
+    one non-90° bend, plus a d6 through hole in the first panel (pierce_count).
+    All bend axes parallel (+Y) — the v1 analytic-unfold envelope."""
+    flats = [40.0, 30.0, 25.0, 15.0]
+    bends = [(90.0, 1), (90.0, -1), (45.0, 1)]
+    t, r, w = 2.0, 3.0, 50.0
+    shape = prism_from_profile(bend_chain_profile(flats, bends, t, r), (0, w, 0))
+    hole = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 25, -1), gp_Dir(0, 0, 1)), 3.0, 4.0).Shape()
+    shape = BRepAlgoAPI_Cut(shape, hole).Shape()
+
+    sum_flats = sum(flats)
+    sweep = [math.radians(a) for a, _ in bends]
+    profile_area = t * sum_flats + sum(a * t * (r + t / 2) for a in sweep)
+    hole_r = 3.0
+    volume = profile_area * w - math.pi * hole_r**2 * t
+    # skins (flats + arcs at the direction-dependent radius) - 2 hole disks,
+    # + 2 profile side walls + 2 strip-end caps + the hole wall
+    bottom_len = sum_flats + sum(
+        a * ((r + t) if d > 0 else r) for a, (_, d) in zip(sweep, bends, strict=True)
+    )
+    top_len = sum_flats + sum(
+        a * (r if d > 0 else (r + t)) for a, (_, d) in zip(sweep, bends, strict=True)
+    )
+    area = (
+        (bottom_len + top_len) * w
+        - 2 * math.pi * hole_r**2
+        + 2 * profile_area
+        + 2 * t * w
+        + 2 * math.pi * hole_r * t
+    )
+    k = (0.65 + 0.5 * math.log10(r / t)) * 0.5
+    allowances = [a * (r + k * t) for a in sweep]
+    developed = sum_flats + sum(allowances)
+    # bend-line positions = centre of each bend region along the unfold
+    positions, cursor = [], 0.0
+    for flat, ba in zip(flats, allowances, strict=False):
+        cursor += flat
+        positions.append(cursor + ba / 2)
+        cursor += ba
+    # no "bbox" golden: the engine's min-volume OBB/AABB tie-break legitimately
+    # beats the construction-frame AABB on this tilted-end profile, and an
+    # analytic optimal OBB is not worth deriving — this fixture exists for the
+    # sheet-metal scalars (volume/area stay analytic below).
+    golden = {
+        "family": "sheet_metal",
+        "volume": volume,
+        "area": area,
+        "thickness": t,
+        "bend_count": 3,
+        "bends": [{"radius": r, "angle_deg": a, "line_length": w, "k_factor": k} for a, _ in bends],
+        "k_factor": k,
+        "developed_length": developed,
+        "unfolded_size": [developed, w],
+        "bend_line_positions": positions,
+        "flat_area": volume / t,
+        "total_cut_length": (area - 2 * volume / t) / t,
+        "pierce_count": 1,
     }
     return shape, golden
 
@@ -309,7 +445,13 @@ def write_assembly(path: Path) -> dict:
 
 
 def main() -> int:
-    outdir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("fixtures/cad")
+    # --sync (M4.2): refresh goldens.json from the builders but only write STEP
+    # files that are missing on disk — existing fixture bytes stay untouched
+    # (STEP headers carry timestamps; a no-op regeneration would still churn
+    # every file and invalidate nothing but diffs).
+    args = [a for a in sys.argv[1:] if a != "--sync"]
+    sync_only = "--sync" in sys.argv[1:]
+    outdir = Path(args[0]) if args else Path("fixtures/cad")
     outdir.mkdir(parents=True, exist_ok=True)
     # the probes also read these two pre-existing fixtures (M1.13/M2.6) — copy them
     # into a custom outdir so a regenerated set is self-contained
@@ -336,6 +478,7 @@ def main() -> int:
 
     solids = {
         "bracket-L-60x40x2-r3.step": bracket,
+        "bracket-Z3-3bend-t2-r3.step": bracket_z3,
         "block-milled-80x50x20.step": milled_block,
         "shaft-stepped-d30-d20-d12.step": shaft,
         "tube-round-d30-t2-l200.step": tube_round,
@@ -354,10 +497,16 @@ def main() -> int:
         )
         if rel >= 1e-6:
             raise RuntimeError(f"{name}: modelled volume deviates from analytic golden")
-        write_step(shape, outdir / name)
+        if not sync_only or not (outdir / name).exists():
+            write_step(shape, outdir / name)
         goldens[name] = golden
 
-    goldens["asm-plate-2pins.step"] = write_assembly(outdir / "asm-plate-2pins.step")
+    asm_path = outdir / "asm-plate-2pins.step"
+    if sync_only and asm_path.exists():
+        existing = json.loads((outdir / "goldens.json").read_text())
+        goldens["asm-plate-2pins.step"] = existing["asm-plate-2pins.step"]
+    else:
+        goldens["asm-plate-2pins.step"] = write_assembly(asm_path)
     (outdir / "goldens.json").write_text(json.dumps(goldens, indent=2) + "\n")
     print(f"\nwrote {len(goldens)} fixtures + goldens.json to {outdir}/")
     return 0

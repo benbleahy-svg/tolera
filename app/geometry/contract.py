@@ -25,6 +25,15 @@ from typing import Any, Literal, Protocol
 #: per-type areas) at 6 significant digits → SHA-256 (GEOMETRY.md §2).
 SIGNATURE_VERSION = "gs1"
 
+#: Family values the engine recognizes (mirror ``app.models.ProcessFamily``
+#: values without importing app models across the boundary). M4.2: sheet metal;
+#: M4.4-M4.6 add the rest of the Core 4.
+FAMILY_SHEET_METAL = "SHEET_METAL"
+
+#: Families with a per-family recognizer behind :meth:`GeometryService.analyze`
+#: — any other family degrades to the dims-only pass, never fabricated scalars.
+RECOGNIZED_FAMILIES = frozenset({FAMILY_SHEET_METAL})
+
 
 class GeometryError(Exception):
     """Base for engine failures the caller can classify."""
