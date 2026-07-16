@@ -28,6 +28,9 @@ import type {
   MaterialOut,
   MaterialSearchHit,
   MaterialUpdateBody,
+  NestCreateBody,
+  NestOut,
+  NestingOverview,
   OperationCreateBody,
   OperationDefOut,
   OperationUpdateBody,
@@ -121,6 +124,10 @@ export interface EstimatingApi {
   // M3.4 — Bulk Create Line Items (prefill + explicit Accept)
   getBulkCreatePrefill: (quoteId: string) => Promise<BulkCreatePrefill>;
   bulkCreateLineItems: (quoteId: string, rows: BulkCreateRowBody[]) => Promise<QuoteSummary>;
+  // M4.3 — multi-component sheet-metal nesting
+  getNestingOverview: (quoteId: string) => Promise<NestingOverview>;
+  createNest: (quoteId: string, body: NestCreateBody) => Promise<{ nests: NestOut[] }>;
+  deleteNest: (quoteId: string, nestId: string) => Promise<void>;
 }
 
 /** Build an estimating API client bound to the current Clerk session token. */
@@ -246,6 +253,11 @@ export function useEstimatingApi(): EstimatingApi {
           body,
         }),
       getQuoteTotals: (quoteId) => apiFetch(`/api/quotes/${quoteId}/totals`, token),
+      getNestingOverview: (quoteId) => apiFetch(`/api/quotes/${quoteId}/nesting`, token),
+      createNest: (quoteId, body) =>
+        apiFetch(`/api/quotes/${quoteId}/nests`, token, { method: 'POST', body }),
+      deleteNest: (quoteId, nestId) =>
+        apiFetch(`/api/quotes/${quoteId}/nests/${nestId}`, token, { method: 'DELETE' }),
     };
   }, [getToken]);
 }

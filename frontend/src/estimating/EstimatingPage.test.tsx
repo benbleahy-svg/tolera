@@ -46,6 +46,9 @@ const getBulkCreatePrefill = vi.fn(() =>
   Promise.resolve({ status: 'none', found_in: null, rfq_files: [], rows: [] }),
 );
 const bulkCreateLineItems = vi.fn();
+const getNestingOverview = vi.fn(() =>
+  Promise.resolve({ sheet_metal: [], linear_metal: [], nests: [] }),
+);
 const getQuoteTotals = vi.fn(() =>
   Promise.resolve({
     currency: 'EUR',
@@ -126,6 +129,7 @@ vi.mock('./api', () => ({
     getQuoteTotals,
     getBulkCreatePrefill,
     bulkCreateLineItems,
+    getNestingOverview,
   }),
 }));
 
