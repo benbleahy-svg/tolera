@@ -187,3 +187,22 @@ tr.est-missing-rate td {
 .cad-render-modes, .cad-tools { display: flex; gap: 0.25rem; }
 .cad-render-modes button[aria-pressed='true'],
 .cad-tools button[aria-pressed='true'] { outline: 2px solid var(--accent, #d6409f); }
+
+/* M3.9 — RFQ Triage Brief card (dashboard notification + header chip) */
+.triage-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0.25rem 0;
+  background: var(--surface);
+}
+.triage-card-pending { color: var(--t2); font-style: italic; }
+.triage-card-header { font-size: 0.95rem; margin-bottom: 0.5rem; }
+.triage-signals { display: grid; grid-template-columns: 1fr; gap: 0.35rem; margin: 0; }
+.triage-signal { display: grid; grid-template-columns: 12rem 1fr; gap: 0.5rem; }
+.triage-signal dt { font-weight: 600; color: var(--t2); margin: 0; }
+.triage-signal dd { margin: 0; }
+.triage-blocker dt, .triage-blocker dd,
+.triage-compliance dt, .triage-compliance dd { color: var(--danger); font-weight: 600; }
+.triage-compliance dd span { display: block; }
+.triage-ai-off { color: var(--t2); font-style: italic; }

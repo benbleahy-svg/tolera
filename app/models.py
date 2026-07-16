@@ -143,6 +143,11 @@ def _org_fk() -> Mapped[uuid.UUID]:
     return mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
 
 
+def _ai_flag() -> Mapped[bool]:
+    """A per-org AI toggle: non-null boolean defaulting TRUE (see OrgAiSettings)."""
+    return mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+
 def _salesperson_fk() -> Mapped[uuid.UUID | None]:
     """Optional assigned salesperson. The single-column FK to ``app_user`` is
     deliberately *not* used: a composite ``(salesperson_id, org_id)`` FK to
@@ -788,6 +793,10 @@ class Quote(Base):
     # [{"days_faster": int, "markup_pct": "<decimal string>"}]}. Staging only — the math
     # reads the per-component expedite_option rows the apply writes.
     expedite_tiers: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # M3.9 — the cached RFQ Triage Brief (spec #ai-triage build-note: "Add
+    # triage_brief JSONB to Quote"). Regenerable cache written by the
+    # ``generate_triage_brief`` task after the email-parse job; NULL until then.
+    triage_brief: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Workflow-tracker + lifecycle timestamps.
     rfq_received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -2206,6 +2215,41 @@ class Notification(Base):
     )
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
+
+
+class OrgAiSettings(Base):
+    """Per-org AI feature toggles (spec ``#ai-settings`` build-note).
+
+    ``master_enabled`` gates every AI feature and is checked first; each
+    per-feature flag then gates its own code path. All default TRUE (fixture
+    orgs ship AI fully enabled). ``org_id`` is the PK — exactly one row per org
+    — and an *absent* row is treated as all-enabled by the accessor
+    (:mod:`app.ai_settings`), so a missing row is never a silent disable.
+
+    M3.9 (RFQ Triage Brief) is the first consumer and reads only
+    ``master_enabled`` then ``triage_brief_enabled``; the remaining flags exist
+    for M3.10 / M5 / M6."""
+
+    __tablename__ = "org_ai_settings"
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id", ondelete="CASCADE"), primary_key=True
+    )
+    master_enabled: Mapped[bool] = _ai_flag()
+    wingman_enabled: Mapped[bool] = _ai_flag()
+    triage_brief_enabled: Mapped[bool] = _ai_flag()
+    quote_assembly_enabled: Mapped[bool] = _ai_flag()
+    estimation_coaching_enabled: Mapped[bool] = _ai_flag()
+    presend_review_enabled: Mapped[bool] = _ai_flag()
+    assistant_enabled: Mapped[bool] = _ai_flag()
+    mcp_enabled: Mapped[bool] = _ai_flag()
+    customer_brief_enabled: Mapped[bool] = _ai_flag()
+    requote_diff_enabled: Mapped[bool] = _ai_flag()
+    rule_suggest_enabled: Mapped[bool] = _ai_flag()
+    margin_coach_enabled: Mapped[bool] = _ai_flag()
+    benchmarking_opt_out: Mapped[bool] = _ai_flag()
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
 
 
 # --------------------------------------------------------------------------- #

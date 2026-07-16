@@ -660,6 +660,26 @@
     "notif_mention": "Sie wurden in einer Diskussion erwähnt",
     "notif_task_assigned": "Ihnen wurde eine Aufgabe zugewiesen"
   },
+  "triage": {
+    "title": "Triage — Angebot #{{number}}",
+    "unavailable": "Triage-Übersicht nicht verfügbar",
+    "pending": "Triage-Übersicht wird erstellt…",
+    "parts": "Teile & Dateien",
+    "parts_value": "{{count}} Teile · {{files}}",
+    "missing_files": "Fehlende Dateien",
+    "processes": "Erkannte Prozesse",
+    "est_time": "Geschätzte Bearbeitungszeit",
+    "customer": "Kunde",
+    "compliance": "Exportkontrolle",
+    "need_by": "Liefertermin",
+    "need_by_value": "{{date}} · {{days}} Tage · {{urgency}}",
+    "ai_disabled": "KI-Verarbeitung deaktiviert",
+    "urgency_hoch": "hoch",
+    "urgency_mittel": "mittel",
+    "urgency_niedrig": "niedrig",
+    "urgency_überfällig": "überfällig",
+    "urgency_keine": "kein Termin"
+  },
   "lens": {
     "part_setup": "Teil einrichten",
     "part_setup_hint": "Positionen und Teile durchgehen, Extraktionen prüfen und Teile- und Kalkulationsdaten erfassen.",

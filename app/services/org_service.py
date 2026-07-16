@@ -34,6 +34,7 @@ from app.models import (
     AppUser,
     MembershipRole,
     MembershipStatus,
+    OrgAiSettings,
     Organization,
     OrgCountry,
     UserOrgMembership,
@@ -209,6 +210,15 @@ class OrgService:
             .returning(Organization.id)
         )
         org_id: uuid.UUID = (await self._session.execute(stmt)).scalar_one()
+        # M3.9 — every org owns exactly one AI-settings row (spec #ai-settings:
+        # "Default row is inserted on org creation with the above defaults").
+        # Idempotent so reconciling an existing org is a no-op; the all-TRUE
+        # column defaults ship the org AI-fully-enabled.
+        await self._session.execute(
+            pg_insert(OrgAiSettings)
+            .values(org_id=org_id)
+            .on_conflict_do_nothing(index_elements=[OrgAiSettings.org_id])
+        )
         return org_id, existing is None
 
     async def _upsert_user(self, user: UserSpec) -> tuple[uuid.UUID, bool]:

@@ -85,3 +85,40 @@ export interface SavedViewCreate {
   filters?: FilterClause[];
   sort?: SortClause[];
 }
+
+// --- M3.9 RFQ Triage Brief (spec #ai-triage) ---
+export interface TriageProcess {
+  family: string;
+  name: string;
+  likelihood: string;
+  source: string;
+}
+
+export interface TriageComplianceFlag {
+  code: string;
+  severity: string;
+  source: string;
+  detail: string;
+  term?: string;
+}
+
+export interface TriageBrief {
+  version: number;
+  generated_at: string;
+  ai: { enabled: boolean; reason: string };
+  parts: {
+    count: number;
+    files: { step: number; dxf: number; pdf: number; other: number; total: number; summary: string };
+  };
+  missing_files: string[];
+  detected_processes: TriageProcess[];
+  est_time_to_quote: { low_min: number; high_min: number; display: string; deterministic: boolean };
+  customer: { known: boolean; name: string | null; prior_quotes: number; one_liner: string };
+  compliance_flags: TriageComplianceFlag[];
+  need_by: { date: string | null; days_until: number | null; urgency: string };
+}
+
+export interface TriageBriefResponse {
+  brief: TriageBrief | null;
+  ai?: { enabled: boolean; reason: string };
+}

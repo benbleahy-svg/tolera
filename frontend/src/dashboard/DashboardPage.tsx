@@ -19,6 +19,7 @@ import {
   type Task,
   useCollabApi,
 } from '../collab/api';
+import { TriageCard } from './TriageCard';
 
 /** Human copy per notification kind; unknown kinds fall back to the raw kind. */
 function notificationText(
@@ -100,7 +101,15 @@ export function DashboardPage(): React.ReactElement {
                 className={n.read_at ? 'notification-read' : 'notification-unread'}
                 data-testid="notification-row"
               >
-                <span>{notificationText(n, t)}</span>
+                {n.kind === 'quote_email_ingested' &&
+                typeof n.payload.quote_id === 'string' ? (
+                  <TriageCard
+                    quoteId={n.payload.quote_id}
+                    quoteNumber={String(n.payload.quote_number ?? '')}
+                  />
+                ) : (
+                  <span>{notificationText(n, t)}</span>
+                )}
                 {typeof n.payload.quote_id === 'string' && (
                   <Link to={`/quotes/${n.payload.quote_id}`}>{t('dashboard.open_quote')}</Link>
                 )}

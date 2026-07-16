@@ -173,6 +173,34 @@ def test_seed_is_idempotent_on_rerun(clean_db: str) -> None:
     )
 
 
+def test_provisioning_creates_one_ai_settings_row_per_org(clean_db: str) -> None:
+    """Every provisioned org owns exactly one all-enabled ``org_ai_settings``
+    row (spec #ai-settings; M3.9), and re-seeding stays at one row per org."""
+
+    async def _ai_rows(owner_url: str) -> tuple[int, int]:
+        engine = make_engine(owner_url)
+        try:
+            async with engine.connect() as conn:
+                total = await _scalar(conn, "SELECT count(*) FROM org_ai_settings")
+                enabled = await _scalar(
+                    conn,
+                    "SELECT count(*) FROM org_ai_settings "
+                    "WHERE master_enabled AND triage_brief_enabled",
+                )
+                return total, enabled
+        finally:
+            await engine.dispose()
+
+    specs = load_seeds(DEFAULT_SEEDS_DIR)
+    asyncio.run(_apply(clean_db, specs))
+    total, enabled = asyncio.run(_ai_rows(clean_db))
+    assert total == len(specs)  # one row per org
+    assert enabled == len(specs)  # shipped AI-fully-enabled
+
+    asyncio.run(_apply(clean_db, specs))  # re-seed is idempotent
+    assert asyncio.run(_ai_rows(clean_db))[0] == len(specs)
+
+
 def test_seed_reuses_one_global_user_across_orgs(clean_db: str) -> None:
     """One global AppUser may hold a membership in each org (E4-a multi-org)."""
     shared = "shared.admin@example.com"
