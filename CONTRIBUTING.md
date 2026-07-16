@@ -37,7 +37,7 @@ PRs are opened by `/ship` with **auto-merge armed**; no human approval per PR. T
 | Fresh-context review | a clean-memory subagent reviews the diff vs. `REVIEW.md` inside `/ship` | 🔴 fixed before the PR opens |
 | CodeRabbit | auto-reviews every PR (assertive, see `.coderabbit.yaml`) | advisory post-merge; swept at checkpoints |
 | Claude Code Review | cross-model: **Fable 5** on money/pricing/schema/auth/tax diffs, Opus 4.8 otherwise | advisory post-merge; swept at checkpoints |
-| **Human** | clicks through `CHECKPOINT.md` at each **milestone boundary** (`scripts/checkpoint.sh`) | required ✋ before the next milestone |
+| **Human** | reviews completed milestones **on demand** via `REVIEW-QUEUE.md` + `scripts/checkpoint.sh <M>` | non-blocking — the build continues |
 
 > The *plausible but wrong* domain mistakes — a money rule, a tax rate, a tenancy boundary — are covered mechanically: semgrep tier-1 rules + golden-fixture tests gate every merge, and the frontier model reviews every tier-1 diff. Anything the ladder can't decide is an `OPEN:` halt, never a guess.
 
