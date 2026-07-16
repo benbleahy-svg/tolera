@@ -45,6 +45,7 @@ from app.nesting_math import (
     NestComponent,
     NestSettings,
     NestStock,
+    _snap_net,
     compute_nest,
 )
 
@@ -315,6 +316,37 @@ class TestBoundaries:
         assert result.net_sheet_used == pytest.approx(2.0, abs=1e-9)
         assert result.charged_sheets == pytest.approx(2.0)
         assert result.material_cost == Decimal("500.0000")
+
+    def test_near_integral_float_dust_snaps_to_the_integer(self) -> None:
+        """A net of 2.0000000000000004 must charge 2 sheets, not ceil to 3
+        (and symmetric dust below must not register as a 'drop')."""
+        assert _snap_net(2.0000000000000004) == 2.0
+        assert _snap_net(1.9999999999999998) == 2.0
+        # genuine fractions are untouched
+        assert _snap_net(2.1) == 2.1
+        assert _snap_net(0.0469157) == 0.0469157
+
+    def test_non_finite_geometry_rejected(self) -> None:
+        bad = NestComponent(
+            key="A",
+            flat_x_mm=float("nan"),
+            flat_y_mm=100.0,
+            flat_area_mm2=18_000.0,
+            contour_length_mm=620.0,
+            make_qty=1,
+        )
+        with pytest.raises(ValueError, match="finite"):
+            compute_nest([bad], STOCK, SETTINGS)
+
+    def test_negative_kerf_rejected(self) -> None:
+        with pytest.raises(ValueError, match="negative"):
+            compute_nest(
+                [COMP_A],
+                STOCK,
+                NestSettings(
+                    edge_buffer_mm=3.0, clearance_mm=3.0, kerf_mm=-0.5, drop_threshold_pct=25.0
+                ),
+            )
 
     def test_drop_threshold_zero_always_charges_full_sheets(self) -> None:
         """threshold 0: no fraction is ever below it -> always ceil."""

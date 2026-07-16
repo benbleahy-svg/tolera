@@ -118,9 +118,10 @@ describe('NestingPage', () => {
     await user.click(screen.getByRole('checkbox', { name: 'BR-200' }));
     await user.click(screen.getByRole('button', { name: /nests/i }));
 
-    // one stock row for the single shared break, with the metric defaults
+    // one stock row for the single shared break, with the metric defaults;
+    // German-first comma decimal is normalized for the API
     const cost = await screen.findByLabelText(/10$/, { selector: 'input[inputmode]' });
-    await user.type(cost, '250.00');
+    await user.type(cost, '250,00');
     await user.click(screen.getByRole('button', { name: /erstellen|generate/i }));
 
     await waitFor(() => expect(createNest).toHaveBeenCalledTimes(1));

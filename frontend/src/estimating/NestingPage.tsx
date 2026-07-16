@@ -112,6 +112,9 @@ export function NestingPage() {
     const anchor = selectedRows[0];
     if (!anchor || anchor.component_id === row.component_id) return true;
     if (row.material_id !== anchor.material_id) return false;
+    // the prepare dialog builds one stock row per break of the anchor — a
+    // mismatched break set would silently omit required stock rows
+    if (row.quantities.join('/') !== anchor.quantities.join('/')) return false;
     if (allowMixed) return true;
     return (
       row.thickness_mm != null &&
@@ -153,7 +156,28 @@ export function NestingPage() {
         <input
           type="checkbox"
           checked={allowMixed}
-          onChange={(e) => setAllowMixed(e.target.checked)}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setAllowMixed(on);
+            if (!on) {
+              // prune selections that are only valid under mixed thickness
+              setSelected((prev) => {
+                const kept = rows.filter((r) => prev.has(r.component_id));
+                const anchor = kept[0];
+                if (!anchor) return prev;
+                return new Set(
+                  kept
+                    .filter(
+                      (r) =>
+                        r.thickness_mm != null &&
+                        anchor.thickness_mm != null &&
+                        Math.abs(r.thickness_mm - anchor.thickness_mm) <= 0.01,
+                    )
+                    .map((r) => r.component_id),
+                );
+              });
+            }
+          }}
         />
         {t('nesting.allow_mixed_thickness')}
       </label>
@@ -257,7 +281,7 @@ export function NestingPage() {
           allowMixed={allowMixed}
           onGenerate={(body) => {
             setError(null);
-            api
+            return api
               .createNest(quoteId, body)
               .then(() => {
                 setPreparing(false);
@@ -300,7 +324,7 @@ function PrepareNestDialog({
 }: {
   rows: NestingOverviewRow[];
   allowMixed: boolean;
-  onGenerate: (body: NestCreateBody) => void;
+  onGenerate: (body: NestCreateBody) => Promise<unknown>;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -311,10 +335,33 @@ function PrepareNestDialog({
     breaks.map((quantity) => ({ quantity, ...DEFAULT_STOCK })),
   );
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [submitting, setSubmitting] = useState(false);
+
+  // German-first: accept a comma decimal ("250,00") and normalize for the API
+  const normalizeCost = (value: string) => value.trim().replace(',', '.');
 
   const valid = useMemo(
-    () => stock.every((s) => s.length_mm > 0 && s.width_mm > 0 && Number(s.sheet_cost) >= 0 && s.sheet_cost !== ''),
-    [stock],
+    () =>
+      stock.every(
+        (s) =>
+          Number.isFinite(s.length_mm) &&
+          s.length_mm > 0 &&
+          Number.isFinite(s.width_mm) &&
+          s.width_mm > 0 &&
+          s.sheet_cost !== '' &&
+          Number(normalizeCost(s.sheet_cost)) >= 0 &&
+          !Number.isNaN(Number(normalizeCost(s.sheet_cost))),
+      ) &&
+      Number.isFinite(settings.edge_buffer_mm) &&
+      settings.edge_buffer_mm >= 0 &&
+      Number.isFinite(settings.clearance_mm) &&
+      settings.clearance_mm >= 0 &&
+      Number.isFinite(settings.kerf_mm) &&
+      settings.kerf_mm >= 0 &&
+      Number.isFinite(settings.drop_threshold_pct) &&
+      settings.drop_threshold_pct >= 0 &&
+      settings.drop_threshold_pct <= 100,
+    [stock, settings],
   );
 
   const patchStock = (index: number, patch: Partial<(typeof stock)[number]>) => {
@@ -448,15 +495,17 @@ function PrepareNestDialog({
           </button>
           <button
             type="button"
-            disabled={!valid}
-            onClick={() =>
-              onGenerate({
+            disabled={!valid || submitting}
+            onClick={() => {
+              // the POST is not idempotent — block a double-click resubmit
+              setSubmitting(true);
+              void onGenerate({
                 component_ids: rows.map((r) => r.component_id),
-                stock,
+                stock: stock.map((s) => ({ ...s, sheet_cost: normalizeCost(s.sheet_cost) })),
                 settings: { ...settings, allow_mixed_thickness: allowMixed },
                 component_settings: [],
-              })
-            }
+              }).finally(() => setSubmitting(false));
+            }}
           >
             {t('nesting.generate')}
           </button>

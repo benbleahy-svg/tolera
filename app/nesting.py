@@ -418,17 +418,27 @@ async def create_nest(
         )
 
     comp_settings = {cs.component_id: cs for cs in payload.component_settings}
-    # explicit cost-distribution is all-or-none: a partial set would silently
-    # zero the unlisted components (fresh-eyes review)
-    explicit_pcts = [
-        cs.cost_distribution_pct
-        for cs in payload.component_settings
-        if cs.cost_distribution_pct is not None
+    # explicit cost-distribution is all-or-none over EXACTLY the selected set:
+    # a partial/duplicated/foreign-id set would silently zero components
+    # (fresh-eyes review + CodeRabbit)
+    explicit_pct_ids = [
+        cs.component_id for cs in payload.component_settings if cs.cost_distribution_pct is not None
     ]
-    if explicit_pcts and len(explicit_pcts) != len(unique_ids):
+    if explicit_pct_ids and (
+        len(explicit_pct_ids) != len(set(explicit_pct_ids))
+        or set(explicit_pct_ids) != set(unique_ids)
+    ):
         raise AppError(
             "validation_error",
             "Set a cost-distribution percentage for every nested component or none.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+    if settings.distribution_method != "area_of_parts":
+        # only the spec's default method exists (manual % rides component
+        # settings) — reject rather than silently ignore a requested method
+        raise AppError(
+            "validation_error",
+            "Unsupported price distribution method (v1 supports 'area_of_parts').",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
     set_id = str(uuid.uuid4())

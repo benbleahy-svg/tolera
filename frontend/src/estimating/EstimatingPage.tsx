@@ -618,6 +618,11 @@ export function EstimatingPage() {
                 .getBulkCreatePrefill(quoteId)
                 .then(setBulkPrefill)
                 .catch(() => setBulkPrefill(null));
+              // new line items may be nest-eligible — refresh the banner data
+              api
+                .getNestingOverview(quoteId)
+                .then(setNesting)
+                .catch(() => setNesting(null));
             }
           }}
           onClose={() => setBulkCreating(false)}

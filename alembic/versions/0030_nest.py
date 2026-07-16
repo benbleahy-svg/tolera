@@ -30,13 +30,18 @@ def upgrade() -> None:
         CREATE TABLE nest (
             id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             org_id uuid NOT NULL REFERENCES organization(id),
-            quote_id uuid REFERENCES quote(id) ON DELETE CASCADE,
+            quote_id uuid,
             label text,
             kind text,
             config jsonb,
             result jsonb,
             created_at timestamptz NOT NULL DEFAULT now(),
-            CONSTRAINT ck_nest_kind CHECK (kind IN ('sheet', 'linear'))
+            CONSTRAINT ck_nest_kind CHECK (kind IN ('sheet', 'linear')),
+            -- same-org pin (the quote_item precedent): a nest can never
+            -- reference another org's quote, defense-in-depth beside RLS
+            CONSTRAINT fk_nest_quote_org
+                FOREIGN KEY (org_id, quote_id)
+                REFERENCES quote (org_id, id) ON DELETE CASCADE
         )
         """
     )

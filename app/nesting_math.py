@@ -103,12 +103,34 @@ def _effective_area(comp: NestComponent, settings: NestSettings) -> float:
     return (comp.flat_x_mm + pad) * (comp.flat_y_mm + pad)
 
 
+def _snap_net(net: float) -> float:
+    """Snap float dust off a near-integral net sheet count — an accumulated
+    2.0000000000000004 must not ceil into a third charged sheet."""
+    if math.isclose(net, round(net), rel_tol=1e-12, abs_tol=1e-12):
+        return float(round(net))
+    return net
+
+
 def compute_nest(
     components: list[NestComponent], stock: NestStock, settings: NestSettings
 ) -> NestResult:
     """One nest = one stock sheet type x one quantity break."""
     if not components:
         raise ValueError("a nest needs at least one component")
+    numeric_settings = (
+        stock.length_mm,
+        stock.width_mm,
+        settings.edge_buffer_mm,
+        settings.clearance_mm,
+        settings.kerf_mm,
+        settings.drop_threshold_pct,
+    )
+    if not all(math.isfinite(v) for v in numeric_settings):
+        raise ValueError("sheet and nest settings must be finite numbers")
+    if settings.edge_buffer_mm < 0 or settings.clearance_mm < 0 or settings.kerf_mm < 0:
+        raise ValueError("edge buffer, clearance and kerf must not be negative")
+    if not 0 <= settings.drop_threshold_pct <= 100:
+        raise ValueError("drop threshold must be between 0 and 100 percent")
     usable_x = stock.length_mm - 2 * settings.edge_buffer_mm
     usable_y = stock.width_mm - 2 * settings.edge_buffer_mm
     if usable_x <= 0 or usable_y <= 0:
@@ -120,6 +142,13 @@ def compute_nest(
     for comp in components:
         if comp.make_qty <= 0:
             raise ValueError(f"make_qty must be positive (component {comp.key!r})")
+        dims = (comp.flat_x_mm, comp.flat_y_mm, comp.flat_area_mm2, comp.contour_length_mm)
+        if not all(math.isfinite(v) for v in dims):
+            raise ValueError(f"component {comp.key!r} geometry must be finite")
+        if comp.flat_x_mm <= 0 or comp.flat_y_mm <= 0 or comp.flat_area_mm2 <= 0:
+            raise ValueError(f"component {comp.key!r} geometry must be positive")
+        if comp.contour_length_mm < 0:
+            raise ValueError(f"component {comp.key!r} contour must not be negative")
         # rotation-allowed fit: longer part side within the longer usable side,
         # shorter within the shorter
         fits = max(comp.flat_x_mm, comp.flat_y_mm) + pad <= max(usable_x, usable_y) and min(
@@ -129,7 +158,9 @@ def compute_nest(
             raise ValueError(f"component {comp.key!r} does not fit the usable sheet")
 
     # spec pseudocode: fractional net sheets from effective (buffer/kerf-padded) area
-    net = sum(_effective_area(c, settings) * c.make_qty for c in components) / usable_area
+    net = _snap_net(
+        sum(_effective_area(c, settings) * c.make_qty for c in components) / usable_area
+    )
 
     # ceil_or_frac via the drop threshold (module docstring pins the reading)
     fraction = net - math.floor(net)

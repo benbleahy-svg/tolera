@@ -1461,14 +1461,20 @@ class Nest(Base):
     __tablename__ = "nest"
     __table_args__ = (
         CheckConstraint("kind IN ('sheet', 'linear')", name="ck_nest_kind"),
+        # same-org pin (the quote_item precedent) — a nest can never reference
+        # another org's quote; MATCH SIMPLE skips the check while quote_id is NULL
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_nest_quote_org",
+            ondelete="CASCADE",
+        ),
         Index("ix_nest_org_quote", "org_id", "quote_id"),
     )
 
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = _org_fk()
-    quote_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="CASCADE")
-    )
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     #: Display name, sequential per quote ("Nest #1").
     label: Mapped[str | None] = mapped_column(Text)
     kind: Mapped[str | None] = mapped_column(Text)

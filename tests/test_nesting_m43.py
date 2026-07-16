@@ -257,15 +257,15 @@ def test_across_items_multi_break_rejected(app_client: TestClient, seeder: Seede
         quote_id = app_client.post("/api/quotes", json={}).json()["id"]
         material = _material_id(app_client)
         a = _sheet_line(app_client, quote_id, material, quantities=[10, 20])
-        b = _sheet_line(app_client, quote_id, material, quantities=[10])
+        b = _sheet_line(app_client, quote_id, material, quantities=[10, 20])
         res = _create_nest(
             app_client,
             quote_id,
             [a["component_id"], b["component_id"]],
-            [{**STOCK, "quantity": 10}],
+            [{**STOCK, "quantity": 10}, {**STOCK, "quantity": 20}],
         )
         assert res.status_code == 422
-        assert "quantity" in res.json()["message"].lower()
+        assert "single make quantity" in res.json()["message"].lower()
 
 
 def test_mismatched_material_rejected(app_client: TestClient, seeder: Seeder) -> None:
