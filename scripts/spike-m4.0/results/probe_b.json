@@ -1,0 +1,15 @@
+{
+  "thickness": 2.0,
+  "bends": [
+    {
+      "inner_radius": 3.0,
+      "outer_radius": 5.0,
+      "angle_deg": 90.0000000000059,
+      "line_length": 50.0
+    }
+  ],
+  "k_factor": 0.3690228147639203,
+  "bend_allowance": 5.871708344254434,
+  "developed_length": 95.87170834425443,
+  "ok": true
+}

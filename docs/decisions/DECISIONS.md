@@ -19,6 +19,23 @@
 
 ---
 
+## [2026-07-16] M4.0 — OCCT capability probe verdict: GO with OCCT; signature is topology-tolerant
+
+**Status:** RESOLVED (M4.0 spike output; the map is the artifact)
+**Question:** Can OCCT/pythonocc actually deliver the spec'd Core-4 catalogue (the make-or-break being a stable, topology-tolerant geometry signature), or must Spatial procurement start now?
+**Decision:** **GO with OCCT — no Core-4 family is Spatial-required.** Full per-family map in `GEOMETRY.md` (new, docs/subsystems/). Headlines: (1) **signature PASS** — the spec fingerprint (quantized volume/area/OBB-dims/type-histograms → SHA-256) is stable across re-export, rotation and split-vs-single-face **when preceded by `ShapeUpgrade_UnifySameDomain` canonicalization** (raw histograms fail the split-face pair, as expected); M4.1/M4.11 greenlit, Exact-Geometric bucket NOT degraded; chirality caveat noted (mirror parts collide — matches stay suggestions). (2) Dims/volume/area/weight exact vs analytic goldens; `Bnd_OBB` is approximate → M4.1 takes the tighter of OBB/AABB. (3) Sheet metal: thickness + bend parameters recovered exactly on the probe bracket, developed length composes to the golden via the spec k-factor; flat-leg measurement + complex unfold stay M4.2's flagged mini-spike. (4) Milling: hole/pocket recognition exact; runtime has **no OCCT support** (in-house heuristic + confidence, the designed honest ceiling). (5) Lathe: stock recommendation exact (v2.15 attributes-only scope). (6) Tube: 4/5 profiles classified, `rectangular_radiused` untested (`~`), non-tubes → `incompatible`. (7) `decompose_bom` via XCAF: products/occurrences/names + the AP214 material/density table all read back (M4.9b `cad_metadata` raw-facts capture feasible); the per-body material *link* segfaulted the OCP TreeNode API — deferred to M4.9b. (8) Server tessellation feasible (BRepMesh) — viewer-mesh entry resolved below. Synthetic fixtures per the [2026-07-12] OPEN's recommended default; **the map re-validates when real Fechner fixtures land** (that OPEN stays open).
+**Resolved:** 2026-07-16 (/block M4.0; probes in `scripts/spike-m4.0/`, results JSON committed)
+**Affects:** M4.1–M4.6 (build against the map), M4.9b, M4.11, M2.6/M2.11 (mesh decision), no Spatial procurement trigger.
+
+## [2026-07-16] OCCT Python binding = OCP (`cadquery-ocp`) — pythonocc-core has no pip path
+
+**Status:** RESOLVED (autonomous, doc-backed; flag for Benjamin's review)
+**Question:** DECISIONS [2026-06-14] and spec `#geometry-engine` assume "OCCT (pythonocc)", but `pythonocc-core` ships **only via conda-forge** (its PyPI name is a dead 0.16 stub) — a conda layer in the uv/pip/Docker toolchain (M0.0) just for geometry. Which binding carries v1?
+**Options considered:** (a) `cadquery-ocp` (OCP): official OCCT 7.9.3 pybind11 wheels, cp312, macOS arm64 + manylinux x86_64/aarch64, `pip/uv` native; (b) pythonocc-core via a micromamba layer in the worker image (heavier image, second package manager, dev-machine friction); (c) build pythonocc wheels ourselves (maintenance burden).
+**Decision:** **(a) OCP.** The [2026-06-14] decision's substance is OCCT-vs-Spatial, not the binding wheel; OCP is the same OCCT kernel with 1:1 C++ API naming, so a later move (pythonocc or Spatial) is mechanical and contained behind the unchanged `GeometryService` boundary. Verified by the M4.0 probes on macOS arm64 and linux/amd64 (`python:3.12-slim` + pip — the Hetzner path). Note: wheel pulls in vtk (~102 MB) → OCP belongs in the **Celery worker image only**, not the API image (M4.1).
+**Resolved:** 2026-07-16 (/block M4.0 grill Q2)
+**Affects:** M4.1+ (production dependency goes in then — the spike keeps it PEP 723-local), worker Dockerfile, GEOMETRY.md §0.
+
 ## [2026-07-16] OPEN: M3.8 — does a resolved review item suppress the same rule's next occurrence?
 
 **Status:** OPEN (M3.8 ships one-decision-per-rule-per-component; nothing is stuck)
@@ -931,12 +948,13 @@ The check runs through the org-pinned session, so it reads only the active org's
 
 ---
 
-## [2026-07-14] OPEN: Viewer-mesh provenance & face-ID correlation (M2.6 → M4)
-**Status:** OPEN
-**Question:** M2.6 renders a **client-side** occt-import-js tessellation (browser WASM parse of the stored STEP), while DECISIONS [2026-06] fixes GeometryService on **server-side** OCCT (pythonocc) and the spec (`#viewer3d-tools`) says the viewer "renders what GeometryService tessellates". M2.7 exposes a stable face/entity id that M2.11 **persists** with chat annotations, and M4 must paint interrogation features onto whatever mesh the viewer displays. If display mesh ≠ interrogation mesh, persisted face ids and feature→face maps don't correlate.
+## [2026-07-14] Viewer-mesh provenance & face-ID correlation (M2.6 → M4)
+**Status:** RESOLVED (autonomous, per the OPEN's own recommended default; flag for Benjamin's review)
+**Question:** (was OPEN 2026-07-14) M2.6 renders a **client-side** occt-import-js tessellation (browser WASM parse of the stored STEP), while DECISIONS [2026-06] fixes GeometryService on **server-side** OCCT and the spec (`#viewer3d-tools`) says the viewer "renders what GeometryService tessellates". M2.7 exposes a stable face/entity id that M2.11 **persists** with chat annotations, and M4 must paint interrogation features onto whatever mesh the viewer displays. If display mesh ≠ interrogation mesh, persisted face ids and feature→face maps don't correlate.
 **Options considered:** (a) keep the client-side display mesh permanently and define a correlation contract between the two tessellations (stable face ordering or geometric matching — both OCCT-kernel-based, which helps but is uncontractual in occt-import-js); (b) switch the viewer to fetch GeometryService's server tessellation in M4 and delete the client parse path.
-**Recommended default:** **(b)** — the sub-spec's "renders what GeometryService tessellates" already points there. M2.6 therefore keeps the mesh source behind an async `MeshProvider` seam (worker-based occt-import-js today, swappable without touching scene/UI code), and nothing occt-import-js-specific is persisted. **Until this is resolved, face/entity ids from the client tessellation are opaque and transient — valid only within one loaded viewer session; M2.7 must present them as such and M2.11 must NOT persist them** (or must gate persistence on this decision landing first). Decide at the M4 grill, before M2.11 face-bound annotations ship if M2.11 lands first.
-**Affects:** M2.6 (seam only), M2.7 (face/entity id shape), M2.11 (persisted annotation binding), M4 (tessellation endpoint + feature→face map).
+**Decision:** **(b)**, per the recommended default, decided at the M4 grill as this entry required. M4.0's probe (f) confirms feasibility: `BRepMesh_IncrementalMesh` yields per-face triangulations indexed by the same B-rep topology the interrogation walks, so feature→face-id overlays correlate by construction. The tessellation endpoint + the viewer's `MeshProvider` switch land with M4.1+ (the seam M2.6 built is the swap point; client parse path is deleted then). Until the switch ships, the M2.7/M2.11 guard holds unchanged: client face/entity ids stay opaque, transient, and unpersisted.
+**Resolved:** 2026-07-16 (/block M4.0, probe f; results in `scripts/spike-m4.0/results/probe_f.json`)
+**Affects:** M2.6 (seam only), M2.7 (face/entity id shape), M2.11 (persisted annotation binding), M4.1+ (tessellation endpoint + feature→face map + client switch).
 
 ## [2026-07-15] Lens correction storage — per-tenant only in v1; add-missing findings are born accepted (M3.2)
 

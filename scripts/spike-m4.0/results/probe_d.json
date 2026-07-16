@@ -1,0 +1,47 @@
+{
+  "tube-round-d30-t2-l200.step": {
+    "stock_type": "round",
+    "diameter": 30.0,
+    "thickness": 2.0,
+    "length": 200.0000002,
+    "want": "round",
+    "ok": true
+  },
+  "tube-rect-40x20-t2-l200.step": {
+    "stock_type": "rectangular",
+    "length": 200.0000002,
+    "edges": 8,
+    "want": "rectangular",
+    "ok": true
+  },
+  "profile-angle-40x40x4-l100.step": {
+    "stock_type": "angle",
+    "length": 100.00000019999999,
+    "edges": 6,
+    "want": "angle",
+    "ok": true
+  },
+  "profile-u-channel-40x20x3-l100.step": {
+    "stock_type": "u_channel",
+    "length": 100.00000019999999,
+    "edges": 8,
+    "want": "u_channel",
+    "ok": true
+  },
+  "cube-20mm.step": {
+    "stock_type": "incompatible",
+    "want": "incompatible",
+    "ok": true
+  },
+  "lathe": {
+    "turnable": true,
+    "stock_radius": 15.0,
+    "stock_length": 80.00000019999999,
+    "step_diameters": [
+      30.0,
+      20.0,
+      12.0
+    ],
+    "ok": true
+  }
+}

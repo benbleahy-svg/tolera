@@ -1,0 +1,11 @@
+{
+  "platform": "Linux-6.12.76-linuxkit-aarch64-with-glibc2.41",
+  "machine": "aarch64",
+  "hashes": {
+    "cube-20mm.step": "153cedd3e3c8a587e9d712882e68583ee81d48f8245fc3a39ab04af308eaa2e0",
+    "bracket-L-60x40x2-r3.step": "cf73f5e46128b7219fc06d6dad453ea2f9208e26a202b513692d617db5f643f8",
+    "shaft-stepped-d30-d20-d12.step": "bfbd56a6455c6fb65c28989c8f9afb1bd35e68aace6b33815be4086fcbe09c7e",
+    "block-milled-80x50x20.step": "8bc203ac058890b3aa5926173f1f057f5d0bf71a2f2cc41a37410d90b27abd73",
+    "tube-round-d30-t2-l200.step": "a955c62a194055f4395d78b2641bceca13bca0f06f891ef2749d915ee3a4d836"
+  }
+}

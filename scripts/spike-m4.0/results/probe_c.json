@@ -1,0 +1,35 @@
+{
+  "holes": [
+    {
+      "diameter": 6.0,
+      "length": 10.0,
+      "axis": "Z",
+      "through": false
+    },
+    {
+      "diameter": 8.0,
+      "length": 20.0,
+      "axis": "Z",
+      "through": true
+    },
+    {
+      "diameter": 8.0,
+      "length": 20.0,
+      "axis": "Z",
+      "through": true
+    }
+  ],
+  "pocket_floors": [
+    {
+      "z": 12.0,
+      "depth": 8.0,
+      "area": 799.9999999999999
+    }
+  ],
+  "directions": [
+    "Z"
+  ],
+  "removal_volume": 8693.363957120644,
+  "runtime_estimation": "no OCCT support \u2014 in-house heuristic (honest ceiling)",
+  "ok": true
+}
