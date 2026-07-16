@@ -33,10 +33,22 @@
 
 ---
 
-## [2026-07-16] OPEN: M3.7/M3.8 — ReDoS exposure from org-authored rule regexes over customer print text
+## [2026-07-16] RESOLVED: M3.7/M3.8 — ReDoS exposure from org-authored rule regexes over customer print text
 
-**Status:** OPEN — **BLOCKING M3.8** (2026-07-16). M3.8 is the block that wires the evaluator to the post-AI trigger, so it cannot proceed without this answer; `BLOCKED.md` is at the repo root and the M3.8 session ended here.
-**Reproduced (2026-07-16, M3.8 session, this machine, through the shipped `app.rules_eval._compare_string`):** pattern `^(a+)+$` over a non-matching `'a'*n + '!'` — 22 chars **0.12 s**, 24 chars **0.48 s**, 26 chars **1.94 s**, 28 chars **7.79 s**. Confirms the doubling-per-character blow-up on the real code path; the `regex` module is **not** currently a dependency (`pyproject.toml`), so option (a) means adding one (or a subprocess).
+**Status:** **RESOLVED 2026-07-16 — option (a), "bound the match" (Benjamin).** Shipped; M3.8 is unblocked.
+**Decision:** Execute rule patterns through the **`regex` module under an enforced `timeout=`**, not stdlib `re` (`app.rules_eval._search_bounded`, budget `REGEX_TIMEOUT_SECONDS = 0.5`). A match that exceeds the budget **fails closed** — the rule does not fire — and logs the offending pattern with the text *length* only, never the customer's print text (CLAUDE.md §5). The subprocess variant of (a) was not taken: a process per match is a per-evaluation cost and a new failure mode on every Celery rule run, where the `regex` timeout is enforced inside the engine for one dependency.
+
+Option **(b)** (heuristic nested-quantifier reject at import) was **not** taken — (a) alone closes the hole, and (b) is heuristic, incomplete, and would reject legitimate patterns. It remains available as defence-in-depth if authored patterns ever prove troublesome in practice.
+
+**Two measured findings that shaped the fix** (this machine, 2026-07-16):
+1. **The exposure was real on the shipped path.** Through `app.rules_eval._compare_string` with stdlib `re`, `^(a+)+$` over a non-matching `'a'*n + '!'`: 22 chars **0.12 s**, 24 chars **0.48 s**, 26 chars **1.94 s**, 28 chars **7.79 s** — the doubling-per-character blow-up, confirming the entry's original numbers.
+2. **`regex` is a bigger win than "just a timeout".** It *optimizes away* most classic catastrophic shapes outright — `^(a+)+$`, `(a+)+b`, `(x+x+)+y`, and notably `(\d+[ -]?)+` (the "easy to author by accident" pattern this entry was written about) all return in **< 1 ms** at 4096 chars. The timeout is the backstop for the shapes it cannot optimize (e.g. `^(a|a)+$`, which does still backtrack and is cut off exactly on budget). Both behaviours are pinned by regression tests in `tests/test_rules_m37.py::TestRegexIsBounded`.
+
+**Consequences:**
+- `regex>=2024.11.6` is now a runtime dependency (`pyproject.toml`), commented so it is not "cleaned up" back to `re` — that would silently turn the timeout into a no-op.
+- **M3.6 import validation now compiles with `regex`, not `re`** (`rules_schema.Query._value_matches_filter_type`): validate with the engine that executes, or a set imports clean and never fires.
+- An uncompilable pattern also fails closed at evaluation (belt-and-braces for rows predating the validation).
+- Audited 2026-07-16: the rules engine was the **only** place executing an author-supplied pattern. Every other `re.*` call site in `app/` uses a fixed developer-authored pattern, and `email_parts.py` wraps interpolated user data in `re.escape()`.
 **Question:** A rule's `regex` operator runs an **org-authored** pattern against **customer-supplied** print text (`app.rules_eval._compare_string`). M3.6's import validates only that the pattern *compiles* (`rules_schema.Query._value_matches_filter_type`) — there is no timeout, complexity bound, or text-length cap. Measured against this code, `^(a+)+$` over a 24-char non-matching string takes **0.47 s**, 27 chars **3.8 s**, 30 chars **30.9 s** (doubling per character). The threat needs no malicious admin: a shop writes an innocent-looking backtracking pattern (`(\d+[ -]?)+` is easy to author by accident), then a **customer** uploads the print whose text layer triggers it — hanging a Celery worker and killing rule evaluation for that quote. CLAUDE.md §5's timeout-bounded Celery tasks cap the blast radius but still lose the worker and every review item for the quote.
 **Options considered:**
 - **(a) Bound the match** — run under a time/step budget. Python's `re` has no timeout, and **a thread cannot supply one**: the SRE engine runs in C holding the GIL and never checks for interrupts, so a worker-thread timeout fires while the match keeps burning CPU (and blocks other threads meanwhile) — `signal.alarm` and thread-based timeout decorators fail the same way (CPython #67878, bpo-24555). The two mitigations that actually stop backtracking: the **`regex` module** (enforced `timeout=`) or a **killable subprocess**. New dependency or new failure mode either way.

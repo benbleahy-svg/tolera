@@ -26,11 +26,17 @@ dependencies = [
     # M3.5 — two-way email threading
     "httpx>=0.28.0",  # Gmail/Graph REST calls (was dev-only via TestClient)
     "cryptography>=43.0.0",  # AES-256-GCM credentials-at-rest (imported directly)
+    # M3.7/M3.8 — ReDoS containment (DECISIONS.md 2026-07-16, option (a)).
+    # stdlib `re` CANNOT be bounded: SRE runs in C holding the GIL and never
+    # checks for interrupts, so no thread/signal timeout can stop a backtracking
+    # match. `regex` enforces `timeout=` inside the engine. Do not swap back.
+    "regex>=2024.11.6",
 ]
 
 [dependency-groups]
 dev = [
     "mypy>=1.13.0",
+    "types-regex>=2024.11.6",  # stubs for the ReDoS-bounded rule-regex engine
     "pre-commit>=4.0.0",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",

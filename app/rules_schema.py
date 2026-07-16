@@ -24,10 +24,11 @@ the unit (RULES-ENGINE-SPEC §2/§7).
 from __future__ import annotations
 
 import json
-import re
+import re  # internal, developer-authored patterns only (INTERROGATION_PATH)
 import uuid as uuid_mod
 from typing import Annotated, Literal
 
+import regex  # the engine that executes org-authored rule patterns
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -133,8 +134,12 @@ class Query(BaseModel):
             if not isinstance(self.value, str):
                 raise ValueError("a regex query's value must be a pattern string")
             try:
-                re.compile(self.value)
-            except re.error as exc:
+                # Validate with the engine that will EXECUTE this pattern
+                # (``app.rules_eval._search_bounded``), not stdlib ``re``:
+                # validating with a different engine than the one that runs it
+                # is how a set imports clean and then never fires.
+                regex.compile(self.value)
+            except regex.error as exc:
                 raise ValueError(f"invalid regex pattern: {exc}") from exc
         if self.operator not in FILTER_TYPE_OPERATORS[self.filter_type]:
             raise ValueError(f"a {self.filter_type} filter does not support {self.operator}")

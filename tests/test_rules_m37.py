@@ -12,13 +12,23 @@ golden: each is asserted against a matching and a non-matching component.
 from __future__ import annotations
 
 import json
+import logging
+import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app.rules_eval import _ISO_GPS_SYMBOLS, EvaluationContext, evaluate_rule, evaluate_rules
+from app.logging import JsonFormatter
+from app.rules_eval import (
+    _ISO_GPS_SYMBOLS,
+    REGEX_TIMEOUT_SECONDS,
+    EvaluationContext,
+    _compare_string,
+    evaluate_rule,
+    evaluate_rules,
+)
 from app.rules_schema import RuleSchema, parse_rules_json
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "rules" / "worked-rules.json"
@@ -834,3 +844,72 @@ def test_fixture_is_the_nine_worked_rules(worked_rules: list[RuleSchema]) -> Non
     """Guard the golden: the evaluator's contract is the §5 set."""
     assert len(worked_rules) == 9
     assert json.loads(FIXTURE.read_text(encoding="utf-8"))[0]["signals"], "fixture carries AST"
+
+
+# --------------------------------------------------------------------------- #
+# ReDoS containment (DECISIONS.md 2026-07-16, option (a) — bound the match)
+# --------------------------------------------------------------------------- #
+class TestRegexIsBounded:
+    """A rule's ``regex`` runs an ORG-authored pattern over CUSTOMER-supplied
+    print text, so an accidental backtracking pattern must not hang a worker.
+
+    ``^(a|a)+$`` is the probe deliberately: it is one of the few classic
+    catastrophic shapes the ``regex`` engine does *not* optimize away, so it
+    proves the timeout is actually enforced rather than merely configured.
+    """
+
+    def test_catastrophic_pattern_fails_closed_within_the_budget(self) -> None:
+        started = time.perf_counter()
+        assert _compare_string("a" * 4096 + "!", "regex", "^(a|a)+$") is False, (
+            "a pattern that cannot be decided within the budget must not fire the rule"
+        )
+        elapsed = time.perf_counter() - started
+        assert elapsed < REGEX_TIMEOUT_SECONDS * 4, (
+            f"the match ran {elapsed:.2f}s — the timeout is not being enforced"
+        )
+
+    def test_the_decisions_entry_probe_is_no_longer_exponential(self) -> None:
+        """The `^(a+)+$` / 24-chars case measured in the DECISIONS entry (0.47 s
+        under stdlib ``re``) is optimized away by the ``regex`` engine."""
+        started = time.perf_counter()
+        assert _compare_string("a" * 64 + "!", "regex", "^(a+)+$") is False
+        assert time.perf_counter() - started < 1.0
+
+    def test_an_accidentally_authored_pattern_is_survivable(self) -> None:
+        """`(\\d+[ -]?)+` — the "easy to author by accident" shape the entry
+        names — over a long non-matching run."""
+        started = time.perf_counter()
+        assert _compare_string("1" * 4096 + "x", "regex", r"^(\d+[ -]?)+$") is False
+        assert time.perf_counter() - started < 1.0
+
+    def test_a_timed_out_match_is_logged_without_the_print_text(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """CLAUDE.md §5: structured JSON logs that never carry customer print
+        contents. The pattern is org config and names the culprit; the text is
+        the customer's. Asserted against the **rendered line** — the payload
+        that actually ships is the thing that must not leak."""
+        text = "a" * 4096 + "GEHEIM-KUNDENTEXT!"
+        with caplog.at_level(logging.WARNING, logger="app.rules_eval"):
+            assert _compare_string(text, "regex", "^(a|a)+$") is False
+        assert caplog.records, "a timed-out rule regex must be observable"
+
+        emitted = JsonFormatter().format(caplog.records[-1])
+        payload = json.loads(emitted)
+        assert payload["rule_regex"] == "^(a|a)+$", "the culprit pattern must be findable"
+        assert payload["text_length"] == len(text)
+        assert "GEHEIM-KUNDENTEXT" not in emitted, "customer print text must never be logged"
+        assert "aaaa" not in emitted
+
+
+class TestRegexSemanticsSurviveTheEngineSwap:
+    """The M3.7 contract must be unchanged by moving ``re`` → ``regex``."""
+
+    def test_multiline_anchors_still_bind_per_line(self) -> None:
+        assert _compare_string("ISO 2768-m\nSPX-1234-A\n", "regex", "^SPX-[A-Za-z0-9-]+$") is True
+        assert _compare_string("Nach SPX-1234-A fertigen", "regex", "^SPX-[A-Za-z0-9-]+$") is False
+
+    def test_an_uncompilable_pattern_fails_closed(self) -> None:
+        """M3.6 validates patterns at import, but a rule row predating this
+        change (or any engine disagreement) must not raise mid-evaluation."""
+        assert _compare_string("anything", "regex", "(unclosed") is False

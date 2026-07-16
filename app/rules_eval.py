@@ -36,14 +36,38 @@ pasted PP rule set still evaluates correctly.
 
 from __future__ import annotations
 
+import logging
 import math
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+import regex
+
 from .rules_schema import CONTROL_FRAME_PATHS, Group, Query, RuleSchema, Signal
+
+logger = logging.getLogger(__name__)
+
+#: Per-match wall-clock budget for a rule's ``regex`` operator (DECISIONS.md
+#: 2026-07-16 — ReDoS, option (a) "bound the match", decided 2026-07-16).
+#:
+#: A rule's pattern is authored by the **org** but runs over **customer**-supplied
+#: print text, so an accidental backtracking pattern is customer-triggerable: a
+#: shop writes ``(\d+[ -]?)+``, a customer uploads the print whose text layer
+#: detonates it, and the Celery worker hangs — taking every review item for that
+#: quote with it.
+#:
+#: This bound is enforceable only because we use the ``regex`` module: stdlib
+#: ``re`` runs in C holding the GIL and never checks for interrupts, so neither
+#: ``signal.alarm`` nor a worker thread can stop a match in progress (CPython
+#: #67878, bpo-24555). ``regex`` checks the budget inside the engine. **Do not
+#: swap this back to ``re``** — the timeout below would silently become a no-op.
+#:
+#: 0.5 s is ~3 orders of magnitude above a legitimate pattern over a print's
+#: text layer (sub-millisecond, measured), and the aggregate stays bounded
+#: because a component carries a handful of text documents, not thousands.
+REGEX_TIMEOUT_SECONDS = 0.5
 
 #: Exact by definition (ISO 2768 / international inch).
 MM_PER_INCH = 25.4
@@ -241,13 +265,51 @@ def _compare_string(actual: str, operator: str, expected: Any) -> bool:
         # to the whole document those anchors would only ever match a file whose
         # entire text is one spec code — the rule would be dead on arrival. Per
         # line, it means what it reads as: a line that *is* a spec code.
-        return re.search(str(expected), actual, re.MULTILINE) is not None
+        return _search_bounded(str(expected), actual)
     # `equals` admits a keyword list too (the schema allows a list value on any
     # string filter). Comparing str to list would silently never match, so read
     # a list as any-of — the only sensible reading of "equals one of these".
     if isinstance(expected, list):
         return any(actual == str(k) for k in expected)
     return bool(actual == expected)
+
+
+def _search_bounded(pattern: str, text: str) -> bool:
+    """``pattern`` against ``text`` under :data:`REGEX_TIMEOUT_SECONDS`.
+
+    **Fails closed**: a pattern that cannot be decided within the budget — or
+    that this engine will not compile — returns *no match*, so the rule simply
+    does not fire. The alternative (raising) would let one bad pattern destroy
+    every review item for the quote, which is the outage we are containing.
+
+    The timeout is logged: a rule that silently never fires is a support
+    mystery, and the pattern is the only way its author can find the culprit.
+    ``pattern`` is org-authored configuration and safe to log; ``text`` is the
+    customer's print content and is **never** logged (CLAUDE.md §5) — only its
+    length, which is what makes the report actionable.
+    """
+    try:
+        found = regex.search(pattern, text, flags=regex.MULTILINE, timeout=REGEX_TIMEOUT_SECONDS)
+        return found is not None
+    except TimeoutError:
+        logger.warning(
+            "rule regex exceeded its time budget and was abandoned (rule did not fire)",
+            extra={
+                "rule_regex": pattern,
+                "timeout_seconds": REGEX_TIMEOUT_SECONDS,
+                "text_length": len(text),
+            },
+        )
+        return False
+    except regex.error:
+        # M3.6 validates patterns at import, so this is the belt-and-braces
+        # path: a rule row written before that validation, or any `re`/`regex`
+        # disagreement. Never raise mid-evaluation.
+        logger.warning(
+            "rule regex did not compile and was skipped (rule did not fire)",
+            extra={"rule_regex": pattern},
+        )
+        return False
 
 
 # --------------------------------------------------------------------------- #
