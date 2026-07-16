@@ -24,13 +24,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The tier-1 list mirrors CLAUDE.md §6.1's "expensive to reverse" set and
+      # §9's promise that the frontier model reviews every money/pricing/schema/
+      # auth/tax diff — money, schema and rls were missing, so exactly those
+      # diffs were being routed to the routine model. DACH-sensitive paths
+      # (MwSt/USt, DATEV, DSGVO, EU dual-use) are tier-1 too, per DACH-DELTA-LAYER.
+      #
+      # base_ref goes through env, never a ${{ }} interpolation inside the shell:
+      # a branch name is attacker-controlled on a fork PR and would otherwise be
+      # pasted straight into the script (injection).
       - name: Pick review model by risk of the diff
         id: risk
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch origin "${{ github.base_ref }}" --depth=50 || true
-          CHANGED="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD || true)"
+          git fetch origin "$BASE_REF" --depth=50 || true
+          CHANGED="$(git diff --name-only "origin/$BASE_REF"...HEAD || true)"
           echo "$CHANGED"
-          if echo "$CHANGED" | grep -qiE '(alembic/|migrations/|models/|pricing/|kalk|auth|tenanc|tax|billing|lens)'; then
+          # NB: no bare `ust` — it matches "custom" (app/custom_tables.py,
+          # CustomTablesPage.tsx), which would report "tier-1" for UI diffs.
+          # USt is covered by `umsatzsteuer` and `mwst`.
+          if echo "$CHANGED" | grep -qiE '(alembic/|migrations/|models/|pricing/|kalk|money|schema|tenanc|rls|auth|tax|mwst|umsatzsteuer|datev|dsgvo|gdpr|dual[-_]?use|billing|lens)'; then
             echo "model=claude-fable-5" >> "$GITHUB_OUTPUT"
             echo "Tier-1 path touched → reviewing with Fable 5."
           else
