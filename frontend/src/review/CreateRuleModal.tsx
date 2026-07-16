@@ -36,6 +36,20 @@ export interface SelectedItem {
   units: 'mm' | 'deg';
 }
 
+/**
+ * The pre-seed from an AI Rule Auto-Suggestion (M3.10). The AI never creates
+ * the rule — it only fills this dialog in; the human still clicks CREATE RULE.
+ * The condition is a keyword draft (the material class) on the text signal; the
+ * operation is pre-loaded as an ADD_OPERATION resolution. The human refines all
+ * of it before saving.
+ */
+export interface RuleSuggestionSeed {
+  name: string;
+  description: string;
+  keyword: string;
+  operationLabel: string;
+}
+
 export interface NewRule {
   uuid: string;
   name: string;
@@ -57,6 +71,8 @@ interface Props {
   members?: Member[];
   /** Set when opened from a callout popover; null when opened from scratch. */
   selectedItem?: SelectedItem | null;
+  /** Set when opened from an M3.10 Rule Auto-Suggestion; null otherwise. */
+  suggestion?: RuleSuggestionSeed | null;
   onCreate: (rule: NewRule) => Promise<void> | void;
   onClose: () => void;
 }
@@ -75,23 +91,27 @@ export function CreateRuleModal({
   documentPaths,
   members = [],
   selectedItem = null,
+  suggestion = null,
   onCreate,
   onClose,
 }: Props) {
   const { t } = useTranslation();
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const [name, setName] = useState(suggestion?.name ?? '');
+  const [description, setDescription] = useState(suggestion?.description ?? '');
   const [documentPath, setDocumentPath] = useState(
-    selectedItem?.document_path ?? documentPaths[0] ?? 'text',
+    selectedItem?.document_path ?? (suggestion ? 'text' : documentPaths[0] ?? 'text'),
   );
   const [fieldName, setFieldName] = useState(selectedItem?.field_name ?? 'raw_text');
   const [comparison, setComparison] = useState<Comparison>('lessThanOrEqual');
-  const [value, setValue] = useState(selectedItem ? String(selectedItem.value) : '');
+  const [value, setValue] = useState(
+    selectedItem ? String(selectedItem.value) : (suggestion?.keyword ?? ''),
+  );
   const [units, setUnits] = useState<'mm' | 'deg'>(selectedItem?.units ?? 'mm');
   const [seeded, setSeeded] = useState(selectedItem);
+  // A suggestion pre-loads the operation as an ADD_OPERATION resolution draft.
   const [resolutions, setResolutions] = useState<
     { type: ResolutionType; custom_label: string | null }[]
-  >([]);
+  >(suggestion ? [{ type: 'ADD_OPERATION', custom_label: suggestion.operationLabel }] : []);
   const [assigneeId, setAssigneeId] = useState<string>('');
   const [saving, setSaving] = useState(false);
   // Minted once per dialog, not per render: crypto.randomUUID() is impure, so

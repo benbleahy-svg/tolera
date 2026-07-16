@@ -206,3 +206,24 @@ tr.est-missing-rate td {
 .triage-compliance dt, .triage-compliance dd { color: var(--danger); font-weight: 600; }
 .triage-compliance dd span { display: block; }
 .triage-ai-off { color: var(--t2); font-style: italic; }
+
+/* M3.10 — Rule Auto-Suggestion: non-blocking chips (dashboard strip + the
+   operation-drawer chip). AI-Governor purple accent (--color-ai-signal), muted
+   so it reads as a suggestion, never a blocker. */
+.dashboard-suggested-actions { margin: 0.5rem 0 1rem; }
+.suggested-actions { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.suggested-action-chip,
+.rule-suggest-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--color-ai-signal, #7c3aed);
+  border-left: 3px solid var(--color-ai-signal, #7c3aed);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  background: color-mix(in srgb, var(--color-ai-signal, #7c3aed) 8%, transparent);
+}
+.suggested-action-buttons,
+.rule-suggest-chip-buttons { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.rule-suggest-chip { margin: 0.5rem 0; }

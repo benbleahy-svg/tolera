@@ -516,7 +516,11 @@ async def _apply_effect(
                     message="Die Regel benennt eine Operation, die es nicht mehr gibt.",
                     status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 )
-            await attach_operation_from_def(session, org_id, component, op_def)
+            # Rule-added, not estimator-added: excluded from the M3.10
+            # rule-suggestion pattern detector (spec ``#ai-rule-suggest``).
+            await attach_operation_from_def(
+                session, org_id, component, op_def, added_manually=False
+            )
             present.add(op_def_id)
             added = True
         if added:

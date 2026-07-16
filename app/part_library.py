@@ -478,6 +478,10 @@ async def import_router(
         copied = Operation(
             org_id=target.org_id,
             component_id=target.id,
+            # A wholesale router import is not the estimator hand-adding each op,
+            # so it must not feed the M3.10 rule-suggestion pattern detector
+            # (spec ``#ai-rule-suggest``: "added directly by the estimator").
+            added_manually=False,
             # JSONB dict is copied, never shared, so later edits don't alias.
             variable_overrides=dict(src.variable_overrides),
             **{field: getattr(src, field) for field in _OPERATION_COPY_FIELDS},

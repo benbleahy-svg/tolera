@@ -1367,6 +1367,15 @@ class Operation(Base):
     is_from_factory: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # M3.10 (Rule Auto-Suggestion): TRUE when an estimator added this operation
+    # directly (the manual-add path in ``app.operations``); FALSE when a rule
+    # resolution added it (ADD_OPERATION, ``app.review_items``). Only manual adds
+    # feed the "tribal knowledge that should be a rule" pattern detector, so this
+    # flag is the aggregate's filter (spec ``#ai-rule-suggest``). Defaults TRUE:
+    # pre-M3.10 rows were all estimator/manual adds (no auto-add path existed).
+    added_manually: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     # Kalk (M1.9): formula snapshot copied from the def at attach (E4-d freeze);
     # variable_overrides = {name: value} / {name: {"<qty>": value}} — the
@@ -2250,6 +2259,64 @@ class OrgAiSettings(Base):
     benchmarking_opt_out: Mapped[bool] = _ai_flag()
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+class SuggestedActionKind(enum.StrEnum):
+    """The kind of a :class:`SuggestedAction` (stored as text, mirroring
+    ``Notification.kind``). M3.10 introduces ``rule_suggestion``; later AI
+    features (requote diff, quote assembly) can add their own kinds."""
+
+    rule_suggestion = "rule_suggestion"
+
+
+class SuggestedActionStatus(enum.StrEnum):
+    """Lifecycle of a :class:`SuggestedAction`. ``open`` surfaces on the drawer
+    chip + dashboard strip; ``dismissed`` is hidden and never re-surfaced (so a
+    junior estimator who waved it away isn't re-nagged — spec ``#ai-settings``
+    rationale for the whole feature being toggleable); ``acted`` records that a
+    rule was authored from it."""
+
+    open = "open"
+    dismissed = "dismissed"
+    acted = "acted"
+
+
+class SuggestedAction(Base):
+    """A non-blocking, human-gated AI suggestion surfaced on the dashboard
+    suggested-actions strip and (for rule suggestions) the operation drawer chip
+    (spec ``#ai-rule-suggest`` build-note: "surfaces suggestions via the existing
+    ``SuggestedAction`` mechanism").
+
+    M3.10 is the first consumer: when the same operation has been *manually*
+    added to 3+ parts in the same process family + material class in the last 90
+    days, a ``rule_suggestion`` row is upserted. ``payload`` carries the
+    deterministic pre-seed for the Create Rule dialog plus the (optionally
+    Claude-written) human-readable sentence. **The AI never creates a rule** — a
+    suggestion only pre-seeds the dialog; the human clicks CREATE RULE.
+
+    ``dedup_key`` makes the upsert idempotent across the nightly scan and the
+    on-add trigger: one open row per distinct pattern per org. ``UNIQUE (org_id,
+    dedup_key)`` enforces it; RLS keys on ``org_id``."""
+
+    __tablename__ = "suggested_action"
+    __table_args__ = (UniqueConstraint("org_id", "dedup_key", name="uq_suggested_action_dedup"),)
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'open'"))
+    #: Stable identity of the underlying pattern, e.g.
+    #: ``rule_suggestion:<op_def_id>:<family>:<material_class_id>`` — dedupes the
+    #: on-add trigger against the nightly scan.
+    dedup_key: Mapped[str] = mapped_column(String, nullable=False)
+    #: The operation the pattern is about (nullable; a non-rule kind may omit it).
+    operation_def_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # --------------------------------------------------------------------------- #

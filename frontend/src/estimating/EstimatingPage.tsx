@@ -8,12 +8,20 @@
  * with later blocks; this page is the Materials & Operations slice.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
+import { useConfigureApi } from '../configure/api';
 import { PartMatchesChip } from '../parts/MatchingParts';
+import {
+  RULE_SEED_DOCUMENT_PATHS,
+  type RuleSuggestionPayload,
+  suggestionSeed,
+  useRuleSuggestApi,
+} from '../review/api';
+import { CreateRuleModal, type NewRule } from '../review/CreateRuleModal';
 import { useHasPermission } from '../session/session';
 import { AddOnsSection } from './AddOnsSection';
 import { CommunicationsSection } from './CommunicationsSection';
@@ -43,6 +51,8 @@ export function EstimatingPage() {
   const { quoteId } = useParams<{ quoteId: string }>();
   const { t, i18n } = useTranslation();
   const api = useEstimatingApi();
+  const suggestApi = useRuleSuggestApi();
+  const configureApi = useConfigureApi();
   const canEdit = useHasPermission('quote_edit');
 
   const [quote, setQuote] = useState<QuoteSummary | null>(null);
@@ -54,6 +64,8 @@ export function EstimatingPage() {
   const [material, setMaterial] = useState<MaterialSearchHit | null>(null);
   const [drawerOpId, setDrawerOpId] = useState<string | null>(null);
   const [changingProcess, setChangingProcess] = useState(false);
+  const [ruleSuggestion, setRuleSuggestion] = useState<RuleSuggestionPayload | null>(null);
+  const [seedingRule, setSeedingRule] = useState(false);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkPrefill, setBulkPrefill] = useState<BulkCreatePrefill | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,8 +96,16 @@ export function EstimatingPage() {
     if (quoteId) api.getQuoteTotals(quoteId).then(setTotals).catch(fail);
   }, [api, componentId, quoteId, fail]);
 
+  // Guards the async rule-suggestion probe against a line-item switch (M3.10):
+  // a probe fired for component A must not paint A's chip after the user moved
+  // to component B.
+  const activeComponentRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!componentId) return;
+    // Switching line items: drop any chip from the previous component.
+    activeComponentRef.current = componentId;
+    setRuleSuggestion(null);
     api.getCosting(componentId).then(setCosting).catch(fail);
     loadPricing();
   }, [api, componentId, fail, loadPricing]);
@@ -114,6 +134,32 @@ export function EstimatingPage() {
         .catch(fail);
     },
     [fail, loadPricing],
+  );
+
+  // M3.10 — after a *manual* operation add, probe for a rule-suggestion pattern
+  // (non-blocking; a miss or an error just leaves the chip hidden). The chip is
+  // transient (this render), separate from the persisted dashboard strip.
+  const applyAdd = useCallback(
+    (next: Promise<ComponentCosting>) => {
+      setError(null);
+      next
+        .then((costingNext) => {
+          setCosting(costingNext);
+          loadPricing();
+          const probed = componentId;
+          if (probed) {
+            suggestApi
+              .getRuleSuggestion(probed)
+              .then((r) => {
+                // Ignore a stale probe if the user has since switched line items.
+                if (activeComponentRef.current === probed) setRuleSuggestion(r.suggestion);
+              })
+              .catch(() => undefined);
+          }
+        })
+        .catch(fail);
+    },
+    [componentId, loadPricing, fail, suggestApi],
   );
 
   // A pricing-side mutation moves prices AND the costing view's custom rows.
@@ -311,6 +357,46 @@ export function EstimatingPage() {
         </p>
       )}
 
+      {ruleSuggestion && (
+        <div className="rule-suggest-chip" role="status" data-testid="rule-suggest-chip">
+          <span>{ruleSuggestion.sentence}</span>
+          <div className="rule-suggest-chip-buttons">
+            <button type="button" onClick={() => setSeedingRule(true)}>
+              {t('rule_suggest.create_rule')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // Dismiss the *persisted* suggestion so it doesn't re-nag on the
+                // dashboard strip, then hide the chip.
+                const id = ruleSuggestion.suggested_action_id;
+                if (id) suggestApi.dismissSuggestedAction(id).catch(() => undefined);
+                setRuleSuggestion(null);
+              }}
+            >
+              {t('rule_suggest.dismiss')}
+            </button>
+          </div>
+        </div>
+      )}
+      {seedingRule && ruleSuggestion && (
+        <CreateRuleModal
+          documentPaths={RULE_SEED_DOCUMENT_PATHS}
+          suggestion={suggestionSeed(ruleSuggestion)}
+          onCreate={async (rule: NewRule) => {
+            // No rule until this call — the human clicked CREATE RULE.
+            await configureApi.importRules(JSON.stringify([rule]));
+            // Consume the persisted suggestion so the dashboard strip can't
+            // author a duplicate rule from the same pattern.
+            const id = ruleSuggestion.suggested_action_id;
+            if (id) await suggestApi.dismissSuggestedAction(id).catch(() => undefined);
+            setSeedingRule(false);
+            setRuleSuggestion(null);
+          }}
+          onClose={() => setSeedingRule(false)}
+        />
+      )}
+
       {costing && (
         <>
           <OperationsSection
@@ -324,11 +410,11 @@ export function EstimatingPage() {
             formatMoney={formatMoney}
             searchDefs={(q) => api.listOperationDefs(q)}
             onAddFromDef={(defId) =>
-              componentId && apply(api.addOperation(componentId, { operation_def_id: defId }))
+              componentId && applyAdd(api.addOperation(componentId, { operation_def_id: defId }))
             }
             onAddInline={(name) =>
               componentId &&
-              apply(api.addOperation(componentId, { name, category: 'material' }))
+              applyAdd(api.addOperation(componentId, { name, category: 'material' }))
             }
             onOpen={(op) => setDrawerOpId(op.id)}
             onDuplicate={(id) => apply(api.duplicateOperation(id))}
@@ -354,10 +440,10 @@ export function EstimatingPage() {
             formatMoney={formatMoney}
             searchDefs={(q) => api.listOperationDefs(q)}
             onAddFromDef={(defId) =>
-              componentId && apply(api.addOperation(componentId, { operation_def_id: defId }))
+              componentId && applyAdd(api.addOperation(componentId, { operation_def_id: defId }))
             }
             onAddInline={(name) =>
-              componentId && apply(api.addOperation(componentId, { name }))
+              componentId && applyAdd(api.addOperation(componentId, { name }))
             }
             onOpen={(op) => setDrawerOpId(op.id)}
             onDuplicate={(id) => apply(api.duplicateOperation(id))}

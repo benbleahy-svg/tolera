@@ -660,6 +660,12 @@
     "notif_mention": "Sie wurden in einer Diskussion erwähnt",
     "notif_task_assigned": "Ihnen wurde eine Aufgabe zugewiesen"
   },
+  "rule_suggest": {
+    "heading": "Regel-Vorschläge",
+    "create_rule": "Regel erstellen",
+    "dismiss": "Ablehnen",
+    "load_error": "Regel-Vorschläge konnten nicht geladen werden."
+  },
   "triage": {
     "title": "Triage — Angebot #{{number}}",
     "unavailable": "Triage-Übersicht nicht verfügbar",
