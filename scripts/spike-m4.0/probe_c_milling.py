@@ -93,6 +93,9 @@ def main() -> int:
         and abs(blind[0]["length"] - golden["blind_holes"]["depth"]) < 1e-6
         and len(pocket_floors) == 1
         and abs(pocket_floors[0]["depth"] - golden["pocket"]["depth"]) < 1e-6
+        and sorted(directions) == golden["machine_directions_expected"]
+        and abs(removal - (80 * 50 * 20 - golden["volume"])) / (80 * 50 * 20 - golden["volume"])
+        < 1e-6
     )
     print(f"\nPROBE C {'PASS' if ok else 'FAIL'}")
     out = Path("scripts/spike-m4.0/results")

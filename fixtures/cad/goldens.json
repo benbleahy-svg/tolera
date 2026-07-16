@@ -1,7 +1,28 @@
 {
+  "cube-20mm.step": {
+    "family": "milling",
+    "volume": 8000.0,
+    "area": 2400.0,
+    "bbox": [
+      20,
+      20,
+      20
+    ]
+  },
+  "plate-hole-20x20x10-d8.step": {
+    "family": "milling",
+    "volume": 3497.345175425633,
+    "area": 1750.79644737231,
+    "bbox": [
+      20,
+      20,
+      10
+    ]
+  },
   "bracket-L-60x40x2-r3.step": {
     "family": "sheet_metal",
     "volume": 9628.31853071796,
+    "area": 10213.451271946678,
     "bbox": [
       60,
       50,
@@ -22,6 +43,7 @@
   "block-milled-80x50x20.step": {
     "family": "milling",
     "volume": 71306.63736287945,
+    "area": 15152.743278534375,
     "bbox": [
       80,
       50,
@@ -44,12 +66,13 @@
       "depth": 8.0
     },
     "machine_directions_expected": [
-      "+Z"
+      "Z"
     ]
   },
   "shaft-stepped-d30-d20-d12.step": {
     "family": "lathe",
     "volume": 32892.47508308513,
+    "area": 6880.087911361647,
     "bbox": [
       30,
       30,
@@ -67,6 +90,7 @@
     "family": "tube_laser",
     "stock_type": "round",
     "volume": 35185.83772020568,
+    "area": 35537.69609740774,
     "thickness": 2.0,
     "diameter": 30.0,
     "length": 200.0
@@ -75,6 +99,7 @@
     "family": "tube_laser",
     "stock_type": "rectangular",
     "volume": 44800,
+    "area": 45248,
     "thickness": 2.0,
     "width": 40.0,
     "height": 20.0,
@@ -84,6 +109,7 @@
     "family": "tube_laser",
     "stock_type": "angle",
     "volume": 30400,
+    "area": 16608,
     "leg_lengths": [
       40.0,
       40.0
@@ -95,6 +121,7 @@
     "family": "tube_laser",
     "stock_type": "u_channel",
     "volume": 22200,
+    "area": 15844,
     "width": 40.0,
     "height": 20.0,
     "thickness": 3.0,
@@ -103,6 +130,7 @@
   "cube-20mm-splitface.step": {
     "family": "milling",
     "volume": 8000.0,
+    "area": 2400.0,
     "bbox": [
       20,
       20,

@@ -2,17 +2,23 @@
   "bracket-L-60x40x2-r3.step": {
     "meshed_faces": 10,
     "vertices": 96,
-    "triangles": 76
+    "triangles": 76,
+    "unmeshed_faces": 0,
+    "deterministic_across_loads": true
   },
   "shaft-stepped-d30-d20-d12.step": {
     "meshed_faces": 7,
     "vertices": 394,
-    "triangles": 384
+    "triangles": 384,
+    "unmeshed_faces": 0,
+    "deterministic_across_loads": true
   },
   "asm-plate-2pins.step": {
     "meshed_faces": 12,
     "vertices": 236,
-    "triangles": 212
+    "triangles": 212,
+    "unmeshed_faces": 0,
+    "deterministic_across_loads": true
   },
   "ok": true
 }

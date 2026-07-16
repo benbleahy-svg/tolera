@@ -70,8 +70,9 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "ASYNC"]
 python_version = "3.12"
 strict = true
 warn_unused_ignores = true
-# scripts/spike-m4.0 = throwaway M4.0 OCCT probe scaffold (PEP 723 scripts, OCP has no
-# stubs); deleted/productionized in M4.1 — excluded from strict typing, ruff still runs.
+# scripts/spike-m4.0 = throwaway M4.0 OCCT probe scaffold (PEP 723 scripts outside the
+# project env; wiring cadquery-ocp-stubs into strict mypy isn't warranted for code that
+# M4.1 deletes/productionizes) — excluded from typing, ruff still runs.
 exclude = ['(^|/)(alembic|clerk-react|clerk-nextjs|ui-prototype|frontend|e2e)/', '(^|/)scripts/spike-m4\.0/']
 
 [[tool.mypy.overrides]]

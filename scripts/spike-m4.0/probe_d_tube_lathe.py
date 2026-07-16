@@ -11,6 +11,7 @@ Run: uv run scripts/spike-m4.0/probe_d_tube_lathe.py [fixtures_dir]
 """
 
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -117,21 +118,37 @@ def classify_tube(shape) -> dict:
 
 
 def probe_lathe(shape) -> dict:
-    """All cylindrical faces coaxial -> turnable; stock = max radius x axis extent."""
+    """All cylindrical faces on ONE common centerline -> turnable; stock =
+    max radius x extent of the part projected onto that axis."""
     axes, radii = [], []
     for f in faces(shape):
         ad = BRepAdaptor_Surface(f)
         if ad.GetType() == CYLINDER:
             cyl = ad.Cylinder()
-            d = cyl.Axis().Direction()
-            axes.append((round(d.X(), 6), round(d.Y(), 6), round(d.Z(), 6)))
+            ax = cyl.Axis()
+            d, loc = ax.Direction(), ax.Location()
+            axes.append(((d.X(), d.Y(), d.Z()), (loc.X(), loc.Y(), loc.Z())))
             radii.append(cyl.Radius())
-    coaxial = len({(abs(a[0]), abs(a[1]), abs(a[2])) for a in axes}) == 1
-    dims = aabb_dims(shape)
+    coaxial = bool(axes)
+    d0, p0 = axes[0] if axes else ((0.0, 0.0, 1.0), (0.0, 0.0, 0.0))
+    for d, pnt in axes[1:]:
+        dot = abs(sum(a * b for a, b in zip(d, d0, strict=True)))
+        gap = [a - b for a, b in zip(pnt, p0, strict=True)]
+        along = sum(g * a for g, a in zip(gap, d0, strict=True))
+        radial = math.sqrt(max(sum(g * g for g in gap) - along**2, 0.0))
+        if abs(dot - 1.0) > 1e-6 or radial > 1e-6:
+            coaxial = False
+    box = Bnd_Box()
+    BRepBndLib.Add_s(shape, box, False)
+    lo, hi = box.CornerMin(), box.CornerMax()
+    corners = [
+        (x, y, z) for x in (lo.X(), hi.X()) for y in (lo.Y(), hi.Y()) for z in (lo.Z(), hi.Z())
+    ]
+    proj = [sum(c * a for c, a in zip(corner, d0, strict=True)) for corner in corners]
     return {
         "turnable": coaxial,
         "stock_radius": max(radii) if radii else None,
-        "stock_length": max(dims),
+        "stock_length": max(proj) - min(proj) if axes else None,
         "step_diameters": sorted({round(2 * r, 3) for r in radii}, reverse=True),
     }
 

@@ -19,19 +19,21 @@ from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.TopLoc import TopLoc_Location
 
 
-def tessellate(shape, deflection: float = 0.1) -> tuple[int, int, int]:
-    """Mesh the shape; return (face_count, total_vertices, total_triangles)."""
+def face_mesh_seq(path, deflection: float = 0.1) -> tuple[list[tuple[int, int]], int]:
+    """Fresh parse + mesh; per-face (vertices, triangles) in topology order,
+    plus the count of faces that produced NO triangulation."""
+    shape = read_step(path)
     BRepMesh_IncrementalMesh(shape, deflection, False, 0.5, True)
-    nf = nv = nt = 0
+    seq: list[tuple[int, int]] = []
+    unmeshed = 0
     for f in faces(shape):
         loc = TopLoc_Location()
         tri = BRep_Tool.Triangulation_s(f, loc)
         if tri is None:
+            unmeshed += 1
             continue
-        nf += 1
-        nv += tri.NbNodes()
-        nt += tri.NbTriangles()
-    return nf, nv, nt
+        seq.append((tri.NbNodes(), tri.NbTriangles()))
+    return seq, unmeshed
 
 
 def main() -> int:
@@ -43,18 +45,28 @@ def main() -> int:
         "shaft-stepped-d30-d20-d12.step",
         "asm-plate-2pins.step",
     ):
-        nf, nv, nt = tessellate(read_step(fixtures / name))
-        results[name] = {"meshed_faces": nf, "vertices": nv, "triangles": nt}
-        this_ok = nt > 0 and nf > 0
+        # two independent parse+mesh runs: every face must mesh, and the per-face
+        # (vertex, triangle) sequence must be identical across fresh loads — the
+        # determinism the viewer feature->face overlay relies on
+        seq1, unmeshed1 = face_mesh_seq(fixtures / name)
+        seq2, unmeshed2 = face_mesh_seq(fixtures / name)
+        results[name] = {
+            "meshed_faces": len(seq1),
+            "vertices": sum(v for v, _ in seq1),
+            "triangles": sum(t for _, t in seq1),
+            "unmeshed_faces": unmeshed1,
+            "deterministic_across_loads": seq1 == seq2,
+        }
+        this_ok = bool(seq1) and unmeshed1 == 0 and unmeshed2 == 0 and seq1 == seq2
         ok = ok and this_ok
         print(
-            f"{name}: {nf} faces meshed, {nv} vertices, {nt} triangles "
-            f"-> {'OK' if this_ok else 'FAIL'}"
+            f"{name}: {len(seq1)} faces meshed, {sum(t for _, t in seq1)} triangles, "
+            f"deterministic={seq1 == seq2} -> {'OK' if this_ok else 'FAIL'}"
         )
 
     print(
-        f"\nPROBE F {'PASS' if ok else 'FAIL'} — per-face triangulation with stable "
-        "face indexing available server-side (viewer overlay + thumbnails feasible)"
+        f"\nPROBE F {'PASS' if ok else 'FAIL'} — full per-face triangulation, identical "
+        "face-order mesh sequence across fresh loads (viewer overlay + thumbnails feasible)"
     )
     out = Path("scripts/spike-m4.0/results")
     out.mkdir(exist_ok=True)

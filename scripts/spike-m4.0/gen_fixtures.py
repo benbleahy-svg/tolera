@@ -15,6 +15,7 @@ import json
 import math
 import sys
 from pathlib import Path
+from shutil import copy2
 
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
 from OCP.BRepBuilderAPI import (
@@ -58,9 +59,10 @@ def face_count(shape) -> int:
 
 def write_step(shape, path: Path) -> None:
     writer = STEPControl_Writer()
-    writer.Transfer(shape, STEPControl_AsIs)
-    status = writer.Write(str(path))
-    assert status == IFSelect_RetDone, f"STEP write failed for {path}"
+    if writer.Transfer(shape, STEPControl_AsIs) != IFSelect_RetDone:
+        raise RuntimeError(f"STEP transfer failed for {path}")
+    if writer.Write(str(path)) != IFSelect_RetDone:
+        raise RuntimeError(f"STEP write failed for {path}")
 
 
 def edge_line(p1, p2):
@@ -104,6 +106,7 @@ def bracket() -> tuple[object, dict]:
     golden = {
         "family": "sheet_metal",
         "volume": (55 * 2 + 35 * 2 + (math.pi / 4) * (25 - 9)) * 50,
+        "area": (184 + 4 * math.pi) * 50 + 2 * (180 + 4 * math.pi),
         "bbox": [60, 50, 40],
         "thickness": 2.0,
         "bend_count": 1,
@@ -132,11 +135,13 @@ def milled_block() -> tuple[object, dict]:
     golden = {
         "family": "milling",
         "volume": 80 * 50 * 20 - 40 * 20 * 8 - 2 * math.pi * 16 * 20 - math.pi * 9 * 10,
+        # box 13200 + pocket walls/floor net + 2 through holes net + blind net
+        "area": 13200 + 960 + 256 * math.pi + 60 * math.pi,
         "bbox": [80, 50, 20],
         "through_holes": {"count": 2, "diameter": 8.0},
         "blind_holes": {"count": 1, "diameter": 6.0, "depth": 10.0},
         "pocket": {"size": [40, 20], "depth": 8.0},
-        "machine_directions_expected": ["+Z"],
+        "machine_directions_expected": ["Z"],
     }
     return shape, golden
 
@@ -151,6 +156,8 @@ def shaft() -> tuple[object, dict]:
     golden = {
         "family": "lathe",
         "volume": math.pi * (225 * 30 + 100 * 30 + 36 * 20),
+        # laterals 2*(450+300+120) + step annuli (225-100)+(100-36) + both ends 225+36
+        "area": math.pi * (2 * 870 + 125 + 64 + 225 + 36),
         "bbox": [30, 30, 80],
         "stock_radius": 15.0,
         "stock_length": 80.0,
@@ -169,6 +176,7 @@ def tube_round() -> tuple[object, dict]:
         "family": "tube_laser",
         "stock_type": "round",
         "volume": math.pi * (225 - 169) * 200,
+        "area": math.pi * (2 * 15 * 200 + 2 * 13 * 200 + 2 * (225 - 169)),
         "thickness": 2.0,
         "diameter": 30.0,
         "length": 200.0,
@@ -184,6 +192,7 @@ def tube_rect() -> tuple[object, dict]:
         "family": "tube_laser",
         "stock_type": "rectangular",
         "volume": (800 - 576) * 200,
+        "area": 120 * 200 + 104 * 200 + 2 * (800 - 576),
         "thickness": 2.0,
         "width": 40.0,
         "height": 20.0,
@@ -201,6 +210,7 @@ def profile_angle() -> tuple[object, dict]:
         "family": "tube_laser",
         "stock_type": "angle",
         "volume": (40 * 4 + 36 * 4) * 100,
+        "area": 160 * 100 + 2 * (40 * 4 + 36 * 4),
         "leg_lengths": [40.0, 40.0],
         "thickness": 4.0,
         "length": 100.0,
@@ -216,6 +226,7 @@ def profile_u_channel() -> tuple[object, dict]:
         "family": "tube_laser",
         "stock_type": "u_channel",
         "volume": (40 * 3 + 2 * 17 * 3) * 100,
+        "area": 154 * 100 + 2 * (40 * 3 + 2 * 17 * 3),
         "width": 40.0,
         "height": 20.0,
         "thickness": 3.0,
@@ -234,6 +245,7 @@ def cube_splitface() -> tuple[object, dict]:
     golden = {
         "family": "milling",
         "volume": 8000.0,
+        "area": 2400.0,
         "bbox": [20, 20, 20],
         "note": "same solid as cube-20mm.step; side faces split at z=10 seam",
         "expected_face_count_split": face_count(shape),
@@ -282,10 +294,10 @@ def write_assembly(path: Path) -> dict:
     writer = STEPCAFControl_Writer()
     writer.SetNameMode(True)
     writer.SetMaterialMode(True)
-    ok = writer.Transfer(doc, STEPControl_AsIs)
-    assert ok, "XCAF transfer failed"
-    status = writer.Write(str(path))
-    assert status == IFSelect_RetDone, "assembly STEP write failed"
+    if not writer.Transfer(doc, STEPControl_AsIs):
+        raise RuntimeError("XCAF transfer failed")
+    if writer.Write(str(path)) != IFSelect_RetDone:
+        raise RuntimeError("assembly STEP write failed")
     return {
         "family": "assembly",
         "products": 2,
@@ -299,11 +311,29 @@ def write_assembly(path: Path) -> dict:
 def main() -> int:
     outdir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("fixtures/cad")
     outdir.mkdir(parents=True, exist_ok=True)
-    goldens: dict[str, dict] = {}
+    # the probes also read these two pre-existing fixtures (M1.13/M2.6) — copy them
+    # into a custom outdir so a regenerated set is self-contained
+    canonical = Path(__file__).resolve().parents[2] / "fixtures/cad"
+    for name in ("cube-20mm.step", "plate-hole-20x20x10-d8.step"):
+        if (canonical / name).resolve() != (outdir / name).resolve():
+            copy2(canonical / name, outdir / name)
+    goldens: dict[str, dict] = {
+        # analytic goldens for the pre-existing fixtures (cube 20^3; 20x20x10 plate
+        # with a through hole d8)
+        "cube-20mm.step": {
+            "family": "milling",
+            "volume": 8000.0,
+            "area": 2400.0,
+            "bbox": [20, 20, 20],
+        },
+        "plate-hole-20x20x10-d8.step": {
+            "family": "milling",
+            "volume": 4000 - math.pi * 16 * 10,
+            "area": 1600 + 48 * math.pi,
+            "bbox": [20, 20, 10],
+        },
+    }
 
-    # cube-20mm.step and plate-hole-20x20x10-d8.step are pre-existing (M1.13/M2.6)
-    # fixtures the probes also read — regenerating into a fresh outdir needs both
-    # copied in, or probe_a/probe_d will fail on the missing files.
     solids = {
         "bracket-L-60x40x2-r3.step": bracket,
         "block-milled-80x50x20.step": milled_block,
@@ -322,7 +352,8 @@ def main() -> int:
             f"{name}: modelled vol {vol:.2f} vs analytic {expect:.2f} (rel {rel:.2e}), "
             f"faces {face_count(shape)}"
         )
-        assert rel < 1e-6, f"{name}: modelled volume deviates from analytic golden"
+        if rel >= 1e-6:
+            raise RuntimeError(f"{name}: modelled volume deviates from analytic golden")
         write_step(shape, outdir / name)
         goldens[name] = golden
 

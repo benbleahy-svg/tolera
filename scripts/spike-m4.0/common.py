@@ -49,8 +49,10 @@ CURVE_TYPES = {
 
 def read_step(path: str):
     reader = STEPControl_Reader()
-    assert reader.ReadFile(str(path)) == IFSelect_RetDone, f"read failed: {path}"
-    reader.TransferRoots()
+    if reader.ReadFile(str(path)) != IFSelect_RetDone:
+        raise RuntimeError(f"STEP read failed: {path}")
+    if reader.TransferRoots() == 0:
+        raise RuntimeError(f"STEP transfer produced no roots: {path}")
     return reader.OneShape()
 
 

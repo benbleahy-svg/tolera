@@ -70,6 +70,9 @@ def main() -> int:
             "area": area,
         }
         ok = row["volume_rel_err"] < 1e-3
+        if "area" in golden:
+            row["area_rel_err"] = rel(area, golden["area"])
+            ok = ok and row["area_rel_err"] < 1e-3
         if "bbox" in golden:
             pairs = zip(sorted(row["aabb"]), sorted(golden["bbox"]), strict=True)
             bbox_ok = all(rel(m, g) < 1e-3 for m, g in pairs)

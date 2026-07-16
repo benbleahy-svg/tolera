@@ -35,10 +35,10 @@ work or a mini-spike remains · `✗` no OCCT support (in-house heuristic or Spa
 
 | Attribute | v1 | Verdict | Evidence (probe a, 9 fixtures) |
 |---|---|---|---|
-| `volume`, `area` | ✓ | ✓ | `BRepGProp` exact vs analytic goldens (rel ≤1e-14). |
+| `volume`, `area` | ✓ | ✓ | `BRepGProp` vs analytic goldens: volume rel ≤3e-14; surface area gated at 0.1%, measured ≤1e-9. |
 | `size_x/y/z` (AABB path) | ✓ | ✓ | `Bnd_Box` exact on all fixtures. |
 | `max/med/min_dim` (optimal bbox) | ✓ | **~** | `Bnd_OBB(theIsOptimal=True)` is **approximate** (PCA-based): tight on prisms/cylinders, but on the bracket it returned 71.3×50×35.5 (volume-larger than the 60×50×40 AABB). **M4.1 must take the tighter of OBB/AABB** (min volume) for the `overwrite › optimal-bbox › AABB` precedence. |
-| `weight` = volume × density | ✓ | ✓ | Arithmetic on ✓ volume (20 mm cube × 7.9 g/cm³ = 63.20 g). Density is `man` (material record), per the catalog. |
+| `weight` | ✓ | ✓ | `weight_g = (volume_mm³ / 1000) × density_g/cm³` — 20 mm cube × 7.9 g/cm³ = 63.20 g (mind the mm³→cm³ factor). Density is `man` (material record), per the catalog. |
 | Units | — | ✓ | STEP files are mm-native; all probes metric (mm/mm²/mm³/g). |
 
 ## 2. Geometry signature (`compute_signature`) — **the make-or-break: PASS**
@@ -125,13 +125,15 @@ Probe d, mid-length section + loop/edge classification:
 |---|---|---|
 | Unique products → Parts; occurrences → Nodes | ✓ | XCAF (STEPCAFControl_Reader): 2 products (exact volumes), 3 placed occurrences with transforms. |
 | Occurrence / product names | ✓ | Round-trip where authored (PIN-1/PIN-2); unnamed occurrences fall back to XCAF entry ids — capture raw, don't invent (Lens classifies later, M4.10b). |
-| STEP AP214 material + density per body | ✓ | `XCAFDoc_Material`: 1.4301 @ 7.9 g/cm³, AlMg3 @ 2.66 g/cm³ read back → `node.cad_metadata` (M4.9b) is feasible as raw-facts capture. |
+| STEP AP214 material + density per body | ~ | `XCAFDoc_Material`: the material table (1.4301 @ 7.9 g/cm³, AlMg3 @ 2.66 g/cm³) reads back ✓ — but resolving **which body carries which material** via `TDataStd_TreeNode`/MaterialRefGUID **segfaulted the OCP 7.9.3 bindings** (twice). Raw-facts capture for `node.cad_metadata` stays feasible; the per-body link is M4.9b work (alternate XCAF API or STEP-entity parse). |
 | Multi-level nesting | ~ | Traversal is recursive; probed one level deep — deep/large assemblies get exercised with real fixtures (M4.9b). |
 
 ## 8. Server-side tessellation & thumbnails — verdict: **feasible** (probe f)
 
 `BRepMesh_IncrementalMesh` produces per-face triangulations (bracket 10 faces/76 tris;
-assembly 12/212) with **stable face indexing from the interrogation topology** — the viewer
+assembly 12/212); every face meshes, and the per-face vertex/triangle sequence is
+**identical across two independent parse+mesh runs** (measured, probe f) — face indexing
+from the interrogation topology is deterministic, so the viewer
 can render what GeometryService tessellates and feature→face-id overlays correlate
 (resolves DECISIONS [2026-07-14] viewer-mesh entry to its recommended default (b); the
 actual endpoint + client switch land in M4.1+). `render_thumbnail` composes on the same

@@ -18,7 +18,7 @@ from OCP.IFSelect import IFSelect_RetDone
 from OCP.STEPCAFControl import STEPCAFControl_Reader
 from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
-from OCP.TDF import TDF_Label, TDF_LabelSequence
+from OCP.TDF import TDF_Label, TDF_LabelSequence, TDF_Tool
 from OCP.TDocStd import TDocStd_Document
 from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_Material
 
@@ -59,11 +59,16 @@ def main() -> int:
                 comp = comps.Value(i)
                 referred = TDF_Label()
                 shape_tool.GetReferredShape_s(comp, referred)
+                # key products by XCAF label entry (unique), never by display name —
+                # two distinct products may share a name
+                entry = TCollection_AsciiString()
+                TDF_Tool.Entry_s(referred, entry)
+                pkey = entry.ToCString()
                 pname = label_name(referred)
-                if pname not in products:
+                if pkey not in products:
                     shape = shape_tool.GetShape_s(referred)
                     vol, _ = volume_area(shape)
-                    products[pname] = {"volume": vol}
+                    products[pkey] = {"name": pname, "volume": vol}
                 loc = shape_tool.GetLocation_s(comp).Transformation()
                 occurrences.append(
                     {
@@ -96,8 +101,10 @@ def main() -> int:
                 }
             )
 
+    by_name = {v["name"]: v for v in products.values()}
     print(
-        f"products ({len(products)}): { {k: round(v['volume'], 2) for k, v in products.items()} }"
+        f"products ({len(products)}): "
+        f"{ {v['name']: round(v['volume'], 2) for v in products.values()} }"
     )
     print(f"occurrences ({len(occurrences)}):")
     for o in occurrences:
@@ -112,15 +119,26 @@ def main() -> int:
         and occ_by_product == golden["occurrences"]
         and len(materials) == 2
         and any(m["name"] == "1.4301" and abs(m["density"] - 7.9) < 1e-9 for m in materials)
-        and abs(products["PLATE-60x40x5"]["volume"] - golden["plate_volume"]) < 1e-3
-        and abs(products["PIN-D6x20"]["volume"] - golden["pin_volume"]) < 1e-3
+        and abs(by_name["PLATE-60x40x5"]["volume"] - golden["plate_volume"]) < 1e-3
+        and abs(by_name["PIN-D6x20"]["volume"] - golden["pin_volume"]) < 1e-3
     )
     print(f"\nPROBE E {'PASS' if ok else 'FAIL'}")
     out = Path("scripts/spike-m4.0/results")
     out.mkdir(exist_ok=True)
     (out / "probe_e.json").write_text(
         json.dumps(
-            {"products": products, "occurrences": occurrences, "materials": materials, "ok": ok},
+            {
+                "products": products,
+                "occurrences": occurrences,
+                "materials": materials,
+                "material_link_note": (
+                    "global material table + densities readable (above); resolving WHICH "
+                    "body carries which material via TDataStd_TreeNode/MaterialRefGUID "
+                    "segfaulted OCP 7.9.3 twice — per-body link deferred to M4.9b "
+                    "(alternate XCAF API or STEP-entity parse)"
+                ),
+                "ok": ok,
+            },
             indent=2,
         )
         + "\n"
