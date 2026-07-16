@@ -254,13 +254,31 @@ def _face_area(face: TopoDS_Face) -> float:
     return float(props.Mass())
 
 
+#: Samples per curved boundary edge for extent measurement — a convex arc's
+#: extreme point lies BETWEEN vertices (an obround strap end bulges w/2 past
+#: its diameter vertices), so vertices alone understate panel extents.
+_CURVE_SAMPLES = 32
+
+
 def _face_vertices(face: TopoDS_Face) -> list[tuple[float, float, float]]:
+    """Boundary points of the face: edge vertices plus sampled points along
+    every non-line edge, so extents measured over these points are true face
+    extents for curved outlines too (fresh-eyes review, M4.2)."""
     pts = []
     ex = TopExp_Explorer(face, TopAbs_VERTEX)
     while ex.More():
         p = BRep_Tool.Pnt_s(TopoDS.Vertex_s(ex.Current()))
         pts.append((p.X(), p.Y(), p.Z()))
         ex.Next()
+    ee = TopExp_Explorer(face, TopAbs_EDGE)
+    while ee.More():
+        curve = BRepAdaptor_Curve(TopoDS.Edge_s(ee.Current()))
+        if curve.GetType() != 0:  # anything but a straight line
+            first, last = curve.FirstParameter(), curve.LastParameter()
+            for i in range(1, _CURVE_SAMPLES):
+                p = curve.Value(first + (last - first) * i / _CURVE_SAMPLES)
+                pts.append((p.X(), p.Y(), p.Z()))
+        ee.Next()
     return pts
 
 
@@ -372,8 +390,8 @@ def _detect_bends(cylinders: list[_CylFace], thickness: float) -> list[_Bend]:
                 continue
             gap = _v_sub(a.axis_loc, b.axis_loc)
             along = _v_dot(gap, a.axis_dir)
-            radial_sq = _v_dot(gap, gap) - along * along
-            if radial_sq > _DIST_TOL:
+            radial = math.sqrt(max(_v_dot(gap, gap) - along * along, 0.0))
+            if radial > _DIST_TOL:
                 continue  # parallel but not concentric — two different bends
             if abs(abs(a.radius - b.radius) - thickness) > _DIST_TOL:
                 continue
@@ -472,6 +490,21 @@ def _analyze_sheet_metal(
     panels = [p for p in pairs if abs(p.offset - thickness) <= _DIST_TOL]
     bends = _detect_bends(cylinders, thickness)
 
+    # Constant-thickness gate (fresh-eyes review): the mid-surface identities
+    # below are exact ONLY for a constant-thickness shell, and every prismatic
+    # solid has some anti-parallel planar pair — a milled billet assigned a
+    # sheet-metal process must yield NO scalars, not arithmetic dressed up as
+    # measurement. For a real sheet the two skins account for the whole
+    # surface except the cut walls: sum(panel skins) + sum(bend skins)
+    # == 2·volume/thickness. Small extra features (chamfers, countersinks)
+    # stay within the 2% envelope; anything larger is not a sheet body.
+    skin_area = sum(p.area for p in panels) + sum(
+        math.radians(b.angle_deg) * (2.0 * b.radius + thickness) * b.length for b in bends
+    )
+    expected_skins = 2.0 * volume / thickness
+    if abs(skin_area - expected_skins) > 0.02 * expected_skins:
+        return {}, []  # not a constant-thickness sheet — nothing recognized
+
     pierce_wires = sum(_inner_wire_count(f.face) for p in panels for f in p.faces)
 
     scalars: dict[str, Any] = {
@@ -531,6 +564,11 @@ def _unfold(
     axis = bends[0].axis_dir
     if any(abs(abs(_v_dot(axis, b.axis_dir)) - 1.0) > _DIR_TOL for b in bends):
         return None  # bends about different axes: not a v1 analytic chain
+    if any(b.allowance <= 0.0 for b in bends):
+        # r/t below ~0.045 drives the frozen k-formula negative past the bend
+        # radius itself — outside the formula's physical domain, so the unfold
+        # is omitted rather than emitted with a negative allowance.
+        return None
     panel_bends, bend_panels = _edge_adjacency(shape, panels, bends)
     chain = _walk_chain(panels, bends, panel_bends, bend_panels)
     if chain is None:

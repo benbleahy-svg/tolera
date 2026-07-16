@@ -128,6 +128,25 @@ def test_flat_plate_zero_bends() -> None:
     assert result.features == []
 
 
+def test_milled_billet_yields_no_sheet_scalars() -> None:
+    """A machined block assigned a sheet-metal process must return NO scalars
+    (constant-thickness gate): flat_area/cut_length identities on a billet
+    would be arithmetic dressed up as measurement (fresh-eyes review)."""
+    result = get_engine().analyze(
+        (FIXTURES / "block-milled-80x50x20.step").read_bytes(), family=FAMILY_SHEET_METAL
+    )
+    assert result.family_scalars == {}
+    assert result.features == []
+
+
+def test_cube_yields_no_sheet_scalars() -> None:
+    """Same gate for the degenerate cube — three 'skin pairs', none a sheet."""
+    result = get_engine().analyze(
+        (FIXTURES / "cube-20mm.step").read_bytes(), family=FAMILY_SHEET_METAL
+    )
+    assert result.family_scalars == {}
+
+
 def test_dims_only_run_unchanged() -> None:
     """No family → the M4.1 dims-only pass: empty scalars and features."""
     result = get_engine().analyze((FIXTURES / "bracket-L-60x40x2-r3.step").read_bytes())

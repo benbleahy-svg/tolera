@@ -626,7 +626,6 @@
     "sheetmetal_flat_area": "Flat Surface Area",
     "sheetmetal_unfolded": "Bounding Dimensions",
     "sheetmetal_bends": "Number of Bends",
-    "sheetmetal_cut_length": "Cut Length",
     "sheetmetal_flat_pattern": "Flat pattern (preview)"
   },
   "collab": {
