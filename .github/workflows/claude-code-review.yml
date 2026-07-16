@@ -1,23 +1,16 @@
+# Cross-model PR review. Builds are routed by scripts/autobuild.sh (Opus 4.8 for
+# routine blocks, Fable 5 for risky ones); the REVIEW runs on the frontier model
+# whenever the diff touches a tier-1 path (money/pricing/schema/auth/tax), and on
+# Opus 4.8 otherwise — strongest scrutiny exactly where mistakes are irreversible,
+# and a different model from the author on most routine blocks (diverse blind spots).
 name: Claude Code Review
 
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,7 +22,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      # The tier-1 list mirrors CLAUDE.md §6.1's "expensive to reverse" set and
+      # §9's promise that the frontier model reviews every money/pricing/schema/
+      # auth/tax diff — money, schema and rls were missing, so exactly those
+      # diffs were being routed to the routine model. DACH-sensitive paths
+      # (MwSt/USt, DATEV, DSGVO, EU dual-use) are tier-1 too, per DACH-DELTA-LAYER.
+      #
+      # base_ref goes through env, never a ${{ }} interpolation inside the shell:
+      # a branch name is attacker-controlled on a fork PR and would otherwise be
+      # pasted straight into the script (injection).
+      - name: Pick review model by risk of the diff
+        id: risk
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch origin "$BASE_REF" --depth=50 || true
+          CHANGED="$(git diff --name-only "origin/$BASE_REF"...HEAD || true)"
+          echo "$CHANGED"
+          # NB: no bare `ust` — it matches "custom" (app/custom_tables.py,
+          # CustomTablesPage.tsx), which would report "tier-1" for UI diffs.
+          # USt is covered by `umsatzsteuer` and `mwst`.
+          if echo "$CHANGED" | grep -qiE '(alembic/|migrations/|models/|pricing/|kalk|money|schema|tenanc|rls|auth|tax|mwst|umsatzsteuer|datev|dsgvo|gdpr|dual[-_]?use|billing|lens)'; then
+            echo "model=claude-fable-5" >> "$GITHUB_OUTPUT"
+            echo "Tier-1 path touched → reviewing with Fable 5."
+          else
+            echo "model=opus" >> "$GITHUB_OUTPUT"
+            echo "Routine diff → reviewing with Opus 4.8."
+          fi
 
       - name: Run Claude Code Review
         id: claude-review
@@ -39,6 +60,4 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-
+          claude_args: '--model ${{ steps.risk.outputs.model }}'

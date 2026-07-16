@@ -60,3 +60,11 @@ htmlcov/
 
 # Auto-generated session-end handoff net (local only; /handoff writes the real HANDOFF.md)
 HANDOFF.autogen.md
+
+# autobuild driver state (local-only)
+.autobuild-logs/
+.autobuild.state*
+.autobuild.halted
+.autobuild.completed
+CHECKPOINT.md
+REVIEW-QUEUE.md

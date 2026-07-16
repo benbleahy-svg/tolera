@@ -48,6 +48,26 @@ jobs:
       - name: Tests + coverage (pytest)
         run: uv run pytest --cov --cov-report=term-missing --cov-fail-under=80
 
+  # Tier-1 mechanical rules (money-as-float, Kalk determinism, raw DDL, secrets
+  # in logs, org scoping) — .semgrep/tier1.yml. Merge-blocking.
+  semgrep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # scanning needs the tree and nothing else
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install semgrep
+      # ERROR blocks the merge. WARNING-tier rules (model-missing-org-id,
+      # imperial-units) are reported but non-blocking — scanning only at
+      # --severity ERROR hid them entirely, so nobody ever saw them.
+      - name: Tier-1 rules (WARNING — advisory)
+        run: semgrep scan --config .semgrep/tier1.yml --severity WARNING . || true
+      - name: Tier-1 rules (ERROR — merge-blocking)
+        run: semgrep scan --config .semgrep/tier1.yml --error --severity ERROR .
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

@@ -19,25 +19,27 @@ git switch develop && git pull
 git switch -c feature/m1-quote-costing      # feature/{m}-{slug}
 ```
 
-Then run the loop (full detail in the playbook): **grill → TDD build → diagnose → local review → fixtures + golden thread green → PR**.
+Then run the loop (full detail in the playbook): **self-grill → TDD build → diagnose → local review → fixtures + golden thread green → PR (auto-merge armed)**.
 
-- Start every block by getting Claude to **grill you** (`/grill-with-docs`) — align before code. Highest-leverage habit on the team.
+- Normally the **driver runs this for you**: `scripts/autobuild.sh` executes the queue block-by-block, one fresh session each, and only stops for `BLOCKED.md` halts and milestone checkpoints. Manual sessions still work the same way (`/block <id>`).
+- Every block starts with the **self-grill** (`/grill-with-docs`): Claude asks the hard questions and answers them *from the sources with citations* (precedence ladder; uncited + irreversible = `OPEN:` + halt). The verification table lands in the PR body — audit it at checkpoints.
 - Build test-first (`/tdd`). Mandatory for pricing/geometry math.
-- Before the PR, run the **local review** (`coderabbit` in the terminal + `/code-review` in-session) and fix what they find.
+- `/ship` runs the local gate — ruff/mypy/pytest, **semgrep tier-1** (`.semgrep/tier1.yml`), a **fresh-context subagent review**, `coderabbit` — then opens the PR and arms `gh pr merge --auto --squash`.
 
-## 3. Open the PR — let the bots carry the review
+## 3. The PR merges itself — the machines carry the review
 
-Our human code review is light, so the machines are the safety net and **you verify behaviour, not lines**:
+PRs are opened by `/ship` with **auto-merge armed**; no human approval per PR. The safety net is layered, and **the human verifies behaviour at milestone checkpoints, not lines per PR**:
 
 | Layer | Who | Gate |
 |---|---|---|
-| CI | ruff · mypy · pytest · eval-suite | must be green |
-| CodeRabbit | auto-reviews every PR (assertive, see `.coderabbit.yaml`) | resolve 🔴 |
-| Anthropic Code Review | multi-agent review vs. whole codebase (if enabled) | resolve 🔴 |
-| `@claude` | comment **"@claude address the review findings and push a fix"** — it reads the other bots' comments and commits | findings cleared |
-| **Human** | a teammate approves (required) — and **clicks the demo** to confirm it behaves | required ✋ |
+| CI | ruff · mypy · pytest · **semgrep tier-1** · eval-suite | must be green (merge-blocking) |
+| e2e demos | promoted Playwright demos — "a human clicks the demo," executable | must be green (merge-blocking) |
+| Fresh-context review | a clean-memory subagent reviews the diff vs. `REVIEW.md` inside `/ship` | 🔴 fixed before the PR opens |
+| CodeRabbit | auto-reviews every PR (assertive, see `.coderabbit.yaml`) | advisory post-merge; swept at checkpoints |
+| Claude Code Review | cross-model: **Fable 5** on money/pricing/schema/auth/tax diffs, Opus 4.8 otherwise | advisory post-merge; swept at checkpoints |
+| **Human** | reviews completed milestones **on demand** via `REVIEW-QUEUE.md` + `scripts/checkpoint.sh <M>` | non-blocking — the build continues |
 
-> The bots can't sign off the things that are *plausible but wrong* in our domain — a money rule, a tax rate, a tenancy boundary. For changes touching **money, tax, schema, auth, or customer data**, the Code Owner (see `.github/CODEOWNERS`) must approve. That's non-negotiable even when CI + bots are green.
+> The *plausible but wrong* domain mistakes — a money rule, a tax rate, a tenancy boundary — are covered mechanically: semgrep tier-1 rules + golden-fixture tests gate every merge, and the frontier model reviews every tier-1 diff. Anything the ladder can't decide is an `OPEN:` halt, never a guess.
 
 ### Demo tests are how "done" is proven
 The 14 acceptance demos live as Playwright tests in [`e2e/`](e2e/). Each is a `fixme` placeholder until its milestone lands; when you build that milestone you **promote** the demo (remove `.fixme`, drive the flow per the `DemoX/` screenshots, assert the fixture). A promoted demo then gates every PR — so "the demo still works" is checked by a machine, not your memory. Template: `e2e/demos/demo-e-markups.spec.ts`; full guide: `e2e/README.md`.
