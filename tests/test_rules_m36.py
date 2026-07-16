@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
+import regex
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -523,6 +524,10 @@ def _regex_rule(pattern: str) -> dict[str, object]:
     return rule
 
 
+def _probe_times_out(pattern: str, text: str, **kwargs: object) -> None:
+    raise TimeoutError("regex timed out")
+
+
 class TestCatastrophicPatternsAreRejectedAtImport:
     """Option (b) — defence in depth over the evaluator's timeout (option (a)).
 
@@ -530,13 +535,31 @@ class TestCatastrophicPatternsAreRejectedAtImport:
     But it fails closed **silently** — the shop's rule just never fires, which
     is a support mystery. (b) exists for feedback timing: tell the author at
     config time, while they are looking at the pattern.
+
+    The blow-up is **injected**, not provoked. Whether a given pattern actually
+    backtracks is a property of the engine build — ``^(a|a)+$`` does on
+    macOS/arm64 but is optimized away on Linux/x86_64, same ``regex`` version —
+    so a test that provokes a real timeout passes on one platform and fails on
+    the other (it did, on CI, 2026-07-16). What is platform-independent, and
+    what these pin, is the wiring: *given* a pattern that exceeds the probe
+    budget, the import is refused with a message naming it.
+
+    That (b) rejects nothing on a platform whose engine optimizes everything is
+    correct, not a gap — there is nothing to warn about there, and (a) remains
+    the guarantee regardless.
     """
 
-    def test_a_catastrophic_pattern_is_rejected_with_an_actionable_message(self) -> None:
+    def test_a_catastrophic_pattern_is_rejected_with_an_actionable_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(regex, "search", _probe_times_out)
         with pytest.raises(ValidationError, match=r"zu lange"):
             _parse_one(_regex_rule("^(a|a)+$"))
 
-    def test_rejection_names_the_pattern_so_the_author_can_find_it(self) -> None:
+    def test_rejection_names_the_pattern_so_the_author_can_find_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(regex, "search", _probe_times_out)
         with pytest.raises(ValidationError) as excinfo:
             _parse_one(_regex_rule("^(a|a)+$"))
         assert "^(a|a)+$" in str(excinfo.value)

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import regex
 
 from app.logging import JsonFormatter
 from app.rules_eval import (
@@ -853,45 +854,73 @@ class TestRegexIsBounded:
     """A rule's ``regex`` runs an ORG-authored pattern over CUSTOMER-supplied
     print text, so an accidental backtracking pattern must not hang a worker.
 
-    ``^(a|a)+$`` is the probe deliberately: it is one of the few classic
-    catastrophic shapes the ``regex`` engine does *not* optimize away, so it
-    proves the timeout is actually enforced rather than merely configured.
+    **The invariant under test is "evaluation is bounded", not "the timeout
+    fires."** Two mechanisms deliver it and the caller cannot tell them apart:
+    the ``regex`` engine optimizes most catastrophic shapes away outright, and
+    the enforced ``timeout=`` cuts off whatever it cannot. Which one acts is a
+    property of the engine build — ``^(a|a)+$`` backtracks on macOS/arm64 but is
+    optimized away on Linux/x86_64 (CI), same ``regex`` version — so asserting
+    on the *mechanism* makes the suite fail per-platform for no reason. The
+    tests below assert the bound, and inject the timeout where the fail-closed
+    contract itself is what needs proving.
     """
 
-    def test_catastrophic_pattern_fails_closed_within_the_budget(self) -> None:
+    @pytest.mark.parametrize(
+        ("pattern", "text"),
+        [
+            ("^(a|a)+$", "a" * 4096 + "!"),  # backtracks on some builds, optimized on others
+            ("^(a+)+$", "a" * 4096 + "!"),  # the DECISIONS entry's own probe
+            (r"^(\d+[ -]?)+$", "1" * 4096 + "x"),  # the "authored by accident" shape
+            ("(x+x+)+y", "x" * 4096 + "z"),
+        ],
+    )
+    def test_a_catastrophic_pattern_cannot_hang_evaluation(self, pattern: str, text: str) -> None:
+        """Under stdlib ``re`` these are the shapes that hang a worker — the
+        DECISIONS entry measured 7.79 s at 28 chars, doubling per character.
+        Here they are 4096 chars and must all resolve within the budget."""
         started = time.perf_counter()
-        assert _compare_string("a" * 4096 + "!", "regex", "^(a|a)+$") is False, (
-            "a pattern that cannot be decided within the budget must not fire the rule"
+        assert _compare_string(text, "regex", pattern) is False, (
+            "an undecidable pattern must not fire the rule"
         )
         elapsed = time.perf_counter() - started
         assert elapsed < REGEX_TIMEOUT_SECONDS * 4, (
-            f"the match ran {elapsed:.2f}s — the timeout is not being enforced"
+            f"{pattern!r} ran {elapsed:.2f}s — evaluation is not bounded"
         )
 
-    def test_the_decisions_entry_probe_is_no_longer_exponential(self) -> None:
-        """The `^(a+)+$` / 24-chars case measured in the DECISIONS entry (0.47 s
-        under stdlib ``re``) is optimized away by the ``regex`` engine."""
-        started = time.perf_counter()
-        assert _compare_string("a" * 64 + "!", "regex", "^(a+)+$") is False
-        assert time.perf_counter() - started < 1.0
+    def test_the_engine_is_handed_the_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The guarantee is the ``timeout=`` argument reaching the engine. A
+        swap back to stdlib ``re`` (which silently accepts no timeout) or a
+        dropped kwarg would disarm every other test here without failing it."""
+        seen: dict[str, Any] = {}
 
-    def test_an_accidentally_authored_pattern_is_survivable(self) -> None:
-        """`(\\d+[ -]?)+` — the "easy to author by accident" shape the entry
-        names — over a long non-matching run."""
-        started = time.perf_counter()
-        assert _compare_string("1" * 4096 + "x", "regex", r"^(\d+[ -]?)+$") is False
-        assert time.perf_counter() - started < 1.0
+        def spy(pattern: str, text: str, **kwargs: Any) -> None:
+            seen.update(kwargs)
+            return None
 
-    def test_a_timed_out_match_is_logged_without_the_print_text(
-        self, caplog: pytest.LogCaptureFixture
+        monkeypatch.setattr(regex, "search", spy)
+        assert _compare_string("irgendein Text", "regex", "muster") is False
+        assert seen.get("timeout") == REGEX_TIMEOUT_SECONDS, "the budget must reach the engine"
+
+    def test_a_timed_out_match_fails_closed_and_is_logged_without_the_print_text(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """CLAUDE.md §5: structured JSON logs that never carry customer print
-        contents. The pattern is org config and names the culprit; the text is
-        the customer's. Asserted against the **rendered line** — the payload
-        that actually ships is the thing that must not leak."""
+        """The fail-closed + log contract, with the timeout **injected**.
+
+        Provoking a real timeout would bind this test to one engine build's
+        optimizer (see the class docstring). What we own — and must pin — is the
+        behaviour *given* a timeout: the rule does not fire, the pattern is
+        reported so its author can find it, and the customer's print text never
+        reaches the log (CLAUDE.md §5). Asserted against the **rendered JSON
+        line**, since the shipped payload is what must not leak.
+        """
+
+        def timed_out(pattern: str, text: str, **kwargs: Any) -> None:
+            raise TimeoutError("regex timed out")
+
+        monkeypatch.setattr(regex, "search", timed_out)
         text = "a" * 4096 + "GEHEIM-KUNDENTEXT!"
         with caplog.at_level(logging.WARNING, logger="app.rules_eval"):
-            assert _compare_string(text, "regex", "^(a|a)+$") is False
+            assert _compare_string(text, "regex", "^(a|a)+$") is False, "must fail closed"
         assert caplog.records, "a timed-out rule regex must be observable"
 
         emitted = JsonFormatter().format(caplog.records[-1])
