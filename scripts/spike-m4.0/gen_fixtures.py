@@ -31,7 +31,7 @@ from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 from OCP.GProp import GProp_GProps
 from OCP.IFSelect import IFSelect_RetDone
 from OCP.STEPCAFControl import STEPCAFControl_Writer
-from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+from OCP.STEPControl import STEPControl_AsIs, STEPControl_Reader, STEPControl_Writer
 from OCP.TCollection import TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
 from OCP.TDocStd import TDocStd_Document
@@ -499,6 +499,21 @@ def main() -> int:
             raise RuntimeError(f"{name}: modelled volume deviates from analytic golden")
         if not sync_only or not (outdir / name).exists():
             write_step(shape, outdir / name)
+        else:
+            # Drift guard (CodeRabbit, M4.2): --sync refreshes goldens from the
+            # BUILDERS while keeping existing STEP bytes — verify the on-disk
+            # file still IS the built shape (volume vs the analytic golden),
+            # so an edited builder can't silently mismatch fixture and golden.
+            reader = STEPControl_Reader()
+            if reader.ReadFile(str(outdir / name)) != IFSelect_RetDone:
+                raise RuntimeError(f"{name}: existing STEP unreadable")
+            reader.TransferRoots()
+            disk_vol = volume_of(reader.OneShape())
+            if abs(disk_vol - expect) / expect >= 1e-6:
+                raise RuntimeError(
+                    f"{name}: on-disk fixture (vol {disk_vol:.4f}) no longer matches its "
+                    f"builder golden ({expect:.4f}) — regenerate without --sync"
+                )
         goldens[name] = golden
 
     asm_path = outdir / "asm-plate-2pins.step"

@@ -101,7 +101,8 @@ def test_k_factor_formula_frozen() -> None:
     the bracket must equal the spec formula exactly."""
     golden = GOLDENS["bracket-L-60x40x2-r3.step"]
     result = analyze("bracket-L-60x40x2-r3.step")
-    k = result.features[0]["properties"]["k_factor"]
+    (bend,) = [feature for feature in result.features if feature["name"] == "bend"]
+    k = bend["properties"]["k_factor"]
     r, t = golden["bend_inner_radius"], golden["thickness"]
     assert k == pytest.approx((0.65 + 0.5 * math.log10(r / t)) * 0.5, rel=1e-9)
 

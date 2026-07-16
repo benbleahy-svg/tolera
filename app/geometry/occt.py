@@ -256,8 +256,10 @@ def _face_area(face: TopoDS_Face) -> float:
 
 #: Samples per curved boundary edge for extent measurement — a convex arc's
 #: extreme point lies BETWEEN vertices (an obround strap end bulges w/2 past
-#: its diameter vertices), so vertices alone understate panel extents.
-_CURVE_SAMPLES = 32
+#: its diameter vertices), so vertices alone understate panel extents. At 256
+#: samples the worst-case understatement is r·(1-cos(pi/256)) ~ 7.5e-5·r —
+#: micrometres at sheet scale, far inside the 0.1% geometry gate.
+_CURVE_SAMPLES = 256
 
 
 def _face_vertices(face: TopoDS_Face) -> list[tuple[float, float, float]]:
@@ -376,16 +378,24 @@ def _planar_pairs(planes: list[_PlanarFace]) -> list[_Panel]:
     return pairs
 
 
+#: A bend is an open cylindrical sweep; (near-)full cylinders are hole /
+#: counterbore walls, which are coaxial and can sit exactly t apart —
+#: pairing those would fabricate a bend (CodeRabbit, M4.2).
+_MAX_BEND_SWEEP_DEG = 350.0
+
+
 def _detect_bends(cylinders: list[_CylFace], thickness: float) -> list[_Bend]:
     bends = []
     used: set[int] = set()
     for i, a in enumerate(cylinders):
-        if i in used:
+        if i in used or a.angle_deg > _MAX_BEND_SWEEP_DEG:
             continue
         for j in range(i + 1, len(cylinders)):
             if j in used:
                 continue
             b = cylinders[j]
+            if b.angle_deg > _MAX_BEND_SWEEP_DEG:
+                continue
             if abs(abs(_v_dot(a.axis_dir, b.axis_dir)) - 1.0) > _DIR_TOL:
                 continue
             gap = _v_sub(a.axis_loc, b.axis_loc)
@@ -394,6 +404,10 @@ def _detect_bends(cylinders: list[_CylFace], thickness: float) -> list[_Bend]:
             if radial > _DIST_TOL:
                 continue  # parallel but not concentric — two different bends
             if abs(abs(a.radius - b.radius) - thickness) > _DIST_TOL:
+                continue
+            # The two skins of one bend sweep the same angle over the same
+            # width — coaxial but unrelated surfaces (stepped bores) do not.
+            if abs(a.angle_deg - b.angle_deg) > 1e-3 or abs(a.length - b.length) > _DIST_TOL:
                 continue
             inner, outer = (a, b) if a.radius < b.radius else (b, a)
             bends.append(_Bend(inner, outer, thickness))
@@ -505,7 +519,14 @@ def _analyze_sheet_metal(
     if abs(skin_area - expected_skins) > 0.02 * expected_skins:
         return {}, []  # not a constant-thickness sheet — nothing recognized
 
-    pierce_wires = sum(_inner_wire_count(f.face) for p in panels for f in p.faces)
+    # A through-piercing shows an inner wire on BOTH skins of its panel; a
+    # one-sided recess (blind opening small enough to pass the skin gate)
+    # shows on one only — per-panel min() counts pairs, never fabricates a
+    # piercing out of two unrelated openings (CodeRabbit, M4.2). Cutouts
+    # crossing a bend zone sit on cylinder faces and stay uncounted (v1).
+    pierce_count = sum(
+        min(_inner_wire_count(p.faces[0].face), _inner_wire_count(p.faces[1].face)) for p in panels
+    )
 
     scalars: dict[str, Any] = {
         "thickness": thickness,
@@ -514,7 +535,7 @@ def _analyze_sheet_metal(
         # pattern's area and its total contour length (outer + cutouts)
         "flat_area": volume / thickness,
         "total_cut_length": (area - 2.0 * volume / thickness) / thickness,
-        "pierce_count": pierce_wires // 2,
+        "pierce_count": pierce_count,
     }
     features: list[dict[str, Any]] = [
         {
