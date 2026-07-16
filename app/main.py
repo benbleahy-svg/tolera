@@ -34,6 +34,7 @@ from .materials import materials_router
 from .me import router as me_router
 from .metrics import register_metrics
 from .middleware import MaxBodySizeMiddleware, RequestContextMiddleware
+from .nesting import nesting_router
 from .notes import router as notes_router
 from .operations import operations_router
 from .part_library import library_router as part_library_router
@@ -84,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(contacts_router)
     app.include_router(parts_router)
     app.include_router(interrogation_router)
+    app.include_router(nesting_router)
     app.include_router(part_library_router)
     app.include_router(split_router)
     app.include_router(extract_router)

@@ -646,6 +646,11 @@ async def change_quantities(
             "Line item not found on this quote.",
             status_code=status.HTTP_404_NOT_FOUND,
         )
+    # M4.3: make quantities are locked while the component is in a nest — the
+    # shared costing would silently drift (spec #nesting dialog warning).
+    from .nesting import ensure_component_not_nested
+
+    await ensure_component_not_nested(session, item.root_component_id)
     await set_quantity_breaks(session, quote.org_id, item.root_component_id, payload.quantities)
     # New breaks need their per-op cost cells materialised (removed breaks cascaded
     # theirs away); recalc writes calc_cost only — overrides are untouched (M1.7).

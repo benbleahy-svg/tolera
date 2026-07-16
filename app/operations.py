@@ -725,6 +725,11 @@ async def remove_operation(
     operation = await _get_operation_or_404(session, operation_id)
     component = await _get_component_or_404(session, operation.component_id)
     await _lock_editable_quote(session, component)
+    if operation.category is OpCategory.material:
+        # M4.3: the nestable (material) op is locked while nested (KB FAQ)
+        from .nesting import ensure_component_not_nested
+
+        await ensure_component_not_nested(session, component.id)
     await session.delete(operation)  # cells cascade
     await session.flush()
 
