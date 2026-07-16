@@ -22,16 +22,19 @@ export function TriageCard({ quoteId, quoteNumber }: Props): React.ReactElement 
   const { t } = useTranslation();
   const api = useQuotesApi();
   const [brief, setBrief] = useState<TriageBrief | null>(null);
-  const [pending, setPending] = useState(true);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
   useEffect(() => {
     let alive = true;
     void (async () => {
       try {
         const res = await api.getTriageBrief(quoteId);
-        if (alive) setBrief(res.brief);
-      } finally {
-        if (alive) setPending(false);
+        if (alive) {
+          setBrief(res.brief);
+          setStatus('ready');
+        }
+      } catch {
+        if (alive) setStatus('error');
       }
     })();
     return () => {
@@ -39,10 +42,10 @@ export function TriageCard({ quoteId, quoteNumber }: Props): React.ReactElement 
     };
   }, [api, quoteId]);
 
-  if (pending) {
-    return <div className="triage-card triage-card-pending">{t('triage.pending')}</div>;
+  if (status === 'error') {
+    return <div className="triage-card triage-card-pending">{t('triage.unavailable')}</div>;
   }
-  if (brief === null) {
+  if (status === 'loading' || brief === null) {
     return <div className="triage-card triage-card-pending">{t('triage.pending')}</div>;
   }
 

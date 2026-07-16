@@ -14,10 +14,12 @@ Design — a **deterministic core** + a **gated AI enrichment**:
   together with "AI-disabled skips briefs": when AI is off, the core still
   renders and the card shows an "AI processing disabled" state for the enriched
   fields only.
-* The AI enrichment (refined process-hint labels + the customer one-liner
-  phrasing) is a **single Claude call** over the deterministic core. It is
-  skipped when AI is disabled *or* any part is export-controlled (DECISIONS
-  2026-07-15: a dual-use-flagged part's content never reaches ANY provider).
+* The AI enrichment is a **single Claude call** that only *adds* inferred
+  process hints (never-hallucinate: it cannot drop a deterministic process, and
+  it never overwrites the deterministic customer one-liner, est-time, or
+  compliance — those are facts). It is skipped when AI is disabled *or* any part
+  is export-controlled (DECISIONS 2026-07-15: a dual-use-flagged part's content
+  never reaches ANY provider).
 
 The est-time figure is deterministic -- ``part_count * per-process base
 minutes * +/-band`` -- identical across runs and independent of the AI call
@@ -370,9 +372,8 @@ _ENRICH_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
             },
         },
-        "customer_one_liner": {"type": "string"},
     },
-    "required": ["detected_processes", "customer_one_liner"],
+    "required": ["detected_processes"],
     "additionalProperties": False,
 }
 
@@ -382,12 +383,12 @@ def _core_json(core: dict[str, Any]) -> str:
 
 
 _ENRICH_PROMPT = (
-    f"[{TRIAGE_PROMPT_VERSION}] Du bist ein Fertigungs-Kalkulator. Erstelle aus den "
-    "strukturierten RFQ-Signalen einen kurzen Triage-Hinweis auf DEUTSCH. Gib NUR "
-    "JSON zurück: `detected_processes` (verfeinerte Prozess-Labels aus den erkannten "
-    "Prozessen und Material-Stichworten) und `customer_one_liner` (ein Satz, "
-    "neu-vs-bekannt). Erfinde KEINE Historie oder Werte, die nicht in den Signalen "
-    "stehen. Signale:\n"
+    f"[{TRIAGE_PROMPT_VERSION}] Du bist ein Fertigungs-Kalkulator. Leite aus den "
+    "strukturierten RFQ-Signalen zusätzliche wahrscheinliche Fertigungsprozesse auf "
+    "DEUTSCH ab. Gib NUR JSON zurück: `detected_processes` (Prozess-Labels aus "
+    "Material-Stichworten und Dateitypen). Erfinde KEINE Werte, die nicht in den "
+    "Signalen stehen. Kundenhistorie und Zeiten sind vorgegeben — nicht ableiten. "
+    "Signale:\n"
 )
 
 
@@ -452,22 +453,23 @@ def _line_item_part_numbers(suggested: dict[str, Any] | None) -> list[str]:
     return out
 
 
-async def build_triage_brief(
+async def build_triage_snapshot(
     session: Any,
     *,
     org_id: uuid.UUID,
     quote_id: uuid.UUID,
     now: datetime,
-    enricher: TriageEnricher | None = None,
 ) -> dict[str, Any] | None:
-    """Assemble a quote's triage brief from committed ingest data.
+    """Gather the **deterministic** triage snapshot — reads only, **no AI call**.
 
     Reads the quote, its RFQ (``rfq.quote_id == quote_id``), the received files
     (``part_file.rfq_id``), and the account history — all within the caller's
-    org-scoped session. Returns the assembled brief dict, or ``None`` when the
-    quote no longer exists. Does **not** persist (caller writes it)."""
+    org-scoped session. Returns a snapshot dict (deterministic fields + the AI
+    gating decision + the ``core`` passed to enrichment), or ``None`` when the
+    quote is gone. The LLM enrichment runs **outside** this session (the M3.4
+    pool-exhaustion lesson), so this function must not touch the provider."""
     from .ai_settings import get_ai_flags
-    from .models import Account, PartFile, Quote, RequestForQuote
+    from .models import Account, Part, PartFile, Quote, RequestForQuote
 
     quote = await session.get(Quote, quote_id)
     if quote is None:
@@ -479,6 +481,7 @@ async def build_triage_brief(
     body_text = ""
     requested_date: Any = quote.due_date
     export_controlled = False
+    received_parts = 0
     if rfq is not None:
         body_text = f"{rfq.subject or ''}\n{rfq.description or ''}"
         requested_date = rfq.requested_delivery_date or requested_date
@@ -489,27 +492,31 @@ async def build_triage_brief(
             ).all()
         )
         part_numbers = _line_item_part_numbers(rfq.suggested_line_items)
+        # Count PARTS, not attachments: a bundled STEP+PDF is one part (spec
+        # "7 parts · 5 STEP + 3 PDF" — parts and files are distinct signals).
+        received_parts = (
+            await session.scalar(
+                select(func.count(func.distinct(PartFile.part_id))).where(PartFile.rfq_id == rfq.id)
+            )
+        ) or 0
+        # Any export-controlled part also gates the AI call — parts link to the
+        # RFQ through their files (``part_file.rfq_id``), so join across.
+        if not export_controlled:
+            export_controlled = bool(
+                (
+                    await session.scalars(
+                        select(Part.id)
+                        .join(PartFile, PartFile.part_id == Part.id)
+                        .where(PartFile.rfq_id == rfq.id, Part.export_controlled.is_(True))
+                    )
+                ).first()
+            )
     else:
         filenames = []
         part_numbers = []
 
-    # Any export-controlled part on the quote also gates the AI call. Parts link
-    # to the RFQ through their files (``part_file.rfq_id``), so join across.
-    if not export_controlled and rfq is not None:
-        from .models import Part, PartFile
-
-        export_controlled = bool(
-            (
-                await session.scalars(
-                    select(Part.id)
-                    .join(PartFile, PartFile.part_id == Part.id)
-                    .where(PartFile.rfq_id == rfq.id, Part.export_controlled.is_(True))
-                )
-            ).first()
-        )
-
     files = summarize_files(filenames)
-    part_count = max(len(part_numbers), len(filenames))
+    part_count = max(len(part_numbers), int(received_parts))
     missing = detect_missing_files(part_numbers, filenames)
     processes = detect_processes(filenames, body_text)
     est_time = estimate_time_to_quote(part_count, processes)
@@ -549,51 +556,26 @@ async def build_triage_brief(
     else:
         ai_reason = "ok"
 
-    if ai_reason == "ok":
-        core = {
+    return {
+        "ai_reason": ai_reason,
+        "part_count": part_count,
+        "files": files,
+        "missing": missing,
+        "processes": processes,
+        "est_time": est_time,
+        "customer": customer,
+        "compliance": compliance,
+        "need_by_signal": need_by_signal,
+        # The read-only input handed to the LLM (no print bytes — text only).
+        "core": {
             "parts_count": part_count,
             "files": files,
             "missing_files": missing,
             "detected_processes": processes,
-            "customer": customer,
             "compliance_flags": compliance,
             "need_by": need_by_signal,
-        }
-        try:
-            enriched = await (enricher or resolve()).enrich(core)
-        except (LensProviderError, RuntimeError, AttributeError) as exc:
-            code = exc.code if isinstance(exc, LensProviderError) else "provider_unavailable"
-            logger.info("triage_enrich_skipped", extra={"code": code})
-            ai_reason = f"error:{code}"
-        else:
-            ep = enriched.get("detected_processes")
-            if isinstance(ep, list) and ep:
-                processes = [
-                    {
-                        "family": _family_for(p.get("name", "")),
-                        "name": str(p.get("name", "")),
-                        "likelihood": p.get("likelihood", "possible"),
-                        "source": "ai",
-                    }
-                    for p in ep
-                    if isinstance(p, dict) and p.get("name")
-                ]
-            one_liner = enriched.get("customer_one_liner")
-            if isinstance(one_liner, str) and one_liner.strip():
-                customer["one_liner"] = one_liner.strip()
-
-    return assemble_brief(
-        now=now,
-        ai_reason=ai_reason,
-        part_count=part_count,
-        files=files,
-        missing=missing,
-        processes=processes,
-        est_time=est_time,
-        customer=customer,
-        compliance=compliance,
-        need_by_signal=need_by_signal,
-    )
+        },
+    }
 
 
 def _family_for(label: str) -> str:
@@ -605,23 +587,85 @@ def _family_for(label: str) -> str:
     return "unknown"
 
 
+def _merge_ai_processes(
+    deterministic: list[dict[str, Any]], enriched: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Merge AI-inferred process hints onto the deterministic list **without
+    dropping any deterministic fact** (never-hallucinate): every deterministic
+    process is kept; an AI process whose name isn't already present is appended
+    as an advisory ``source: "ai"`` entry."""
+    merged = list(deterministic)
+    seen = {p.get("name", "").casefold() for p in merged}
+    ep = enriched.get("detected_processes")
+    if isinstance(ep, list):
+        for p in ep:
+            if not isinstance(p, dict):
+                continue
+            name = str(p.get("name", "")).strip()
+            if not name or name.casefold() in seen:
+                continue
+            seen.add(name.casefold())
+            merged.append(
+                {
+                    "family": _family_for(name),
+                    "name": name,
+                    "likelihood": p.get("likelihood", "possible"),
+                    "source": "ai",
+                }
+            )
+    return merged
+
+
 async def run_generate_triage_brief(
     db_url: str, *, org_id: uuid.UUID, quote_id: uuid.UUID
 ) -> dict[str, Any]:
     """Task core — idempotent: overwrites ``quote.triage_brief`` with a fresh
     build (deterministic core is stable; the AI enrichment is advisory).
 
-    A short read transaction assembles the brief, then a short write
-    transaction persists it — the external LLM round-trip never holds a row
-    lock (the M3.4 pool-exhaustion lesson)."""
+    Three phases with the external LLM call **between** two short transactions,
+    never inside one — a degraded provider must not hold a pooled connection
+    (the M3.4 pool-exhaustion lesson): (1) read the deterministic snapshot,
+    (2) enrich outside any session, (3) write the assembled brief."""
     engine = make_engine(db_url)
     try:
         sessionmaker = make_sessionmaker(engine)
         now = datetime.now(UTC)
+
+        # Phase 1 — deterministic snapshot (read-only, short txn).
         async with org_scoped_session(sessionmaker, org_id) as session:
-            brief = await build_triage_brief(session, org_id=org_id, quote_id=quote_id, now=now)
-        if brief is None:
+            snap = await build_triage_snapshot(session, org_id=org_id, quote_id=quote_id, now=now)
+        if snap is None:
             return {"failed": True, "error_code": "quote_gone"}
+
+        # Phase 2 — AI enrichment OUTSIDE any DB session. Deterministic facts
+        # (customer one-liner, est-time, compliance, deterministic processes)
+        # are never overwritten by the model; AI only *adds* process hints.
+        ai_reason = snap["ai_reason"]
+        processes = snap["processes"]
+        if ai_reason == "ok":
+            try:
+                enriched = await resolve().enrich(snap["core"])
+            except (LensProviderError, RuntimeError, AttributeError) as exc:
+                code = exc.code if isinstance(exc, LensProviderError) else "provider_unavailable"
+                logger.info("triage_enrich_skipped", extra={"code": code})
+                ai_reason = f"error:{code}"
+            else:
+                processes = _merge_ai_processes(snap["processes"], enriched)
+
+        brief = assemble_brief(
+            now=now,
+            ai_reason=ai_reason,
+            part_count=snap["part_count"],
+            files=snap["files"],
+            missing=snap["missing"],
+            processes=processes,
+            est_time=snap["est_time"],
+            customer=snap["customer"],
+            compliance=snap["compliance"],
+            need_by_signal=snap["need_by_signal"],
+        )
+
+        # Phase 3 — persist (short txn).
         from .models import Quote
 
         async with org_scoped_session(sessionmaker, org_id) as session:

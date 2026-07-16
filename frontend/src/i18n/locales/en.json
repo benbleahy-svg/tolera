@@ -662,6 +662,7 @@
   },
   "triage": {
     "title": "Triage — Quote #{{number}}",
+    "unavailable": "Triage brief unavailable",
     "pending": "Preparing triage brief…",
     "parts": "Parts & files",
     "parts_value": "{{count}} parts · {{files}}",

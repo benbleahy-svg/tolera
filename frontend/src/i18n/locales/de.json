@@ -662,6 +662,7 @@
   },
   "triage": {
     "title": "Triage — Angebot #{{number}}",
+    "unavailable": "Triage-Übersicht nicht verfügbar",
     "pending": "Triage-Übersicht wird erstellt…",
     "parts": "Teile & Dateien",
     "parts_value": "{{count}} Teile · {{files}}",

@@ -18,10 +18,12 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app import triage
+from app.models import MembershipRole
 from app.triage import (
     customer_line,
     detect_missing_files,
@@ -31,7 +33,9 @@ from app.triage import (
     scan_compliance,
     summarize_files,
 )
-from tests.conftest import app_role_url
+from tests.conftest import Seeder, app_role_url, authed
+
+ADMIN = [MembershipRole.admin]
 
 NOW = datetime(2026, 7, 16, 9, 0, tzinfo=UTC)
 
@@ -319,3 +323,69 @@ def test_export_controlled_skips_ai_but_flags_compliance(
     assert brief["ai"]["reason"] == "export_controlled"
     assert fake_enricher.calls == 0  # dual-use content never reaches the provider
     assert any(f["source"] == "part_flag" for f in brief["compliance_flags"])
+
+
+def test_ai_flags_absent_row_defaults_all_enabled(tenancy_db: str, seeder: Seeder) -> None:
+    """An org with no ``org_ai_settings`` row behaves AI-fully-enabled — a
+    missing row must never be a silent disable (the accessor invariant)."""
+    from app.ai_settings import get_ai_flags
+    from app.db import make_engine, make_sessionmaker, org_scoped_session
+
+    org_id = seeder.org("no-ai-row")
+    seeder.sql("DELETE FROM org_ai_settings WHERE org_id = :o", {"o": str(org_id)})
+
+    async def _flags() -> Any:
+        engine = make_engine(app_role_url(tenancy_db))
+        try:
+            sm = make_sessionmaker(engine)
+            async with org_scoped_session(sm, org_id) as session:
+                return await get_ai_flags(session, org_id)
+        finally:
+            await engine.dispose()
+
+    flags = asyncio.run(_flags())
+    assert flags.master_enabled is True
+    assert flags.triage_enabled is True
+
+
+# --------------------------------------------------------------------------- #
+# API route — GET /api/quotes/{id}/triage-brief (org-scoped)
+# --------------------------------------------------------------------------- #
+
+
+def test_triage_brief_endpoint_returns_cached_brief(app_client: TestClient, seeder: Seeder) -> None:
+    org_id = seeder.org("triage-api")
+    user = seeder.user("u@triage-api.example")
+    seeder.membership(user, org_id, ADMIN)
+    quote_id = seeder.quote(org_id, "Q-API-1")
+    seeder.sql(
+        "UPDATE quote SET triage_brief = CAST(:b AS jsonb) WHERE id = :id",
+        {"b": _json({"version": 1, "ai": {"enabled": True, "reason": "ok"}}), "id": str(quote_id)},
+    )
+    with authed(app_client, user_id=user, org_id=org_id, roles=ADMIN):
+        res = app_client.get(f"/api/quotes/{quote_id}/triage-brief")
+    assert res.status_code == 200
+    assert res.json()["brief"]["ai"]["reason"] == "ok"
+
+
+def test_triage_brief_endpoint_pending_when_absent(app_client: TestClient, seeder: Seeder) -> None:
+    org_id = seeder.org("triage-api2")
+    user = seeder.user("u@triage-api2.example")
+    seeder.membership(user, org_id, ADMIN)
+    quote_id = seeder.quote(org_id, "Q-API-2")
+    with authed(app_client, user_id=user, org_id=org_id, roles=ADMIN):
+        res = app_client.get(f"/api/quotes/{quote_id}/triage-brief")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["brief"] is None and body["ai"]["reason"] == "pending"
+
+
+def test_triage_brief_endpoint_is_org_scoped(app_client: TestClient, seeder: Seeder) -> None:
+    org_a = seeder.org("triage-a")
+    org_b = seeder.org("triage-b")
+    user_b = seeder.user("u@triage-b.example")
+    seeder.membership(user_b, org_b, ADMIN)
+    quote_a = seeder.quote(org_a, "Q-A")  # belongs to org A
+    with authed(app_client, user_id=user_b, org_id=org_b, roles=ADMIN):
+        res = app_client.get(f"/api/quotes/{quote_a}/triage-brief")
+    assert res.status_code == 404  # RLS hides org A's quote from org B

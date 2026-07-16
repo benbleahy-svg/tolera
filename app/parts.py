@@ -820,13 +820,17 @@ async def upload_part_files(
         raise
 
     # M3.9 — re-run the RFQ Triage Brief when a file is added to an ingested
-    # quote that no estimator has opened yet (spec #ai-triage). Fire-and-forget;
-    # the task re-reads committed data and is idempotent.
+    # quote that no estimator has opened yet (spec #ai-triage). Post-commit only
+    # (run_after_commit): the triage task opens its own connection and re-reads
+    # committed rows, so enqueuing before this request commits would race the
+    # task into reading the pre-upload state (the _enqueue_pdf_text precedent).
     from .triage import enqueue_triage_brief, find_rerun_target
 
     rerun_quote_id = await find_rerun_target(session, part_id)
     if rerun_quote_id is not None:
-        enqueue_triage_brief(principal.active_org_id, rerun_quote_id)
+        run_after_commit(
+            session, partial(enqueue_triage_brief, principal.active_org_id, rerun_quote_id)
+        )
 
     return [_part_file_out(row) for row in rows]
 
