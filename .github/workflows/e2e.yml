@@ -47,6 +47,23 @@ jobs:
             echo "any=false" >> "$GITHUB_OUTPUT"; echo "All demos still fixme — suite runs without the app."
           fi
 
+      # A promoted demo without Clerk secrets does NOT fail on its own:
+      # e2e/global.setup.ts calls setup.skip(!CLERK_SECRET_KEY), so the suite
+      # reports GREEN having run no acceptance test at all — and secrets are
+      # absent by design on fork PRs. A silent-green merge gate is worse than no
+      # gate, so fail loudly the moment a demo is promoted without its secrets.
+      - name: Require Clerk secrets once demos are promoted
+        if: steps.promoted.outputs.any == 'true'
+        run: |
+          missing=
+          [ -n "$CLERK_SECRET_KEY" ]      || missing="$missing CLERK_SECRET_KEY"
+          [ -n "$CLERK_PUBLISHABLE_KEY" ] || missing="$missing CLERK_PUBLISHABLE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Promoted demos need:$missing — global.setup.ts would skip and this job would pass green without running them. Set via 'gh secret set <NAME>' (note: fork PRs cannot read secrets)."
+            exit 1
+          fi
+          echo "Clerk secrets present — the promoted demos will actually run."
+
       - name: Boot backend stack (compose)
         if: steps.promoted.outputs.any == 'true'
         run: |
