@@ -18,7 +18,13 @@ from app.db import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers=False` — the default (True) silences every
+    # logger that already exists when this runs, which in-process (the test
+    # harness migrates via `alembic upgrade head`, and the container migrates
+    # before serving) means every `app.*` logger goes quiet for the rest of the
+    # process. Nothing warns; logs just stop. Alembic's own config only wants to
+    # add its loggers, never to gag the application's.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

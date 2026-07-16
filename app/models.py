@@ -2570,3 +2570,110 @@ class Rule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+#: §3 resolution catalogue — the effect a user picks on a review item. Mirrors
+#: ``app.rules_schema.Resolution.type`` (the AST's own literal set) and the
+#: ``ck_review_item_resolution_type`` CHECK.
+class ResolutionType(enum.StrEnum):
+    NO_QUOTE = "NO_QUOTE"
+    RESOLVE = "RESOLVE"
+    ADD_OPERATION = "ADD_OPERATION"
+    SET_PROCESS = "SET_PROCESS"
+    ASSIGN_ESTIMATOR = "ASSIGN_ESTIMATOR"
+
+
+class ReviewItemStatus(enum.StrEnum):
+    open = "open"
+    resolved = "resolved"
+
+
+class ReviewItem(Base):
+    """One matched rule on one component — the assignable, resolvable unit of
+    Requirements Review (spec ``#rules-lifecycle``; RULES-ENGINE-SPEC §6).
+
+    The **component** is the subject (§1: "when a rule's signals match a
+    component, a review item is created"); ``quote_item_id`` is the line item
+    its resolutions mutate, and ``quote_id`` is what the panel aggregates over.
+
+    ``UNIQUE (org_id, component_id, rule_id)`` is what makes generation
+    idempotent: the spec's contract is "on any extraction/geometry change,
+    evaluate all org rules against the part → **create/update** ReviewItems",
+    and Lens re-runs on every upload — so re-evaluation must converge on the
+    same row rather than pile up duplicates.
+
+    ``status``/``resolution_*``/``resolved_*`` carry §6's audit trail. The
+    stored ``detail`` holds the matched callout text + finding ids the card
+    renders as entity pills; ``assignee_id``/``resolved_by`` point at the
+    global ``app_user`` (active-membership is checked in the service layer —
+    the ``collab.py`` precedent), so they carry no composite FK."""
+
+    __tablename__ = "review_item"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"], ["quote.org_id", "quote.id"], name="fk_review_item_quote_org"
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "quote_item_id"],
+            ["quote_item.org_id", "quote_item.id"],
+            name="fk_review_item_quote_item_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "component_id"],
+            ["component.org_id", "component.id"],
+            name="fk_review_item_component_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "rule_id"], ["rule.org_id", "rule.id"], name="fk_review_item_rule_org"
+        ),
+        UniqueConstraint("org_id", "id", name="uq_review_item_org_id_id"),
+        UniqueConstraint("org_id", "component_id", "rule_id", name="uq_review_item_component_rule"),
+        CheckConstraint("status IN ('open', 'resolved')", name="ck_review_item_status"),
+        CheckConstraint(
+            "resolution_type IS NULL OR resolution_type IN "
+            "('NO_QUOTE', 'RESOLVE', 'ADD_OPERATION', 'SET_PROCESS', 'ASSIGN_ESTIMATOR')",
+            name="ck_review_item_resolution_type",
+        ),
+        # A resolved item without its decision is an audit hole; an open one
+        # carrying a decision is a contradiction. Mirrors migration 0026.
+        CheckConstraint(
+            "(status = 'open' AND resolution_type IS NULL AND resolved_at IS NULL"
+            " AND resolved_by IS NULL)"
+            " OR (status = 'resolved' AND resolution_type IS NOT NULL"
+            " AND resolved_at IS NOT NULL)",
+            name="ck_review_item_resolved_is_complete",
+        ),
+        Index("ix_review_item_org_quote_status", "org_id", "quote_id", "status"),
+        Index("ix_review_item_org_component", "org_id", "component_id"),
+        Index("ix_review_item_org_assignee", "org_id", "assignee_id"),
+        # §6.4's "up to 5 past parts this rule flagged", newest first.
+        Index(
+            "ix_review_item_org_rule_resolved",
+            "org_id",
+            "rule_id",
+            text("resolved_at DESC"),
+            postgresql_where=text("status = 'resolved'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quote_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    rule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
+    assignee_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
+    )
+    resolution_type: Mapped[str | None] = mapped_column(Text)
+    resolution_label: Mapped[str | None] = mapped_column(Text)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
+    )
+    detail: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()

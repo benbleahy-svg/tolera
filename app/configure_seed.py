@@ -34,6 +34,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,8 +57,10 @@ from app.models import (
     Process,
     ProcessFamily,
     ProcessOperation,
+    Rule,
     WorkflowStepDef,
 )
+from app.rules_schema import RuleSchema
 
 # ---------------------------------------------------------------------------
 # §2 — non-metal classes (German-first; Metall is M1.7's)
@@ -354,6 +357,7 @@ class ConfigureSeedResult:
     workflow_steps_created: int
     custom_tables_created: int
     email_templates_created: int
+    rules_created: int
 
 
 async def seed_configure_catalog(
@@ -386,6 +390,7 @@ async def seed_configure_catalog(
     steps_created = await _seed_workflow_steps(session, org_id)
     tables_created = await _seed_custom_tables(session, org_id)
     templates_created = await _seed_email_templates(session, org_id)
+    rules_created = await _seed_rules(session, org_id)
 
     await session.flush()
     return ConfigureSeedResult(
@@ -400,6 +405,7 @@ async def seed_configure_catalog(
         workflow_steps_created=steps_created,
         custom_tables_created=tables_created,
         email_templates_created=templates_created,
+        rules_created=rules_created,
     )
 
 
@@ -714,4 +720,265 @@ async def _seed_email_templates(session: AsyncSession, org_id: uuid.UUID) -> int
             continue
         session.add(EmailTemplate(org_id=org_id, key=key, locale=locale, subject=subject))
         created += 1
+    return created
+
+
+# --------------------------------------------------------------------------- #
+# §7 — starter rule library
+# --------------------------------------------------------------------------- #
+#: Tolerance collections the tight-tolerance rule ORs over (RULES-ENGINE-SPEC §4).
+_TIGHT_TOLERANCE_PATHS = (
+    "length_tolerances",
+    "diameter_tolerances",
+    "radius_tolerances",
+    "angular_tolerances",
+)
+
+#: PP's 5-thou tight-tolerance threshold, re-unit'd (§7 DACH: "PP 5-thou →
+#: 0.13 mm"). **Linear paths only.**
+_TIGHT_TOLERANCE_MM = 0.13
+
+#: The angular threshold is a SEPARATE number, not the linear one reused. §7
+#: re-units PP's 5 thou to 0.13 mm and says nothing about angles, so sharing the
+#: scalar would be a coincidence of digits rather than a decision — and it would
+#: print "0.13 mm" in the rule's description while comparing degrees.
+#: 0.5° is the seeded default: ISO 2768-m's angular general tolerance is ±1° for
+#: the shortest leg, so half of it means "tighter than the general tolerance the
+#: shop already assumes", which is what the rule is for. ASSUMED — the ladder is
+#: silent on an angular threshold; shop-specific and cheap to retune, and
+#: Fechner's real numbers arrive with the starter-rule review (DECISIONS
+#: 2026-07-12).
+_TIGHT_ANGLE_DEG = 0.5
+
+#: Stable identities so a re-seed reconciles the same rows rather than minting
+#: duplicates (``rule.uuid`` is the portable upsert key, M3.6).
+_RULE_UUIDS = {
+    "dual_use": uuid.UUID("6f1f6a3e-0b8e-4a5a-9c21-2a1d1f0a0001"),
+    "tight_tolerance": uuid.UUID("6f1f6a3e-0b8e-4a5a-9c21-2a1d1f0a0002"),
+    "missing_file": uuid.UUID("6f1f6a3e-0b8e-4a5a-9c21-2a1d1f0a0003"),
+    "deburr": uuid.UUID("6f1f6a3e-0b8e-4a5a-9c21-2a1d1f0a0004"),
+}
+
+
+def _text_keyword_signal(keywords: list[str]) -> dict[str, Any]:
+    return {
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "document_path": "text",
+                "logical_operator": "AND",
+                "queries": [
+                    {
+                        "field_name": ["raw_text"],
+                        "operator": "includesCaseInsensitive",
+                        "value": keywords,
+                        "value_type": "string",
+                        "filter_type": "string",
+                        "units": None,
+                    }
+                ],
+                "count_query": None,
+            }
+        ],
+    }
+
+
+def _files_signal(field: str) -> dict[str, Any]:
+    return {
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "document_path": "files",
+                "logical_operator": "AND",
+                "queries": [
+                    {
+                        "field_name": [field],
+                        "operator": "equals",
+                        "value": False,
+                        "value_type": "boolean",
+                        "filter_type": "boolean",
+                        "units": None,
+                    }
+                ],
+                "count_query": None,
+            }
+        ],
+    }
+
+
+def _tolerance_signal(document_path: str) -> dict[str, Any]:
+    angular = document_path == "angular_tolerances"
+    return {
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "document_path": document_path,
+                "logical_operator": "AND",
+                "queries": [
+                    {
+                        "field_name": ["smallest_delta"],
+                        "operator": "lessThanOrEqual",
+                        "value": _TIGHT_ANGLE_DEG if angular else _TIGHT_TOLERANCE_MM,
+                        "value_type": "angle" if angular else "distance",
+                        "filter_type": "numeric",
+                        "units": "deg" if angular else "mm",
+                    }
+                ],
+                "count_query": None,
+            }
+        ],
+    }
+
+
+def _starter_rules(deburr_op_def_id: uuid.UUID | None) -> list[dict[str, Any]]:
+    """The §7 starter library, German-first (DECISIONS 2026-07-16: Claude-
+    generated German, Fechner reviews later).
+
+    §7 names five starters; four are expressible against M3.6's ``document_path``
+    catalogue and are seeded here. The fifth — *no material specified → block
+    send* — has **no addressable path**: the catalogue exposes no line-item or
+    material collection (M3.7's ``line_item``/``quote`` context fields are inert
+    for exactly this reason). Cataloguing one is an M3.6 schema change, logged in
+    DECISIONS.md (2026-07-16) rather than guessed at here.
+    """
+    rules: list[dict[str, Any]] = [
+        {
+            "uuid": str(_RULE_UUIDS["dual_use"]),
+            "name": "Ausfuhrkontrolle prüfen (Dual-Use)",
+            "description": (
+                "Hinweis auf Ausfuhrkontrolle/Dual-Use in den Dokumenten — "
+                "Einstufung durch die Leitung bestätigen lassen."
+            ),
+            "logical_operator": "OR",
+            "signals": [
+                _text_keyword_signal(
+                    [
+                        "dual-use",
+                        "dual use",
+                        "ausfuhrgenehmigung",
+                        "ausfuhrliste",
+                        "ausfuhrkontrolle",
+                        "eg 428/2009",
+                        "eu 2021/821",
+                        "export control",
+                    ]
+                )
+            ],
+            "resolutions": [
+                {"type": "RESOLVE", "parameters": [], "custom_label": "Von Leitung freigegeben"},
+                {"type": "RESOLVE", "parameters": [], "custom_label": "Einstufung bestätigt"},
+                {"type": "NO_QUOTE", "parameters": [], "custom_label": None},
+            ],
+            "default_assignee_id": None,
+        },
+        {
+            "uuid": str(_RULE_UUIDS["tight_tolerance"]),
+            "name": "Enge Toleranz — Senior-Schätzer",
+            "description": (
+                f"Mindestens eine Toleranz ≤ {_TIGHT_TOLERANCE_MM} mm "
+                f"(bzw. ≤ {_TIGHT_ANGLE_DEG}° bei Winkeln) — "
+                "vor der Kalkulation von einem Senior-Schätzer prüfen lassen."
+            ),
+            "logical_operator": "OR",
+            "signals": [_tolerance_signal(path) for path in _TIGHT_TOLERANCE_PATHS],
+            "resolutions": [
+                {
+                    "type": "RESOLVE",
+                    "parameters": [],
+                    "custom_label": "Von Senior-Schätzer geprüft",
+                },
+                {"type": "RESOLVE", "parameters": [], "custom_label": "Fremdvergabe"},
+                {"type": "NO_QUOTE", "parameters": [], "custom_label": None},
+            ],
+            "default_assignee_id": None,
+        },
+        {
+            "uuid": str(_RULE_UUIDS["missing_file"]),
+            "name": "Fehlendes Modell oder fehlende Zeichnung",
+            "description": "Zum Bauteil fehlt das 3D-Modell oder die Zeichnung.",
+            "logical_operator": "OR",
+            "signals": [_files_signal("has_print"), _files_signal("has_model")],
+            "resolutions": [
+                {"type": "RESOLVE", "parameters": [], "custom_label": "Kunde kontaktiert"},
+                {"type": "RESOLVE", "parameters": [], "custom_label": "Ohne Datei kalkuliert"},
+            ],
+            "default_assignee_id": None,
+        },
+    ]
+    if deburr_op_def_id is not None:
+        rules.append(
+            {
+                "uuid": str(_RULE_UUIDS["deburr"]),
+                "name": "Entgraten gefordert",
+                "description": (
+                    "Die Zeichnung fordert Entgraten/Kantenbruch — "
+                    "Operation in den Arbeitsplan aufnehmen."
+                ),
+                "logical_operator": "OR",
+                "signals": [
+                    _text_keyword_signal(
+                        [
+                            "entgrat",
+                            "kanten brechen",
+                            "kantenbruch",
+                            "gratfrei",
+                            "deburr",
+                            "break all edges",
+                            "remove all burrs",
+                        ]
+                    )
+                ],
+                "resolutions": [
+                    {
+                        "type": "ADD_OPERATION",
+                        "parameters": [{"name": "op_def_ids", "value": [str(deburr_op_def_id)]}],
+                        "custom_label": None,
+                    },
+                    {"type": "RESOLVE", "parameters": [], "custom_label": "Nicht zutreffend"},
+                ],
+                "default_assignee_id": None,
+            }
+        )
+    return rules
+
+
+async def _seed_rules(session: AsyncSession, org_id: uuid.UUID) -> int:
+    """Seed the §7 starter rule library (spec ``#rules``: "Starter rule library
+    ships seeded").
+
+    Reconciling, not overwriting: a rule the shop has since edited keeps its
+    edits — re-seeding must never silently revert an admin's tuning (the
+    config-freeze posture the rest of this module takes). Only absent rules are
+    created.
+    """
+    deburr = await session.scalar(
+        select(OperationDef).where(
+            OperationDef.org_id == org_id,
+            OperationDef.name == "Entgraten",
+            OperationDef.deleted_at.is_(None),
+        )
+    )
+    existing = {
+        row.uuid for row in (await session.scalars(select(Rule).where(Rule.org_id == org_id))).all()
+    }
+    created = 0
+    for payload in _starter_rules(deburr.id if deburr is not None else None):
+        rule = RuleSchema.model_validate(payload)
+        if rule.uuid in existing:
+            continue
+        dumped = rule.model_dump(mode="json")
+        session.add(
+            Rule(
+                org_id=org_id,
+                uuid=rule.uuid,
+                name=rule.name,
+                description=rule.description,
+                logical_operator=rule.logical_operator,
+                signals=dumped["signals"],
+                resolutions=dumped["resolutions"],
+                default_assignee_id=rule.default_assignee_id,
+            )
+        )
+        created += 1
+    await session.flush()
     return created

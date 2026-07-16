@@ -214,6 +214,21 @@ def lens_extract_task(self: Any, org_id: str, part_id: str, file_id: str) -> dic
             **binding,
         },
     )
+    # M3.8 §6.1: "after AI/interrogation finishes, matching rules create review
+    # items". Extraction is what changes the data the rules read, so it is what
+    # re-runs them. Chained *after* run_extraction's commit — the generator opens
+    # its own session and must see the findings. Only on the real success path:
+    # a `skipped` (nothing extractable) or `failed` return changed no findings.
+    # Dispatched best-effort: review items are derived data, so a broker hiccup
+    # must not fail an extraction that already committed (a later upload, or the
+    # panel's refresh, regenerates them).
+    if not out.get("skipped") and not out.get("failed"):
+        try:
+            from .review_items import review_items_generate_task
+
+            review_items_generate_task.delay(org_id, part_id)
+        except Exception:  # never fail an extraction that already committed
+            logger.warning("review_items_dispatch_failed", extra={"part_id": part_id, **binding})
     return {**out, **binding}
 
 

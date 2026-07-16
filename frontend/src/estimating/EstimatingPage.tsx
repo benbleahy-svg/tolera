@@ -23,6 +23,7 @@ import { ChangeProcessModal } from './ChangeProcessModal';
 import { LeadTimesSection } from './LeadTimesSection';
 import { MaterialPicker } from './MaterialPicker';
 import { OperationDrawer } from './OperationDrawer';
+import { ReviewItemsPanel } from '../review/ReviewItemsPanel';
 import { OperationsSection } from './OperationsSection';
 import { PricingSection } from './PricingSection';
 import { QuoteTotalsPanel } from './QuoteTotalsPanel';
@@ -370,6 +371,19 @@ export function EstimatingPage() {
             onMove={moveOperation}
             disabled={!editable}
           />
+
+          {/* M3.8: the line-item Review Items panel. A resolution can mutate the
+              router (ADD_OPERATION / SET_PROCESS), so refetch the costing it
+              just changed rather than leaving a stale grid on screen. */}
+          {componentId && (
+            <ReviewItemsPanel
+              componentId={componentId}
+              onResolved={() => {
+                api.getCosting(componentId).then(setCosting).catch(fail);
+                loadPricing();
+              }}
+            />
+          )}
 
           {pricing && (
             <PricingSection

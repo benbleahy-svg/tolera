@@ -16,7 +16,18 @@ celery_app = Celery(
     "tolera",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks", "app.file_split", "app.email_ingest", "app.email_sync"],
+    # Every module defining a task must be listed: a worker imports only these,
+    # so an omitted module's task is never registered and its `.delay()` dies as
+    # an unregistered task at runtime (the API process hides this — it imports
+    # the module via its router, so eager/in-process dispatch still works).
+    include=[
+        "app.tasks",
+        "app.file_split",
+        "app.email_ingest",
+        "app.email_sync",
+        "app.lens_extract",
+        "app.review_items",
+    ],
 )
 
 celery_app.conf.update(

@@ -1,0 +1,168 @@
+/*
+ * Review Items panel + Create Rule modal (M3.8, spec #rules / DemoC).
+ *
+ * The burn-down list: each card is one matched rule on one part, carrying its
+ * rule's own stacked one-click resolutions. A resolved card stays legible but
+ * recedes — it is the audit trail (§6.6), not clutter to hide.
+ *
+ * Deliberately NOT the Lens purple (--color-ai-signal): a review item is a
+ * deterministic rule match, not an AI suggestion, and the AI-Governor treatment
+ * must keep meaning "a model proposed this" (CLAUDE.md §5).
+ */
+
+.review-panel {
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+}
+.review-panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.review-panel-header h3 { margin: 0; font-size: 1rem; }
+.review-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted, #667085);
+}
+
+.review-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 0.5rem 0;
+  color: var(--muted, #667085);
+}
+.review-filters label { display: flex; align-items: center; gap: 0.3rem; }
+
+.review-empty { color: var(--muted, #667085); margin: 0.5rem 0; }
+
+.review-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+
+.review-card {
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 6px;
+  padding: 0.6rem;
+  background: var(--surface, #fff);
+}
+.review-card[data-status='resolved'] { opacity: 0.65; }
+.review-card-head { display: flex; align-items: center; gap: 0.5rem; }
+.review-type { font-weight: 600; flex: 1; }
+.review-assignee { max-width: 12rem; }
+
+.review-callout {
+  margin: 0.4rem 0;
+  padding: 0.3rem 0.45rem;
+  border-left: 2px solid var(--border, #d0d4da);
+  color: var(--muted, #667085);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+  /* A callout is print text: it may be long and must not blow out the card. */
+  overflow-wrap: anywhere;
+}
+
+.review-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.review-action {
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  background: var(--surface, #fff);
+  cursor: pointer;
+}
+.review-action:hover:not(:disabled) { background: var(--surface-hover, #f3f4f6); }
+.review-action:disabled { cursor: progress; opacity: 0.6; }
+/* No-quote is the one destructive resolution — it must not look like the rest. */
+.review-action[data-resolution='NO_QUOTE'] { color: var(--danger, #b42318); }
+
+.review-resolved-note { margin: 0.4rem 0 0; color: var(--muted, #667085); }
+
+.review-priors-toggle {
+  margin-top: 0.5rem;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--link, #175cd3);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.review-priors {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0 0 0 0.6rem;
+  border-left: 2px solid var(--border, #d0d4da);
+  color: var(--muted, #667085);
+}
+.review-priors-empty { font-style: italic; }
+
+/* --- Create Rule modal (two columns: editor | live preview) --------------- */
+.review-rule-modal { width: min(880px, 94vw); }
+.review-rule-columns {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1rem;
+}
+/* The preview is a companion, not content — it stacks under on narrow screens. */
+@media (max-width: 720px) {
+  .review-rule-columns { grid-template-columns: 1fr; }
+}
+.review-rule-editor { display: grid; gap: 0.6rem; align-content: start; }
+.review-rule-editor label { display: grid; gap: 0.2rem; }
+.review-rule-editor fieldset {
+  border: 1px solid var(--border, #d0d4da);
+  border-radius: 6px;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.5rem;
+}
+.review-rule-editor legend { padding: 0 0.3rem; font-weight: 600; }
+.review-hint { color: var(--muted, #667085); font-size: 0.8rem; margin: 0; }
+
+.review-selected-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: var(--info-bg, #eff8ff);
+  border: 1px solid var(--info-border, #b2ddff);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+}
+.review-selected-chip button {
+  border: 0;
+  background: none;
+  color: var(--link, #175cd3);
+  cursor: pointer;
+}
+
+.review-filter-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  /* the spec's indented "↳" filter row under its signal path */
+  padding-left: 1rem;
+}
+.review-filter-row input { min-width: 0; flex: 1; }
+
+.review-rule-resolutions ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.review-rule-resolutions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.review-rule-resolutions li button {
+  border: 0;
+  background: none;
+  color: var(--danger, #b42318);
+  cursor: pointer;
+}
+
+.review-rule-preview {
+  border-left: 1px solid var(--border, #d0d4da);
+  padding-left: 1rem;
+}
+.review-rule-preview h4 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--muted, #667085); }

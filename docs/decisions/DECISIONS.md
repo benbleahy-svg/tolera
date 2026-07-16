@@ -19,6 +19,64 @@
 
 ---
 
+## [2026-07-16] OPEN: M3.8 — does a resolved review item suppress the same rule's next occurrence?
+
+**Status:** OPEN (M3.8 ships one-decision-per-rule-per-component; nothing is stuck)
+**Question:** `uq_review_item_component_rule` (`org_id, component_id, rule_id`) makes generation idempotent — the point of the constraint, since Lens re-runs on every upload and re-evaluation must converge rather than accumulate. But it also means a **resolved** item is a permanent verdict for that (component, rule) pair: if the rule matches again later, no new item appears.
+
+That is right when the decision is about the *part* ("Fremdvergabe", "Kunde kontaktiert" — still true next week). It is wrong when the *evidence* changes underneath it: a **new print revision** is uploaded, Lens re-extracts, and the tight-tolerance rule matches a **different, tighter** callout — the estimator's earlier "geprüft" was about the old drawing, and the new one is silently never flagged. Raised in review of #48 (CodeRabbit, 🟠 Major).
+
+**Options considered:**
+- **(a) One decision per (component, rule) ← shipped.** Simplest, and matches §6's framing of a decision as being *about the part*. Silently under-reports on a revision.
+- **(b) Reconcile only against *open* items; a resolved one does not block a new occurrence.** Catches the revision case. But with no notion of "the same occurrence", the rule re-fires after *every* re-extraction, re-opening work the estimator just closed — the false-positive firehose §6's build/test loop warns about. Needs an occurrence key (finding ids? a content hash?) that nothing currently produces.
+- **(c) Withdraw resolved items when their evidence changes** (re-open on a new *file revision*, not on every re-extraction). Closest to the intent; needs a revision signal M2's file pipeline has but the generator does not read yet.
+
+**Recommended default:** (c) once the generator can see a file-revision boundary (M2.1's revision compare already models one). Until then (a), which errs toward *not* nagging rather than toward re-opening closed work.
+**Why it is not a halt:** the failure mode needs a re-revised print *and* a changed finding to matter, no shop has authored rules yet, and today the constraint is what makes the post-extraction trigger safe to re-run. Changing it later is a migration + one branch in `generate_for_component`. Logged rather than quietly assumed.
+**Affects:** M3.8 (`review_items.generate_for_component`, migration 0026's unique constraint), M2 (revision signal), M3.10.
+
+---
+
+## [2026-07-16] OPEN: M3.8 — does an unresolved review item block Draft→Sent?
+
+**Status:** OPEN (M3.8 ships the conservative default — the count is surfaced, send is **not** blocked; nothing is stuck)
+**Question:** Two spec lines disagree, so the ladder does not settle it.
+- `#rules` (tier 2, the feature's own section): "The unresolved count drives the quote's **Outstanding Work / Incomplete Quote Items**" — i.e. *informational*, exactly what M3.8 implemented (`WorkflowTracker.unresolved_review_item_count`).
+- `#rules-accept` (tier 2, same document): "the dual-use rule fires and **blocks send pending review**" — i.e. a hard gate on Draft→Sent.
+- `#export-control` (tier 2, marked **decision**): export-controlled / EU dual-use is "**flag + audit, no hard block** in v1". That is written about *access* to flagged records, not about sending, so it neither clearly grants nor clearly denies the gate.
+
+There is also no way to express "this rule blocks send" in the canonical AST: the §3 resolution catalogue has no `BLOCK_SEND`, and `rule` carries no such flag. So "the dual-use rule blocks send" is only implementable as a blanket rule — *any* unresolved review item blocks Draft→Sent — which is a much larger claim than the sentence makes.
+
+**Options considered:**
+- **(a) Nothing blocks; the unresolved count is informational ← shipped default.** Matches `#rules` literally and the "no hard block in v1" posture. Risk: a dual-use part can be sent with the flag unresolved — the exact thing `#rules-accept` names.
+- **(b) Any unresolved review item blocks Draft→Sent.** Satisfies `#rules-accept` and is the only shape the AST can express. But it is a real workflow gate: with the §7 starter library seeded, the "Fehlendes Modell oder fehlende Zeichnung" rule fires on nearly every part that arrives without a print, so **every such quote becomes unsendable** until someone clears it. It would also put a rules-engine dependency in the middle of the M1 golden thread's send step.
+- **(c) A per-rule `blocks_send` flag.** Matches the sentence's intent precisely and blocks only what the shop marks. But it is an **M3.6 schema + canonical-AST change** (a new field in the portable JSON contract), which is expensive to reverse and not M3.8's to make.
+
+**Recommended default:** (c) as the eventual answer, (a) until then — do not turn the whole starter library into a send gate by accident. If Fechner wants the dual-use gate before (c) lands, (b) scoped to a hard-coded rule uuid is a two-line stopgap.
+**Why it is not a halt:** the ladder is ambiguous rather than silent, and the conservative reading is the feature section's own words; nothing downstream is blocked, and the count is already surfaced for the UI. Per §6.2 the block continued.
+**Counter-argument (review of #48, CodeRabbit 🔴):** "sending a flagged quote is not safely reversible" — an email to the customer cannot be recalled, so the asymmetry favours (b)/(c) over (a). That is the strongest case for resolving this before the pilot, and it is why this entry is flagged in the PR body rather than buried. It does not change the shipped default: (b) would make every print-less quote unsendable, which is a bigger, *also* unreviewed behaviour change, and (c) is the M3.6 work this recommends.
+**Affects:** M3.8 (`quote_lifecycle.transition` send guard), M3.6 (if (c)), `SEED-AND-FIXTURES §7`, Demo C's acceptance line.
+
+---
+
+## [2026-07-16] OPEN: M3.6/M3.8 — "no material specified" has no addressable document_path
+
+**Status:** OPEN (M3.8 seeds the other four §7 starters; nothing is stuck)
+**Question:** `SEED-AND-FIXTURES §7` names five starter rules. Four are expressible against M3.6's `document_path` catalogue and are seeded (`configure_seed._starter_rules`). The fifth — *no material specified → block send* — is **not addressable**: the catalogue (spec `#rules-paths`) exposes `part`, `files`, `text`, the tolerance/control-frame collections and the interrogation families, but **nothing for the component's material or the line item**. M3.7's `EvaluationContext` carries `line_item`/`quote` fields that are inert for precisely this reason, and its docstring already flags that cataloguing them "is a schema change, M3.6's domain".
+
+`#rules-signals` §2 *does* list "Line-item information — minimum / maximum requested quantity" and "Quote information — the account" as signal categories, so the catalogue is knowingly narrower than the signal model it implements. This is the first starter rule to fall through that gap.
+
+**Options considered:**
+- **(a) Add `component` / `line_item` document_paths to the catalogue** (material_id, min/max qty, account). Faithful to §2, unblocks the rule — but it widens the **portable AST contract** (M3.6), which every exported rule set is written against.
+- **(b) Approximate with `text`** (flag prints with no material callout). Cheap, and wrong: absence of a keyword is not absence of a material.
+- **(c) Leave it unseeded ← shipped.** The other four starters ship; this one waits for (a).
+
+**Recommended default:** (a), as part of the same change that resolves the `blocks_send` question above — both are M3.6 catalogue/schema work and are cheaper done together than twice.
+**Why it is not a halt:** it removes one seeded example, not a capability; the engine, the lifecycle and the other four starters are unaffected. Expensive to reverse (it is the portable AST contract), so it is logged rather than guessed — CLAUDE.md §6.1.
+**Affects:** M3.6 (`rules_schema` catalogue), M3.8 (`configure_seed._starter_rules`), `SEED-AND-FIXTURES §7`.
+
+---
+
 ## [2026-07-16] OPEN: M3.7 `smallest_delta` — does a unilateral `+X/-0` count as a tight tolerance?
 
 **Status:** OPEN (M3.7 ships a default; nothing is blocked — cheap to reverse)
