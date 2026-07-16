@@ -1,0 +1,13 @@
+{
+  "pdf": "halter-4711-rev-c.pdf",
+  "pages_total": 1,
+  "print_pages": [1],
+  "findings": [
+    { "category": "quote_setup", "type": "part_number", "value": "Halter 4711" },
+    { "category": "quote_setup", "type": "material", "value": "1.4301" },
+    { "category": "quote_setup", "type": "document_units", "value": "mm" },
+    { "category": "quote_setup", "type": "revision", "value": "C" },
+    { "category": "requirements", "type": "general_tolerance", "value": "ISO 2768-m" },
+    { "category": "requirements", "type": "packaging_requirement", "value": "Einzeln verpacken (VCI-Folie)" }
+  ]
+}

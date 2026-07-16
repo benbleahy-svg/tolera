@@ -1,0 +1,9 @@
+{
+  "pdf": "cube-20mm-print.pdf",
+  "pages_total": 1,
+  "print_pages": [1],
+  "findings": [
+    { "category": "quote_setup", "type": "material", "value": "1.4301" },
+    { "category": "requirements", "type": "general_tolerance", "value": "ISO 2768-m" }
+  ]
+}
