@@ -819,6 +819,15 @@ async def upload_part_files(
         await _discard_blobs(storage, stored_keys)
         raise
 
+    # M3.9 — re-run the RFQ Triage Brief when a file is added to an ingested
+    # quote that no estimator has opened yet (spec #ai-triage). Fire-and-forget;
+    # the task re-reads committed data and is idempotent.
+    from .triage import enqueue_triage_brief, find_rerun_target
+
+    rerun_quote_id = await find_rerun_target(session, part_id)
+    if rerun_quote_id is not None:
+        enqueue_triage_brief(principal.active_org_id, rerun_quote_id)
+
     return [_part_file_out(row) for row in rows]
 
 

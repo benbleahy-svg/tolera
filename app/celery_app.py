@@ -27,6 +27,7 @@ celery_app = Celery(
         "app.email_sync",
         "app.lens_extract",
         "app.review_items",
+        "app.triage",
     ],
 )
 

@@ -251,6 +251,8 @@ async def run_email_parts_parse(
             if rfq is None:
                 return {"failed": True, "error_code": "rfq_gone"}
             body_text = rfq.description or ""
+            # M3.9: the draft quote the Triage Brief chains onto after this parse.
+            quote_id = str(rfq.quote_id) if rfq.quote_id is not None else None
             filenames = list(
                 (
                     await session.scalars(
@@ -261,7 +263,7 @@ async def run_email_parts_parse(
 
         if not body_text.strip():
             await _store_payload(sessionmaker, org_id, rfq_id, _payload("completed"))
-            return {"items": 0, "dropped": 0}
+            return {"items": 0, "dropped": 0, "quote_id": quote_id}
         try:
             provider = cast("EmailPartsListProvider", resolve())
             raw_items = await provider.parse_email_parts_list(body_text, filenames)
@@ -269,10 +271,11 @@ async def run_email_parts_parse(
             # Deterministic non-answers (refusal, bad JSON, provider not
             # configured): record and stop — retries would burn identical
             # calls, and a parse failure must degrade to an empty dialog,
-            # never fail the ingested quote.
+            # never fail the ingested quote. Triage still runs (files/compliance/
+            # need-by don't need the parts list).
             code = exc.code if isinstance(exc, LensProviderError) else "provider_unavailable"
             await _store_payload(sessionmaker, org_id, rfq_id, _payload("failed", error_code=code))
-            return {"failed": True, "error_code": code}
+            return {"failed": True, "error_code": code, "quote_id": quote_id}
         kept, dropped_items = parts_list_guard(raw_items, body_text, filenames)
         stored = await _store_payload(
             sessionmaker,
@@ -282,7 +285,7 @@ async def run_email_parts_parse(
         )
         if not stored:
             return {"failed": True, "error_code": "rfq_gone"}
-        return {"items": len(kept), "dropped": len(dropped_items)}
+        return {"items": len(kept), "dropped": len(dropped_items), "quote_id": quote_id}
     finally:
         await engine.dispose()
 
@@ -306,6 +309,14 @@ def email_parts_parse_task(self: Any, org_id: str, rfq_id: str) -> dict[str, Any
         run_email_parts_parse(db_url, org_id=uuid.UUID(org_id), rfq_id=uuid.UUID(rfq_id))
     )
     out = cast("dict[str, Any]", result)
+    # M3.9 — chain the RFQ Triage Brief after the email-parse job (spec
+    # #ai-triage: "chains after the Lens email-parse Celery job"). Post-work,
+    # fire-and-forget: the parts list is now committed, so the brief reads it.
+    quote_id = out.get("quote_id")
+    if quote_id:
+        from .triage import enqueue_triage_brief
+
+        enqueue_triage_brief(uuid.UUID(org_id), uuid.UUID(quote_id))
     # counts only — parts lists are customer content (§5 logging).
     logger.info(
         "email_parts_parse_completed",

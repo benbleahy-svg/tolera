@@ -660,6 +660,25 @@
     "notif_mention": "You were mentioned in a discussion",
     "notif_task_assigned": "A task was assigned to you"
   },
+  "triage": {
+    "title": "Triage — Quote #{{number}}",
+    "pending": "Preparing triage brief…",
+    "parts": "Parts & files",
+    "parts_value": "{{count}} parts · {{files}}",
+    "missing_files": "Missing files",
+    "processes": "Detected processes",
+    "est_time": "Estimated time to quote",
+    "customer": "Customer",
+    "compliance": "Export control",
+    "need_by": "Need-by",
+    "need_by_value": "{{date}} · {{days}} days · {{urgency}}",
+    "ai_disabled": "AI processing disabled",
+    "urgency_hoch": "high",
+    "urgency_mittel": "medium",
+    "urgency_niedrig": "low",
+    "urgency_überfällig": "overdue",
+    "urgency_keine": "no deadline"
+  },
   "lens": {
     "part_setup": "Part Setup",
     "part_setup_hint": "Step through line items and parts to consider extractions and enter part and costing information.",

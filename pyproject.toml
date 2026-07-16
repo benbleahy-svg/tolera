@@ -93,6 +93,7 @@ module = [
     "app.email_parts",
     "app.email_sync",
     "app.review_items",
+    "app.triage",
 ]
 disallow_untyped_decorators = false
 disallow_subclassing_any = false

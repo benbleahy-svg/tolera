@@ -497,6 +497,22 @@ async def get_quote(
     return await _load_detail(session, await _get_quote_or_404(session, quote_id))
 
 
+@quotes_router.get("/{quote_id}/triage-brief")
+async def get_triage_brief(
+    quote_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.view_all))],
+) -> dict[str, Any]:
+    """The cached RFQ Triage Brief for the dashboard card + header chip (M3.9,
+    spec #ai-triage). Returns the ``triage_brief`` JSONB, or a ``pending`` shell
+    when the brief hasn't been generated yet (a manually-created quote, or one
+    still being processed) — never a silent 404 for a real quote."""
+    quote = await _get_quote_or_404(session, quote_id)
+    if quote.triage_brief is None:
+        return {"brief": None, "ai": {"enabled": False, "reason": "pending"}}
+    return {"brief": quote.triage_brief}
+
+
 @quotes_router.patch("/{quote_id}")
 async def update_quote(
     quote_id: uuid.UUID,

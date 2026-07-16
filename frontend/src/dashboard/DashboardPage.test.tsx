@@ -10,6 +10,39 @@ const listMembers = vi.fn();
 const updateTask = vi.fn();
 const listNotifications = vi.fn();
 const markNotification = vi.fn();
+const getTriageBrief = vi.fn();
+
+vi.mock('../quotes/api', () => ({
+  useQuotesApi: () => ({
+    searchQuotes: vi.fn(),
+    listSavedViews: vi.fn(),
+    createSavedView: vi.fn(),
+    updateSavedView: vi.fn(),
+    deleteSavedView: vi.fn(),
+    getTriageBrief,
+  }),
+}));
+
+function triageBrief(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    generated_at: '2026-07-16T09:00:00Z',
+    ai: { enabled: true, reason: 'ok' },
+    parts: {
+      count: 3,
+      files: { step: 1, dxf: 0, pdf: 2, other: 0, total: 3, summary: '1 STEP + 2 PDF' },
+    },
+    missing_files: ['PP-5531'],
+    detected_processes: [{ family: 'machining', name: 'CNC-Fräsen', likelihood: 'likely', source: 'ai' }],
+    est_time_to_quote: { low_min: 120, high_min: 180, display: 'ca. 2-3 Std.', deterministic: true },
+    customer: { known: false, name: 'Arch Medial', prior_quotes: 0, one_liner: 'Neukunde · Arch Medial' },
+    compliance_flags: [
+      { code: 'export_control', severity: 'warn', source: 'keyword', detail: 'Exportkontroll-Hinweis' },
+    ],
+    need_by: { date: '2026-07-22', days_until: 6, urgency: 'mittel' },
+    ...overrides,
+  };
+}
 
 vi.mock('../collab/api', async () => {
   const actual = await vi.importActual<typeof import('../collab/api')>('../collab/api');
@@ -60,8 +93,10 @@ describe('DashboardPage', () => {
     updateTask.mockResolvedValue(task({ status: 'resolved' }));
     listNotifications.mockReset();
     markNotification.mockReset();
+    getTriageBrief.mockReset();
     listNotifications.mockResolvedValue([]);
     markNotification.mockResolvedValue({});
+    getTriageBrief.mockResolvedValue({ brief: null });
   });
 
   it('surfaces assigned tasks with assignee + status', async () => {
@@ -91,8 +126,9 @@ describe('DashboardPage', () => {
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith('t1', 'resolved'));
   });
 
-  it('renders the email-ingest notification with a quote link (M3.3)', async () => {
+  it('renders the email-ingest notification as a triage card with signals (M3.9)', async () => {
     listTasks.mockResolvedValue([]);
+    getTriageBrief.mockResolvedValue({ brief: triageBrief() });
     listNotifications.mockResolvedValue([
       {
         id: 'n1',
@@ -104,15 +140,39 @@ describe('DashboardPage', () => {
     ]);
     await renderWithProviders(<DashboardPage />);
 
-    expect(
-      await screen.findByText(
-        'Neues Angebot aus E-Mail-Weiterleitung: Angebot #17 erstellt',
-      ),
-    ).toBeInTheDocument();
+    // The structured triage card replaces the plain notification text.
+    expect(await screen.findByTestId('triage-card')).toBeInTheDocument();
+    expect(screen.getByTestId('triage-parts')).toHaveTextContent('1 STEP + 2 PDF');
+    expect(screen.getByTestId('triage-missing')).toHaveTextContent('PP-5531'); // ⚠ blocker
+    expect(screen.getByTestId('triage-compliance')).toBeInTheDocument(); // never suppressed
+    expect(screen.getByTestId('triage-est-time')).toHaveTextContent('ca. 2-3 Std.');
+    expect(getTriageBrief).toHaveBeenCalledWith('q1');
+    // The deep-link to the quote is preserved.
     expect(screen.getByRole('link', { name: 'Angebot öffnen' })).toHaveAttribute(
       'href',
       '/quotes/q1',
     );
+  });
+
+  it('shows the AI-disabled state without suppressing compliance (M3.9)', async () => {
+    listTasks.mockResolvedValue([]);
+    getTriageBrief.mockResolvedValue({
+      brief: triageBrief({ ai: { enabled: false, reason: 'master_disabled' } }),
+    });
+    listNotifications.mockResolvedValue([
+      {
+        id: 'n1',
+        kind: 'quote_email_ingested',
+        payload: { quote_id: 'q1', quote_number: '17' },
+        read_at: null,
+        created_at: '2026-07-15T00:00:00Z',
+      },
+    ]);
+    await renderWithProviders(<DashboardPage />);
+    expect(await screen.findByText('KI-Verarbeitung deaktiviert')).toBeInTheDocument();
+    // Compliance + missing-file blocker still surface with AI off.
+    expect(screen.getByTestId('triage-compliance')).toBeInTheDocument();
+    expect(screen.getByTestId('triage-missing')).toBeInTheDocument();
   });
 
   it('marks a notification as read', async () => {

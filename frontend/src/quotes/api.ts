@@ -14,6 +14,7 @@ import type {
   SavedView,
   SavedViewCreate,
   SavedViewList,
+  TriageBriefResponse,
 } from './types';
 
 export interface QuotesApi {
@@ -22,6 +23,7 @@ export interface QuotesApi {
   createSavedView: (body: SavedViewCreate) => Promise<SavedView>;
   updateSavedView: (id: string, body: Partial<SavedViewCreate>) => Promise<SavedView>;
   deleteSavedView: (id: string) => Promise<void>;
+  getTriageBrief: (quoteId: string) => Promise<TriageBriefResponse>;
 }
 
 /** Build a quotes API client bound to the current Clerk session token. */
@@ -38,6 +40,8 @@ export function useQuotesApi(): QuotesApi {
         apiFetch(`/api/saved-views/${id}`, token, { method: 'PATCH', body }),
       deleteSavedView: (id) =>
         apiFetch(`/api/saved-views/${id}`, token, { method: 'DELETE' }),
+      getTriageBrief: (quoteId) =>
+        apiFetch(`/api/quotes/${quoteId}/triage-brief`, token),
     };
   }, [getToken]);
 }
