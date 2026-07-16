@@ -48,6 +48,11 @@ class AiFlags:
         """The M3.9 gate: master first, then the triage-brief flag."""
         return self.master_enabled and self.triage_brief_enabled
 
+    @property
+    def rule_suggest_active(self) -> bool:
+        """The M3.10 gate: master first, then the rule-suggestion flag."""
+        return self.master_enabled and self.rule_suggest_enabled
+
 
 #: All-enabled default returned when an org has no ``org_ai_settings`` row.
 DEFAULT_AI_FLAGS = AiFlags()

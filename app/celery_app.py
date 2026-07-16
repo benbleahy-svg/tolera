@@ -28,8 +28,14 @@ celery_app = Celery(
         "app.lens_extract",
         "app.review_items",
         "app.triage",
+        "app.rule_suggest",
     ],
 )
+
+#: Nightly rule-suggestion scan cadence (spec ``#ai-rule-suggest``: "Nightly
+#: Celery job scans for patterns per org"). 24h; a fixed interval avoids a
+#: crontab dependency and the exact hour is immaterial (the scan is idempotent).
+_RULE_SUGGEST_SCAN_SECONDS = 24 * 60 * 60
 
 celery_app.conf.update(
     task_default_queue="celery",
@@ -48,6 +54,10 @@ celery_app.conf.update(
         "email-sync": {
             "task": "app.email_sync_all",
             "schedule": settings.email_sync_interval_seconds,
+        },
+        "rule-suggest-scan": {
+            "task": "app.scan_rule_suggestions",
+            "schedule": _RULE_SUGGEST_SCAN_SECONDS,
         },
     },
     task_routes={

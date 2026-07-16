@@ -448,6 +448,8 @@ async def attach_operation_from_def(
     org_id: uuid.UUID,
     component: Component,
     op_def: OperationDef,
+    *,
+    added_manually: bool = True,
 ) -> Operation:
     """Append ``op_def`` to the bottom of ``component``'s router.
 
@@ -460,6 +462,11 @@ async def attach_operation_from_def(
     says the resolution "appends the specified operation(s) to the bottom of the
     router" — so both must freeze config identically. The caller owns the
     editability lock and the follow-up ``recalculate_component``.
+
+    ``added_manually`` (M3.10) records provenance: the default ``True`` is the
+    estimator's direct add (the pattern the rule-suggestion detector learns
+    from); the rule resolution passes ``False`` so an auto-added op is never
+    mistaken for tribal knowledge (spec ``#ai-rule-suggest``).
     """
     operation = Operation(
         org_id=org_id,
@@ -467,6 +474,7 @@ async def attach_operation_from_def(
         operation_def_id=op_def.id,
         name=op_def.name,
         category=op_def.category,
+        added_manually=added_manually,
         position=await _next_position(session, component.id),
         calculation_mode=op_def.calculation_mode,
         run_rate=op_def.run_rate,

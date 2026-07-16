@@ -660,6 +660,12 @@
     "notif_mention": "You were mentioned in a discussion",
     "notif_task_assigned": "A task was assigned to you"
   },
+  "rule_suggest": {
+    "heading": "Rule suggestions",
+    "create_rule": "Create rule",
+    "dismiss": "Dismiss",
+    "load_error": "Could not load rule suggestions."
+  },
   "triage": {
     "title": "Triage — Quote #{{number}}",
     "unavailable": "Triage brief unavailable",

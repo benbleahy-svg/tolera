@@ -125,6 +125,85 @@ export function useReviewApi(): ReviewApi {
   }, [getToken]);
 }
 
+// --------------------------------------------------------------------------- //
+// Rule Auto-Suggestion (M3.10, spec #ai-rule-suggest)
+// --------------------------------------------------------------------------- //
+
+/** The deterministic pre-seed the suggestion carries into the Create Rule dialog. */
+export interface RuleDraft {
+  name: string;
+  description: string;
+  operation_def_id: string;
+  operation_name: string;
+  process_family: string;
+  material_class: string;
+  keyword: string;
+}
+
+export interface RuleSuggestionPayload {
+  version: number;
+  sentence: string;
+  /** Present on the drawer probe (M3.10): the persisted row id, so the chip can
+   * dismiss/consume the suggestion rather than only hiding it locally. */
+  suggested_action_id?: string;
+  pattern: {
+    operation_def_id: string;
+    operation_name: string;
+    process_family: string;
+    material_class_id: string;
+    material_class: string;
+    part_count: number;
+  };
+  rule_draft: RuleDraft;
+}
+
+export interface SuggestedActionOut {
+  id: string;
+  kind: string;
+  status: 'open' | 'dismissed' | 'acted';
+  operation_def_id: string | null;
+  payload: RuleSuggestionPayload;
+  created_at: string;
+}
+
+export interface RuleSuggestApi {
+  listSuggestedActions: () => Promise<SuggestedActionOut[]>;
+  dismissSuggestedAction: (id: string) => Promise<SuggestedActionOut>;
+  getRuleSuggestion: (componentId: string) => Promise<{ suggestion: RuleSuggestionPayload | null }>;
+}
+
+export function useRuleSuggestApi(): RuleSuggestApi {
+  const { getToken } = useAuth();
+  return useMemo<RuleSuggestApi>(() => {
+    const token: TokenGetter = () => getToken();
+    return {
+      listSuggestedActions: () => apiFetch('/api/suggested-actions', token),
+      dismissSuggestedAction: (id) =>
+        apiFetch(`/api/suggested-actions/${id}/dismiss`, token, { method: 'POST' }),
+      getRuleSuggestion: (componentId) =>
+        apiFetch(`/api/components/${componentId}/rule-suggestion`, token),
+    };
+  }, [getToken]);
+}
+
+/**
+ * Map a suggestion payload to the Create Rule dialog's pre-seed (M3.10). The
+ * dialog still requires an explicit CREATE RULE — this only fills it in.
+ */
+export function suggestionSeed(payload: RuleSuggestionPayload): {
+  name: string;
+  description: string;
+  keyword: string;
+  operationLabel: string;
+} {
+  return {
+    name: payload.rule_draft.name,
+    description: payload.rule_draft.description,
+    keyword: payload.rule_draft.keyword,
+    operationLabel: payload.rule_draft.operation_name,
+  };
+}
+
 /** The card's button label for one resolution (spec #rules: "1–N suggested actions"). */
 export function resolutionLabel(
   option: ResolutionOption,

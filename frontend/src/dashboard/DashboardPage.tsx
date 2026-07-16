@@ -19,6 +19,7 @@ import {
   type Task,
   useCollabApi,
 } from '../collab/api';
+import { SuggestedActionsStrip } from './SuggestedActionsStrip';
 import { TriageCard } from './TriageCard';
 
 /** Human copy per notification kind; unknown kinds fall back to the raw kind. */
@@ -88,6 +89,7 @@ export function DashboardPage(): React.ReactElement {
   return (
     <div className="dashboard">
       <h1>{t('nav.dashboard')}</h1>
+      <SuggestedActionsStrip />
       <section aria-label={t('dashboard.notifications')}>
         <h2>{t('dashboard.notifications')}</h2>
         {error && <p role="alert">{error}</p>}
