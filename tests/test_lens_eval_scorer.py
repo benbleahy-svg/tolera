@@ -14,6 +14,8 @@ from __future__ import annotations
 import math
 from typing import ClassVar
 
+import pytest
+
 from tests.lens_eval_harness import (
     BBOX_IOU_MIN,
     GATED_METRICS,
@@ -70,7 +72,7 @@ class TestPrecisionRecallF1Math:
 
 
 class TestMatchSemantics:
-    """Match predicate: value normalization, tolerance, bbox, greedy 1:1."""
+    """Match predicate: value normalization, units, tolerance, bbox, max 1:1."""
 
     def test_normalized_value_absorbs_whitespace_and_case(self) -> None:
         pred = [_qs("material", "1.4301  (x5crni18-10)")]
@@ -135,7 +137,7 @@ class TestMatchSemantics:
         assert match_counts([overlapping], [to_comparable(label)]) == Counts(tp=1, fp=0, fn=0)
         assert match_counts([disjoint], [to_comparable(label)]) == Counts(tp=0, fp=1, fn=1)
 
-    def test_greedy_one_to_one_no_double_claim(self) -> None:
+    def test_one_to_one_no_double_claim(self) -> None:
         # Two identical labels, one matching prediction: exactly one TP.
         preds = [_qs("part_number", "4711")]
         labels = [
@@ -145,6 +147,30 @@ class TestMatchSemantics:
         assert match_counts(
             [to_comparable(p) for p in preds], [to_comparable(x) for x in labels]
         ) == Counts(tp=1, fp=0, fn=1)
+
+    def test_units_must_match_when_labelled(self) -> None:
+        # 10 in must never satisfy a 10 mm label (metric-native invariant).
+        label = LabelledFinding("dimensions", "length", value="10", units="mm", value_tolerance=0.1)
+        metric = Comparable("dimensions", "length", value="10", units="mm")
+        imperial = Comparable("dimensions", "length", value="10", units="in")
+        assert match_counts([metric], [to_comparable(label)]) == Counts(tp=1, fp=0, fn=0)
+        assert match_counts([imperial], [to_comparable(label)]) == Counts(tp=0, fp=1, fn=1)
+
+    def test_maximum_matching_beats_first_fit_ordering(self) -> None:
+        # pred0 carries the bbox; pred1 does not. label0 is unconstrained (matches
+        # both); label1 needs a bbox (only pred0). Greedy first-fit lets label0 grab
+        # the low-index pred0 and strands label1 → 1 TP. Maximum matching reassigns
+        # label0 to pred1 via an augmenting path → 2 TP, independent of ordering.
+        box: dict[str, float] = {"x": 0, "y": 0, "width": 10, "height": 10}
+        preds = [
+            Comparable("regions", "note", value="A", bbox=box),  # pred0: has bbox
+            Comparable("regions", "note", value="A"),  # pred1: no bbox
+        ]
+        labels = [
+            LabelledFinding("regions", "note", value="A"),  # unconstrained
+            LabelledFinding("regions", "note", value="A", bbox=box),  # needs a bbox
+        ]
+        assert match_counts(preds, [to_comparable(x) for x in labels]) == Counts(tp=2, fp=0, fn=0)
 
 
 class TestScoreFindings:
@@ -228,6 +254,15 @@ class TestClassificationAccuracy:
     def test_zero_pages_is_vacuously_perfect(self) -> None:
         assert classification_accuracy(set(), set(), 0) == 1.0
 
+    def test_out_of_range_predicted_page_is_penalized(self) -> None:
+        # Model calls page 2 a print in a 1-page doc: a disagreement, not ignored.
+        # Universe = {1, 2}: page1 both-print ✓, page2 predicted-not-expected ✗.
+        assert classification_accuracy({1, 2}, {1}, 1) == 0.5
+
+    def test_negative_pages_total_rejected(self) -> None:
+        with pytest.raises(ValueError, match="pages_total"):
+            classification_accuracy(set(), set(), -1)
+
 
 class TestBaselineRegressionGate:
     BASE: ClassVar[dict[str, float]] = {
@@ -252,9 +287,18 @@ class TestBaselineRegressionGate:
         # metrics still within margin are not reported as failures
         assert not any("overall.recall" in f for f in result.failures)
 
-    def test_missing_metric_is_skipped_not_failed(self) -> None:
+    def test_missing_metric_fails_closed(self) -> None:
+        # A gated metric absent from the current run must NOT bypass the gate —
+        # an omitted/typo'd metric is a misconfiguration, not a silent pass.
         current = {"classification": 0.95}  # recall/precision absent this run
-        assert compare_to_baseline(current, self.BASE, margin=0.10).passed
+        result = compare_to_baseline(current, self.BASE, margin=0.10)
+        assert not result.passed
+        assert any("overall.recall" in f for f in result.failures)
+        assert any("overall.precision" in f for f in result.failures)
+
+    def test_missing_baseline_metric_fails_closed(self) -> None:
+        current = {"classification": 0.95, "overall.recall": 0.65, "overall.precision": 0.85}
+        assert not compare_to_baseline(current, {"classification": 0.95}, margin=0.10).passed
 
 
 class TestSeededFixtures:

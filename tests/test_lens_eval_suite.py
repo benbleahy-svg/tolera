@@ -64,11 +64,17 @@ async def test_lens_extraction_quality_gate(capsys: pytest.CaptureFixture[str]) 
     assert scored_fixtures, "no document-extraction fixtures to score"
 
     agg: dict[str, Counts] = {}
+    errors: list[str] = []
     correct_pages = 0
     total_pages = 0
     for name in scored_fixtures:
         fx = load_fixture(name)
-        result = await run_document_extraction(provider, fx.pdf_bytes)  # type: ignore[arg-type]
+        try:
+            result = await run_document_extraction(provider, fx.pdf_bytes)  # type: ignore[arg-type]
+        except Exception as exc:  # one bad fixture must not discard the rest
+            # Keep scoring the others so the report still emits; fail at the end.
+            errors.append(f"{name}: {exc!r}")
+            continue
         # Score each document independently and SUM the counts — never pool the
         # finding lists (a prediction on print A must not satisfy a label on B).
         for cat, counts in category_counts(result.findings, fx.findings).items():
@@ -91,6 +97,10 @@ async def test_lens_extraction_quality_gate(capsys: pytest.CaptureFixture[str]) 
     }
     # Emitted for the CI log / artifact — the per-category diff-vs-baseline.
     print("LENS_EVAL_REPORT " + json.dumps(report, indent=2, sort_keys=True))
+
+    # A fixture that errored is a hard failure — but only after the report for
+    # the fixtures that DID score has been emitted (surfaced above).
+    assert not errors, "Live extraction call(s) failed:\n" + "\n".join(errors)
 
     gate = compare_to_baseline(
         run.flat(), baseline["metrics"], float(baseline["margin"]), metrics=GATED_METRICS

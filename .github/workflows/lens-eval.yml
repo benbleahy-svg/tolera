@@ -25,6 +25,8 @@ on:
       - "app/lens.py"
       - "app/lens_provider.py"
       - "app/lens_extract.py"
+      - "app/config.py" # provider/model resolution the live gate depends on
+      - "pyproject.toml" # eval marker / selection policy
       - "tests/lens_eval_harness.py"
       - "tests/test_lens_eval_suite.py"
       - "fixtures/lens-eval/**"
@@ -38,6 +40,9 @@ concurrency:
 jobs:
   eval-suite:
     runs-on: ubuntu-latest
+    # Bound the job: a stalled model call must not hold a PR or nightly runner
+    # open indefinitely (well above the normal fixture-run budget).
+    timeout-minutes: 30
     env:
       # Pinned model + versioned prompt carry repeatability (temperature-0 is
       # superseded on this model generation — app/lens_provider.py). Keep in

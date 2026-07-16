@@ -25,9 +25,11 @@ math), and `tests/test_lens_eval_suite.py` (the live, cost-gated quality gate).
 ```
 
 A prediction matches a label on `(category, type)` **and** normalized value
-(whitespace + case-folded, or within `value_tolerance`) **and** the tolerance
-spec (when labelled) **and** bbox IoU ≥ 0.5 (when labelled). `category` is the
-5-value `FindingCategory` taxonomy; `type` mirrors `ExtractionFinding.type`.
+(whitespace + case-folded, or within `value_tolerance`) **and** units (when the
+label sets them — `10 in` never satisfies a `10 mm` label) **and** the tolerance
+spec (when labelled) **and** bbox IoU ≥ 0.5 (when labelled). Matching is
+**maximum one-to-one** (order-independent), not greedy first-fit. `category` is
+the 5-value `FindingCategory` taxonomy; `type` mirrors `ExtractionFinding.type`.
 
 ## `baseline.json` — the regression gate
 

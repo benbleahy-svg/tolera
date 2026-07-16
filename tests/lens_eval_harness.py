@@ -80,6 +80,7 @@ class Comparable:
     type: str
     value: str | None = None
     normalized_value: str | None = None
+    units: str | None = None
     tolerance: dict[str, Any] | None = None
     bbox: dict[str, float] | None = None
     value_tolerance: float | None = None
@@ -112,6 +113,7 @@ def _label_to_comparable(label: LabelledFinding) -> Comparable:
         type=label.type,
         value=label.value,
         normalized_value=label.normalized_value,
+        units=label.units,
         tolerance=label.tolerance,
         bbox=label.bbox,
         value_tolerance=label.value_tolerance,
@@ -142,6 +144,7 @@ def to_comparable(obj: Any) -> Comparable:
         type=str(_get("type")),
         value=_get("value"),
         normalized_value=_get("normalized_value"),
+        units=_get("units"),
         tolerance=_dump(_get("tolerance")),
         bbox=_dump(_get("bbox")),
         value_tolerance=None,  # only labels carry a numeric tolerance
@@ -161,6 +164,17 @@ def values_match(pred: Comparable, label: Comparable) -> bool:
     if pv is None or lv is None:
         return pv is None and lv is None
     return _norm(pv) == _norm(lv)
+
+
+def units_match(pred: Comparable, label: Comparable) -> bool:
+    """When the label specifies units, the prediction's must match (normalized):
+    ``10 in`` must never satisfy a ``10 mm`` label (metric-native invariant,
+    CLAUDE.md §5). Not scored when the label carries no units."""
+    if label.units is None:
+        return True
+    if pred.units is None:
+        return False
+    return _norm(pred.units) == _norm(label.units)
 
 
 def tolerance_match(pred: Comparable, label: Comparable) -> bool:
@@ -200,6 +214,7 @@ def is_match(pred: Comparable, label: Comparable) -> bool:
         pred.category == label.category
         and pred.type == label.type
         and values_match(pred, label)
+        and units_match(pred, label)
         and tolerance_match(pred, label)
         and bbox_match(pred, label)
     )
@@ -240,24 +255,32 @@ def precision_recall_f1(counts: Counts) -> Metrics:
 
 
 def match_counts(predicted: list[Comparable], labels: list[Comparable]) -> Counts:
-    """Greedy one-to-one matching within a ``(category, type)`` group: each
-    label claims the first still-unmatched prediction it matches. TP = matched
-    labels, FN = unmatched labels, FP = unmatched predictions. Greedy (not
-    max-bipartite) — deterministic and sufficient for the small finding sets a
-    single print yields; documented so the meta-test can pin it."""
-    used: set[int] = set()
-    tp = 0
-    for label in labels:
-        for i, pred in enumerate(predicted):
-            if i in used:
+    """**Maximum** one-to-one matching between predictions and labels (Kuhn's
+    augmenting-path algorithm). TP = matched pairs, FN = unmatched labels,
+    FP = unmatched predictions. Maximum (not greedy first-fit) so the score is
+    independent of fixture ordering — a greedy pass can undercount when an
+    unconstrained label claims the only prediction a bbox-constrained label
+    needs; maximum matching frees it via an augmenting path."""
+    # adj[label] = prediction indices that satisfy the match predicate.
+    adj = [[i for i, pred in enumerate(predicted) if is_match(pred, label)] for label in labels]
+    matched_pred_to_label = [-1] * len(predicted)
+
+    def _augment(label_idx: int, seen: list[bool]) -> bool:
+        for pred_idx in adj[label_idx]:
+            if seen[pred_idx]:
                 continue
-            if is_match(pred, label):
-                used.add(i)
-                tp += 1
-                break
-    fn = len(labels) - tp
-    fp = len(predicted) - len(used)
-    return Counts(tp=tp, fp=fp, fn=fn)
+            seen[pred_idx] = True
+            owner = matched_pred_to_label[pred_idx]
+            if owner == -1 or _augment(owner, seen):
+                matched_pred_to_label[pred_idx] = label_idx
+                return True
+        return False
+
+    tp = 0
+    for label_idx in range(len(labels)):
+        if _augment(label_idx, [False] * len(predicted)):
+            tp += 1
+    return Counts(tp=tp, fp=len(predicted) - tp, fn=len(labels) - tp)
 
 
 @dataclass(frozen=True)
@@ -334,14 +357,19 @@ def classification_accuracy(
     predicted_print_pages: set[int], expected_print_pages: set[int], pages_total: int
 ) -> float:
     """Per-page is-print accuracy: pages where predicted-is-print agrees with
-    expected-is-print, over all pages. 1.0 for a zero-page document (vacuous)."""
-    if pages_total <= 0:
+    expected-is-print. The page universe is ``1..pages_total`` **plus** any
+    out-of-range page either side claims — so a prediction for page 0 or
+    ``pages_total + 1`` is a disagreement (penalized), never silently ignored.
+    1.0 for an empty universe (vacuous)."""
+    if pages_total < 0:
+        raise ValueError(f"pages_total must be >= 0, got {pages_total}")
+    universe = set(range(1, pages_total + 1)) | predicted_print_pages | expected_print_pages
+    if not universe:
         return 1.0
     correct = sum(
-        (page in predicted_print_pages) == (page in expected_print_pages)
-        for page in range(1, pages_total + 1)
+        (page in predicted_print_pages) == (page in expected_print_pages) for page in universe
     )
-    return correct / pages_total
+    return correct / len(universe)
 
 
 # --------------------------------------------------------------------------- #
@@ -363,12 +391,21 @@ def compare_to_baseline(
     """Regression gate: fail a tracked metric only when it drops **more than
     ``margin`` below** its baseline (block: "fail on regression-vs-baseline
     beyond a margin"). Benign phrasing variance — a drop within the margin —
-    passes. An *improvement* always passes and never re-baselines here."""
+    passes. An *improvement* always passes and never re-baselines here.
+
+    **Fails closed on a missing metric**: a gated metric absent from the
+    baseline or the current run is a misconfiguration/harness bug, not a pass —
+    otherwise a typo or an omitted ``classification`` entry silently bypasses a
+    tracked gate."""
     failures: list[str] = []
     for name in metrics:
         base = baseline.get(name)
         cur = current.get(name)
-        if base is None or cur is None:
+        if base is None:
+            failures.append(f"{name}: missing from baseline (gate cannot evaluate)")
+            continue
+        if cur is None:
+            failures.append(f"{name}: missing from current run (gate cannot evaluate)")
             continue
         if cur < base - margin:
             failures.append(
