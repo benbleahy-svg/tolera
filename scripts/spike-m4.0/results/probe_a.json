@@ -1,0 +1,180 @@
+{
+  "dims": {
+    "bracket-L-60x40x2-r3.step": {
+      "volume_rel_err": 9.823880325792607e-15,
+      "aabb": [
+        60.0000002,
+        50.0000002,
+        40.0000002
+      ],
+      "obb_sorted": [
+        71.27058581402014,
+        50.000000000000085,
+        35.47309087761212
+      ],
+      "area": 10213.451271946717,
+      "bbox_ok": true,
+      "ok": true
+    },
+    "block-milled-80x50x20.step": {
+      "volume_rel_err": 1.224451111414397e-15,
+      "aabb": [
+        80.00000019999999,
+        50.0000002,
+        20.000000200000002
+      ],
+      "obb_sorted": [
+        80.00000000000007,
+        50.037915976627005,
+        20.094979529151466
+      ],
+      "area": 15152.743278534452,
+      "bbox_ok": true,
+      "ok": true
+    },
+    "shaft-stepped-d30-d20-d12.step": {
+      "volume_rel_err": 6.414925306725457e-15,
+      "aabb": [
+        30.0000002,
+        30.0000002,
+        80.00000019999999
+      ],
+      "obb_sorted": [
+        80.00000000000009,
+        30.000000000000114,
+        30.000000000000004
+      ],
+      "area": 6880.087911362008,
+      "bbox_ok": true,
+      "ok": true
+    },
+    "tube-round-d30-t2-l200.step": {
+      "volume_rel_err": 2.171258662545761e-14,
+      "aabb": [
+        30.0000002,
+        30.0000002,
+        200.0000002
+      ],
+      "obb_sorted": [
+        200.0,
+        30.00000000000001,
+        30.0
+      ],
+      "area": 35537.69609741005,
+      "ok": true
+    },
+    "tube-rect-40x20-t2-l200.step": {
+      "volume_rel_err": 6.496390726949487e-16,
+      "aabb": [
+        40.0000002,
+        20.000000200000002,
+        200.0000002
+      ],
+      "obb_sorted": [
+        200.0,
+        40.0,
+        20.0
+      ],
+      "area": 45248.0,
+      "ok": true
+    },
+    "profile-angle-40x40x4-l100.step": {
+      "volume_rel_err": 2.3934071099287585e-16,
+      "aabb": [
+        40.0000002,
+        40.0000002,
+        100.00000019999999
+      ],
+      "obb_sorted": [
+        100.0,
+        40.0,
+        40.0
+      ],
+      "area": 16608.0,
+      "ok": true
+    },
+    "profile-u-channel-40x20x3-l100.step": {
+      "volume_rel_err": 3.277458384767309e-16,
+      "aabb": [
+        40.0000002,
+        20.000000200000002,
+        100.00000019999999
+      ],
+      "obb_sorted": [
+        100.0,
+        40.0,
+        20.0
+      ],
+      "area": 15843.999999999998,
+      "ok": true
+    },
+    "cube-20mm-splitface.step": {
+      "volume_rel_err": 2.2737367544323206e-16,
+      "aabb": [
+        20.000000200000002,
+        20.000000200000002,
+        20.000000200000002
+      ],
+      "obb_sorted": [
+        20.0,
+        20.0,
+        20.0
+      ],
+      "area": 2399.9999999999995,
+      "bbox_ok": true,
+      "ok": true
+    },
+    "weight_demo": {
+      "cube_volume_mm3": 7999.999999999998,
+      "weight_g_at_7.9": 63.19999999999999
+    }
+  },
+  "signature": {
+    "sig4_unify=False": {
+      "reexport": true,
+      "rotated": true,
+      "split_vs_single": false,
+      "rotated_split": false,
+      "distinct_parts_differ": true
+    },
+    "sig4_unify=True": {
+      "reexport": true,
+      "rotated": true,
+      "split_vs_single": true,
+      "rotated_split": true,
+      "distinct_parts_differ": true
+    },
+    "sig6_unify=False": {
+      "reexport": true,
+      "rotated": true,
+      "split_vs_single": false,
+      "rotated_split": false,
+      "distinct_parts_differ": true
+    },
+    "sig6_unify=True": {
+      "reexport": true,
+      "rotated": true,
+      "split_vs_single": true,
+      "rotated_split": true,
+      "distinct_parts_differ": true
+    },
+    "sig8_unify=False": {
+      "reexport": true,
+      "rotated": true,
+      "split_vs_single": false,
+      "rotated_split": false,
+      "distinct_parts_differ": true
+    },
+    "sig8_unify=True": {
+      "reexport": true,
+      "rotated": true,
+      "split_vs_single": true,
+      "rotated_split": true,
+      "distinct_parts_differ": true
+    }
+  },
+  "verdict": {
+    "topology_tolerant_hash": true,
+    "recipe": "UnifySameDomain + OBB-sorted dims + 6-sig-digit quantization"
+  }
+}

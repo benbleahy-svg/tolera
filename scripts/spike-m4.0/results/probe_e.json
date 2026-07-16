@@ -1,0 +1,58 @@
+{
+  "products": {
+    "PLATE-60x40x5": {
+      "volume": 12000.0
+    },
+    "PIN-D6x20": {
+      "volume": 565.4866776461629
+    }
+  },
+  "occurrences": [
+    {
+      "occurrence": "=>[0:1:1:2]",
+      "product": "PLATE-60x40x5",
+      "parent": "ASM-PLATE-2PINS",
+      "depth": 0,
+      "translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "occurrence": "PIN-1",
+      "product": "PIN-D6x20",
+      "parent": "ASM-PLATE-2PINS",
+      "depth": 0,
+      "translation": [
+        15.0,
+        20.0,
+        5.0
+      ]
+    },
+    {
+      "occurrence": "PIN-2",
+      "product": "PIN-D6x20",
+      "parent": "ASM-PLATE-2PINS",
+      "depth": 0,
+      "translation": [
+        45.0,
+        20.0,
+        5.0
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "AlMg3",
+      "density": 2.66,
+      "density_unit": "g/cm3"
+    },
+    {
+      "name": "1.4301",
+      "density": 7.9,
+      "density_unit": "g/cm3"
+    }
+  ],
+  "ok": true
+}
