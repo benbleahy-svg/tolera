@@ -443,6 +443,50 @@ async def _component_costing(session: AsyncSession, component: Component) -> Com
     )
 
 
+async def attach_operation_from_def(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    component: Component,
+    op_def: OperationDef,
+) -> Operation:
+    """Append ``op_def`` to the bottom of ``component``'s router.
+
+    Config is **copied** from the def at attach time: a later library edit never
+    silently reprices an existing quote (config-freeze posture, E4-d) —
+    including the Kalk formula snapshot (DECISIONS.md 2026-07-08).
+
+    Shared by the estimator's manual add (``add_operation``) and M3.8's
+    ADD_OPERATION resolution (``app.review_items``), which is the same act — §3
+    says the resolution "appends the specified operation(s) to the bottom of the
+    router" — so both must freeze config identically. The caller owns the
+    editability lock and the follow-up ``recalculate_component``.
+    """
+    operation = Operation(
+        org_id=org_id,
+        component_id=component.id,
+        operation_def_id=op_def.id,
+        name=op_def.name,
+        category=op_def.category,
+        position=await _next_position(session, component.id),
+        calculation_mode=op_def.calculation_mode,
+        run_rate=op_def.run_rate,
+        labour_rate=op_def.labour_rate,
+        setup_basis=op_def.setup_basis,
+        setup_cost=op_def.setup_cost,
+        cost_formula=op_def.cost_formula,
+        calc_setup_mins=op_def.setup_time_mins,
+        # Outside-process defs are outside services by construction.
+        is_outside_service=(
+            op_def.is_outside_service or op_def.calculation_mode is CalculationMode.outside_process
+        ),
+        is_finish=op_def.is_finish,
+        surcharge_pct=op_def.surcharge_pct,
+    )
+    session.add(operation)
+    await session.flush()
+    return operation
+
+
 async def _next_position(session: AsyncSession, component_id: uuid.UUID) -> int:
     max_position = await session.scalar(
         select(func.max(Operation.position)).where(Operation.component_id == component_id)
@@ -595,32 +639,7 @@ async def add_operation(
             session.add(op_def)
             await session.flush()
 
-    # Config is COPIED from the def at attach time: a later library edit never
-    # silently reprices an existing quote (config-freeze posture, E4-d) —
-    # including the Kalk formula snapshot (DECISIONS.md 2026-07-08).
-    operation = Operation(
-        org_id=principal.active_org_id,
-        component_id=component.id,
-        operation_def_id=op_def.id,
-        name=op_def.name,
-        category=op_def.category,
-        position=await _next_position(session, component.id),
-        calculation_mode=op_def.calculation_mode,
-        run_rate=op_def.run_rate,
-        labour_rate=op_def.labour_rate,
-        setup_basis=op_def.setup_basis,
-        setup_cost=op_def.setup_cost,
-        cost_formula=op_def.cost_formula,
-        calc_setup_mins=op_def.setup_time_mins,
-        # Outside-process defs are outside services by construction.
-        is_outside_service=(
-            op_def.is_outside_service or op_def.calculation_mode is CalculationMode.outside_process
-        ),
-        is_finish=op_def.is_finish,
-        surcharge_pct=op_def.surcharge_pct,
-    )
-    session.add(operation)
-    await session.flush()
+    await attach_operation_from_def(session, principal.active_org_id, component, op_def)
     await recalculate_component(session, principal.active_org_id, component.id)
     return await _component_costing(session, component)
 

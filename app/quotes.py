@@ -42,6 +42,7 @@ from .models import (
     QuoteItem,
     QuoteStatus,
     QuoteStatusEvent,
+    ReviewItem,
     UserOrgMembership,
 )
 from .parts import create_root_part
@@ -225,6 +226,9 @@ class WorkflowTracker(BaseModel):
     rfq_received_at: datetime | None
     quote_started_at: datetime | None
     incomplete_item_count: int
+    #: M3.8 — open Requirements-Review items across the quote's parts. Spec
+    #: #rules: the unresolved count drives "Outstanding Work".
+    unresolved_review_item_count: int = 0
     quote_sent_at: datetime | None
 
 
@@ -375,10 +379,19 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
         for qi, part_id in rows
     ]
     incomplete = sum(1 for qi, _ in rows if qi.workflow_status not in _DONE_LINE_ITEM_STATUSES)
+    # M3.8, spec #rules: "The unresolved count drives the quote's Outstanding
+    # Work / Incomplete Quote Items" — a quote with an open review item still
+    # has work on it, whatever its line-item statuses say.
+    unresolved_review_items = await session.scalar(
+        select(func.count())
+        .select_from(ReviewItem)
+        .where(ReviewItem.quote_id == quote.id, ReviewItem.status == "open")
+    )
     tracker = WorkflowTracker(
         rfq_received_at=quote.rfq_received_date,
         quote_started_at=quote.started_at,
         incomplete_item_count=incomplete,
+        unresolved_review_item_count=unresolved_review_items or 0,
         quote_sent_at=quote.sent_at,
     )
     return QuoteDetail(

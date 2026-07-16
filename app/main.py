@@ -39,6 +39,7 @@ from .part_library import library_router as part_library_router
 from .parts import parts_router
 from .pricing import pricing_router
 from .quotes import quotes_router
+from .review_items import review_items_router
 from .rules import rules_router
 from .saved_views import saved_views_router
 from .storage import make_storage
@@ -98,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(email_connections_router)
     app.include_router(email_threads_router)
     app.include_router(rules_router)
+    app.include_router(review_items_router)
 
     return app
 
