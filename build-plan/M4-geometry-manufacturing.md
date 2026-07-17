@@ -117,6 +117,16 @@
 - **Test plan (fixtures):** per-family DFM fixtures (e.g. a too-small bend radius, a deep hole) assert the warning + `threshold_used`; an always-on-disable attempt is rejected; a re-seed is idempotent.
 - **Golden-thread role:** none directly; produces the interrogation **signals the M3 rules engine** turns into Review Items (M4 feeds M3, per the milestone graph).
 
+### M4.7b — Provisional Core-4 golden fixtures + `gs1` re-validation   `[M]`  *(chartered 2026-07-17 decision-review; Fechner packages 3+ weeks late)*
+- **Vertical slice:** each Core-4 family has a real-geometry golden in the `/fixtures` harness (open-CAD, not synthetic primitives), and the `gs1` signature's 6-digit quantization is re-validated against them.
+- **Scope (in):** one open-CAD golden per family — sheet-metal bracket (bends/thickness/flat), milled housing (holes/pockets/setups), turned shaft (stock/turning features), tube-laser profile (cross-section) — authored as `/fixtures/parts` recipes with hand-verified expected values; the **`gs1` re-validation** (stability across re-export/rotation/split-face on the new parts; bump to `gs2` per the [2026-07-16] M4.1 entry if the 6-digit choice moves); recipes written to be **replaced part-for-part** when the anonymised Fechner packages land.
+- **Scope (out):** the Fechner starter-rule list (collected with the packages); expanding the M3.11 labelled-print set (separate track).
+- **Depends on:** M1.13 (harness), M4.1–M4.6 (the family analyzers the goldens exercise).
+- **Decisions:** ../docs/decisions/DECISIONS.md → *Fechner fixture packages* (RESOLVED 2026-07-17 — provisional goldens now, swap-in later).
+- **Acceptance criteria:** each family's golden passes its analyzer with hand-verified values; the signature stability suite passes on all four (or the entry is re-opened with measurements and `gs2` is proposed); the harness README documents the Fechner swap-in procedure.
+- **Test plan (fixtures):** the goldens *are* the test; plus the signature stability matrix per part.
+- **Golden-thread role:** strengthens the thread's M4 segment — the interrogation-driven dimensions now assert against real geometry per family.
+
 ### M4.8 — Custom interrogations + material-specific thresholds (most-specific resolution)   `[M]`
 - **Vertical slice:** an estimator binds a named `InterrogationInputs` bundle to a material class/family/material (and/or op defs), and the engine resolves the **most-specific** match for a part's material.
 - **Scope (in):** the `CustomInterrogation` entity (a named bundle of strategy knobs + every `should_detect_*` + threshold, linkable to material class/family/material and/or operation defs); the **most-specific resolution** (e.g. Carbon-Steel-12L14 beats Carbon-Steel family beats Metal class); the material-specific tuning the sub-spec shows (Aluminum deep hole/radial/planar 20×/6×/8× tool-dia; Stainless 6×/2×/3×); the Configure → Interrogations authoring UI on top of M4.7's defaults; the ⚠️ guard against linking same-type interrogations to multiple ops in one process (duplicate dispatch).
@@ -215,6 +225,16 @@
 - **Acceptance criteria:** the **repeat-part fixture triggers the assembly banner** and the **Accept All path imports the router atomically with source tags** (the M4 exit criterion) — a single transaction, every imported value carrying `source = imported` + `source_quote_id`, the 60-second undo reverting to a blank line item; Accept All is **suppressed** when the diff shows a material change (only Review offered), enforced server-side.
 - **Test plan (fixtures):** a no-material-change repeat fixture asserts banner + atomic Accept All + source tags + undo; a material-change fixture asserts Accept All is suppressed server-side.
 - **Golden-thread role:** none on the M1 thread; **satisfies the M4 exit criterion** for repeat-part assembly and closes the milestone's AI track.
+
+### M4.14 — Op-def formula-evaluation endpoint + Variables table   `[S]`  ⟂  *(chartered 2026-07-17 decision-review)*
+- **Vertical slice:** the operation-definition editor's Variables table (VARIABLE | VALUE | VISIBILITY) lights up — a def's Kalk formula is evaluated against a synthetic context to enumerate its declared variables and defaults, without needing a quote operation.
+- **Scope (in):** a def-level evaluation endpoint (runs the sandboxed formula against a documented synthetic `part`/context; returns declared variables, defaults, `default_visible`, errors); the Variables table in the def editor with the visibility eyes (writes `default_visible`); reuses the M1.8 executor seam and M1.9 variable model unchanged.
+- **Scope (out):** the formula **version store** + last-saved-by/Versions chrome (deferred — designed together with Lens correction history per the RESOLVED 2026-07-17 entry); any new Kalk language surface.
+- **Depends on:** M1.8 (sandbox), M1.9 (variable declaration model + def editor).
+- **Decisions:** ../docs/decisions/DECISIONS.md → *op-def Variables table + Kalk editor versions/last-saved-by* (RESOLVED 2026-07-17 — split).
+- **Acceptance criteria:** a def with declared variables returns them with defaults + visibility; toggling an eye persists `default_visible` and the quote-side Show-hidden filter honours it; a formula error surfaces as the CHECK chrome's message, never a 500.
+- **Test plan (fixtures):** endpoint test on a fixture formula (plain + quantity-specific vars); visibility round-trip.
+- **Golden-thread role:** none; config-side chrome only.
 
 ---
 

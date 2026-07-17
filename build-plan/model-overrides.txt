@@ -4,3 +4,8 @@
 # Lines not matching that shape (like these comments) are ignored.
 # See the routing rules in scripts/autobuild.sh; inspect the live table with:
 #   scripts/autobuild.sh --dry-run
+
+# 2026-07-17 decision-review blocks — schema/lifecycle/security surface → frontier
+M3.12 frontier
+M3.13 frontier
+M5.0 frontier

@@ -153,6 +153,26 @@
 - **Test plan (fixtures):** the harness *is* the test — seed 2–3 labelled prints now, expand on fixture delivery; a meta-test asserts the scorer's precision/recall math on a hand-checked mini-case.
 - **Golden-thread role:** none directly — it is the quality gate that keeps the thread's *real* M3 intake (M3.3/M3.4) trustworthy as prompts and models change.
 
+### M3.12 — Rules hardening: `blocks_send` gate + component/line-item paths + revision re-open   `[M]`  *(chartered 2026-07-17 decision-review; pre-pilot)*
+- **Vertical slice:** a rule marked `blocks_send` stops Draft→Sent while unresolved (`409` naming the blocking items); "kein Werkstoff angegeben" is finally expressible and seeded; a new print revision re-opens a stale resolved review item.
+- **Scope (in):** `rule.blocks_send` boolean + the field in the portable AST (migration + `rules_schema`); the `quote_lifecycle.transition` Draft→Sent guard; **catalogue paths** `component.material_id`, `line_item.min_quantity`/`max_quantity`, `quote.account_id` (exactly the `#rules-signals` §2 set — nothing speculative) wired through the M3.7 `EvaluationContext`'s inert fields; the **fifth §7 starter rule** seeded with `blocks_send=true` (dual-use starter flips to `true` too); **review-item revision stamping + re-open** — items record the file revision they were generated against; a new revision supersedes a resolution (history preserved) instead of being silently suppressed by `uq_review_item_component_rule`.
+- **Scope (out):** any further catalogue paths; bulk operations on review items; the Create Rule modal beyond surfacing the new flag + paths.
+- **Depends on:** M3.8 (generator + lifecycle), M1.4 (`transition` service), M2.1 (revision signal).
+- **Decisions:** ../docs/decisions/DECISIONS.md → the three RESOLVED 2026-07-17 entries (*does an unresolved review item block Draft→Sent*; *"no material specified" document_path*; *does a resolved review item suppress the next occurrence*).
+- **Acceptance criteria:** a quote with an unresolved `blocks_send` item cannot be sent (`409`, items named) and sends after resolution; a rule without the flag never blocks; the five §7 starters all import/export byte-equivalently with the widened AST; the material-less fixture component fires the fifth starter; a re-uploaded print revision with a changed matching finding re-opens the resolved item, while re-extraction within a revision stays idempotent.
+- **Test plan (fixtures):** send-gate test both ways; AST round-trip incl. new paths + flag; revision re-open test (same revision → no-op, new revision + changed finding → re-opened with history).
+- **Golden-thread role:** the send step gains a guard — the M1 golden thread must still send cleanly (no starter rule except the two flagged ones may ever block).
+
+### M3.13 — ClamAV upload scanning + quarantine   `[M]`  *(chartered 2026-07-17 decision-review; due immediately — M3.3 already opened the untrusted path)*
+- **Vertical slice:** every stored upload (direct or email-ingested) is scanned async; an infected file is quarantined — download and any outbound forward are blocked until clean.
+- **Scope (in):** ClamAV (clamd) sidecar in docker-compose + deploy; a Celery scan-on-store task (idempotent, retried with backoff, dead-lettered; CLAUDE.md §5); `part_file.scan_status ENUM(pending|clean|infected|error)` migration; download/forward endpoints gate on `clean` (pending = allow internal view-metadata, block download/forward; infected = blocked + surfaced in the Files panel); M3.3 ingest attachments enqueue the same task; structured log on quarantine (no file contents).
+- **Scope (out):** cloud scanning APIs (rejected — GDPR subprocessor); re-scan scheduling/signature-update automation (ops concern); the M6 vendor-send gate UI (it just reads `scan_status`).
+- **Depends on:** M1.2 (storage seam), M3.3 (ingest path).
+- **Decisions:** ../docs/decisions/DECISIONS.md → *Antivirus / malware scanning of customer uploads* (RESOLVED 2026-07-17).
+- **Acceptance criteria:** the EICAR fixture uploads, is flagged `infected`, and its download/forward return 409/403; a clean fixture passes to `clean` and downloads; an ingested email attachment is scanned via the same task; a clamd outage yields `error` + retry, never silent `clean`.
+- **Test plan (fixtures):** EICAR + clean round-trip; task idempotency (double-enqueue converges); gate behaviour per status.
+- **Golden-thread role:** none; upload latency for the thread's fixtures must stay imperceptible (scan is async — the gate, not the store, waits).
+
 ---
 
 **M3 done when:** a fixture `.eml` produces a draft quote with prefilled parts, a fixture drawing produces an extractions overlay, the Demo C rule library works end-to-end, a reply round-trips and threads correctly, and the new-quote notification card renders a triage brief with the correct signals (the spec's M3 exit) — and the golden-thread integration test still passes with intake now originating from the real ingested RFQ + Lens prefill. From here, M4 makes the thread's part dimensions real (interrogation) and supplies the interrogation/DFM signals the rules engine gates on today.
