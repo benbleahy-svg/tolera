@@ -192,20 +192,24 @@ async def maybe_enqueue_for_process(
     pf = await session.get(PartFile, part.primary_file_id)
     if pf is None or FileCategory(pf.file_type) != FileCategory.brep_cad:
         return None
-    # A queued run resolves the CURRENT profile when it executes, so it always
-    # covers this trigger. A running run may have resolved a just-edited
-    # profile's predecessor — accepted: its fingerprint isn't visible
-    # mid-flight, matching on it would double-enqueue every in-flight run
-    # (the duplicate-dispatch pile-up this dedupe prevents), and once it
+    # A queued run resolves the CURRENT profile when it executes — but with
+    # the material frozen on its own row (M4.8), so an in-flight run only
+    # covers this trigger when it carries the part's CURRENT material;
+    # otherwise a material switch under a queued/running run would leave the
+    # old material's thresholds standing with no successor. A run under a
+    # just-edited profile's predecessor stays accepted (its fingerprint isn't
+    # visible mid-flight; matching on it would double-enqueue every in-flight
+    # run — the duplicate-dispatch pile-up this dedupe prevents), and once it
     # commits the next trigger sees the hash mismatch below and re-runs. A
     # succeeded run only counts if it was computed under the current profile
     # inputs — otherwise a threshold/toggle/link edit would keep serving stale
     # warnings on re-assignment (M4.7; material-specific resolution M4.8).
+    current_material_id = await resolve_part_material_id(session, part.id)
     current_fp = inputs_fingerprint(
         await resolve_interrogation_inputs(
             session,
             family=str(family),
-            material_id=await resolve_part_material_id(session, part.id),
+            material_id=current_material_id,
             part_id=part.id,
         )
     )
@@ -215,7 +219,12 @@ async def maybe_enqueue_for_process(
             InterrogationRun.part_id == part.id,
             InterrogationRun.file_id == pf.id,
             InterrogationRun.family == str(family),
-            InterrogationRun.status.in_([InterrogationStatus.queued, InterrogationStatus.running])
+            (
+                InterrogationRun.status.in_(
+                    [InterrogationStatus.queued, InterrogationStatus.running]
+                )
+                & InterrogationRun.material_id.is_not_distinct_from(current_material_id)
+            )
             | (
                 (InterrogationRun.status == InterrogationStatus.succeeded)
                 & (InterrogationRun.inputs_hash == current_fp)
@@ -284,8 +293,9 @@ def select_most_specific(
     """The §4 MOST-SPECIFIC pick over a family's ``CustomInterrogation`` rows.
 
     Material rank per row = its most specific link on the part's material
-    chain: material (3) > family (2) > class (1) > no links, the org default
-    (0); a row whose links all miss the chain is no candidate. Op-def links
+    chain: material (3) > family (2) > class (1) > the org default (0); a row
+    whose links all miss the chain is no candidate, and an unlinked row ranks
+    0 only when it IS the default or enters via an op match. Op-def links
     (``op_links``: profile id → linked op-def ids) are an eligibility filter —
     an op-linked row is a candidate only when the part's process routing
     contains one of its ops — and an op match outranks the bare default at
@@ -305,6 +315,12 @@ def select_most_specific(
             or row.material_class_id is not None
         )
         if not has_material_links:
+            # Rank 0 is the org DEFAULT's slot. An unlinked non-default
+            # profile (authoring in progress, or a viewer-pick bundle à la
+            # the KB Laser/Punch example) must not silently compete with it —
+            # it becomes auto-resolvable only through an op-def match.
+            if not row.is_default and not linked_ops:
+                continue
             rank = 0
         elif row.material_id is not None and row.material_id == material_id:
             rank = 3
@@ -374,6 +390,7 @@ async def resolve_interrogation_inputs(
                     .where(
                         Component.part_id == part_id,
                         Process.family == family,
+                        Process.deleted_at.is_(None),
                         OperationDef.deleted_at.is_(None),
                     )
                     .distinct()

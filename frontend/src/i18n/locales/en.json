@@ -369,7 +369,9 @@
     "interrogation_link_none": "— no link —",
     "interrogation_new": "New profile ({{family}})",
     "interrogation_new_name": "Profile name",
-    "interrogation_duplicate_dispatch": "“{{other}}” is also linked into process “{{process}}” via an operation — the same interrogation would be dispatched twice."
+    "interrogation_duplicate_dispatch": "“{{other}}” is also linked into process “{{process}}” via an operation — the same interrogation would be dispatched twice.",
+    "interrogation_delete_confirm": "Delete profile “{{name}}” permanently? Tuned thresholds and links will be lost.",
+    "interrogation_lookups_failed": "Material/operation lists could not be loaded — link editing is temporarily disabled. Reload the page and try again."
   },
   "pricing": {
     "refresh_pricing": "Refresh Pricing",

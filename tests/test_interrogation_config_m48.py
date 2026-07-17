@@ -306,3 +306,75 @@ def test_default_profile_cannot_be_deleted_variants_can(
         res = app_client.delete(f"/api/configure/interrogations/{variant['id']}")
         assert res.status_code == 204
         assert all(p["name"] != ALUMINIUM_VARIANT for p in _profiles(app_client))
+
+
+def test_default_profile_cannot_be_linked(app_client: TestClient, seeder: Seeder) -> None:
+    """Fresh-eyes review: binding the default would silently remove the rank-0
+    fallback for every other material — rejected server-side; null (clear)
+    stays legal."""
+    org, admin = _org_with_admin(seeder, "m48-default-link")
+    seeder.configure_catalog(org)
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        default = _profile_named(app_client, "Standard CNC-Fräsen")
+        family_id = _material(app_client, "EN AW-6061")["family_id"]
+        res = app_client.put(
+            f"/api/configure/interrogations/{default['id']}",
+            json={"material_family_id": str(family_id)},
+        )
+        assert res.status_code == 422
+        assert res.json()["code"] == "default_profile_unlinkable"
+        ops = seeder.process_router_ops(org, family="MILLING")
+        res = app_client.put(
+            f"/api/configure/interrogations/{default['id']}",
+            json={"operation_def_ids": [str(ops[0])]},
+        )
+        assert res.status_code == 422
+        # clearing (explicit nulls) and plain input edits stay legal
+        res = app_client.put(
+            f"/api/configure/interrogations/{default['id']}",
+            json={"material_family_id": None, "inputs": default["inputs"]},
+        )
+        assert res.status_code == 200, res.text
+
+
+def test_material_change_retriggers_interrogation(app_client: TestClient, seeder: Seeder) -> None:
+    """Fresh-eyes review: the material picks the profile, so changing it must
+    re-interrogate — Aluminium suppresses the deep hole, 1.4301 re-fires it."""
+    org, admin = _org_with_admin(seeder, "m48-mat-change")
+    seeder.configure_catalog(org)
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        quote_id = app_client.post("/api/quotes", json={}).json()["id"]
+        item = app_client.post(f"/api/quotes/{quote_id}/items").json()["items"][0]
+        part_id, component_id = str(item["part_id"]), str(item["root_component_id"])
+        with eager_celery():
+            app_client.post(
+                f"/api/parts/{part_id}/files",
+                files=[("files", ("dh.step", DEEPHOLE, "application/step"))],
+            )
+        milling = next(p for p in app_client.get("/api/processes").json() if p["name"] == "Milling")
+        alu = _material(app_client, "EN AW-6061")
+        inox = _material(app_client, "1.4301")
+
+        with eager_celery():
+            res = app_client.patch(
+                f"/api/components/{component_id}/material", json={"material_id": alu["id"]}
+            )
+            assert res.status_code == 200, res.text
+            res = app_client.patch(
+                f"/api/components/{component_id}/process", json={"process_id": milling["id"]}
+            )
+            assert res.status_code == 200, res.text
+        run = app_client.get(f"/api/parts/{part_id}/interrogation").json()["run"]
+        assert run["status"] == "succeeded"
+        assert _warning(run, "deep_hole") is None  # Aluminium 20x suppresses
+
+        with eager_celery():
+            res = app_client.patch(
+                f"/api/components/{component_id}/material", json={"material_id": inox["id"]}
+            )
+            assert res.status_code == 200, res.text
+        run = app_client.get(f"/api/parts/{part_id}/interrogation").json()["run"]
+        assert run["status"] == "succeeded"
+        fired = _warning(run, "deep_hole")
+        assert fired is not None  # Stainless 6x re-fires on the same geometry
+        assert fired["threshold_used"]["deep_hole_ratio_threshold"] == 6.0

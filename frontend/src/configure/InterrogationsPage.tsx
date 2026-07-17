@@ -87,23 +87,30 @@ type SaveProfile = (
 
 /** Material class/family/material + operation-def binding (M4.8). Link
  * changes save immediately — a link is a small, atomic act, unlike the
- * threshold table's batched Save. */
+ * threshold table's batched Save. The editor locks while a save is in
+ * flight (each response replaces the whole profile, so concurrent PUTs
+ * could land out of order) and stays disabled when the lookup lists failed
+ * to load (options missing ≠ links cleared). */
 function LinkEditor({
   profile,
   materials,
   opDefs,
+  lookupsFailed,
   onSave,
   onNote,
 }: {
   profile: InterrogationProfileOut;
   materials: ClassNode[];
   opDefs: OpDefOption[];
+  lookupsFailed: boolean;
   onSave: SaveProfile;
   onNote: (note: string | null, warnings: DispatchWarningOut[]) => void;
 }) {
   const { t } = useTranslation();
+  const [saving, setSaving] = useState(false);
 
   const save = (body: InterrogationProfileUpdate) => {
+    setSaving(true);
     void onSave(profile.id, body)
       .then((warnings) => {
         onNote(t('configure.interrogation_saved'), warnings);
@@ -115,9 +122,21 @@ function LinkEditor({
           }`,
           [],
         );
+      })
+      .finally(() => {
+        setSaving(false);
       });
   };
 
+  if (lookupsFailed) {
+    return (
+      <p className="interrogation-links" role="alert">
+        {t('configure.interrogation_lookups_failed')}
+      </p>
+    );
+  }
+
+  const disabled = saving;
   const families = materials.flatMap((c) => c.families);
   const allMaterials = families.flatMap((f) => f.materials);
   const none = t('configure.interrogation_link_none');
@@ -128,6 +147,7 @@ function LinkEditor({
         <span>{t('configure.interrogation_link_class')}</span>
         <select
           value={profile.material_class_id ?? ''}
+          disabled={disabled}
           onChange={(e) => save({ material_class_id: e.target.value || null })}
         >
           <option value="">{none}</option>
@@ -142,6 +162,7 @@ function LinkEditor({
         <span>{t('configure.interrogation_link_family')}</span>
         <select
           value={profile.material_family_id ?? ''}
+          disabled={disabled}
           onChange={(e) => save({ material_family_id: e.target.value || null })}
         >
           <option value="">{none}</option>
@@ -156,6 +177,7 @@ function LinkEditor({
         <span>{t('configure.interrogation_link_material')}</span>
         <select
           value={profile.material_id ?? ''}
+          disabled={disabled}
           onChange={(e) => save({ material_id: e.target.value || null })}
         >
           <option value="">{none}</option>
@@ -172,6 +194,7 @@ function LinkEditor({
           multiple
           size={Math.min(6, Math.max(3, opDefs.length))}
           value={profile.operation_def_ids}
+          disabled={disabled}
           onChange={(e) =>
             save({
               operation_def_ids: Array.from(e.target.selectedOptions, (o) => o.value),
@@ -194,6 +217,7 @@ function FamilySection({
   profile,
   materials,
   opDefs,
+  lookupsFailed,
   onSave,
   onDelete,
 }: {
@@ -201,6 +225,7 @@ function FamilySection({
   profile: InterrogationProfileOut;
   materials: ClassNode[];
   opDefs: OpDefOption[];
+  lookupsFailed: boolean;
   onSave: SaveProfile;
   onDelete: (profileId: string) => Promise<void>;
 }) {
@@ -237,6 +262,11 @@ function FamilySection({
   };
 
   const remove = () => {
+    // Destroying a profile drops tuned thresholds + links irrecoverably —
+    // unlike everything else on this page, it deserves a confirm step.
+    if (!window.confirm(t('configure.interrogation_delete_confirm', { name: profile.name }))) {
+      return;
+    }
     void onDelete(profile.id).catch((e: unknown) => {
       setNote(
         `${t('configure.interrogation_save_failed')}: ${
@@ -262,6 +292,7 @@ function FamilySection({
           profile={profile}
           materials={materials}
           opDefs={opDefs}
+          lookupsFailed={lookupsFailed}
           onSave={onSave}
           onNote={onNote}
         />
@@ -447,6 +478,7 @@ export function InterrogationsPage() {
   const [config, setConfig] = useState<InterrogationsConfigOut | null>(null);
   const [materials, setMaterials] = useState<ClassNode[]>([]);
   const [opDefs, setOpDefs] = useState<OpDefOption[]>([]);
+  const [lookupsFailed, setLookupsFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -459,14 +491,17 @@ export function InterrogationsPage() {
   }, [api]);
 
   useEffect(() => {
-    // Link-picker data; the threshold tables work without it.
-    estimatingApi.materialTree().then(setMaterials).catch(() => undefined);
-    api
-      .listOperationDefs('')
-      .then((defs) => {
+    // Link-picker data; the threshold tables work without it — but a failed
+    // load must DISABLE the link editors, not render them empty (existing
+    // links would look cleared and could be overwritten).
+    Promise.all([
+      estimatingApi.materialTree().then(setMaterials),
+      api.listOperationDefs('').then((defs) => {
         setOpDefs(defs.map((d) => ({ id: d.id, name: d.name })));
-      })
-      .catch(() => undefined);
+      }),
+    ]).catch(() => {
+      setLookupsFailed(true);
+    });
   }, [api, estimatingApi]);
 
   const onSave = useCallback<SaveProfile>(
@@ -536,6 +571,7 @@ export function InterrogationsPage() {
                 profile={profile}
                 materials={materials}
                 opDefs={opDefs}
+                lookupsFailed={lookupsFailed}
                 onSave={onSave}
                 onDelete={onDelete}
               />

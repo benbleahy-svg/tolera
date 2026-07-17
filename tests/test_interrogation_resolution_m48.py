@@ -39,6 +39,7 @@ class Candidate:
     material_id: uuid.UUID | None = None
     material_family_id: uuid.UUID | None = None
     material_class_id: uuid.UUID | None = None
+    is_default: bool = False
     created_at: datetime = T0
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
@@ -78,13 +79,13 @@ def test_family_link_beats_class_link() -> None:
 
 
 def test_class_link_beats_default() -> None:
-    default = Candidate()
+    default = Candidate(is_default=True)
     class_level = Candidate(material_class_id=CLS)
     assert pick([default, class_level]) is class_level
 
 
 def test_default_wins_when_nothing_more_specific_matches() -> None:
-    default = Candidate()
+    default = Candidate(is_default=True)
     unrelated = Candidate(material_family_id=OTHER_FAM)
     assert pick([unrelated, default]) is default
 
@@ -100,7 +101,7 @@ def test_no_candidates_returns_none() -> None:
 
 def test_part_without_material_resolves_only_the_default() -> None:
     material_level = Candidate(material_id=MAT)
-    default = Candidate()
+    default = Candidate(is_default=True)
     assert (
         pick(
             [material_level, default],
@@ -126,7 +127,7 @@ def test_row_with_multiple_links_ranks_by_its_most_specific_match() -> None:
 # --------------------------------------------------------------------------- #
 def test_op_linked_profile_requires_a_matching_process_op() -> None:
     linked = Candidate()
-    default = Candidate()
+    default = Candidate(is_default=True)
     op_links = {linked.id: {OP_A}}
     # Process routing does not contain OP_A -> the linked profile is ineligible.
     assert pick([linked, default], op_links=op_links, process_operation_def_ids={OP_B}) is default
@@ -136,7 +137,7 @@ def test_op_linked_profile_requires_a_matching_process_op() -> None:
 
 def test_op_matched_profile_beats_the_bare_default() -> None:
     linked = Candidate()
-    default = Candidate()
+    default = Candidate(is_default=True)
     op_links = {linked.id: {OP_A}}
     assert pick([linked, default], op_links=op_links, process_operation_def_ids={OP_A}) is linked
 
@@ -151,6 +152,16 @@ def test_material_specificity_dominates_op_match() -> None:
         pick([op_matched, family_level], op_links=op_links, process_operation_def_ids={OP_A})
         is family_level
     )
+
+
+def test_unlinked_non_default_profile_is_never_auto_selected() -> None:
+    # An authoring-in-progress / viewer-pick bundle (no links, not default)
+    # must not shadow the org default in automatic resolution — it becomes
+    # resolvable only through an op-def match.
+    stray = Candidate(created_at=T0 - timedelta(days=1))  # older than default
+    default = Candidate(is_default=True)
+    assert pick([stray, default]) is default
+    assert pick([stray]) is None
 
 
 # --------------------------------------------------------------------------- #

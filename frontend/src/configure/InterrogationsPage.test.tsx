@@ -31,8 +31,9 @@ const apiMock = {
 vi.mock('./api', () => ({
   useConfigureApi: () => apiMock,
 }));
+const estimatingApiMock = { materialTree };
 vi.mock('../estimating/api', () => ({
-  useEstimatingApi: () => ({ materialTree }),
+  useEstimatingApi: () => estimatingApiMock,
 }));
 
 const DEFAULT_PROFILE: InterrogationProfileOut = {
@@ -249,6 +250,9 @@ describe('InterrogationsPage', () => {
     });
     await userEvent.selectOptions(variantSection().getByLabelText(/Arbeitsgänge/), 'op-mill');
     await waitFor(() => {
+      expect(updateInterrogationProfile).toHaveBeenCalledWith('prof-2', {
+        operation_def_ids: ['op-mill'],
+      });
       expect(screen.getByRole('alert')).toHaveTextContent(/Fräsen B/);
       expect(screen.getByRole('alert')).toHaveTextContent(/doppelt/);
     });
@@ -262,6 +266,7 @@ describe('InterrogationsPage', () => {
       is_default: false,
     });
     deleteInterrogationProfile.mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await renderWithProviders(<InterrogationsPage />);
     await waitFor(() => {
       expect(screen.getByText(/CNC-Fräsen Aluminium/)).toBeInTheDocument();
@@ -278,7 +283,22 @@ describe('InterrogationsPage', () => {
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Profil löschen' })[0]);
     await waitFor(() => {
-      expect(deleteInterrogationProfile).toHaveBeenCalled();
+      expect(deleteInterrogationProfile).toHaveBeenCalledWith('prof-2');
+      expect(screen.queryByText(/CNC-Fräsen Aluminium/)).not.toBeInTheDocument();
+      expect(screen.getByText(/Standard CNC-Fräsen/)).toBeInTheDocument();
     });
+    expect(confirmSpy).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('does not delete when the confirm dialog is dismissed', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await renderWithProviders(<InterrogationsPage />);
+    await waitFor(() => {
+      expect(screen.getByText(/CNC-Fräsen Aluminium/)).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Profil löschen' }));
+    expect(deleteInterrogationProfile).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });

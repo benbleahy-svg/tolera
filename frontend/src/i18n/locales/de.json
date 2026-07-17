@@ -369,7 +369,9 @@
     "interrogation_link_none": "— keine Verknüpfung —",
     "interrogation_new": "Neues Profil ({{family}})",
     "interrogation_new_name": "Profilname",
-    "interrogation_duplicate_dispatch": "„{{other}}“ ist im Prozess „{{process}}“ ebenfalls über einen Arbeitsgang verknüpft — dieselbe Interrogation würde doppelt ausgeführt."
+    "interrogation_duplicate_dispatch": "„{{other}}“ ist im Prozess „{{process}}“ ebenfalls über einen Arbeitsgang verknüpft — dieselbe Interrogation würde doppelt ausgeführt.",
+    "interrogation_delete_confirm": "Profil „{{name}}“ endgültig löschen? Angepasste Schwellwerte und Verknüpfungen gehen verloren.",
+    "interrogation_lookups_failed": "Werkstoff-/Arbeitsgangslisten konnten nicht geladen werden — Verknüpfungen sind vorübergehend deaktiviert. Seite neu laden und erneut versuchen."
   },
   "pricing": {
     "refresh_pricing": "Preise aktualisieren",

@@ -246,8 +246,13 @@ async def _duplicate_dispatch_warnings(
     process make the system dispatch two interrogations of that type."""
     if not op_def_ids:
         return []
-    shared_processes = select(ProcessOperation.process_id).where(
-        ProcessOperation.operation_def_id.in_(op_def_ids)
+    shared_processes = (
+        select(ProcessOperation.process_id)
+        .join(OperationDef, OperationDef.id == ProcessOperation.operation_def_id)
+        .where(
+            ProcessOperation.operation_def_id.in_(op_def_ids),
+            OperationDef.deleted_at.is_(None),
+        )
     )
     rows = (
         await session.execute(
@@ -261,12 +266,17 @@ async def _duplicate_dispatch_warnings(
                 ProcessOperation.operation_def_id
                 == CustomInterrogationOperationDef.operation_def_id,
             )
+            .join(
+                OperationDef,
+                OperationDef.id == CustomInterrogationOperationDef.operation_def_id,
+            )
             .join(Process, Process.id == ProcessOperation.process_id)
             .where(
                 CustomInterrogation.family == profile.family,
                 CustomInterrogation.id != profile.id,
                 ProcessOperation.process_id.in_(shared_processes),
                 Process.deleted_at.is_(None),
+                OperationDef.deleted_at.is_(None),
             )
             .distinct()
         )
@@ -353,11 +363,33 @@ async def update_interrogation_profile(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ProfileWithWarningsOut:
     profile = await _get_profile_or_404(session, profile_id)
+    # The org default's rank-0 fallback slot is keyed on having no links —
+    # binding it to a material or op would silently remove the fallback for
+    # every other material (fresh-eyes review). Clearing (null) stays legal.
+    wants_links = any(
+        field in body.model_fields_set and getattr(body, field) is not None
+        for field in _MATERIAL_LINK_MODELS
+    ) or bool(body.operation_def_ids)
+    if profile.is_default and wants_links:
+        raise AppError(
+            code="default_profile_unlinkable",
+            message="The default interrogation profile cannot be linked to materials or"
+            " operations — create a named profile for that.",
+            status_code=422,
+        )
     if "name" in body.model_fields_set and body.name is not None:
         await _check_unique_name(session, body.name, exclude_id=profile.id)
         profile.name = body.name
     if body.inputs is not None:
-        profile.inputs = validate_profile_inputs(profile.family.value, body.inputs)
+        # Merge, don't replace: a sparse PUT must never silently reset the
+        # keys it omits to engine defaults — profiles stay full input sets
+        # (create prefills them), and resetting a key = sending its default.
+        overrides = validate_profile_inputs(profile.family.value, body.inputs)
+        profile.inputs = {
+            **dfm_default_inputs(profile.family.value),
+            **profile.inputs,
+            **overrides,
+        }
     for field, model in _MATERIAL_LINK_MODELS.items():
         if field not in body.model_fields_set:
             continue

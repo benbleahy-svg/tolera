@@ -9,8 +9,10 @@ the org default as "all material links NULL", but M4.8 must allow further
 no-material-link profiles (the KB Laser/Punch example, op-linked profiles),
 which that partial index forbade. Also adds the ``(org_id, id)`` unique pin
 0031 omitted (composite-FK target, the house pattern) and the KB "unique
-name" rule per org. Reversible (downgrade restores the 0031 invariant by
-deleting the non-default no-link rows M4.7 could not express).
+name" rule per org (pre-existing duplicates deterministically renamed).
+Reversible: the downgrade rebuilds the 0031 partial index and ABORTS with an
+actionable error if non-default unlinked rows exist (unrepresentable under
+0031) — it never silently deletes customer-authored profiles.
 
 Revision ID: 0032_custom_interrogation_links
 Revises: 0031_custom_interrogation
@@ -62,6 +64,24 @@ def upgrade() -> None:
         """
     )
     # KB custom-interrogations: "Each custom interrogation has a unique name".
+    # 0031 allowed duplicates, so deterministically rename any first (oldest
+    # keeps the plain name) — the index must never block a deploy on data
+    # that was legal when written.
+    op.execute(
+        """
+        WITH ranked AS (
+            SELECT id, name,
+                   row_number() OVER (
+                       PARTITION BY org_id, name ORDER BY created_at, id
+                   ) AS rn
+            FROM custom_interrogation
+        )
+        UPDATE custom_interrogation c
+        SET name = ranked.name || ' (' || ranked.rn || ')'
+        FROM ranked
+        WHERE c.id = ranked.id AND ranked.rn > 1
+        """
+    )
     op.execute(
         """
         CREATE UNIQUE INDEX uq_custom_interrogation_org_name
@@ -112,16 +132,29 @@ def downgrade() -> None:
     op.execute("DROP TABLE custom_interrogation_operation_def")
     op.execute("DROP INDEX uq_custom_interrogation_org_name")
     op.execute("ALTER TABLE custom_interrogation DROP CONSTRAINT uq_custom_interrogation_org_id_id")
-    # Restore the 0031 invariant (one all-NULL row per org+family = the
-    # default): rows M4.7 could not express — no material links, not the
-    # default — must go, or the recreated partial index cannot build.
+    # The 0031 partial index (one all-NULL row per org+family = the default)
+    # cannot represent non-default unlinked profiles. Never silently delete
+    # customer-authored rows on the way down — abort with an actionable
+    # message instead; the operator deletes or links them, then retries.
     op.execute(
         """
-        DELETE FROM custom_interrogation
-        WHERE NOT is_default
-          AND material_class_id IS NULL
-          AND material_family_id IS NULL
-          AND material_id IS NULL
+        DO $$
+        DECLARE incompatible bigint;
+        BEGIN
+            SELECT count(*) INTO incompatible
+            FROM custom_interrogation
+            WHERE NOT is_default
+              AND material_class_id IS NULL
+              AND material_family_id IS NULL
+              AND material_id IS NULL;
+            IF incompatible > 0 THEN
+                RAISE EXCEPTION
+                    'cannot downgrade 0032: % non-default custom interrogation(s)'
+                    ' without material links exist (unrepresentable under 0031);'
+                    ' delete them or link them to a material first',
+                    incompatible;
+            END IF;
+        END $$
         """
     )
     op.execute("DROP INDEX uq_custom_interrogation_org_family_default")

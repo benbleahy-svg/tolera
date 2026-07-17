@@ -926,6 +926,13 @@ async def set_component_material(
             )
     component.material_id = payload.material_id
     await session.flush()
+    # M4.8: the material picks the most-specific interrogation profile
+    # (Aluminium vs Stainless thresholds), so a material change must
+    # re-interrogate exactly like a process change — the fingerprint dedupe
+    # inside skips when the resolved inputs are unchanged.
+    from .interrogation import maybe_enqueue_for_process
+
+    await maybe_enqueue_for_process(session, component)
     return await _component_costing(session, component)
 
 
