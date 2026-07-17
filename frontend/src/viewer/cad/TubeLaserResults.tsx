@@ -7,7 +7,7 @@
 import { useTranslation } from 'react-i18next';
 
 import type { InterrogationFeature, TubeProfileScalars } from '../../parts/api';
-import { formatLength, type DisplayOptions } from './measureFormat';
+import { formatAngle, formatLength, type DisplayOptions } from './measureFormat';
 
 export function TubeLaserResults({
   scalars,
@@ -52,6 +52,24 @@ export function TubeLaserResults({
           <div>
             <dt>{t('viewer.tube_length')}</dt>
             <dd>{formatLength(scalars.length, displayOpts)}</dd>
+          </div>
+        )}
+        {scalars.leg_angle != null && (
+          <div>
+            <dt>{t('viewer.tube_leg_angle')}</dt>
+            <dd>{formatAngle(scalars.leg_angle, displayOpts)}</dd>
+          </div>
+        )}
+        {scalars.outside_corner_radius != null && (
+          <div>
+            <dt>{t('viewer.tube_outside_corner_radius')}</dt>
+            <dd>{formatLength(scalars.outside_corner_radius, displayOpts)}</dd>
+          </div>
+        )}
+        {scalars.internal_radius != null && (
+          <div>
+            <dt>{t('viewer.tube_internal_radius')}</dt>
+            <dd>{formatLength(scalars.internal_radius, displayOpts)}</dd>
           </div>
         )}
         {scalars.total_cut_length != null && (

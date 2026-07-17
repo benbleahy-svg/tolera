@@ -2079,23 +2079,40 @@ def _classify_tube_section(
                 "is_outside_corner_round": False,
             }
         if loops == 1 and len(lines) == 6 and len(loop_areas) == 1:
-            if not area_matches(loop_areas[0], thickness * (width + height - thickness)):
+            # The two longest lines are the legs' OUTER edges; they meet at
+            # the outer corner. Orienting both directions AWAY from that
+            # shared corner gives the true interior angle — an obtuse profile
+            # reports 135°, never the 45° supplement (CodeRabbit, M4.6).
+            leg_a, leg_b = sorted(lines, key=lambda ln: ln.length, reverse=True)[:2]
+            corner_pair = min(
+                ((pa, pb) for pa in (leg_a.p1, leg_a.p2) for pb in (leg_b.p1, leg_b.p2)),
+                key=lambda pair: _v_dot(_v_sub(pair[1], pair[0]), _v_sub(pair[1], pair[0])),
+            )
+            corner_gap = _v_sub(corner_pair[1], corner_pair[0])
+            if math.sqrt(_v_dot(corner_gap, corner_gap)) > max(0.1 * thickness, 1e-3):
+                return None  # legs that never meet are not an angle profile
+            away_a = _v_unit(
+                _v_sub(leg_a.p2 if corner_pair[0] == leg_a.p1 else leg_a.p1, corner_pair[0])
+            )
+            away_b = _v_unit(
+                _v_sub(leg_b.p2 if corner_pair[1] == leg_b.p1 else leg_b.p1, corner_pair[1])
+            )
+            gamma = math.acos(min(max(_v_dot(away_a, away_b), -1.0), 1.0))
+            if math.sin(gamma) < 0.1:
+                return None  # near-collinear legs: no meaningful angle profile
+            # constant-t strip area with a mitered corner: t·(L1+L2) minus the
+            # double-counted corner patch t^2·(1+cos g)/sin g (g=90 deg → t^2).
+            expected = thickness * (leg_a.length + leg_b.length) - thickness**2 * (
+                1.0 + math.cos(gamma)
+            ) / math.sin(gamma)
+            if not area_matches(loop_areas[0], expected):
                 return None
-            longest = sorted(lines, key=lambda ln: ln.length, reverse=True)
-            leg_angle = None
-            for other in longest[1:]:
-                dot = abs(_v_dot(longest[0].dir, other.dir))
-                if dot < 0.999:
-                    # v1: folded into [0°, 90°] — an obtuse bent-angle profile
-                    # reports the supplement (unsigned segment directions).
-                    leg_angle = math.degrees(math.acos(min(max(dot, 0.0), 1.0)))
-                    break
             return {
                 "stock_type": "angle",
                 "width": width,
                 "height": height,
                 "thickness": thickness,
-                **({"leg_angle": leg_angle} if leg_angle is not None else {}),
+                "leg_angle": math.degrees(gamma),
             }
         if loops == 1 and len(lines) == 8 and len(loop_areas) == 1:
             # width = the base (open) side; a tall U measures leg-first, so
@@ -2140,21 +2157,40 @@ def _classify_tube_section(
     return None
 
 
+def _section_total_edge_length(
+    shape: TopoDS_Shape, origin: tuple[float, float, float], normal: tuple[float, float, float]
+) -> float:
+    """Total edge length of the plane∩solid section (both wall contours)."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+    from OCP.gp import gp_Dir, gp_Pln
+
+    sec = BRepAlgoAPI_Section(shape, gp_Pln(gp_Pnt(*origin), gp_Dir(*normal)))
+    sec.Build()
+    if not sec.IsDone():
+        return 0.0
+    props = GProp_GProps()
+    BRepGProp.LinearProperties_s(sec.Shape(), props)
+    return float(props.Mass())
+
+
 def _tube_cut_metrics(
+    shape: TopoDS_Shape,
     faces: list[_TubeFace],
     axis: tuple[float, float, float],
     thickness: float,
+    open_tips: int,
     max_angled_deg: float,
     countersinks_lasered: bool,
 ) -> tuple[float, int, bool, list[dict[str, Any]]]:
     """End cuts + wall cutouts + countersinks → (total_cut_length,
-    pierce_count, machining_required, features)."""
+    pierce_count, machining_required, features). ``open_tips`` = number of
+    free strip ends in the profile's mid-line (2 for angle/u_channel)."""
     features: list[dict[str, Any]] = []
     total_cut = 0.0
     machining_required = False
 
     # -- end cuts: planar faces whose normal has an axial component ---------- #
-    groups: dict[tuple[float, ...], dict[str, float]] = {}
+    groups: dict[tuple[float, ...], dict[str, Any]] = {}
     for f in faces:
         if f.kind != 0 or f.normal is None or f.origin is None:
             continue
@@ -2167,11 +2203,23 @@ def _tube_cut_metrics(
             round(f.normal[2], 3),
             round(_v_dot(f.normal, f.origin), 3),
         )
-        entry = groups.setdefault(key, {"area": 0.0, "cos": cos_ax})
-        entry["area"] += f.area
+        groups.setdefault(key, {"cos": cos_ax, "normal": f.normal, "origin": f.origin})
     for entry in groups.values():
         angle = math.degrees(math.acos(min(max(entry["cos"], 0.0), 1.0)))
-        cut_length = entry["area"] / thickness
+        # The LASER PATH, not cut-face area / t: an area-based measure
+        # overstates mitered cuts (walls parallel to the tilt axis are crossed
+        # at a slant — more material, same path). Section the solid a hair
+        # inside the cut plane: (outer + inner contour) / 2 is the wall
+        # mid-line the laser actually follows — exact for constant walls,
+        # any profile, any tilt (CodeRabbit, M4.6). Open profiles' section
+        # boundary includes the leg-tip widths, which are stock edges, not
+        # cuts — subtracted via ``open_tips``.
+        epsilon = min(0.25 * thickness, 0.5)
+        inside = tuple(
+            o - epsilon * n for o, n in zip(entry["origin"], entry["normal"], strict=True)
+        )
+        contour = _section_total_edge_length(shape, inside, entry["normal"])
+        cut_length = max(contour - open_tips * thickness, 0.0) / 2.0
         if angle <= _TUBE_STRAIGHT_DEG:
             total_cut += cut_length
             features.append(
@@ -2348,16 +2396,21 @@ def _analyze_tube_laser(
     """The M4.6 recognizer. Returns ``(family_scalars, features)`` — a body
     matching none of the 5 profiles yields ``{"stock_type": "incompatible"}``
     and no features (never a fabricated guess, build-plan M4.6)."""
-    resolved = {**_TUBE_DEFAULT_INPUTS, **(inputs or {})}
+    provided = inputs or {}
+    unknown = set(provided) - set(_TUBE_DEFAULT_INPUTS)
+    if unknown:
+        # a typo must not silently fall back to the default strategy
+        raise GeometryError(f"unknown tube-laser inputs: {', '.join(sorted(unknown))}")
+    resolved = {**_TUBE_DEFAULT_INPUTS, **provided}
     for name in _TUBE_NUMERIC_INPUTS:
         value = resolved[name]
         if (
             isinstance(value, bool)
             or not isinstance(value, int | float)
             or not math.isfinite(value)
-            or value < 0
+            or not 0 <= value <= 90
         ):
-            raise GeometryError(f"tube-laser input {name} must be a finite non-negative number")
+            raise GeometryError(f"tube-laser input {name} must be a finite angle in [0, 90] deg")
         resolved[name] = float(value)
     for name in _TUBE_BOOLEAN_INPUTS:
         if not isinstance(resolved[name], bool):
@@ -2438,9 +2491,11 @@ def _analyze_tube_laser(
         return dict(_TUBE_INCOMPATIBLE), []
 
     total_cut, pierce, machining_required, features = _tube_cut_metrics(
+        shape,
         faces,
         axis,
         profile["thickness"],
+        2 if profile["stock_type"] in ("angle", "u_channel") else 0,
         resolved["max_angled_cut_threshold"],
         resolved["should_countersinks_be_lasered"],
     )

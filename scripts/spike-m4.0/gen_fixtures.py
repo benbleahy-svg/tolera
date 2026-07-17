@@ -943,7 +943,10 @@ def _angled_tube_golden(angle_deg: float, length: float, lasered: bool) -> dict:
     # skin area = integral of wall height along each perimeter:
     # outer rect (40x20): integral(20-y)ds = 1200; inner (36x16): 1040
     area = (120 + 104) * length + math.tan(rad) * (1200 + 1040) + 224 + 224 / math.cos(rad)
-    cut = 112.0 + (112.0 / math.cos(rad) if lasered else 0.0)
+    # laser PATH on the mitered end: only the mid-line segments perpendicular
+    # to the tilt axis stretch (the two 18 mm height runs -> 36/cos), the two
+    # 38 mm width runs are parallel to the tilt axis and keep their length.
+    cut = 112.0 + (76.0 + 36.0 / math.cos(rad) if lasered else 0.0)
     return {
         "family": "tube_laser",
         "stock_type": "rectangular",

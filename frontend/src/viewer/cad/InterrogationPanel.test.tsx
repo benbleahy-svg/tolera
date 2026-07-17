@@ -426,6 +426,40 @@ describe('InterrogationPanel', () => {
     expect(screen.getByRole('note')).toHaveTextContent(/Zusätzliche Bearbeitung erforderlich/);
   });
 
+  it('renders angle-profile leg angle and radiused-profile corner radii (M4.6)', async () => {
+    // The radiused fixture's analytic values: 40×20 t2, outer corner r4 / inner r2.
+    const tube = succeeded();
+    tube.run!.family = 'TUBE_LASER';
+    tube.run!.result = {
+      ...tube.run!.result!,
+      family: 'TUBE_LASER',
+      family_scalars: {
+        stock_type: 'rectangular_radiused',
+        width: 40,
+        height: 20,
+        thickness: 2,
+        length: 150,
+        outside_corner_radius: 4,
+        internal_radius: 2,
+        is_outside_corner_round: true,
+        leg_angle: 90,
+        total_cut_length: 213.7,
+        pierce_count: 0,
+        machining_required: false,
+      },
+      features: [],
+    };
+    getInterrogation.mockResolvedValue(tube);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Rechteckrohr (gerundete Ecken)')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Außeneckenradius').parentElement?.textContent).toContain('4,00');
+    expect(screen.getByText('Inneneckenradius').parentElement?.textContent).toContain('2,00');
+    expect(screen.getByText('Schenkelwinkel').parentElement?.textContent).toContain('90');
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
   it('says a TUBE_LASER body matched no profile, not "pending" (M4.6)', async () => {
     // The recognizer's honest path: incompatible — never a fabricated guess.
     const tube = succeeded();

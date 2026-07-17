@@ -148,9 +148,10 @@ def test_angled_cut_threshold_is_an_input() -> None:
         "tube-rect-angled60-40x20-t2-l80.step", inputs={"max_angled_cut_threshold": 75.0}
     )
     assert result.family_scalars.get("machining_required", False) is False
+    # mitered laser path: straight end 112 + angled end 76 + 36/cos60 = 260
     assert_close(
         result.family_scalars["total_cut_length"],
-        112.0 + 112.0 / math.cos(math.radians(60.0)),
+        112.0 + 76.0 + 36.0 / math.cos(math.radians(60.0)),
         "cut length with raised threshold",
     )
 
@@ -168,14 +169,22 @@ def test_cutout_feature_carries_perimeter() -> None:
 def test_countersink_lasered_by_default() -> None:
     golden = GOLDENS["tube-rect-csk-40x20-t3-d8-l120.step"]["tube_laser"]
     result = analyze("tube-rect-csk-40x20-t3-d8-l120.step")
-    assert result.family_scalars["pierce_count"] == 1
+    assert result.family_scalars["pierce_count"] == golden["pierce_count"]
     assert_close(
         result.family_scalars["total_cut_length"], golden["total_cut_length"], "cut length"
     )
     csk = [f for f in result.features if f["name"] == "countersink"]
     assert len(csk) == 1
-    assert_close(csk[0]["properties"]["hole_diameter"], 8.0, "hole diameter")
-    assert_close(csk[0]["properties"]["sink_diameter"], 12.0, "sink diameter")
+    assert_close(
+        csk[0]["properties"]["hole_diameter"],
+        golden["countersink"]["hole_diameter"],
+        "hole diameter",
+    )
+    assert_close(
+        csk[0]["properties"]["sink_diameter"],
+        golden["countersink"]["sink_diameter"],
+        "sink diameter",
+    )
     assert csk[0]["properties"]["lasered"] is True
 
 
@@ -186,7 +195,7 @@ def test_countersink_excluded_when_not_lasered() -> None:
     result = analyze(
         "tube-rect-csk-40x20-t3-d8-l120.step", inputs={"should_countersinks_be_lasered": False}
     )
-    assert result.family_scalars["pierce_count"] == 0
+    assert result.family_scalars["pierce_count"] == golden["pierce_count_not_lasered"]
     assert_close(
         result.family_scalars["total_cut_length"],
         golden["total_cut_length_not_lasered"],
@@ -240,13 +249,8 @@ def _step_bytes_of(shape: object) -> bytes:
         return path.read_bytes()
 
 
-def test_solid_bars_never_fabricate_a_profile() -> None:
-    """Solid stock whose section apes a profile by edge count must classify
-    ``incompatible`` (fresh-eyes review, M4.6): a hex bar sections as 6 lines
-    / 1 loop (angle counts), a chamfered square bar as 8 lines / 1 loop
-    (u_channel counts). The strip gate (wall ≪ section) rejects both."""
-    import math as m
-
+def bar_from_polygon(pts_2d: list[tuple[float, float]], length: float) -> object:
+    """Extrude a closed 2D polygon (z=0 plane) into a prism along z."""
     from OCP.BRepBuilderAPI import (
         BRepBuilderAPI_MakeEdge,
         BRepBuilderAPI_MakeFace,
@@ -255,13 +259,20 @@ def test_solid_bars_never_fabricate_a_profile() -> None:
     from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
     from OCP.gp import gp_Pnt, gp_Vec
 
-    def bar_from_polygon(pts_2d: list[tuple[float, float]], length: float) -> object:
-        wire = BRepBuilderAPI_MakeWire()
-        for i, (x, y) in enumerate(pts_2d):
-            nx, ny = pts_2d[(i + 1) % len(pts_2d)]
-            wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(x, y, 0), gp_Pnt(nx, ny, 0)).Edge())
-        face = BRepBuilderAPI_MakeFace(wire.Wire()).Face()
-        return BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, length)).Shape()
+    wire = BRepBuilderAPI_MakeWire()
+    for i, (x, y) in enumerate(pts_2d):
+        nx, ny = pts_2d[(i + 1) % len(pts_2d)]
+        wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(x, y, 0), gp_Pnt(nx, ny, 0)).Edge())
+    face = BRepBuilderAPI_MakeFace(wire.Wire()).Face()
+    return BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, length)).Shape()
+
+
+def test_solid_bars_never_fabricate_a_profile() -> None:
+    """Solid stock whose section apes a profile by edge count must classify
+    ``incompatible`` (fresh-eyes review, M4.6): a hex bar sections as 6 lines
+    / 1 loop (angle counts), a chamfered square bar as 8 lines / 1 loop
+    (u_channel counts). The strip gate (wall ≪ section) rejects both."""
+    import math as m
 
     hexagon = [
         (10 * m.cos(m.radians(60 * i + 30)), 10 * m.sin(m.radians(60 * i + 30))) for i in range(6)
@@ -297,6 +308,32 @@ def test_solid_bars_never_fabricate_a_profile() -> None:
             f"{name}: {result.family_scalars}"
         )
         assert result.features == []
+
+
+def test_obtuse_angle_profile_reports_true_leg_angle() -> None:
+    """A 135-deg bent-angle profile reports 135, never the 45 supplement
+    (CodeRabbit, M4.6): leg directions are oriented away from the shared
+    outer corner, and the corner-mitre area gate is leg-angle-aware."""
+    t, leg = 4.0, 40.0
+    gamma = math.radians(135.0)
+    d2 = (math.cos(gamma), math.sin(gamma))
+    n2 = (d2[1], -d2[0])  # inward normal of leg 2
+    s_inner = (t - t * n2[1]) / d2[1]
+    inner_corner = (s_inner * d2[0] + t * n2[0], t)
+    poly = [
+        (0.0, 0.0),
+        (leg, 0.0),
+        (leg, t),
+        inner_corner,
+        (leg * d2[0] + t * n2[0], leg * d2[1] + t * n2[1]),
+        (leg * d2[0], leg * d2[1]),
+    ]
+    result = get_engine().analyze(
+        _step_bytes_of(bar_from_polygon(poly, 100.0)), family=FAMILY_TUBE_LASER
+    )
+    assert result.family_scalars["stock_type"] == "angle"
+    assert result.family_scalars["leg_angle"] == pytest.approx(135.0, abs=0.5)
+    assert result.family_scalars["thickness"] == pytest.approx(4.0, rel=1e-3)
 
 
 def test_eccentric_bore_is_not_a_round_tube() -> None:
