@@ -110,5 +110,13 @@ def test_setting_milling_process_triggers_family_run(
         status = app_client.get(f"/api/parts/{part_id}/interrogation").json()
         assert status["status"] == "succeeded"
         assert status["run"]["family"] == "MILLING"
-        assert status["run"]["result"]["family_scalars"]["setup_count"] == 1
-        assert status["run"]["result"]["confidence"] == "High"
+        result = status["run"]["result"]
+        assert result["confidence"] == "High"
+        scalars = result["family_scalars"]
+        assert scalars["setup_count"] == 1
+        [setup] = scalars["setups"]
+        assert setup["direction"] == [0.0, 0.0, 1.0]
+        assert setup["setup_time"] == 1.0
+        assert setup["confidence"] == "High"
+        assert _close(scalars["runtime"], 2.2533333333 / 60.0)
+        assert len([f for f in result["features"] if f["name"] == "hole"]) == 3

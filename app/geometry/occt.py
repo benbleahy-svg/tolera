@@ -25,7 +25,7 @@ import json
 import math
 import tempfile
 from collections import Counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -651,7 +651,10 @@ def _longest_edge_direction(face: TopoDS_Face) -> tuple[float, float, float] | N
 # objects are FEEDBACK and arrive with the DFM catalogue (M4.7). Not detected
 # in v1: partial holes, holes-through-cavity, counterbore/-sink children,
 # through-pockets (no floor), non-axis-aligned bores (their removal degrades
-# the parameterized fraction instead).
+# the parameterized fraction instead). Surfaced-face reachability is judged
+# from one mid-parameter normal + untrimmed UV samples — estimation-grade
+# attribution of the surfacing AREA only; the parameterized-volume confidence
+# fraction (not this sampling) is what gates trust in the estimate.
 
 #: Strategy-input defaults, metric-native (DACH delta overrides the KB inch
 #: defaults; 1000 mm² is KB's own metric value). 45.72 mm = exactly 1.80 in —
@@ -762,6 +765,10 @@ class _MillHole:
         self.bottom_type = "obstructed"
         self.entry_dir: int | None = None  # _AXIS_DIRS index; None = flexible
         self.is_circular_pocket = False
+        #: False = both ends closed (an internal void): no 3-axis tool reaches
+        #: it — excluded from setups AND from the parameterized volume, so it
+        #: degrades confidence instead of being priced (fresh-eyes, M4.4).
+        self.reachable = True
 
 
 class _MillPocket:
@@ -797,14 +804,21 @@ class _MillSetup:
 
     @property
     def volume(self) -> float:
+        # each feature counted exactly once (circular pockets live in
+        # ``holes``; ``rough_mm3`` carries only the unparameterized leftover)
         return (
             sum(h.volume for h in self.holes) + sum(p.volume for p in self.pockets) + self.rough_mm3
         )
 
     def runtime_hours(self) -> float:
         drilled = [h for h in self.holes if not h.is_circular_pocket]
+        roughed = (
+            self.rough_mm3
+            + sum(p.volume for p in self.pockets)
+            + sum(h.volume for h in self.holes if h.is_circular_pocket)
+        )
         minutes = (
-            (self.rough_mm3 + sum(p.volume for p in self.pockets)) / _MILL_MRR_MM3_MIN
+            roughed / _MILL_MRR_MM3_MIN
             + sum(h.depth / _MILL_DRILL_MM_MIN + _MILL_HOLE_HANDLING_MIN for h in drilled)
             + self.profiled / _MILL_PROFILE_MM2_MIN
             + self.surfaced / _MILL_SURF_MM2_MIN
@@ -827,12 +841,26 @@ def _s_bound_max(lo: tuple[float, ...], hi: tuple[float, ...], d: tuple[float, .
 
 def _analyze_mill3(
     shape: TopoDS_Shape, volume: float, inputs: dict[str, Any] | None
-) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], Literal["High", "Medium", "Low"]]:
     """The M4.4 recognizer: 3-axis features → deterministic setup allocation →
     in-house runtime + confidence. Returns ``(family_scalars, features,
     confidence)``; a body with no reachable work returns zero setups and zero
     runtime — never a fabricated estimate."""
     resolved = {**_MILL_DEFAULT_INPUTS, **(inputs or {})}
+    # strategy inputs become org-authorable with custom interrogations (M4.8):
+    # reject junk here instead of silently mis-allocating setups (CodeRabbit)
+    for name in _MILL_DEFAULT_INPUTS:
+        value = resolved[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise GeometryError(f"milling input {name} must be a finite non-negative number")
+        resolved[name] = float(value)
+    if resolved["maximum_hole_diameter"] == 0:
+        raise GeometryError("maximum_hole_diameter must be positive")
     shape = _canonicalize(shape)
     lo, hi = _aabb_bounds(shape)
     stock_volume = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2])
@@ -936,15 +964,10 @@ def _analyze_mill3(
                 return k
         return None
 
-    for hole in holes:
+    def consume_cap(hole: _MillHole, end_s: float) -> bool:
+        """Claim the axis-normal planar face closing the bore at ``end_s`` so
+        it can never double as a pocket floor. True when one was found."""
         e = _AXIS_DIRS[hole.axis]
-        lo_open = abs(hole.s_lo - (-_s_bound_max(lo, hi, tuple(-c for c in e)))) <= _DIST_TOL
-        hi_open = abs(hole.s_hi - _s_bound_max(lo, hi, e)) <= _DIST_TOL
-        if lo_open and hi_open:
-            hole.bottom_type = "thru"
-            continue  # entry stays flexible (either end)
-        closed_s = hole.s_lo if not lo_open else hole.s_hi
-        hole.entry_dir = hole.axis if not lo_open else hole.axis + 1  # +e or -e
         for neighbor in {id(n): n for b in hole.bores for n in adjacent(b.face)}.values():
             k = plane_index(neighbor)
             if k is None or k in consumed_planes:
@@ -953,22 +976,40 @@ def _analyze_mill3(
             if abs(abs(_v_dot(n_out, e)) - 1.0) > _DIR_TOL:
                 continue
             pnt = BRepAdaptor_Surface(face_k).Plane().Location()
-            if abs(_v_dot((pnt.X(), pnt.Y(), pnt.Z()), e) - closed_s) <= _DIST_TOL:
-                hole.bottom_type = "flat"
+            if abs(_v_dot((pnt.X(), pnt.Y(), pnt.Z()), e) - end_s) <= _DIST_TOL:
                 hole.area += planes[k][2]
                 consumed_planes.add(k)
-                break
-        else:
-            # a conical end (drill tip) among the adjacent faces → tipped
-            for neighbor in {id(n): n for b in hole.bores for n in adjacent(b.face)}.values():
-                nf = TopoDS.Face_s(neighbor)
-                if BRepAdaptor_Surface(nf).GetType() == 2:  # cone
-                    hole.bottom_type = "tipped"
-                    break
-        hole.is_circular_pocket = 2 * hole.min_radius > resolved["maximum_hole_diameter"]
+                return True
+        return False
+
     for hole in holes:
-        if hole.bottom_type == "thru":
-            hole.is_circular_pocket = 2 * hole.min_radius > resolved["maximum_hole_diameter"]
+        e = _AXIS_DIRS[hole.axis]
+        lo_open = abs(hole.s_lo - (-_s_bound_max(lo, hi, tuple(-c for c in e)))) <= _DIST_TOL
+        hi_open = abs(hole.s_hi - _s_bound_max(lo, hi, e)) <= _DIST_TOL
+        if lo_open and hi_open:
+            hole.bottom_type = "thru"
+        elif not lo_open and not hi_open:
+            # both ends closed: an internal void no 3-axis tool reaches —
+            # never fabricated into drillable work (fresh-eyes, M4.4). Both
+            # caps are claimed so they cannot masquerade as pocket floors.
+            hole.reachable = False
+            consume_cap(hole, hole.s_lo)
+            consume_cap(hole, hole.s_hi)
+        else:
+            closed_s = hole.s_lo if not lo_open else hole.s_hi
+            hole.entry_dir = hole.axis if not lo_open else hole.axis + 1  # +e or -e
+            if consume_cap(hole, closed_s):
+                hole.bottom_type = "flat"
+            else:
+                # a conical end (drill tip) among the adjacent faces → tipped
+                for neighbor in {id(n): n for b in hole.bores for n in adjacent(b.face)}.values():
+                    nf = TopoDS.Face_s(neighbor)
+                    if BRepAdaptor_Surface(nf).GetType() == 2:  # cone
+                        hole.bottom_type = "tipped"
+                        break
+        hole.is_circular_pocket = (
+            hole.reachable and 2 * hole.min_radius > resolved["maximum_hole_diameter"]
+        )
 
     # -- pockets (floor + adjacent walls) ------------------------------------ #
     pockets: list[_MillPocket] = []
@@ -998,7 +1039,12 @@ def _analyze_mill3(
             wall_face, wall_n, wall_area = planes[w]
             if abs(_v_dot(wall_n, e)) > _DIR_TOL:
                 continue  # not parallel to the tool axis
-            wall_depth = _extent(_face_vertices(wall_face), e)
+            # depth below the setup's entry surface (the KB gate semantic),
+            # not the face's own span — a short wall at the bottom of a deep
+            # cavity is still deep work (fresh-eyes, M4.4)
+            wall_depth = _s_bound_max(lo, hi, e) - min(
+                _v_dot(p, e) for p in _face_vertices(wall_face)
+            )
             consumed_planes.add(w)
             pocket.wall_faces.append((wall_area, wall_depth))
         for neighbor in {id(n): n for n in adjacent(face_k)}.values():
@@ -1023,7 +1069,9 @@ def _analyze_mill3(
         if hole.entry_dir is not None:
             setup_for(hole.entry_dir).holes.append(hole)
     for hole in holes:
-        if hole.entry_dir is None:  # through/obstructed: prefer an existing setup
+        if not hole.reachable:
+            uncovered_area += hole.area  # internal void: no setup, no runtime
+        elif hole.entry_dir is None:  # through: prefer an existing setup
             pair = (hole.axis, hole.axis + 1)
             existing = [p for p in pair if p in setups]
             if len(existing) == 2:
@@ -1033,6 +1081,12 @@ def _analyze_mill3(
             else:
                 chosen = hole.axis  # canonical positive direction (ASSUMED)
             setup_for(chosen).holes.append(hole)
+
+    def depth_below_entry(pts: list[tuple[float, float, float]], idx: int) -> float:
+        """Deepest point of the face below the setup's stock-entry surface —
+        the KB depth-gate semantic (fresh-eyes, M4.4)."""
+        d = _AXIS_DIRS[idx]
+        return _s_bound_max(lo, hi, d) - min(_v_dot(p, d) for p in pts)
 
     # surfaced work: tapers/cones/partial cylinders/freeform faces
     orphans: dict[int, list[tuple[TopoDS_Face, float, float]]] = {}
@@ -1049,7 +1103,7 @@ def _analyze_mill3(
             reach = _v_dot(n_rep, _AXIS_DIRS[idx])
             if reach > best_dot:
                 best, best_dot = idx, reach
-        if best is not None and _extent(pts, _AXIS_DIRS[best]) <= (
+        if best is not None and depth_below_entry(pts, best) <= (
             resolved["depth_surfacing_threshold"] + _DIST_TOL
         ):
             setups[best].surfaced += f_area
@@ -1063,7 +1117,7 @@ def _analyze_mill3(
     for idx, faces_ in orphans.items():
         group_area = sum(a for _, a, _ in faces_)
         depth_ok = all(
-            _extent(_surface_grid_points(f), _AXIS_DIRS[idx])
+            depth_below_entry(_surface_grid_points(f), idx)
             <= resolved["depth_surfacing_threshold"] + _DIST_TOL
             for f, _, _ in faces_
         )
@@ -1083,17 +1137,22 @@ def _analyze_mill3(
                     uncovered_area += wall_area
         for hole in setup.holes:
             if hole.is_circular_pocket:  # profiled, not drilled
-                setup.rough_mm3 += hole.volume
                 setup.profiled += hole.area
 
     # deterministic order: attributed removal volume desc, then canonical axis
     ordered = sorted(setups.values(), key=lambda s: (-s.volume, s.direction))
-    parameterized = sum(h.volume for h in holes) + sum(p.volume for p in pockets)
+    parameterized = sum(h.volume for h in holes if h.reachable) + sum(p.volume for p in pockets)
+    # provably-unreachable volume (internal voids) is never charged as
+    # roughing either — it only degrades confidence (CodeRabbit, M4.4)
+    unreachable_mm3 = sum(h.volume for h in holes if not h.reachable)
     if ordered:
-        ordered[0].rough_mm3 += max(total_removal - parameterized, 0.0)
+        ordered[0].rough_mm3 += max(total_removal - parameterized - unreachable_mm3, 0.0)
 
     # -- confidence ---------------------------------------------------------- #
-    fraction = parameterized / total_removal if total_removal > 1e-9 else 1.0
+    # relative guard: Bnd_Box is conservative, so a bare blank shows an
+    # epsilon of phantom "removal" — measured certainty, not a guess
+    confidence: Literal["High", "Medium", "Low"]
+    fraction = parameterized / total_removal if total_removal > 1e-6 * stock_volume else 1.0
     if fraction >= _CONF_HIGH_FRACTION:
         confidence = "High"
     elif fraction >= _CONF_MEDIUM_FRACTION:
@@ -1187,7 +1246,7 @@ class OcctGeometryService:
         weight = (volume / 1000.0) * density_g_cm3 if density_g_cm3 is not None else None
         family_scalars: dict[str, Any] = {}
         features: list[dict[str, Any]] = []
-        confidence: str | None = None
+        confidence: Literal["High", "Medium", "Low"] | None = None
         if family == FAMILY_SHEET_METAL:
             family_scalars, features = _analyze_sheet_metal(shape, volume, area)
         elif family == FAMILY_MILLING:
@@ -1208,7 +1267,7 @@ class OcctGeometryService:
             ),
             family_scalars=family_scalars,
             features=features,
-            confidence=confidence,  # type: ignore[arg-type]
+            confidence=confidence,
         )
 
     def compute_signature(self, step_bytes: bytes) -> str:

@@ -164,13 +164,79 @@ def test_low_confidence_dome() -> None:
 
 def test_blank_body_yields_no_setups() -> None:
     """A bare prismatic blank (nothing to mill) returns zero setups and zero
-    runtime — never a fabricated setup."""
+    runtime — never a fabricated setup. Confidence stays High deliberately:
+    zero removal is measured certainty, not a guess (fresh-eyes, M4.4)."""
     result = analyze("cube-20mm.step")
     scalars = result.family_scalars
     assert scalars["setup_count"] == 0
     assert scalars["setups"] == []
     assert scalars["runtime"] == 0.0
     assert scalars["setup_time"] == 0.0
+    assert result.confidence == "High"
+
+
+def test_internal_void_never_fabricates_work(tmp_path: Path) -> None:
+    """A both-ends-closed bore (an internal void) is unreachable by any 3-axis
+    tool: no fabricated entry direction, no drill runtime, its caps never
+    masquerade as pocket floors — the void degrades confidence instead
+    (fresh-eyes review, M4.4)."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    block = BRepPrimAPI_MakeBox(30, 30, 20).Shape()
+    void = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(15, 15, 5), gp_Dir(0, 0, 1)), 3.0, 10.0).Shape()
+    shape = BRepAlgoAPI_Cut(block, void).Shape()
+    writer = STEPControl_Writer()
+    assert writer.Transfer(shape, STEPControl_AsIs) == IFSelect_RetDone
+    path = tmp_path / "void.step"
+    assert writer.Write(str(path)) == IFSelect_RetDone
+
+    result = get_engine().analyze(path.read_bytes(), family=FAMILY_MILLING)
+    scalars = result.family_scalars
+    assert scalars["setup_count"] == 0
+    assert scalars["setups"] == []
+    assert scalars["runtime"] == 0.0
+    assert result.features == []
+    assert result.confidence == "Low"
+
+    # With a real pocket alongside the void, the void's volume must not be
+    # smuggled into the pocket setup's roughing: runtime is pocket-only
+    # (320 mm3 rough + 160 mm2 walls) and the void degrades confidence.
+    pocket = BRepPrimAPI_MakeBox(gp_Pnt(20, 2, 15), 8, 8, 5).Shape()
+    shape2 = BRepAlgoAPI_Cut(shape, pocket).Shape()
+    writer2 = STEPControl_Writer()
+    assert writer2.Transfer(shape2, STEPControl_AsIs) == IFSelect_RetDone
+    path2 = tmp_path / "void-pocket.step"
+    assert writer2.Write(str(path2)) == IFSelect_RetDone
+    with_pocket = get_engine().analyze(path2.read_bytes(), family=FAMILY_MILLING)
+    scalars2 = with_pocket.family_scalars
+    assert scalars2["setup_count"] == 1
+    assert_close(
+        scalars2["runtime"],
+        (320.0 / 15000.0 + 160.0 / 6000.0) / 60.0,
+        "runtime excludes the unreachable void volume",
+    )
+    assert with_pocket.confidence == "Medium"  # fraction 0.53, uncovered cap
+
+
+def test_invalid_strategy_inputs_are_rejected() -> None:
+    """Strategy inputs become org-authorable with custom interrogations
+    (M4.8): junk must raise instead of silently mis-allocating setups."""
+    from app.geometry import GeometryError
+
+    step = (FIXTURES / "cube-20mm.step").read_bytes()
+    for bad in (
+        {"maximum_hole_diameter": -1.0},
+        {"maximum_hole_diameter": 0},
+        {"depth_profiling_threshold": float("nan")},
+        {"minimum_area_for_setup": "big"},
+        {"depth_surfacing_threshold": True},
+    ):
+        with pytest.raises(GeometryError):
+            get_engine().analyze(step, family=FAMILY_MILLING, inputs=bad)
 
 
 def test_other_family_yields_no_milling_scalars() -> None:
