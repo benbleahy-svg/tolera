@@ -25,6 +25,7 @@ import {
   formatVolume,
   type DisplayOptions,
 } from './measureFormat';
+import { DfmWarnings } from './DfmWarnings';
 import { LatheResults } from './LatheResults';
 import { MillingResults } from './MillingResults';
 import { SheetMetalResults } from './SheetMetalResults';
@@ -122,6 +123,15 @@ export function InterrogationPanel({
       : null;
   return (
     <div className="cad-interrogation-result">
+      {/* Manufacturability Warnings (M4.7) — DemoN pins this list in the
+          right panel; only fired warnings appear. */}
+      {status.run.result.family != null && (
+        <DfmWarnings
+          family={status.run.result.family}
+          feedback={status.run.result.feedback ?? []}
+          displayOpts={displayOpts}
+        />
+      )}
       {sheetMetal != null && (
         <SheetMetalResults scalars={sheetMetal} displayOpts={displayOpts} />
       )}

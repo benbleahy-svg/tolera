@@ -2859,8 +2859,9 @@ class InterrogationRun(Base):
     org-scoped, so the viewer and costing share one run and an identical body
     re-uploaded in the same org can reuse a finished result, never across orgs.
     ``family`` is nullable in M4.1 (core-dims pass is family-agnostic; the
-    per-family recognizers land M4.2+). ``inputs_hash`` is ``''`` until custom
-    interrogations (M4.8) hash their resolved threshold sets. The dims
+    per-family recognizers land M4.2+). ``inputs_hash`` is the fingerprint of
+    the resolved default-profile inputs (M4.7; ``''`` = engine defaults —
+    material-specific resolution is M4.8). The dims
     extraction ALSO lands in ``part_geometry.raw`` (the canonical output cache);
     this row carries job state, error taxonomy, and the audit copy.
 
@@ -2928,3 +2929,60 @@ class InterrogationRun(Base):
     created_at: Mapped[datetime] = _ts()
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# --------------------------------------------------------------------------- #
+# M4.7 — interrogation profiles (Configure -> Interrogations)
+# --------------------------------------------------------------------------- #
+class CustomInterrogation(Base):
+    """A named ``InterrogationInputs`` bundle (DB-SCHEMA ``custom_interrogation``):
+    the DFM thresholds + ``should_detect_*`` toggles one interrogation runs
+    with. M4.7 ships exactly one org DEFAULT per Core-4 family (all material
+    links NULL — enforced by the partial unique index in migration 0031);
+    linking to material class/family/material and the most-specific resolution
+    are M4.8. ``inputs`` holds only keys the family's catalogue allows —
+    validated at the API edge; always-on warnings have no toggle key at all,
+    which is what makes them non-disableable server-side."""
+
+    __tablename__ = "custom_interrogation"
+    __table_args__ = (
+        # same-org pins mirroring migration 0031 (a profile can never bind
+        # another org's material tree — defense-in-depth beside RLS)
+        ForeignKeyConstraint(
+            ["org_id", "material_class_id"],
+            ["material_class.org_id", "material_class.id"],
+            name="fk_custom_interrogation_material_class",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "material_family_id"],
+            ["material_family.org_id", "material_family.id"],
+            name="fk_custom_interrogation_material_family",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "material_id"],
+            ["material.org_id", "material.id"],
+            name="fk_custom_interrogation_material",
+        ),
+        Index("ix_custom_interrogation_org_family", "org_id", "family"),
+        # One org default (no material link) per family — mirrors migration
+        # 0031 so autogenerate never proposes dropping it.
+        Index(
+            "uq_custom_interrogation_org_family_default",
+            "org_id",
+            "family",
+            unique=True,
+            postgresql_where=text(
+                "material_class_id IS NULL AND material_family_id IS NULL AND material_id IS NULL"
+            ),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    family: Mapped[ProcessFamily] = mapped_column(_process_family_enum, nullable=False)
+    inputs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    material_class_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    material_family_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    material_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _ts()

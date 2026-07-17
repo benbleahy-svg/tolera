@@ -79,3 +79,16 @@
   border: none;
   background: transparent;
 }
+
+/* M4.7 — Configure → Interrogations (DFM profiles) */
+.interrogations-page .interrogation-family { margin: 1.25rem 0; }
+.interrogations-page table { border-collapse: collapse; width: 100%; }
+.interrogations-page th, .interrogations-page td { border: 1px solid var(--border, #dadce0); padding: 0.3rem 0.5rem; text-align: left; font-size: 0.85rem; }
+.interrogation-profile-name { font-weight: normal; color: var(--muted, #667085); font-size: 0.85rem; }
+.interrogation-badge { margin-left: 0.4rem; padding: 0.05rem 0.35rem; border-radius: 999px; font-size: 0.68rem; white-space: nowrap; }
+.interrogation-always-on { background: #fde8e8; color: #b42318; }
+.interrogation-v2 { background: #eef2f6; color: #475467; }
+.interrogation-v2-row { opacity: 0.65; }
+.interrogation-threshold { display: flex; gap: 0.4rem; align-items: center; font-size: 0.75rem; }
+.interrogation-threshold input { width: 6rem; }
+.interrogation-actions { margin-top: 0.5rem; display: flex; gap: 0.75rem; align-items: center; }

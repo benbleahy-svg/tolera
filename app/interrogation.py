@@ -12,12 +12,15 @@ lives here and does NOT feed costing; the Kalk ``analyze_*()`` path arrives
 with the per-family recognizers (M4.2+). Results are cached per
 ``(org, geom_hash, family, inputs_hash)`` (§5.4) — weight is always recomputed
 from the caller's density, so a cached copy never smuggles another material's
-weight. ``inputs_hash`` stays ``''`` until custom interrogations (M4.8).
+weight. ``inputs_hash`` = the org default profile's fingerprint (M4.7); the
+material-specific most-specific resolution arrives with M4.8.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -42,6 +45,7 @@ from .file_types import FileCategory
 from .geometry import RECOGNIZED_FAMILIES
 from .models import (
     Component,
+    CustomInterrogation,
     InterrogationRun,
     InterrogationStatus,
     Material,
@@ -182,18 +186,26 @@ async def maybe_enqueue_for_process(
     pf = await session.get(PartFile, part.primary_file_id)
     if pf is None or FileCategory(pf.file_type) != FileCategory.brep_cad:
         return None
+    # A queued run resolves the CURRENT profile when it executes, so it always
+    # covers this trigger. A running run may have resolved a just-edited
+    # profile's predecessor — accepted: its fingerprint isn't visible
+    # mid-flight, matching on it would double-enqueue every in-flight run
+    # (the duplicate-dispatch pile-up this dedupe prevents), and once it
+    # commits the next trigger sees the hash mismatch below and re-runs. A
+    # succeeded run only counts if it was computed under the current profile
+    # inputs — otherwise a threshold/toggle edit would keep serving stale
+    # warnings on re-assignment (M4.7).
+    current_fp = inputs_fingerprint(await resolve_default_inputs(session, str(family)))
     existing = await session.scalar(
         select(InterrogationRun.id)
         .where(
             InterrogationRun.part_id == part.id,
             InterrogationRun.file_id == pf.id,
             InterrogationRun.family == str(family),
-            InterrogationRun.status.in_(
-                [
-                    InterrogationStatus.queued,
-                    InterrogationStatus.running,
-                    InterrogationStatus.succeeded,
-                ]
+            InterrogationRun.status.in_([InterrogationStatus.queued, InterrogationStatus.running])
+            | (
+                (InterrogationRun.status == InterrogationStatus.succeeded)
+                & (InterrogationRun.inputs_hash == current_fp)
             ),
         )
         .limit(1)
@@ -235,6 +247,31 @@ def _enqueue_task(org_id: uuid.UUID, run_id: uuid.UUID) -> None:
 # --------------------------------------------------------------------------- #
 async def _read_blob(storage: ObjectStorage, key: str) -> bytes:
     return b"".join([chunk async for chunk in storage.stream(key)])
+
+
+def inputs_fingerprint(inputs: dict[str, Any] | None) -> str:
+    """Canonical hash of a resolved ``InterrogationInputs`` set — the
+    ``inputs_hash`` leg of the §5.4 cache key. Empty/None -> ``''`` (the
+    engine-defaults sentinel every pre-M4.7 run carries)."""
+    if not inputs:
+        return ""
+    payload = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def resolve_default_inputs(session: AsyncSession, family: str) -> dict[str, Any] | None:
+    """The org's DEFAULT ``CustomInterrogation`` inputs for a family (all
+    material links NULL — seeded by ``configure_seed``); None when the org has
+    no profile row (engine defaults apply). Org scoping rides the session RLS."""
+    profile = await session.scalar(
+        select(CustomInterrogation).where(
+            CustomInterrogation.family == family,
+            CustomInterrogation.material_class_id.is_(None),
+            CustomInterrogation.material_family_id.is_(None),
+            CustomInterrogation.material_id.is_(None),
+        )
+    )
+    return dict(profile.inputs) if profile is not None else None
 
 
 def _fail(run: InterrogationRun, code: str, detail: str) -> dict[str, Any]:
@@ -314,6 +351,17 @@ async def run_interrogation(
                 if material is not None and material.density is not None:
                     density = float(material.density)
 
+            # M4.7: resolve the org's DEFAULT interrogation profile for this
+            # family (all material links NULL — material-specific resolution is
+            # M4.8) and stamp its hash BEFORE the cache probe, so a threshold
+            # or toggle edit changes the cache key and never serves a result
+            # computed under the old profile. No profile / no family -> engine
+            # defaults, hash stays ''.
+            inputs: dict[str, Any] | None = None
+            if run.family is not None:
+                inputs = await resolve_default_inputs(session, run.family)
+                run.inputs_hash = inputs_fingerprint(inputs)
+
             geometry = get_engine()
             try:
                 geom_hash = geometry.compute_signature(blob)
@@ -349,7 +397,9 @@ async def run_interrogation(
                 result["cached_from"] = str(cached.id)
             else:
                 try:
-                    analysis = geometry.analyze(blob, family=run.family, density_g_cm3=density)
+                    analysis = geometry.analyze(
+                        blob, family=run.family, density_g_cm3=density, inputs=inputs
+                    )
                 except MultiBodyError as exc:
                     return _fail(run, "multi_body", str(exc))
                 except StepParseError as exc:
@@ -425,6 +475,8 @@ class InterrogationRunOut(BaseModel):
     family: str | None
     material_id: uuid.UUID | None
     geom_hash: str | None
+    #: fingerprint of the resolved profile inputs ('' = engine defaults)
+    inputs_hash: str
     status: str
     error_code: str | None
     error_detail: str | None
@@ -465,6 +517,7 @@ def _run_out(run: InterrogationRun) -> InterrogationRunOut:
         family=run.family,
         material_id=run.material_id,
         geom_hash=run.geom_hash,
+        inputs_hash=run.inputs_hash,
         status=run.status,
         error_code=run.error_code,
         error_detail=run.error_detail,

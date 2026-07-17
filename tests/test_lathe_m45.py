@@ -93,7 +93,12 @@ def test_stock_and_setups_match_goldens(name: str) -> None:
 
     # lathe never estimates runtime -> no confidence rating (sub-spec §2)
     assert result.confidence is None
-    assert result.feedback == []  # DFM warnings arrive with M4.7
+    # M4.7: feedback carries only catalogued lathe warning types (a flange's
+    # bolt circle legitimately raises off_axis_hole).
+    from app.geometry.dfm import CATALOGUE
+
+    allowed = {d.type for d in CATALOGUE["LATHE"]}
+    assert {w["type"] for w in result.feedback} <= allowed
 
 
 @pytest.mark.parametrize("name", LATHE_FIXTURES)

@@ -58,6 +58,7 @@ from .contract import (
     MultiBodyError,
     StepParseError,
 )
+from .dfm import dfm_default_inputs, evaluate_feedback
 
 #: Quantization for the gs1 fingerprint — 6 significant digits passed every
 #: M4.0 stability case (4/6/8 all passed; 6 is the probe's verdict recipe).
@@ -1225,6 +1226,9 @@ def _analyze_mill3(
         # aggregates for the Kalk single-operation pattern (KB milling-process)
         "runtime": sum(s["runtime"] for s in setup_dicts),
         "setup_time": sum(s["setup_time"] for s in setup_dicts),
+        # mm² no 3-axis direction reaches — basis of the always-on Uncut
+        # Faces warning (M4.7); already degrades confidence above.
+        "uncovered_area": uncovered_area,
     }
     return scalars, all_features, confidence
 
@@ -1745,6 +1749,12 @@ def _analyze_lathe(
         "stock_radius": stock_radius,
         "stock_length": stock_length,
     }
+    # Smallest external turned diameter -> the slender-part ratio's
+    # denominator (M4.7); exact only for coaxial cylinders, so emitted only
+    # when one exists (never a sampled guess).
+    ext_radii = [lf.radius for lf in external_axial if lf.kind == 1 and lf.radius is not None]
+    if ext_radii:
+        scalars["min_external_radius"] = min(ext_radii)
     return scalars, features
 
 
@@ -2397,7 +2407,10 @@ def _analyze_tube_laser(
     matching none of the 5 profiles yields ``{"stock_type": "incompatible"}``
     and no features (never a fabricated guess, build-plan M4.6)."""
     provided = inputs or {}
-    unknown = set(provided) - set(_TUBE_DEFAULT_INPUTS)
+    # The resolved InterrogationInputs bundle (M4.7) carries the family's DFM
+    # threshold/toggle keys alongside the strategy knobs — those belong to the
+    # evaluator, not this recognizer. Only keys neither side knows are typos.
+    unknown = set(provided) - set(_TUBE_DEFAULT_INPUTS) - set(dfm_default_inputs(FAMILY_TUBE_LASER))
     if unknown:
         # a typo must not silently fall back to the default strategy
         raise GeometryError(f"unknown tube-laser inputs: {', '.join(sorted(unknown))}")
@@ -2567,22 +2580,28 @@ class OcctGeometryService:
         elif family == FAMILY_LATHE:
             # attributes + stock only (v2.15); no runtime -> no confidence
             family_scalars, features = _analyze_lathe(shape, inputs)
+        dimensions = Dimensions(
+            size_x=dims[0],
+            size_y=dims[1],
+            size_z=dims[2],
+            max_dim=dims[0],
+            med_dim=dims[1],
+            min_dim=dims[2],
+            area=area,
+            volume=volume,
+            weight=weight,
+            bbox_source=bbox_source,  # type: ignore[arg-type]
+        )
+        # DFM pass (M4.7): pure threshold evaluation over what the recognizer
+        # actually found — the resolved InterrogationInputs carry the org's
+        # thresholds + should_detect_* toggles.
+        feedback = evaluate_feedback(family, dimensions, family_scalars, features, inputs)
         return AnalysisResult(
             family=family,
-            dimensions=Dimensions(
-                size_x=dims[0],
-                size_y=dims[1],
-                size_z=dims[2],
-                max_dim=dims[0],
-                med_dim=dims[1],
-                min_dim=dims[2],
-                area=area,
-                volume=volume,
-                weight=weight,
-                bbox_source=bbox_source,  # type: ignore[arg-type]
-            ),
+            dimensions=dimensions,
             family_scalars=family_scalars,
             features=features,
+            feedback=feedback,
             confidence=confidence,
         )
 

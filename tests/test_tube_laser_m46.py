@@ -354,10 +354,18 @@ def test_eccentric_bore_is_not_a_round_tube() -> None:
     assert result.features == []
 
 
-def test_feedback_stays_empty_until_m47() -> None:
-    """DFM warnings are M4.7 — the recognizer never emits feedback."""
+def test_feedback_carries_only_catalogued_warnings() -> None:
+    """M4.7: feedback is the DFM pass over recognized features — every entry
+    is a catalogued tube-laser warning type; straight-cut tubes emit none."""
+    from app.geometry.contract import FAMILY_TUBE_LASER as _TL
+    from app.geometry.dfm import CATALOGUE
+
+    allowed = {d.type for d in CATALOGUE[_TL]}
     for name in TUBE_FIXTURES:
-        assert analyze(name).feedback == []
+        result = analyze(name)
+        assert {w["type"] for w in result.feedback} <= allowed
+        if "angled" not in name:
+            assert result.feedback == []
 
 
 def test_invalid_strategy_inputs_are_rejected() -> None:

@@ -101,6 +101,38 @@ export interface OperationDefUpdateBody {
   cost_formula?: string | null;
 }
 
+
+/** Configure -> Interrogations (M4.7): one catalogue row per DFM warning. */
+export interface DfmWarningDefOut {
+  type: string;
+  detects: string;
+  threshold_fields: string[];
+  /** `should_detect_*` key; null = not toggleable (incl. always-on rows). */
+  toggle: string | null;
+  toggle_default: boolean;
+  /** false = "v2/Spatial": listed but never evaluated by the v1 engine. */
+  v1_supported: boolean;
+  always_on: boolean;
+}
+
+export interface DfmFamilyCatalogOut {
+  family: string;
+  warnings: DfmWarningDefOut[];
+  defaults: Record<string, number | boolean>;
+}
+
+export interface InterrogationProfileOut {
+  id: string;
+  name: string;
+  family: string;
+  inputs: Record<string, number | boolean>;
+}
+
+export interface InterrogationsConfigOut {
+  catalog: DfmFamilyCatalogOut[];
+  profiles: InterrogationProfileOut[];
+}
+
 export interface ConfigureApi {
   listOperationDefs: (q: string) => Promise<import('../estimating/types').OperationDefOut[]>;
   updateOperationDef: (defId: string, body: OperationDefUpdateBody) => Promise<unknown>;
@@ -131,6 +163,11 @@ export interface ConfigureApi {
   listRules: () => Promise<RuleOut[]>;
   exportRules: () => Promise<{ rules_json: string; count: number }>;
   importRules: (rulesJson: string) => Promise<{ created: number; updated: number }>;
+  getInterrogationsConfig: () => Promise<InterrogationsConfigOut>;
+  updateInterrogationProfile: (
+    profileId: string,
+    inputs: Record<string, number | boolean>,
+  ) => Promise<InterrogationProfileOut>;
 }
 
 export function useConfigureApi(): ConfigureApi {
@@ -180,6 +217,12 @@ export function useConfigureApi(): ConfigureApi {
       exportRules: () => apiFetch('/api/rules/export', token),
       importRules: (rulesJson) =>
         apiFetch('/api/rules/import', token, { method: 'POST', body: { rules_json: rulesJson } }),
+      getInterrogationsConfig: () => apiFetch('/api/configure/interrogations', token),
+      updateInterrogationProfile: (profileId, inputs) =>
+        apiFetch(`/api/configure/interrogations/${profileId}`, token, {
+          method: 'PUT',
+          body: { inputs },
+        }),
     };
   }, [getToken]);
 }
