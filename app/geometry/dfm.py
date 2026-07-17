@@ -34,9 +34,11 @@ from .contract import (
 
 _IN = 25.4  # mm per inch — catalogue defaults documented in inches
 
-#: |angle - 90| beyond this counts as a non-90-degree bend (float slack only;
-#: the catalogue defines no tolerance — cheap-to-reverse ASSUMED default).
-_ANGLE_TOL_DEG = 0.5
+#: Float-noise guard for the exact "bends != 90 deg" catalogue definition —
+#: NOT a shop threshold: recognizer angles come from OCCT cylinder
+#: parameterization (noise ~1e-6 deg on the probe fixtures), so 0.01 deg is
+#: safely above numeric noise and far below any real design deviation.
+_ANGLE_TOL_DEG = 1e-2
 
 #: Positive-area slack for the uncut-faces check (mm²) — mirrors the
 #: recognizer's own distance tolerance scale, not a shop threshold.

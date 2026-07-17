@@ -988,14 +988,15 @@ async def _seed_rules(session: AsyncSession, org_id: uuid.UUID) -> int:
     return created
 
 
-#: Default interrogation-profile names per Core-4 family. The sheet-metal name
-#: is DFM-WARNINGS §Implementation 1 verbatim ("Default Sheet Metal (Laser)");
-#: the others follow the same convention (ASSUMED, cheap to rename).
+#: Default interrogation-profile names per Core-4 family — German-first (the
+#: tier-1 UI rule + the seeded German op-library precedent outrank the folded
+#: sub-spec's PP-English example "Default Sheet Metal (Laser)", which is an
+#: "e.g.", not a pinned name).
 _INTERROGATION_PROFILE_NAMES: dict[ProcessFamily, str] = {
-    ProcessFamily.SHEET_METAL: "Default Sheet Metal (Laser)",
-    ProcessFamily.MILLING: "Default CNC Milling",
-    ProcessFamily.LATHE: "Default CNC Lathe",
-    ProcessFamily.TUBE_LASER: "Default Tube Laser",
+    ProcessFamily.SHEET_METAL: "Standard Blech (Laser)",
+    ProcessFamily.MILLING: "Standard CNC-Fräsen",
+    ProcessFamily.LATHE: "Standard CNC-Drehen",
+    ProcessFamily.TUBE_LASER: "Standard Rohrlaser",
 }
 
 

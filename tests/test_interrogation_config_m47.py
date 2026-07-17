@@ -49,8 +49,8 @@ def test_seed_creates_core4_default_profiles(seeder: Seeder, app_client: TestCli
         payload = client.get("/api/configure/interrogations").json()
     profiles = {p["family"]: p for p in payload["profiles"]}
     assert set(profiles) == {"SHEET_METAL", "MILLING", "LATHE", "TUBE_LASER"}
-    # DFM-WARNINGS §Implementation 1 name, verbatim
-    assert profiles["SHEET_METAL"]["name"] == "Default Sheet Metal (Laser)"
+    # German-first (tier-1 UI rule; the sub-spec's English name is an "e.g.")
+    assert profiles["SHEET_METAL"]["name"] == "Standard Blech (Laser)"
     # catalogue defaults, metric-native (240 in -> 6096 mm; 8.0 ratio)
     assert profiles["SHEET_METAL"]["inputs"]["press_length"] == pytest.approx(6096.0)
     assert profiles["MILLING"]["inputs"]["deep_hole_ratio_threshold"] == 8.0

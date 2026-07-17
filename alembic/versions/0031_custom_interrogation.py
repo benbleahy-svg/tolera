@@ -36,10 +36,21 @@ def upgrade() -> None:
             name text NOT NULL,
             family process_family NOT NULL,
             inputs jsonb NOT NULL,
-            material_class_id uuid REFERENCES material_class(id),
-            material_family_id uuid REFERENCES material_family(id),
-            material_id uuid REFERENCES material(id),
-            created_at timestamptz NOT NULL DEFAULT now()
+            material_class_id uuid,
+            material_family_id uuid,
+            material_id uuid,
+            created_at timestamptz NOT NULL DEFAULT now(),
+            -- same-org pin (the nest/quote precedent): a profile can never
+            -- bind another org's material tree, defense-in-depth beside RLS
+            CONSTRAINT fk_custom_interrogation_material_class
+                FOREIGN KEY (org_id, material_class_id)
+                REFERENCES material_class (org_id, id),
+            CONSTRAINT fk_custom_interrogation_material_family
+                FOREIGN KEY (org_id, material_family_id)
+                REFERENCES material_family (org_id, id),
+            CONSTRAINT fk_custom_interrogation_material
+                FOREIGN KEY (org_id, material_id)
+                REFERENCES material (org_id, id)
         )
         """
     )

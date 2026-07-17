@@ -2946,6 +2946,23 @@ class CustomInterrogation(Base):
 
     __tablename__ = "custom_interrogation"
     __table_args__ = (
+        # same-org pins mirroring migration 0031 (a profile can never bind
+        # another org's material tree — defense-in-depth beside RLS)
+        ForeignKeyConstraint(
+            ["org_id", "material_class_id"],
+            ["material_class.org_id", "material_class.id"],
+            name="fk_custom_interrogation_material_class",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "material_family_id"],
+            ["material_family.org_id", "material_family.id"],
+            name="fk_custom_interrogation_material_family",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "material_id"],
+            ["material.org_id", "material.id"],
+            name="fk_custom_interrogation_material",
+        ),
         Index("ix_custom_interrogation_org_family", "org_id", "family"),
         # One org default (no material link) per family — mirrors migration
         # 0031 so autogenerate never proposes dropping it.
@@ -2965,13 +2982,7 @@ class CustomInterrogation(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     family: Mapped[ProcessFamily] = mapped_column(_process_family_enum, nullable=False)
     inputs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    material_class_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("material_class.id")
-    )
-    material_family_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("material_family.id")
-    )
-    material_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("material.id")
-    )
+    material_class_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    material_family_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    material_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()

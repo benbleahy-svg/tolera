@@ -104,7 +104,7 @@ describe('InterrogationsPage', () => {
 
   it('saves edited toggles + thresholds via PUT (M4.7 acceptance)', async () => {
     getInterrogationsConfig.mockResolvedValue(CONFIG);
-    updateInterrogationProfile.mockImplementation((id: string, inputs: unknown) =>
+    updateInterrogationProfile.mockImplementation((_id: string, inputs: unknown) =>
       Promise.resolve({ ...CONFIG.profiles[0], inputs }),
     );
     await renderWithProviders(<InterrogationsPage />);
