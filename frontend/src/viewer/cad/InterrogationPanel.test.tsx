@@ -322,7 +322,7 @@ describe('InterrogationPanel', () => {
     expect(screen.getByText('Innenschnitte').nextElementSibling).toHaveTextContent('1');
     // the live-tooling callouts are flagged, with the not-auto-costed note
     expect(screen.getByText('Außermittige Bohrungen').nextElementSibling).toHaveTextContent('4');
-    expect(screen.getByRole('note')).toHaveTextContent(/Live-Tooling erforderlich/);
+    expect(screen.getByRole('note')).toHaveTextContent(/Angetriebene Werkzeuge erforderlich/);
     // the family block replaces the generic pending note
     expect(screen.queryByText(/Merkmalserkennung folgt/)).not.toBeInTheDocument();
   });

@@ -1512,6 +1512,12 @@ def _analyze_lathe(
         return {}, []
 
     # -- bores: contiguous coaxial concave spans -> internal_cut each ---------- #
+    # Span-overlap merging is exact for coaxial cylindrical voids: two coaxial
+    # bores whose spans overlap intersect physically (the smaller lies inside
+    # the larger over the shared span), so overlap ⇒ one cavity. B-rep
+    # face-connectivity components (the general answer for exotic multi-cavity
+    # cases) are the Spatial-tier feature tree, out of v1 scope — these
+    # aggregates are estimation-grade attributes, not costed features.
     bore_walls = [lf for lf in internal_axial if lf.kind == 1]
     for lf in bore_walls:
         spans = sorted(s_of(p) for p in lf.points)
@@ -1546,7 +1552,11 @@ def _analyze_lathe(
     # -- off-axis holes: group coaxial-among-themselves concave cylinders ------ #
     # (grouped BEFORE the coverage gate so a partial concave fillet that fails
     # the sweep guard counts as asymmetric — not as recognized hole area that
-    # would weaken the non-turned rejection; fresh-eyes review, M4.5)
+    # would weaken the non-turned rejection; fresh-eyes review, M4.5.
+    # Shared-axis grouping treats a cross-hole's split entry/exit walls as ONE
+    # drilled hole — correct for drilling; two genuinely separate collinear
+    # holes would merge, an accepted estimation-grade ceiling for a flagged,
+    # never-costed callout.)
     hole_groups: list[list[_LatheFace]] = []
     for lf in off_axis_cyls:
         assert lf.axis is not None

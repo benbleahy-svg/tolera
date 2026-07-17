@@ -702,7 +702,7 @@ def pin_domed() -> tuple[object, dict]:
         "volume": math.pi * (100 * 40 + (2.0 / 3.0) * 1000),
         # lateral 2*10*40 + flat end 100 + hemisphere 2*100
         "area": math.pi * (800 + 100 + 200),
-        "bbox": [50, 20, 20],
+        "bbox": [20, 20, 50],
         # M4.5: the dome is turned profile work (no plane), no intermediate
         # shoulders -> 1 setup; sphere counts into the axial (lateral) split.
         "lathe": {

@@ -639,7 +639,7 @@
     "lathe_internal_cuts": "Innenschnitte",
     "lathe_off_axis": "Außermittige Bohrungen",
     "lathe_asymmetric": "Asymmetrische Flächen",
-    "lathe_live_tooling_hint": "Live-Tooling erforderlich: außermittige oder asymmetrische Bearbeitung erkannt — sie wird gekennzeichnet, aber nicht automatisch kalkuliert.",
+    "lathe_live_tooling_hint": "Angetriebene Werkzeuge erforderlich: außermittige oder asymmetrische Bearbeitung erkannt — sie wird gekennzeichnet, aber nicht automatisch kalkuliert.",
     "lathe_not_turnable": "Kein Drehteil erkannt: Die Geometrie ist nicht überwiegend rotationssymmetrisch — Rohteil und Aufspannungen werden nicht geschätzt.",
     "sheetmetal_title": "Blechanalyse – Ergebnisse",
     "sheetmetal_thickness": "Blechdicke",

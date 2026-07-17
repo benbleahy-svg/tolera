@@ -36,8 +36,19 @@ GOLDENS = json.loads((FIXTURES / "goldens.json").read_text(encoding="utf-8"))
 
 GEOMETRY_RTOL = 1e-3
 
-#: Fixtures carrying a lathe golden (stock/setups/cut split).
+#: Fixtures carrying a lathe golden (stock/setups/cut split). The expected
+#: set is pinned so a renamed/dropped golden fails collection instead of
+#: silently shrinking the acceptance surface (CodeRabbit, M4.5).
 LATHE_FIXTURES = sorted(name for name, golden in GOLDENS.items() if "lathe" in golden)
+_EXPECTED_LATHE_FIXTURES = {
+    "shaft-stepped-d30-d20-d12.step",
+    "bushing-d40-d30-bore-d16.step",
+    "flange-d40-4bolt.step",
+    "pin-domed-d20-l50.step",
+}
+assert set(LATHE_FIXTURES) >= _EXPECTED_LATHE_FIXTURES, (
+    f"missing lathe goldens: {_EXPECTED_LATHE_FIXTURES - set(LATHE_FIXTURES)}"
+)
 
 
 def analyze(name: str, inputs: dict[str, Any] | None = None) -> AnalysisResult:
