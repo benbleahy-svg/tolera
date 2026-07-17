@@ -42,6 +42,7 @@ from .operations import operations_router
 from .part_library import library_router as part_library_router
 from .parts import parts_router
 from .pricing import pricing_router
+from .purchased_components import purchased_components_router
 from .quotes import quotes_router
 from .review_items import review_items_router
 from .rule_suggest_api import rule_suggest_router
@@ -99,6 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(saved_views_router)
     app.include_router(materials_router)
     app.include_router(operations_router)
+    app.include_router(purchased_components_router)
     app.include_router(pricing_router)
     app.include_router(addons_router)
     app.include_router(custom_tables_router)
