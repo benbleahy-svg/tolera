@@ -1379,6 +1379,34 @@ def _is_concave(lf: _LatheFace) -> bool:
     return _v_dot(lf.normal, outward) < 0
 
 
+#: Bin width for the angular-union measurement. Curved boundary edges are
+#: sampled at ``_CURVE_SAMPLES`` (256) points — ~1.4 degrees apart on a full
+#: circle — so 3-degree bins are always seeded by a covered arc and an
+#: uncovered half-circumference stays visibly uncovered.
+_ANGLE_BIN_DEG = 3
+
+
+def _angular_union_deg(
+    group: list[_LatheFace],
+    axis_dir: tuple[float, float, float],
+    axis_loc: tuple[float, float, float],
+) -> float:
+    """Degrees of the circumference covered by the UNION of the group's faces
+    about their shared axis. Sweep angles must not simply be summed: two
+    half-cylinder faces over the same half (an interrupted groove) sum to a
+    full turn but enclose nothing (CodeRabbit, M4.5)."""
+    seed = (0.0, 0.0, 1.0) if abs(axis_dir[2]) < 0.9 else (1.0, 0.0, 0.0)
+    u = _v_unit(_v_cross(axis_dir, seed))
+    v = _v_unit(_v_cross(axis_dir, u))
+    bins = [False] * (360 // _ANGLE_BIN_DEG)
+    for lf in group:
+        for p in lf.points:
+            gap = _v_sub(p, axis_loc)
+            theta = math.degrees(math.atan2(_v_dot(gap, v), _v_dot(gap, u))) % 360.0
+            bins[min(int(theta / _ANGLE_BIN_DEG), len(bins) - 1)] = True
+    return sum(bins) * float(_ANGLE_BIN_DEG)
+
+
 def _face_contains_axis_point(face: TopoDS_Face, point: tuple[float, float, float]) -> bool:
     from OCP.BRepClass import BRepClass_FaceClassifier
     from OCP.TopAbs import TopAbs_State
@@ -1574,11 +1602,15 @@ def _analyze_lathe(
     off_axis_holes: list[dict[str, Any]] = []
     accepted_hole_area = 0.0
     for group in hole_groups:
-        if sum(g.sweep_deg for g in group) < _MIN_HOLE_SWEEP_DEG:
-            asymmetric.extend(group)  # a partial concave fillet, not a hole
-            continue
         g0 = group[0]
         assert g0.axis is not None
+        # ANGULAR UNION, not sweep sum: two 180-degree faces over the SAME
+        # half-circumference (an interrupted half-round groove) sum to 360
+        # but enclose nothing (CodeRabbit, M4.5) — only combined coverage of
+        # the circumference makes a drilled hole.
+        if _angular_union_deg(group, _v_unit(g0.axis[0]), g0.axis[1]) < _MIN_HOLE_SWEEP_DEG:
+            asymmetric.extend(group)  # a partial fillet / open groove, not a hole
+            continue
         # min radius over the group: a counterbored hole reports its drill
         # size for the full depth (facts), not a traversal-order-dependent
         # mix of the largest bore with the whole span (fresh-eyes, M4.5)
@@ -1602,14 +1634,19 @@ def _analyze_lathe(
         key=lambda h: (h["properties"]["radius"], h["properties"]["depth"], h["properties"]["area"])
     )
 
-    # -- coverage gate: recognized area must dominate, else nothing ------------ #
-    recognized = (
+    # -- coverage gate: TURNED area must dominate, else nothing ---------------- #
+    # Off-axis holes are NEUTRAL: they neither prove turnedness (a prismatic
+    # manifold drilled full of parallel holes must not buy its way past the
+    # gate on hole-wall area — CodeRabbit, M4.5) nor count against it (a
+    # bolt circle is normal on a real flange), so their area leaves both
+    # sides of the ratio.
+    turned_area = (
         sum(lf.area for lf in external_axial)
         + sum(lf.area for lf in internal_axial)
         + sum(lf.area for lf in turned_planes)
-        + accepted_hole_area
     )
-    if recognized / total_area < _TURNED_COVERAGE_MIN:
+    coverage_basis = total_area - accepted_hole_area
+    if coverage_basis <= 0.0 or turned_area / coverage_basis < _TURNED_COVERAGE_MIN:
         return {}, []
 
     # -- setups: distinct axial sides carrying INTERMEDIATE turned work -------- #

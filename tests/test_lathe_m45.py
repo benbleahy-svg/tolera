@@ -251,6 +251,76 @@ def test_non_turned_body_yields_nothing() -> None:
     assert result.dimensions.volume > 0
 
 
+def test_drilled_manifold_block_yields_nothing() -> None:
+    """A prismatic manifold drilled full of parallel holes must not buy its
+    way past the turned-coverage gate on hole-wall area — off-axis holes are
+    NEUTRAL evidence (CodeRabbit, M4.5): the deep hole walls dominate the
+    surface here, yet nothing about the body is turned."""
+    import tempfile
+
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    shape = BRepPrimAPI_MakeBox(gp_Pnt(-20, -20, 0), gp_Pnt(20, 20, 100)).Shape()
+    for cx in (-12.0, -4.0, 4.0, 12.0):
+        for cy in (-12.0, -4.0, 4.0, 12.0):
+            hole = BRepPrimAPI_MakeCylinder(
+                gp_Ax2(gp_Pnt(cx, cy, -1), gp_Dir(0, 0, 1)), 3.0, 102.0
+            ).Shape()
+            shape = BRepAlgoAPI_Cut(shape, hole).Shape()
+
+    writer = STEPControl_Writer()
+    assert writer.Transfer(shape, STEPControl_AsIs) == IFSelect_RetDone
+    with tempfile.NamedTemporaryFile(suffix=".step") as f:
+        assert writer.Write(f.name) == IFSelect_RetDone
+        step_bytes = Path(f.name).read_bytes()
+
+    result = get_engine().analyze(step_bytes, family=FAMILY_LATHE)
+    assert result.family_scalars == {}
+    assert result.features == []
+
+
+def test_interrupted_groove_is_not_an_off_axis_hole() -> None:
+    """Two collinear half-round groove segments sweep 180 degrees EACH over
+    the same half-circumference — their sum reaches a full turn but they
+    enclose nothing. The angular-UNION guard must keep them out of the
+    off_axis_hole callout (CodeRabbit, M4.5); they stay flagged asymmetric."""
+    import tempfile
+
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    shape = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 15.0, 60.0).Shape()
+    # two groove segments along the same line, sunk 1 mm below the shaft
+    # surface (centre x = 14, r = 3): each cut leaves a ~208-degree concave
+    # face over the SAME angular range — the old sweep SUM (415 >= 350) would
+    # fabricate a hole; the angular UNION (~208 < 350) must not
+    for z0, z1 in ((5.0, 25.0), (35.0, 55.0)):
+        groove = BRepPrimAPI_MakeCylinder(
+            gp_Ax2(gp_Pnt(14.0, 0.0, z0), gp_Dir(0, 0, 1)), 3.0, z1 - z0
+        ).Shape()
+        shape = BRepAlgoAPI_Cut(shape, groove).Shape()
+
+    writer = STEPControl_Writer()
+    assert writer.Transfer(shape, STEPControl_AsIs) == IFSelect_RetDone
+    with tempfile.NamedTemporaryFile(suffix=".step") as f:
+        assert writer.Write(f.name) == IFSelect_RetDone
+        step_bytes = Path(f.name).read_bytes()
+
+    result = get_engine().analyze(step_bytes, family=FAMILY_LATHE)
+    scalars = result.family_scalars
+    assert_close(scalars["stock_radius"], 15.0, "grooved stock_radius")
+    assert features_named(result, "off_axis_hole") == []
+    (cavity,) = features_named(result, "asymmetric_cavity")
+    assert cavity["properties"]["face_count"] >= 2  # the two groove walls
+
+
 def test_mostly_prismatic_body_with_a_bore_yields_nothing() -> None:
     """A plate with one drilled hole HAS a cylinder (a candidate axis) but is
     not a turned part — the coaxial-coverage gate must reject it."""
