@@ -223,6 +223,79 @@ def test_non_tube_classifies_incompatible(name: str) -> None:
     assert result.dimensions.volume > 0
 
 
+def _step_bytes_of(shape: object) -> bytes:
+    """Write an OCP shape to STEP bytes (the M4.4 in-test fixture precedent)."""
+    import tempfile
+
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    writer = STEPControl_Writer()
+    assert writer.Transfer(shape, STEPControl_AsIs) == IFSelect_RetDone
+    with tempfile.NamedTemporaryFile(suffix=".step") as tmp:
+        assert writer.Write(tmp.name) == IFSelect_RetDone
+        return Path(tmp.name).read_bytes()
+
+
+def test_solid_bars_never_fabricate_a_profile() -> None:
+    """Solid stock whose section apes a profile by edge count must classify
+    ``incompatible`` (fresh-eyes review, M4.6): a hex bar sections as 6 lines
+    / 1 loop (angle counts), a chamfered square bar as 8 lines / 1 loop
+    (u_channel counts). The strip gate (wall ≪ section) rejects both."""
+    import math as m
+
+    from OCP.BRepBuilderAPI import (
+        BRepBuilderAPI_MakeEdge,
+        BRepBuilderAPI_MakeFace,
+        BRepBuilderAPI_MakeWire,
+    )
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+    from OCP.gp import gp_Pnt, gp_Vec
+
+    def bar_from_polygon(pts_2d: list[tuple[float, float]], length: float) -> object:
+        wire = BRepBuilderAPI_MakeWire()
+        for i, (x, y) in enumerate(pts_2d):
+            nx, ny = pts_2d[(i + 1) % len(pts_2d)]
+            wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(x, y, 0), gp_Pnt(nx, ny, 0)).Edge())
+        face = BRepBuilderAPI_MakeFace(wire.Wire()).Face()
+        return BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, length)).Shape()
+
+    hexagon = [
+        (10 * m.cos(m.radians(60 * i + 30)), 10 * m.sin(m.radians(60 * i + 30))) for i in range(6)
+    ]
+    chamfered: list[tuple[float, float]] = [
+        (3, 0),
+        (27, 0),
+        (30, 3),
+        (30, 27),
+        (27, 30),
+        (3, 30),
+        (0, 27),
+        (0, 3),
+    ]
+    # a T-profile IS a constant-wall extrusion, but not one of the 5 profiles —
+    # its enclosed area misses the u_channel formula for its dims by ~1/3.
+    tee: list[tuple[float, float]] = [
+        (0, 34),
+        (17, 34),
+        (17, 0),
+        (23, 0),
+        (23, 34),
+        (40, 34),
+        (40, 40),
+        (0, 40),
+    ]
+    engine = get_engine()
+    for name, pts in (("hex bar", hexagon), ("chamfered bar", chamfered), ("tee bar", tee)):
+        result = engine.analyze(
+            _step_bytes_of(bar_from_polygon(pts, 100.0)), family=FAMILY_TUBE_LASER
+        )
+        assert result.family_scalars == {"stock_type": "incompatible"}, (
+            f"{name}: {result.family_scalars}"
+        )
+        assert result.features == []
+
+
 def test_feedback_stays_empty_until_m47() -> None:
     """DFM warnings are M4.7 — the recognizer never emits feedback."""
     for name in TUBE_FIXTURES:

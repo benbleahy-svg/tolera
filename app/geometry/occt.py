@@ -1957,6 +1957,58 @@ class _TubeSection:
                     best = perp
         return best
 
+    def line_loop_areas(
+        self, u: tuple[float, float, float], v: tuple[float, float, float]
+    ) -> list[float] | None:
+        """Shoelace area of every closed line-only loop (in the (u, v) frame),
+        or ``None`` when a loop fails to walk as a simple cycle. This is the
+        anti-impostor measurement: a claimed profile must ENCLOSE the area its
+        analytic section formula says it does (a T-profile has u_channel-like
+        counts but ~2/3 of the u_channel area for its dims)."""
+        if self.arc_radii or self.circle_radii:
+            return None
+
+        def q(p: tuple[float, float, float]) -> tuple[float, float, float]:
+            return (round(p[0], 4), round(p[1], 4), round(p[2], 4))
+
+        adjacency: dict[tuple[float, float, float], list[tuple[float, float, float]]] = {}
+        for ln in self.lines:
+            a, b = q(ln.p1), q(ln.p2)
+            adjacency.setdefault(a, []).append(b)
+            adjacency.setdefault(b, []).append(a)
+        if any(len(nbrs) != 2 for nbrs in adjacency.values()):
+            return None
+        seen: set[tuple[float, float, float]] = set()
+        areas: list[float] = []
+        for start in adjacency:
+            if start in seen:
+                continue
+            cycle = [start]
+            seen.add(start)
+            prev: tuple[float, float, float] | None = None
+            cur = start
+            while True:
+                step = adjacency[cur]
+                nxt = step[0] if step[0] != prev else step[1]
+                if nxt == start:
+                    break
+                if nxt in seen:
+                    return None
+                seen.add(nxt)
+                cycle.append(nxt)
+                prev, cur = cur, nxt
+            pts = [(_v_dot(p, u), _v_dot(p, v)) for p in cycle]
+            areas.append(
+                abs(
+                    sum(
+                        x1 * y2 - x2 * y1
+                        for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1], strict=True)
+                    )
+                )
+                / 2
+            )
+        return areas
+
 
 def _classify_tube_section(
     section: _TubeSection, axis: tuple[float, float, float]
@@ -1991,8 +2043,24 @@ def _classify_tube_section(
     vs = [_v_dot(p, v) for p in section.points]
     width, height = max(us) - min(us), max(vs) - min(vs)
 
+    # Tube walls are thin relative to the section — an across-flats "wall"
+    # (solid hex bar reading as an angle, chamfered square bar as a u_channel)
+    # means the body is stock, not tube; never fabricate a profile from it.
+    if thickness > 0.4 * min(width, height):
+        return None
+
+    def area_matches(measured: float, expected: float) -> bool:
+        return abs(measured - expected) <= 0.05 * expected
+
     if not arcs:
-        if loops == 2 and len(lines) == 8:
+        loop_areas = section.line_loop_areas(u, v)
+        if loop_areas is None:
+            return None
+        if loops == 2 and len(lines) == 8 and len(loop_areas) == 2:
+            ring = max(loop_areas) - min(loop_areas)
+            expected = width * height - (width - 2 * thickness) * (height - 2 * thickness)
+            if not area_matches(ring, expected):
+                return None
             return {
                 "stock_type": "rectangular",
                 "width": width,
@@ -2000,12 +2068,16 @@ def _classify_tube_section(
                 "thickness": thickness,
                 "is_outside_corner_round": False,
             }
-        if loops == 1 and len(lines) == 6:
+        if loops == 1 and len(lines) == 6 and len(loop_areas) == 1:
+            if not area_matches(loop_areas[0], thickness * (width + height - thickness)):
+                return None
             longest = sorted(lines, key=lambda ln: ln.length, reverse=True)
             leg_angle = None
             for other in longest[1:]:
                 dot = abs(_v_dot(longest[0].dir, other.dir))
                 if dot < 0.999:
+                    # v1: folded into [0°, 90°] — an obtuse bent-angle profile
+                    # reports the supplement (unsigned segment directions).
                     leg_angle = math.degrees(math.acos(min(max(dot, 0.0), 1.0)))
                     break
             return {
@@ -2015,7 +2087,15 @@ def _classify_tube_section(
                 "thickness": thickness,
                 **({"leg_angle": leg_angle} if leg_angle is not None else {}),
             }
-        if loops == 1 and len(lines) == 8:
+        if loops == 1 and len(lines) == 8 and len(loop_areas) == 1:
+            # width = the base (open) side; a tall U measures leg-first, so
+            # accept either orientation and normalize.
+            if area_matches(loop_areas[0], thickness * (width + 2 * height - 2 * thickness)):
+                pass
+            elif area_matches(loop_areas[0], thickness * (height + 2 * width - 2 * thickness)):
+                width, height = height, width
+            else:
+                return None
             return {
                 "stock_type": "u_channel",
                 "width": width,
@@ -2190,25 +2270,38 @@ def _tube_cut_metrics(
                 "geometry_refs": [],
             }
         )
-        if not countersinks_lasered:
-            # drop the sink's pierced wire from the laser metrics
-            target = math.pi * sink_d
-            match = min(
-                (p for p in perimeters if abs(p - target) <= 0.02 * target),
-                default=None,
-            )
-            if match is not None:
-                perimeters.remove(match)
-                pierce = max(pierce - 1, 0)
+    # Each countersink claims the ONE pierced wire closest to its sink
+    # perimeter (closest-match, so a coincidentally similar plain cutout is
+    # not consumed). Lasered → the wire stays in the metrics but is the
+    # sink's, not a separate cutout feature; not lasered → the wire leaves
+    # the laser metrics entirely (secondary op).
+    marks: list[str | None] = [None] * len(perimeters)
+    for feat in features:
+        if feat["name"] != "countersink":
+            continue
+        target = math.pi * feat["properties"]["sink_diameter"]
+        best = min(
+            (
+                i
+                for i, p in enumerate(perimeters)
+                if marks[i] is None and abs(p - target) <= 0.02 * target
+            ),
+            key=lambda i: abs(perimeters[i] - target),
+            default=None,
+        )
+        if best is None:
+            continue
+        if feat["properties"]["lasered"]:
+            marks[best] = "sink"
+        else:
+            marks[best] = "removed"
+            pierce = max(pierce - 1, 0)
 
-    sink_perims = {
-        round(math.pi * f["properties"]["sink_diameter"], 3)
-        for f in features
-        if f["name"] == "countersink"
-    }
-    for p in perimeters:
+    for p, mark in zip(perimeters, marks, strict=True):
+        if mark == "removed":
+            continue
         total_cut += p
-        if round(p, 3) not in sink_perims:
+        if mark is None:
             features.append({"name": "cutout", "properties": {"perimeter": p}, "geometry_refs": []})
 
     return total_cut, pierce, machining_required, features
@@ -2260,9 +2353,9 @@ def _analyze_tube_laser(
     centroid_s = sum(projections) / len(projections)
 
     profile: dict[str, Any] | None = None
+    centroid = _shape_centroid(shape)
     for station in _TUBE_STATIONS:
         s = lo + station * (hi - lo)
-        centroid = _shape_centroid(shape)
         origin = (
             centroid[0] + (s - centroid_s) * axis[0],
             centroid[1] + (s - centroid_s) * axis[1],
