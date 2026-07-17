@@ -83,7 +83,7 @@
         "similar_geometries": "Similar geometries",
         "historical": "Prior quotes"
       },
-      "pending_m4": "Geometry indexing pending",
+      "processing": "Analyzing geometry…",
       "quotes_one": "{{count}} quote:",
       "quotes_other": "{{count}} quotes:",
       "import": "Import"

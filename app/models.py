@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID as PyUUID  # for classes whose own `uuid` column shadows the module
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -43,6 +44,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
+from .geometry.vector import GV_DIM
 
 
 class MembershipRole(enum.StrEnum):
@@ -387,6 +389,14 @@ class Part(Base):
         Index("ix_part_org_deleted_at", "org_id", "deleted_at"),
         # Part-library historical match by geometry signature (populated at M4).
         Index("ix_part_org_geom_hash", "org_id", "geom_hash"),
+        # Similar-Geometries ANN (M4.11) — mirrors migration 0035 so
+        # autogenerate never proposes dropping it.
+        Index(
+            "ix_part_geometry_vector_hnsw",
+            "geometry_vector",
+            postgresql_using="hnsw",
+            postgresql_ops={"geometry_vector": "vector_l2_ops"},
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -407,6 +417,9 @@ class Part(Base):
     )
     # Interrogation signature for part-library match — NULL until M4.
     geom_hash: Mapped[str | None] = mapped_column(Text)
+    # gv1 similarity feature vector (M4.11) — pgvector L2 NN feeds the
+    # Similar-Geometries bucket; NULL until the part interrogates cleanly.
+    geometry_vector: Mapped[Any | None] = mapped_column(Vector(GV_DIM))
     # EU dual-use export flag (DACH delta; primary home is the Part — it travels across
     # quotes). Stored only in M1.5; runtime enforcement → M6 (DECISIONS.md 2026-06-26).
     export_controlled: Mapped[bool] = mapped_column(

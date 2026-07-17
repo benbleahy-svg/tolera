@@ -80,21 +80,19 @@ def _quoted_item(client: TestClient, seeder: Seeder, org: Any, number: str) -> d
 
 
 class TestMatchBuckets:
-    def test_bucket_catalogue_shape_and_pending_stubs(
-        self, app_client: TestClient, seeder: Seeder
-    ) -> None:
+    def test_bucket_catalogue_shape(self, app_client: TestClient, seeder: Seeder) -> None:
+        """All six buckets ready-and-empty for a bare part (the geometry
+        buckets went live with M4.11 — a part without a CAD primary has no
+        geometry indexes by design, spec ``#partlib`` pipeline step 2)."""
         org, admin = _org_with_admin(seeder, "org-mb0")
         with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
             part = _new_part(app_client)
             body = _matches(app_client, part)
         assert [b["key"] for b in body["buckets"]] == BUCKET_KEYS
-        # Geometry buckets render the "geometry indexing pending (M4)" stub.
-        for key in ("exact_geometric", "similar_geometries"):
+        for key in BUCKET_KEYS:
             bucket = _bucket(body, key)
-            assert bucket["status"] == "pending_m4"
+            assert bucket["status"] == "ready"
             assert bucket["count"] == 0
-        for key in ("exact_file", "file_name", "part_number", "historical"):
-            assert _bucket(body, key)["status"] == "ready"
 
     def test_exact_file_match_on_byte_identical_uploads(
         self, app_client: TestClient, seeder: Seeder

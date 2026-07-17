@@ -59,7 +59,7 @@ export type MatchBucketKey =
 
 export interface MatchBucket {
   key: MatchBucketKey;
-  status: 'ready' | 'pending_m4';
+  status: 'ready' | 'processing';
   count: number;
   matches: MatchCard[];
 }

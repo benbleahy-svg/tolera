@@ -83,7 +83,7 @@
         "similar_geometries": "Ähnliche Geometrien",
         "historical": "Frühere Angebote"
       },
-      "pending_m4": "Geometrie-Indizierung folgt",
+      "processing": "Geometrie wird analysiert …",
       "quotes_one": "{{count}} Angebot:",
       "quotes_other": "{{count}} Angebote:",
       "import": "Übernehmen"
