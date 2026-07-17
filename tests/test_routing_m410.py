@@ -288,3 +288,59 @@ def test_generation_formula_error_surfaces(seeder: Seeder, app_client: TestClien
         # the failed change kept the component un-routed (transaction rolled back)
         ops = _ops(app_client, ids["component_id"])
     assert ops == []
+
+
+def test_generation_formula_routes_from_analysis_result(
+    seeder: Seeder, app_client: TestClient
+) -> None:
+    """Block AC: an auto-routing formula generates the expected operations
+    from a fixture's analyze_*() result (the KB lathe workcenter example) —
+    and the same formula routes the small workcenter when no geometry exists
+    (permissive zero scalars, the KB non-geometric fallback)."""
+    org, admin = _org_admin(seeder, "route-analysis")
+    seeder.configure_catalog(org)
+    formula = (
+        "lathe = analyze_lathe()\n"
+        "outer_diameter = lathe.stock_radius * 2\n"
+        "if outer_diameter > 4:\n"
+        "  generate_operation('Drehen', custom_name='Drehen gross')\n"
+        "else:\n"
+        "  generate_operation('Drehen', custom_name='Drehen klein')\n"
+        "generate_operation('Entgraten')\n"
+    )
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        process_id = _process_id(app_client, "Lathe")
+        seeder.sql(
+            "UPDATE process SET generation_formula = :f WHERE id = :id",
+            {"f": formula, "id": uuid.UUID(process_id)},
+        )
+
+        # geometric part: stock radius 3.0 mm -> OD 6 > 4 -> the big workcenter
+        ids = _new_item(app_client)
+        file_id = seeder.part_file(org, uuid.UUID(ids["part_id"]), "shaft.step")
+        seeder.sql(
+            """
+            INSERT INTO interrogation_run
+                (id, org_id, part_id, file_id, family, status, result)
+            VALUES
+                (:id, :org, :part, :file, 'LATHE', 'succeeded', CAST(:result AS jsonb))
+            """,
+            {
+                "id": uuid.uuid4(),
+                "org": org,
+                "part": uuid.UUID(ids["part_id"]),
+                "file": file_id,
+                "result": json.dumps({"family_scalars": {"stock_radius": 3.0}}),
+            },
+        )
+        _set_process(app_client, ids["component_id"], process_id)
+        geometric_ops = _ops(app_client, ids["component_id"])
+
+        # non-geometric part: scalars default to 0 -> the small workcenter
+        ids2 = _new_item(app_client)
+        _set_process(app_client, ids2["component_id"], process_id)
+        plain_ops = _ops(app_client, ids2["component_id"])
+
+    assert [op["name"] for op in geometric_ops] == ["Drehen gross", "Entgraten"]
+    assert {op["origin"] for op in geometric_ops} == {"auto_routing"}
+    assert [op["name"] for op in plain_ops] == ["Drehen klein", "Entgraten"]

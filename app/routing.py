@@ -110,6 +110,60 @@ async def _generate_from_templates(
     return generated
 
 
+#: Kalk analyzer name → interrogation family (contract ANALYZER_NAMES).
+_ANALYZER_FAMILIES: dict[str, str] = {
+    "analyze_mill3": "MILLING",
+    "analyze_lathe": "LATHE",
+    "analyze_sheet_metal": "SHEET_METAL",
+    "analyze_tube_laser": "TUBE_LASER",
+    "analyze_wire_edm": "WIRE_EDM",
+    "analyze_casting": "CASTING",
+    "analyze_additive": "ADDITIVE",
+}
+
+
+class _PermissiveScalars(dict[str, Any]):
+    """Analyzer attrs: a scalar the family didn't produce reads as 0 — the KB
+    pattern (`if geometric_outer_diameter:`) relies on falsy, never an abort,
+    so one formula serves geometric AND non-geometric parts."""
+
+    def __contains__(self, key: object) -> bool:
+        return True
+
+    def __getitem__(self, key: str) -> Any:
+        return self.get(key, 0)
+
+
+async def _analyzers_for(session: AsyncSession, component: Component) -> dict[str, Any]:
+    """Real ``analyze_*()`` closures over the part's latest successful
+    interrogation per family (family_scalars; empty → all-zero object)."""
+    from .services.kalk.objects import KalkObject
+
+    runs = (
+        await session.scalars(
+            select(InterrogationRun)
+            .where(
+                InterrogationRun.part_id == component.part_id,
+                InterrogationRun.status == "succeeded",
+            )
+            .order_by(InterrogationRun.created_at.desc())
+        )
+    ).all()
+    scalars_by_family: dict[str, dict[str, Any]] = {}
+    for run in runs:
+        if run.family and run.family not in scalars_by_family:
+            scalars_by_family[run.family] = (run.result or {}).get("family_scalars", {})
+
+    def make(family: str) -> Any:
+        obj = KalkObject("analysis")
+        # assigned after construction: __init__'s ``attrs or {}`` would swap
+        # an EMPTY permissive dict (falsy) for a plain one that aborts reads
+        obj.attrs = _PermissiveScalars(scalars_by_family.get(family, {}))
+        return lambda: obj
+
+    return {name: make(family) for name, family in _ANALYZER_FAMILIES.items()}
+
+
 async def _generate_from_formula(
     session: AsyncSession, component: Component, process: Process
 ) -> list[dict[str, Any]]:
@@ -147,7 +201,7 @@ async def _generate_from_formula(
     result = evaluate(
         process.generation_formula,
         context_type="operation_generation",
-        eval_context={"part": part},
+        eval_context={"part": part, **(await _analyzers_for(session, component))},
         quantity=first_make,
         table_provider=env.provider,
         context_data=ContextData(
