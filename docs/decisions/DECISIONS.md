@@ -19,6 +19,12 @@
 
 ---
 
+## [2026-07-17] Decision-review session — all 19 OPEN items resolved; five blocks chartered
+
+**Status:** RESOLVED (Benjamin, interactive decision-review session — each item put to him individually with a recommendation; details in each entry, updated in place)
+**Summary:** Every `OPEN:` entry in this log was resolved on 2026-07-17. Five new build blocks were chartered to carry the decisions that need code (queue order = driver order): **M3.12** rules hardening (`blocks_send` flag + `component`/`line_item`/`quote` document_paths + fifth starter rule + review-item re-open on new file revision); **M3.13** ClamAV upload scanning + quarantine (due immediately — M3.3 email ingest already shipped); **M4.7b** provisional Core-4 golden fixtures + `gs1` re-validation; **M4.14** op-def formula-evaluation endpoint (Variables table); **M5.0** estimating shell (spec route + line-item sidebar + costing-inputs band + `line_item.priority` + quotes-list multi-select + Bulk Refresh). Notable non-default choice: CNC quick-quote goes **marketplace-first (Xometry Europe)** against the logged recommendation — the per-send hard gate is therefore load-bearing from day one and a marketplace DPA precedes any live send. Human follow-ups on Benjamin: tk materials4me partner conversation; Xometry DPA; chasing the Fechner packages + rule list.
+**Affects:** build-plan (M3/M4/M5 files + model-overrides), every entry updated below.
+
 ## [2026-07-16] M4.1 — geometry signature frozen as `gs1` (6-digit quantization, version-prefixed)
 
 **Status:** RESOLVED (M4.1 build; cheap-to-reverse knobs noted, re-validation pending real fixtures)
@@ -45,9 +51,10 @@
 **Resolved:** 2026-07-16 (/block M4.0 grill Q2)
 **Affects:** M4.1+ (production dependency goes in then — the spike keeps it PEP 723-local), worker Dockerfile, GEOMETRY.md §0.
 
-## [2026-07-16] OPEN: M3.8 — does a resolved review item suppress the same rule's next occurrence?
+## [2026-07-16] M3.8 — does a resolved review item suppress the same rule's next occurrence?
 
-**Status:** OPEN (M3.8 ships one-decision-per-rule-per-component; nothing is stuck)
+**Status:** RESOLVED 2026-07-17 — option (c) (Benjamin, decision-review session)
+**Decision:** **(c) — re-open on a new file revision.** A resolved verdict holds *within* a file revision (the unique constraint keeps re-extraction idempotent, exactly as shipped); when a **new print revision** crosses the boundary, the item re-opens with the new evidence and the prior decision is preserved in history (review items are stamped with the file revision they were generated against; a new revision supersedes the resolution rather than deleting it). Implemented in **M3.12** (pre-pilot rules-hardening block) together with the `blocks_send` gate below — a stale "resolved" must never suppress a send-blocking rule. Until M3.12 lands, the shipped (a) behaviour holds.
 **Question:** `uq_review_item_component_rule` (`org_id, component_id, rule_id`) makes generation idempotent — the point of the constraint, since Lens re-runs on every upload and re-evaluation must converge rather than accumulate. But it also means a **resolved** item is a permanent verdict for that (component, rule) pair: if the rule matches again later, no new item appears.
 
 That is right when the decision is about the *part* ("Fremdvergabe", "Kunde kontaktiert" — still true next week). It is wrong when the *evidence* changes underneath it: a **new print revision** is uploaded, Lens re-extracts, and the tight-tolerance rule matches a **different, tighter** callout — the estimator's earlier "geprüft" was about the old drawing, and the new one is silently never flagged. Raised in review of #48 (CodeRabbit, 🟠 Major).
@@ -63,9 +70,10 @@ That is right when the decision is about the *part* ("Fremdvergabe", "Kunde kont
 
 ---
 
-## [2026-07-16] OPEN: M3.8 — does an unresolved review item block Draft→Sent?
+## [2026-07-16] M3.8 — does an unresolved review item block Draft→Sent?
 
-**Status:** OPEN (M3.8 ships the conservative default — the count is surfaced, send is **not** blocked; nothing is stuck)
+**Status:** RESOLVED 2026-07-17 — option (c) (Benjamin, decision-review session)
+**Decision:** **(c) — a per-rule `blocks_send` flag.** New boolean on `rule` **and** the portable AST (a deliberate M3.6-contract widening, made while no shop has authored rules), seeded `true` only on the dual-use starter rule (and the new "kein Werkstoff" starter — next entry); enforced in the `quote_lifecycle.transition` Draft→Sent guard, which rejects with the blocking items named. The blanket gate (b) stays rejected — it would make every print-less quote unsendable. Ships in **M3.12**, scheduled before the pilot; until then the shipped default (a) holds and the unresolved count stays the surfaced warning.
 **Question:** Two spec lines disagree, so the ladder does not settle it.
 - `#rules` (tier 2, the feature's own section): "The unresolved count drives the quote's **Outstanding Work / Incomplete Quote Items**" — i.e. *informational*, exactly what M3.8 implemented (`WorkflowTracker.unresolved_review_item_count`).
 - `#rules-accept` (tier 2, same document): "the dual-use rule fires and **blocks send pending review**" — i.e. a hard gate on Draft→Sent.
@@ -85,9 +93,10 @@ There is also no way to express "this rule blocks send" in the canonical AST: th
 
 ---
 
-## [2026-07-16] OPEN: M3.6/M3.8 — "no material specified" has no addressable document_path
+## [2026-07-16] M3.6/M3.8 — "no material specified" has no addressable document_path
 
-**Status:** OPEN (M3.8 seeds the other four §7 starters; nothing is stuck)
+**Status:** RESOLVED 2026-07-17 — option (a) (Benjamin, decision-review session)
+**Decision:** **(a) — add exactly the §2-named paths, nothing speculative:** `component.material_id`, `line_item.min_quantity` / `line_item.max_quantity`, `quote.account_id` join the `document_path` catalogue (the paths `#rules-signals` §2 already lists — every addition is permanent portable-AST contract surface, so the catalogue widens no further than the spec's own signal model). The fifth §7 starter rule (*kein Werkstoff angegeben* → `blocks_send=true`) is then seeded. Ships in **M3.12** together with the `blocks_send` change above — same contract file, same migration window.
 **Question:** `SEED-AND-FIXTURES §7` names five starter rules. Four are expressible against M3.6's `document_path` catalogue and are seeded (`configure_seed._starter_rules`). The fifth — *no material specified → block send* — is **not addressable**: the catalogue (spec `#rules-paths`) exposes `part`, `files`, `text`, the tolerance/control-frame collections and the interrogation families, but **nothing for the component's material or the line item**. M3.7's `EvaluationContext` carries `line_item`/`quote` fields that are inert for precisely this reason, and its docstring already flags that cataloguing them "is a schema change, M3.6's domain".
 
 `#rules-signals` §2 *does* list "Line-item information — minimum / maximum requested quantity" and "Quote information — the account" as signal categories, so the catalogue is knowingly narrower than the signal model it implements. This is the first starter rule to fall through that gap.
@@ -103,9 +112,9 @@ There is also no way to express "this rule blocks send" in the canonical AST: th
 
 ---
 
-## [2026-07-16] OPEN: M3.7 `smallest_delta` — does a unilateral `+X/-0` count as a tight tolerance?
+## [2026-07-16] M3.7 `smallest_delta` — does a unilateral `+X/-0` count as a tight tolerance?
 
-**Status:** OPEN (M3.7 ships a default; nothing is blocked — cheap to reverse)
+**Status:** RESOLVED 2026-07-17 — option (b) confirmed as shipped (Benjamin, decision-review session). No code change; the shipped default is now the decided behaviour.
 **Question:** RULES-ENGINE-SPEC §4 defines `smallest_delta` as "tightest of upper/lower" but never says how to compute it. Read literally as `min(|upper|, |lower|)`, a **unilateral `25 +0.5/-0`** yields **0** — tighter than anything — so *every* `+X/-0` callout, including `+5/-0`, fires the §5 rule-1 tight-tolerance rule (≤ 0.13 mm) and raises a spurious NO_QUOTE review item. Unilateral `+X/-0` is extremely common on prints, so the literal reading is a false-positive firehose — exactly the noise §6's build/test loop warns about. It also makes the branches self-contradictory: the *same* requirement written as the limits `25.0/25.5` goes through the `limit` branch (equivalent band `(upper-lower)/2` = 0.25) and does **not** fire. The KB (`building-review-rules`) publishes PP's rule *set* but never the engine's computation, and the DACH delta is silent — the ladder does not answer this.
 **Options considered:**
 - **(a) Literal `min(|upper|, |lower|)`** — faithful to the §4 wording and possibly to PP's real behaviour, but `+5/-0` reads as maximally tight. Firehose.
@@ -237,8 +246,9 @@ This also confirms the timeout is *not* broken on Linux: CI returned "no match" 
 
 ---
 
-## [2026-07-12] OPEN: Fechner fixture packages — Core-4 coverage + starter rules
-**Status:** OPEN
+## [2026-07-12] Fechner fixture packages — Core-4 coverage + starter rules
+**Status:** RESOLVED 2026-07-17 — provisional goldens now (Benjamin, decision-review session; packages 3+ weeks past their 2026-06-23 target)
+**Decision:** Stop waiting passively. **M4.7b** authors **one provisional golden per Core-4 family from open CAD** (sheet-metal bracket, milled housing, turned shaft, tube-laser profile) through the `/fixtures` harness, and **runs the `gs1` 6-digit re-validation** against them (bump to `gs2` if it moves) — so M4's acceptance oracle stops being indefinitely deferred. The real anonymised Fechner parts **swap in when they land** (Benjamin chasing; the recipes are written to be replaced part-for-part). The Fechner-specific starter-rule list is collected in the same session that delivers the packages; the five generic §7 starters are settled (see the 2026-07-17 rules entries).
 **Question:** SEED-AND-FIXTURES Part 2 names two shop-specific open items the M1.13 harness now depends on: (a) **which fixtures cover which Core-4 family** — the anonymised Fechner packages (original target 2026-06-23) should span Sheet Metal / Milling / Lathe / Tube Laser so each family has at least one golden; (b) **the starter rule set Fechner wants** (consumed by the M3 rules engine, seeded via the same harness).
 **Options considered:** wait for the packages (harness ships with synthetic placeholders — done in M1.13); author provisional per-family fixtures from open CAD (risks divergence from real Fechner parts).
 **Recommended default:** keep the synthetic placeholders until the packages land, then author one `/fixtures/parts` recipe + golden per Core-4 family from the real parts; collect the rule list in the same session.
@@ -270,8 +280,9 @@ This also confirms the timeout is *not* broken on Linux: CI returned "no match" 
 **Resolved:** 2026-07-09 (M1.10 grill; DemoE screenshots supplied by Benjamin — figures encoded in the golden fixtures; `docs/reference/screenshots/` stays gitignored per .gitignore note)
 **Affects:** M1.10 (schema + engine + goldens), M1.11 (VAT on the rounded totals), M1.12 (seeded pricing defaults), M1.13 (harness asserts the same six), M4 (purchased_component entity, child breaks/cells, scrap).
 
-## [2026-07-09] OPEN: Bulk Refresh Pricing placement
-**Status:** OPEN
+## [2026-07-09] Bulk Refresh Pricing placement
+**Status:** RESOLVED 2026-07-17 — option (b) (Benjamin, decision-review session)
+**Decision:** **(b)** — Bulk Refresh lands with the quotes-list multi-select in **M5.0** (the estimating-shell block, which also owns that list's selection UI): a thin batch loop over M1.10's re-evaluate-with-preserved-overrides engine mode. No endpoint ships before its UI exists.
 **Question:** E4-d names both `Refresh Pricing` (single) and `Bulk Refresh Pricing` (quotes-list multi-select). Single lands in M1.10; the bulk action is a quotes-list concern (selection UI + batch job).
 **Options:** (a) M1.10 loop endpoint without list UI; (b) defer to the quotes-list/M5 block where the multi-select UI lives.
 **Recommended default:** (b) — the engine's re-evaluate-with-preserved-overrides mode ships in M1.10, so bulk is a thin loop over it later.
@@ -359,9 +370,10 @@ This also confirms the timeout is *not* broken on Linux: CI returned "no match" 
 **Resolved:** 2026-07-07 (M1.7 grill)
 **Affects:** M1.7 (change-process endpoint + modal), M4 (router generation).
 
-## [2026-07-07] OPEN: rate used for time-based setup (Advanced toggle)
+## [2026-07-07] Rate used for time-based setup (Advanced toggle)
 
-**Status:** OPEN
+**Status:** RESOLVED 2026-07-17 — option (a) confirmed as implemented (Benjamin, decision-review session)
+**Decision:** **(a)** — `setup_cost = setup_time_mins/60 × run_rate` for both internal modes: the machine is blocked during Rüsten, and one fewer rate keeps the library simple. M1.12's seeded guidance stands. If a real rate sheet later distinguishes a Rüstkostensatz, (c) a dedicated `setup_rate` column is a clean additive change.
 **Question:** `#oplibrary` says the Advanced toggle prices setup as "setup time in minutes × setup rate" but never defines *which* rate is the setup rate — the machine rate (`run_rate`/MSS), the operator rate (`labour_rate`), or a dedicated third rate.
 **Options considered:** (a) `run_rate` — during setup the machine is occupied (and the operator is part of MSS-adjacent cost); (b) `labour_rate` — setup is operator work; (c) a dedicated `setup_rate` column.
 **Recommended default (implemented in M1.7):** **(a)** `setup_cost = setup_time_mins/60 × run_rate` for both internal modes — the machine is blocked during Rüsten, and one fewer rate keeps the library simple. Reversible: no stored data depends on it (calc values recompute); flipping to (b)/(c) is a formula/column change. Confirm before M1.12 seeds rate guidance.
@@ -394,9 +406,9 @@ This also confirms the timeout is *not* broken on Linux: CI returned "no match" 
 
 ## [2026-07-07] materials4me API access channel
 
-**Status:** OPEN
+**Status:** RESOLVED 2026-07-17 — (a) + (c) (Benjamin, decision-review session)
 **Question:** materials4me has no documented public API. Channel options: (a) tk Materials Services partner/API agreement (procurement lead time); (b) OCI/electronic-catalog surface; (c) recurring price-list import (CSV) as interim.
-**Recommended default:** start the tk partner/API conversation now; the adapter ships mock-first regardless (fixture JSON is the contract), with the price-list import (c) as the interim fallback if the pilot needs live numbers before an API lands. Do **not** block M6.7b on procurement.
+**Decision:** **(a) + (c)** — Benjamin opens the tk Materials Services partner/API conversation (human action, tracked outside the build); the adapter additionally gets a **CSV price-list import path as the committed pilot interim**, so live-ish numbers never depend on procurement pace. The mock fixture JSON stays the adapter contract either way; **M6.7b never blocks on procurement**.
 **Affects:** M6.7b.
 
 ## [2026-07-07] CNC part quick-quote adapter (M6.7c) + mandatory external-send gate
@@ -409,10 +421,10 @@ This also confirms the timeout is *not* broken on Linux: CI returned "no match" 
 
 ## [2026-07-07] CNC quick-quote first counterparty
 
-**Status:** OPEN
+**Status:** RESOLVED 2026-07-17 — (b) marketplace first (Benjamin, decision-review session; deliberately **against** the logged (a) recommendation)
 **Question:** Who answers the instant-quote request first: (a) the shop's **own vendor network** behind a structured instant-quote API, or (b) a **marketplace** (Xometry/Fractory-style)? The adapter contract is counterparty-agnostic; the fixture can model both.
-**Recommended default:** (a) own vendor network first — vendors are already under the shop's supplier agreements (no new data-sharing exposure), and it composes with the M6.2–M6.6 vendor entities; a marketplace adapter is post-pilot behind the same interface and raises the external-send gate stakes (GDPR + dual-use).
-**Affects:** M6.7c.
+**Decision:** **(b) marketplace first**, fixture modelled on **Xometry Europe's** instant-quote shape (EU entity, CNC-native, the established DACH instant-quote API). Consequences accepted with it: customer CAD goes to a counterparty with **no existing supplier agreement**, so the M6.7c **hard gate is load-bearing from day one** — explicit per-send confirmation + redacted-variant offer + export-control screening, never auto-sent, no bulk mode — and a **DPA with the marketplace is a precondition of any live send** (mock/fixture until then). The own-vendor-network counterparty follows post-pilot behind the same `PartQuotingAdapter` interface.
+**Affects:** M6.7c (fixture shape + gate), M6.9 (audit covers marketplace sends), DPA/AVV paperwork (Benjamin).
 
 ---
 
@@ -509,27 +521,28 @@ This also confirms the timeout is *not* broken on Linux: CI returned "no match" 
 **Affects:** M1.3 (this block), M1.4 (extends `quote` with lifecycle + `quote_item`; hardens FK rigor; grants INSERT/UPDATE).
 
 ## [2026-06-25] SavedView sharing / visibility scope
-**Status:** OPEN
+**Status:** RESOLVED 2026-07-17 — private-only v1 confirmed (Benjamin, decision-review session). The reserved `visibility` enum stays schema-only; org-sharing UI is an M6 candidate; system views stay computed in code.
 **Question:** Spec calls saved views "user-owned" (`owner_id`); M1.3 AC says "org/user-scoped." Are views private to the owner, or shareable org-wide? Are there org-default / admin-managed views?
 **Options considered:** private-only; private + opt-in org-share; org-default views managed by admins.
 **Decision (v1 default, pending review):** **private-only.** `saved_view` is org-scoped (RLS) + `owner_id`; a `visibility` enum column (`private | org`) is **reserved** in the schema but only `private` is honored in v1 (avoids a later migration). System/derived views (All Quotes, My Quotes, Drafts, Outstanding, Overdue) are **computed in code, not stored**. Org-sharing UI deferred (→ M6 candidate).
 **Affects:** M1.3 (schema), M6.
 
 ## [2026-06-25] `saved_view` absent from canonical DB-SCHEMA.sql
-**Status:** OPEN
+**Status:** RESOLVED 2026-07-17 — migrations + models are the authoritative live schema (Benjamin, decision-review session)
 **Question:** The 53-table canonical `DB-SCHEMA.sql` has no `saved_view` table; the definition exists only as the spec's inline tier-2 build-implication (`view_scope`, `filters` JSONB, `sort`, `owner_id`).
-**Decision (proceeding):** Build `saved_view` per the spec build-implication (tier-2 > folded sub-spec). **Action:** fold the resulting DDL back into the canonical `DB-SCHEMA.sql` so the schema stays the single enumerated source.
-**Affects:** M1.3, docs/spec/folded-subspecs/DB-SCHEMA.sql.
+**Decision:** The planned fold-back is **cancelled** — it predates the 2026-06-21 freeze rule (`docs/spec/folded-subspecs/` is do-not-edit provenance) and the live schema has since accumulated multiple deliberate, individually-logged divergences (`saved_view`, `quote_counter`, `quote_status_event`, the `quote_cell` reshape, `source_file_id`, …). Going forward the **Alembic migration chain + SQLAlchemy models are the authoritative enumerated schema source**; the frozen DDL is provenance; divergences continue to be logged here per entry. No document edit required.
+**Affects:** repo convention (schema source of truth), docs/spec/folded-subspecs/DB-SCHEMA.sql (stays frozen).
 
 ## [2026-06-25] Quote-level `priority` — home of the field
-**Status:** OPEN
+**Status:** RESOLVED 2026-07-17 — `line_item.priority`; quote derives MAX (Benjamin, decision-review session)
+**Decision:** Priority lives on the **line item** per the spec build-implication (tier-2), matching how a shop actually thinks (a specific part is hot). The quotes grid shows and the saved-view/filter grammar exposes a **derived `MAX(line-item priority)`** per quote — one source of truth, no quote-level column, no sync problem. The column + derived filter land with the field's **first consumer, M5.0** (the estimating shell owns the line-item sidebar where priority is set; the grammar gains the derived field then as a new allow-listed name — non-breaking, as the 2026-06-25 entry anticipated).
 **Question:** The quotes grid shows a **Priority** column and the spec's "Highest Priority" saved view filters on it, but the canonical `quote` DDL has **no `priority` column** — the build-implication puts `priority` on `LineItem`. Where does quote-level priority live: on `quote`, derived/aggregated from line items, or both?
 **Options considered:** quote-level enum column; derived MAX over line-item priorities; both (quote default + per-line override).
 **Decision (revised — do not guess on a contested schema field):** M1.3's `quote` stub **does NOT add a `priority` column**, and **`priority` is dropped from the v1 filterable field set** (block-and-log: priority's home is genuinely open, and adding a column would commit schema to a contested field that may move to `line_item`). The quotes grid shows a Priority column rendered as a placeholder ("—") for now. The "Highest Priority" demo saved view is an *example*, not a hard M1.3 requirement, and is deferred. v1 filterable fields are therefore: `status`, `account_id`, `salesperson_id`, `estimator_id`, `created_at` (range), plus computed system views (My Quotes, Overdue via `due_date`). **M1.4/M1.6 decide priority's home**, then it can be added to the grammar with no breaking change (new allow-listed field).
 **Affects:** M1.4, M1.6, M1.3 (filter grammar + grid placeholder).
 
 ## [2026-06-25] Quote status: 7 UI "folders" vs. 5-value canonical enum
-**Status:** OPEN
+**Status:** RESOLVED 2026-07-17 — superseded by the [2026-06-26] M1.4 enum ruling (8 values incl. `cancelled`/`no_quote`/`on_hold`; Trash = `deleted_at` soft-delete). Status flipped for bookkeeping only; no new decision.
 **Question:** The spec narrative lists **7 status folders** (Drafts, Outstanding, Accepted, Expired, Lost, Cancelled, Trash); the canonical `quote_status` enum has **5 values** (`draft, sent, won, lost, expired`). Mapping: Drafts→draft, Outstanding→sent, Accepted→won, Expired→expired, Lost→lost; **Cancelled** and **Trash** are unmapped (Trash ≈ soft-delete; Cancelled ≈ ?).
 **Decision (proceeding):** out of M1.3 scope — M1.3 filters/displays whatever `quote_status` exists. **Flagged for M1.4** (owns the enum + lifecycle): decide whether to add `cancelled` to the enum and treat Trash as soft-delete.
 **Affects:** M1.4 (quote lifecycle enum).
@@ -891,19 +904,20 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Resolved:** 2026-06-25 (M1.2 grill)
 **Affects:** M1.2 (Files panel, file-op capabilities), M2/M4 (rendering, ZIP unpack, interrogation), later GDPR (redaction).
 
-## [2026-06-25] OPEN: Production object-store provider — EU data residency (M1.2)
-**Status:** OPEN
+## [2026-06-25] Production object-store provider — EU data residency (M1.2)
+**Status:** RESOLVED 2026-07-17 — Hetzner Object Storage (Benjamin, decision-review session)
+**Decision:** **Hetzner Object Storage** — region- and provider-aligned with the Hetzner infra anchor (no cross-provider egress), S3-compatible behind the existing storage seam, cheapest candidate, and structurally EU-resident (German company, no US CLOUD-Act parent — the cleanest GDPR/DPA story of the four). Deploy-time config only; the seam keeps a later switch code-free.
 **Question:** Customer CAD/print files are personal-data-bearing under GDPR and must reside in the EU. M1.2 builds against the S3 API (MinIO locally) but the **production** provider is unchosen. Candidates: **Hetzner Object Storage** (matches the Hetzner infra anchor), **Cloudflare R2** (EU jurisdiction), **AWS S3 `eu-central-1`**, **Scaleway** — differ on cost, EU-residency guarantees, and S3-API compatibility.
 **Options considered:** Hetzner (cheapest, in-region, S3-compatible, smaller ecosystem); R2 (no egress fees, EU-jurisdiction toggle); S3 eu-central-1 (most mature, dearer + egress).
 **Recommended default:** Hetzner Object Storage (region-aligned, S3 API, cost) unless an existing AWS footprint argues otherwise. No code impact — deploy-time config behind the storage seam.
 **Affects:** M1.2 (storage config / deploy), any block that stores blobs.
 
-## [2026-06-25] OPEN: Antivirus / malware scanning of customer uploads (M1.2)
-**Status:** OPEN
+## [2026-06-25] Antivirus / malware scanning of customer uploads (M1.2)
+**Status:** RESOLVED 2026-07-17 — async ClamAV + quarantine, due **now** (Benjamin, decision-review session)
 **Question:** Customers (and later, external vendors via email ingest) upload arbitrary files that staff download and forward to vendors. Should uploads be AV/malware-scanned, and where (sync at upload vs async Celery post-store vs at download/forward)?
 **Options considered:** ClamAV sidecar scanned async on a Celery task after store (quarantine flag on `part_file`); a cloud scanning API; or accept-risk for the pilot.
-**Recommended default:** **Defer to a later hardening block** (not M1.2) but logged now: async ClamAV scan on store with a quarantine flag, blocking download/forward until clean. Revisit before email-ingest (M3) opens an untrusted upload path.
-**Affects:** M3 (email ingest = untrusted uploads), M6 (hardening), `part_file` (possible future `scan_status` column).
+**Decision:** **Async ClamAV in our infra** — Celery scan-on-store (idempotent, retried, dead-lettered), a `part_file.scan_status` quarantine flag, download/forward **blocked until clean**. A cloud scanning API was rejected on its own GDPR grounds (shipping customer prints to a third-party scanner adds a subprocessor). Benjamin's condition was "before email ingest opens the untrusted path" — **that condition is already breached: M3.3 (Mailgun ingest) shipped in PR #40**, so the block is scheduled immediately as **M3.13**, not parked for M6.
+**Affects:** M3.13 (implementation), M3.3 (ingest attachments scanned), M6.4/M6.5 (vendor forward gate reads `scan_status`), `part_file` (migration).
 
 ## [2026-06-27] Money representation — integer minor units vs `numeric(14,4)` (M1.6 grill; blocked M1.7)
 **Status:** RESOLVED — option (b) confirmed at the M1.7 grill (Benjamin 2026-07-07): `numeric(14,4)` for unit-level/intermediate cost & price columns (per the folded schema); money rounds to **integer minor units + `currency`** at the quote/total boundary (display + any persisted total). This is the exact reading of the CLAUDE.md §5 money invariant from M1.7 onward.
@@ -920,8 +934,9 @@ The check runs through the org-pinned session, so it reads only the active org's
 **Resolved:** 2026-07-13 (M2.4 grill, Benjamin)
 **Affects:** M2.4 (viewer redact UI + renderer), M3 (Lens whiteout targets), M6 (share the redacted file).
 
-## [2026-07-13] OPEN: `part_file.redacted_from` FK + persisted redaction regions (M2.4 → M6)
-**Status:** OPEN
+## [2026-07-13] `part_file.redacted_from` FK + persisted redaction regions (M2.4 → M6)
+**Status:** RESOLVED 2026-07-17 — option (2) (Benjamin, decision-review session)
+**Decision:** **(2)** — the schema rides with the M6 share-scoping block that first consumes it; nothing before then reads either field. Steer for that grill: **reuse the existing `part_file.source_file_id`** (generic derived-file provenance, migration 0017 — M2.4 redacted copies already populate the same shape M2.5/M2.12 use) rather than a dedicated `redacted_from` column, and add a **regions JSONB** then if re-editing a redaction is wanted.
 **Question:** The spec's model section lists `PartFile — redaction is_primary (bool) redacted_from (FK source file) + redaction regions`. M2.4 stores only `is_redacted=TRUE` on the copy — no FK to the source file, no region payload. M6's external-share scoping ("share the redacted file *instead of* the original") may need the provenance link; regions would also enable re-editing a redaction instead of redoing it.
 **Options considered:** (1) add `redacted_from` + a regions JSONB now (migration in M2.4, unused until M6); (2) add both in the M6 Vendor-RFQ block when share-scoping actually consumes them; (3) FK only, regions never (a saved copy is final; re-redact from the original).
 **Recommended default:** **(2)** — schema changes ride with the block that consumes them; nothing in M2.4/M2.5 reads the link, and the filename convention (`<stem>-redacted.pdf`) plus `is_redacted` carries the demo until then. Decide at the M6 grill.
@@ -987,21 +1002,25 @@ The check runs through the org-pinned session, so it reads only the active org's
 - Operations rows keep ↑/↓ reorder (tests + a11y); pricing items got the drag handle the frames show. Unify later if PP-parity on operations matters.
 - Kalk editor ships line numbers + CHECK chrome without version history (see OPEN below).
 
-## [2026-07-15] OPEN: Material Calculator button (estimating Materials section)
+## [2026-07-15] Material Calculator button (estimating Materials section)
 
-The frames show `MATERIAL CALCULATOR` beside `ADD MATERIAL OPERATION`; the KB feature is Online-Metals-backed (US). The DACH replacement (thyssenkrupp materials4me feed) is decided for M6.7b. **Recommended default (applied):** no button until M6.7b lands, then it opens the feed-backed calculator. Alternative: disabled placeholder now.
+**Status:** RESOLVED 2026-07-17 — no button until M6.7b (Benjamin, decision-review session).
+The frames show `MATERIAL CALCULATOR` beside `ADD MATERIAL OPERATION`; the KB feature is Online-Metals-backed (US). The DACH replacement (thyssenkrupp materials4me feed) is decided for M6.7b. **Decision:** the button appears with the feed-backed calculator it opens — no dead chrome (a disabled placeholder was rejected).
 
-## [2026-07-15] OPEN: REQUESTED FINISHES multi-select + ACTIONS ▾ on the costing-inputs band
+## [2026-07-15] REQUESTED FINISHES multi-select + ACTIONS ▾ on the costing-inputs band
 
-Spec `#partview` (costing-inputs row: PROCESS · MATERIAL · REQUESTED FINISHES · ACTIONS ▾) — no build-plan block claims Requested Finishes; finishes as data exist on operations (`is_finish`). Needs an owner (suggest: the quote-detail block that also owns the line-item sidebar). Not built in the reconciliation pass.
+**Status:** RESOLVED 2026-07-17 — owned by **M5.0** (Benjamin, decision-review session).
+Spec `#partview` (costing-inputs row: PROCESS · MATERIAL · REQUESTED FINISHES · ACTIONS ▾) — finishes as data exist on operations (`is_finish`). **Decision:** the M5.0 estimating-shell block owns the full costing-inputs band, including the Requested Finishes multi-select and ACTIONS ▾ — one layout pass over the screen, together with the route change below.
 
-## [2026-07-15] OPEN: op-def Variables table + Kalk editor versions/last-saved-by
+## [2026-07-15] op-def Variables table + Kalk editor versions/last-saved-by
 
-The spec's operation-definition editor shows a Variables table (VARIABLE | VALUE | VISIBILITY eyes) and the Kalk editor chrome lists last-saved-by + a Versions link. Both need backend surface that doesn't exist: a def-level formula evaluation endpoint (to enumerate declared variables without a quote operation) and a formula-version store. The reconciliation pass shipped the def editor (name/rates/formula + CHECK) and quote-side visibility filtering only. **Recommended:** def-evaluation endpoint as a small M4-adjacent block; version store decided together with Lens correction history (similar shape).
+**Status:** RESOLVED 2026-07-17 — split (Benjamin, decision-review session).
+The spec's operation-definition editor shows a Variables table (VARIABLE | VALUE | VISIBILITY eyes) and the Kalk editor chrome lists last-saved-by + a Versions link. **Decision:** **split.** The def-level formula-evaluation endpoint (sandbox run against a synthetic context → declared variables + defaults) ships as **M4.14**, lighting up the Variables table. The formula **version store is deferred** and will be designed together with Lens correction history (same who/what/when + restore shape); until then the editor keeps CHECK chrome without the Versions link.
 
-## [2026-07-15] OPEN: estimating route shape — `/quotes/edit/:id/:lineItemId` + line-item sidebar
+## [2026-07-15] estimating route shape — `/quotes/edit/:id/:lineItemId` + line-item sidebar
 
-Spec `#partview` routes per line item with a left sidebar; the built page is `/quotes/:quoteId` with a line-item select (deferral previously only a code comment — now logged). Belongs to the quote-detail screen block; revisit when that block lands.
+**Status:** RESOLVED 2026-07-17 — M5.0 adopts the spec route (Benjamin, decision-review session).
+Spec `#partview` routes per line item with a left sidebar; the built page is `/quotes/:quoteId` with a line-item select. **Decision:** **M5.0** adopts `/quotes/edit/:id/:lineItemId` + the line-item sidebar; the old route 301-redirects to the first line item so existing links keep working.
 
 ## [2026-07-17] M4.8 resolution micro-contracts + seed variant names (assumptions recorded)
 
