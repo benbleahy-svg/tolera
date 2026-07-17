@@ -17,10 +17,12 @@ from app.services.kalk.executor import Executor, InProcessExecutor
 from app.services.kalk.limits import Limits
 from app.services.kalk.objects import ContextData
 from app.services.kalk.runtime import (
+    _PROCESS_KALK_BANNED_BUILTINS,
     ADD_ON_NAMES,
     BUILTIN_NAMES,
     DISCOUNT_NAMES,
     OPERATION_COST_NAMES,
+    OPERATION_GENERATION_NAMES,
     PRICING_ITEM_NAMES,
     DynamicVar,
     Runtime,
@@ -33,15 +35,27 @@ from app.services.kalk.validator import parse_and_validate
 KALK_FILENAME = "<kalk>"
 
 # M1.9 implemented operation_cost + pricing_item, M1.10 added discount,
-# M1.11 adds add_on; operation_generation arrives with M4 (KALK-REFERENCE §1).
-SUPPORTED_CONTEXTS = frozenset({"operation_cost", "pricing_item", "discount", "add_on"})
+# M1.11 added add_on, M4.10 adds operation_generation (KALK-REFERENCE §1;
+# KB custom-operation-generation).
+SUPPORTED_CONTEXTS = frozenset(
+    {"operation_cost", "pricing_item", "discount", "add_on", "operation_generation"}
+)
 
 _CONTEXT_NAMES: dict[str, frozenset[str]] = {
     "operation_cost": OPERATION_COST_NAMES,
     "pricing_item": PRICING_ITEM_NAMES,
     "discount": DISCOUNT_NAMES,
     "add_on": ADD_ON_NAMES,
+    "operation_generation": OPERATION_GENERATION_NAMES,
 }
+
+
+def _base_names(context_type: str) -> frozenset[str]:
+    """The shared-builtin surface a context validates against. Process-level
+    Kalk (operation_generation) loses the var family per the KB ban list."""
+    if context_type == "operation_generation":
+        return BUILTIN_NAMES - _PROCESS_KALK_BANNED_BUILTINS
+    return BUILTIN_NAMES
 
 
 @dataclass(frozen=True)
@@ -87,8 +101,13 @@ def check(
                 )
             ],
         )
-    known = BUILTIN_NAMES | _CONTEXT_NAMES[context_type] | set(extra_names)
-    _, errors = parse_and_validate(formula, known, limits)
+    known = _base_names(context_type) | _CONTEXT_NAMES[context_type] | set(extra_names)
+    _, errors = parse_and_validate(
+        formula,
+        known,
+        limits,
+        allow_dict_literals=(context_type == "operation_generation"),
+    )
     return CheckResult(ok=not errors, errors=errors)
 
 
@@ -102,6 +121,7 @@ def evaluate(
     executor: Executor | None = None,
     table_provider: TableProvider | None = None,
     context_data: ContextData | None = None,
+    allowed_operations: Iterable[str] | None = None,
 ) -> EvalResult:
     limits = limits or Limits()
     eval_context = dict(eval_context or {})
@@ -117,8 +137,13 @@ def evaluate(
             ]
         )
 
-    known = BUILTIN_NAMES | _CONTEXT_NAMES[context_type] | set(eval_context)
-    tree, errors = parse_and_validate(formula, known, limits)
+    known = _base_names(context_type) | _CONTEXT_NAMES[context_type] | set(eval_context)
+    tree, errors = parse_and_validate(
+        formula,
+        known,
+        limits,
+        allow_dict_literals=(context_type == "operation_generation"),
+    )
     if errors or tree is None:
         return EvalResult(errors=errors)
 
@@ -130,6 +155,7 @@ def evaluate(
         quantity=quantity,
         table_provider=table_provider,
         context_data=context_data,
+        allowed_operations=allowed_operations,
     )
     namespace = runtime.build_globals(eval_context, context_type)
     result = EvalResult()
@@ -280,11 +306,21 @@ def _extract_add_on_output(
     return {"PRICE": float(price)}
 
 
+def _extract_operation_generation_output(
+    namespace: dict[str, object], runtime: Runtime
+) -> dict[str, Any] | list[KalkError]:
+    # KB custom-operation-generation: the program's output IS the routing —
+    # the ordered generate_operation() list (empty is valid, e.g. a formula
+    # that routes nothing for purchased parts). No COST/DAYS here.
+    return {"operations": list(runtime.generated_operations)}
+
+
 _OUTPUT_EXTRACTORS: dict[str, Any] = {
     "operation_cost": _extract_operation_cost_output,
     "pricing_item": _extract_pricing_item_output,
     "discount": _extract_discount_output,
     "add_on": _extract_add_on_output,
+    "operation_generation": _extract_operation_generation_output,
 }
 
 
