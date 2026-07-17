@@ -13,6 +13,9 @@ import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
+import { useBomApi } from '../bom/api';
+import { BomBuilderModal } from '../bom/BomBuilderModal';
+import type { BomStatus } from '../bom/types';
 import { useConfigureApi } from '../configure/api';
 import { PartMatchesChip } from '../parts/MatchingParts';
 import {
@@ -70,14 +73,40 @@ export function EstimatingPage() {
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkPrefill, setBulkPrefill] = useState<BulkCreatePrefill | null>(null);
   const [nesting, setNesting] = useState<NestingOverview | null>(null);
+  const [bomStatus, setBomStatus] = useState<BomStatus | null>(null);
+  const [bomBuilderOpen, setBomBuilderOpen] = useState(false);
+  const [bomPublishedToast, setBomPublishedToast] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
   const partId = quote?.items[itemIndex]?.part_id ?? null;
+  const quoteItemId = quote?.items[itemIndex]?.id ?? null;
 
   const fail = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : String(e));
   }, []);
+
+  const bomApi = useBomApi();
+
+  // M4.9 — the "BOM table found … OPEN IN BOM BUILDER" banner state per line
+  // item; a part without findings or children simply shows no banner.
+  useEffect(() => {
+    let cancelled = false;
+    setBomStatus(null);
+    setBomPublishedToast(false);
+    if (!quoteItemId) return;
+    bomApi
+      .getBomStatus(quoteItemId)
+      .then((bomState) => {
+        if (!cancelled) setBomStatus(bomState);
+      })
+      .catch(() => {
+        if (!cancelled) setBomStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bomApi, quoteItemId]);
 
   useEffect(() => {
     if (!quoteId) return;
@@ -402,6 +431,53 @@ export function EstimatingPage() {
             setRuleSuggestion(null);
           }}
           onClose={() => setSeedingRule(false)}
+        />
+      )}
+
+      {/* M4.9 (DemoD/12): the persistent BOM banner — a detected BOM table or a
+          published BOM both open the builder; publish shows the success toast. */}
+      {bomPublishedToast && (
+        <p className="bom-check-ok" role="status">
+          {t('bom.published_toast')}
+        </p>
+      )}
+      {bomStatus && (bomStatus.suggestion || bomStatus.has_children || bomStatus.has_draft) && (
+        <div className="bom-line-banner" role="status">
+          <span className="bom-sparkle" aria-hidden="true">
+            ✦
+          </span>
+          <span>
+            {bomStatus.suggestion
+              ? t('bom.banner_found', {
+                  file: bomStatus.suggestion.filename,
+                  page: bomStatus.suggestion.page ?? 1,
+                })
+              : t('bom.banner_edit')}
+          </span>
+          {canEdit && quote?.status === 'draft' && (
+            <button
+              type="button"
+              className="bom-open-builder"
+              onClick={() => setBomBuilderOpen(true)}
+            >
+              {t('bom.banner_open')}
+            </button>
+          )}
+        </div>
+      )}
+      {bomBuilderOpen && quoteItemId && (
+        <BomBuilderModal
+          quoteItemId={quoteItemId}
+          api={bomApi}
+          onPublished={() => {
+            setBomBuilderOpen(false);
+            setBomPublishedToast(true);
+            bomApi
+              .getBomStatus(quoteItemId)
+              .then(setBomStatus)
+              .catch(() => undefined);
+          }}
+          onClose={() => setBomBuilderOpen(false)}
         />
       )}
 

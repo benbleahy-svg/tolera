@@ -1,0 +1,58 @@
+{
+  "part_number": "002-00001",
+  "revision": "000",
+  "row_type": "assembly_root",
+  "qty": 1,
+  "flat_qty": 1,
+  "children": [
+    {
+      "part_number": "002-00008-000",
+      "revision": "000",
+      "row_type": "subassembly",
+      "qty": 1,
+      "flat_qty": 1,
+      "children": [
+        {
+          "part_number": "002-00009-000",
+          "revision": "000",
+          "row_type": "manufactured",
+          "qty": 2,
+          "flat_qty": 2,
+          "children": []
+        },
+        {
+          "part_number": "002-00006-000",
+          "revision": null,
+          "row_type": "purchased",
+          "qty": 14,
+          "flat_qty": 14,
+          "children": []
+        }
+      ]
+    },
+    {
+      "part_number": "002-00025-000",
+      "revision": "000",
+      "row_type": "manufactured",
+      "qty": 2,
+      "flat_qty": 2,
+      "children": []
+    },
+    {
+      "part_number": "002-00006-000",
+      "revision": null,
+      "row_type": "purchased",
+      "qty": 16,
+      "flat_qty": 16,
+      "children": []
+    },
+    {
+      "part_number": "002-00014-000",
+      "revision": null,
+      "row_type": "purchased",
+      "qty": 12,
+      "flat_qty": 12,
+      "children": []
+    }
+  ]
+}

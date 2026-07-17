@@ -18,6 +18,7 @@ import './styles/estimating.css'
 import './styles/configure.css'
 import './styles/lens.css'
 import './styles/review.css'
+import './styles/bom.css'
 
 // Apply the persisted colour mode + brand (title + colour token) before first paint.
 applyMode(getInitialMode())

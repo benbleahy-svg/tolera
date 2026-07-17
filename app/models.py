@@ -571,6 +571,9 @@ class Node(Base):
         Integer, nullable=False, server_default=text("1")
     )
     root_part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # Sibling order within the published tree (M4.9) — the decimal-dot Item No.
+    # numbering is derived from it; ties break on created_at (pre-M4.9 rows).
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     created_at: Mapped[datetime] = _ts()
 
 
@@ -883,6 +886,9 @@ class QuoteItem(Base):
         # Positions are unique within a quote — the DB backstop against a
         # concurrent add-item race (the API also serialises via a row lock).
         UniqueConstraint("quote_id", "position", name="uq_quote_item_quote_position"),
+        # Composite-FK target (house pattern; DDL added in 0026) — review_item
+        # and bom_draft pin to (org_id, id).
+        UniqueConstraint("org_id", "id", name="uq_quote_item_org_id_id"),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -897,6 +903,36 @@ class QuoteItem(Base):
     export_controlled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class BomDraft(Base):
+    """The BOM Builder's autosaved staging state (M4.9 — spec ``#bombuilder``).
+
+    One row per quote item (``UNIQUE (org_id, quote_item_id)``); ``payload`` is the
+    whole editable tree (rows, types, quantities, file assignments) as the client
+    last saved it. A draft never touches ``part``/``node``/``component`` — only
+    CHECK AND PUBLISH commits, and publishing deletes the draft. KB
+    ``The-BOM-Builder`` §BOM drafts: reopening the builder loads this row; discard
+    deletes it. CASCADE with the quote item (staging is worthless without it)."""
+
+    __tablename__ = "bom_draft"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        UniqueConstraint("org_id", "quote_item_id", name="uq_bom_draft_quote_item"),
+        ForeignKeyConstraint(
+            ["org_id", "quote_item_id"],
+            ["quote_item.org_id", "quote_item.id"],
+            name="fk_bom_draft_quote_item_org",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 

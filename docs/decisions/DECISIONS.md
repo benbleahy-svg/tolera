@@ -25,6 +25,15 @@
 **Summary:** Every `OPEN:` entry in this log was resolved on 2026-07-17. Five new build blocks were chartered to carry the decisions that need code (queue order = driver order): **M3.12** rules hardening (`blocks_send` flag + `component`/`line_item`/`quote` document_paths + fifth starter rule + review-item re-open on new file revision); **M3.13** ClamAV upload scanning + quarantine (due immediately — M3.3 email ingest already shipped); **M4.7b** provisional Core-4 golden fixtures + `gs1` re-validation; **M4.14** op-def formula-evaluation endpoint (Variables table); **M5.0** estimating shell (spec route + line-item sidebar + costing-inputs band + `line_item.priority` + quotes-list multi-select + Bulk Refresh). Notable non-default choice: CNC quick-quote goes **marketplace-first (Xometry Europe)** against the logged recommendation — the per-send hard gate is therefore load-bearing from day one and a marketplace DPA precedes any live send. Human follow-ups on Benjamin: tk materials4me partner conversation; Xometry DPA; chasing the Fechner packages + rule list.
 **Affects:** build-plan (M3/M4/M5 files + model-overrides), every entry updated below.
 
+---
+
+## [2026-07-17] M4.9 — `bom_tables` finding contract (Lens → BOM Builder) + purchased-row validation softness
+
+**Status:** RESOLVED (M4.9 build; both cheap to reverse, flagged ASSUMED in the PR verification table)
+**Question:** The build plan puts the "Lens BOM-table detector + title-block extractor" in M3, but merged M3.1 only carries the `bom_tables` type hint in `_QUOTE_SETUP_PROMPT` (`app/lens_provider.py`) and the frontend type mapping — no structured row payload was ever defined. What shape do BOM-table findings take, and does M4.9 enforce the KB's "purchased rows must be tied to a PC-library record before publish" rule when the `purchased_component` entity only lands in M4.10?
+**Decision:** (1) A BOM table is one `ExtractionFinding` per detected table: `category=quote_setup`, `type='bom_tables'` (the already-hinted/mapped name), `page` bound to the source file, and `value` carrying a JSON document `{"root_part_number": str|null, "rows": [{"item_no", "part_number", "revision", "qty", "description", "type_hint"}]}` — the open-text `type` + Text `value` columns are M3.1's designed extension seam, so **no schema change**; the quote-setup prompt is extended under a PROMPT_VERSION bump and `app/bom_builder.py` owns a tolerant parser (malformed JSON → finding ignored, never an error). M4.9b/M4.10 consume the same contract. (2) Publish does **not** hard-block on unassigned Purchased rows (KB behavior deferred with the PC library to M4.10) — CHECK BOM lists them as a non-blocking notice; the M4.10 block tightens this when the library exists.
+**Affects:** M4.9 (`app/bom_builder.py`, `app/lens_provider.py`), M4.10 (PC-library matching), M3.11 (eval harness may assert the contract later)
+
 ## [2026-07-16] M4.1 — geometry signature frozen as `gs1` (6-digit quantization, version-prefixed)
 
 **Status:** RESOLVED (M4.1 build; cheap-to-reverse knobs noted, re-validation pending real fixtures)

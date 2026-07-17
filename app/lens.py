@@ -34,7 +34,7 @@ MAX_EXTRACTION_PAGES = 10
 
 #: Version stamp for the extraction prompt set — the M3 test plan pins
 #: model + prompts so eval scores (M3.11) are comparable across runs.
-PROMPT_VERSION = "lens-extract-v1"
+PROMPT_VERSION = "lens-extract-v2"  # v2 (M4.9): structured bom_tables value contract
 
 #: Metric-native document default (DACH); a `document_units` finding overrides.
 DEFAULT_DOCUMENT_UNITS = "mm"
