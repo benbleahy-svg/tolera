@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { DfmWarning } from '../../parts/api';
-import { formatLength, type DisplayOptions } from './measureFormat';
+import { formatArea, formatLength, type DisplayOptions } from './measureFormat';
 
 /** Instance keys that are lengths in mm (formatted via the unit toggle);
  * everything else renders as a plain number/text. */
@@ -22,8 +22,11 @@ const LENGTH_KEYS = new Set([
   'diameter',
   'min_diameter',
   'value',
-  'area',
 ]);
+
+function localeOf(displayOpts: DisplayOptions): string {
+  return displayOpts.language === 'de' ? 'de-DE' : 'en-US';
+}
 
 function formatInstanceValue(
   key: string,
@@ -33,17 +36,23 @@ function formatInstanceValue(
   if (value == null) return '—';
   if (typeof value === 'boolean') return value ? '✓' : '—';
   if (typeof value === 'number') {
-    if (key === 'angle') return `${value.toFixed(1)}°`;
-    if (key === 'ratio') return value.toFixed(1);
+    const num = (v: number) =>
+      v.toLocaleString(localeOf(displayOpts), { maximumFractionDigits: 1 });
+    if (key === 'angle') return `${num(value)}°`;
+    if (key === 'ratio') return num(value);
+    if (key === 'area') return formatArea(value, displayOpts);
     if (LENGTH_KEYS.has(key)) return formatLength(value, displayOpts);
-    return String(value);
+    return num(value);
   }
   return String(value);
 }
 
-function thresholdSummary(w: DfmWarning): string {
+function thresholdSummary(w: DfmWarning, displayOpts: DisplayOptions): string {
   return Object.entries(w.threshold_used)
-    .map(([field, value]) => `${field} = ${value}`)
+    .map(
+      ([field, value]) =>
+        `${field} = ${value.toLocaleString(localeOf(displayOpts), { maximumFractionDigits: 4 })}`,
+    )
     .join(' · ');
 }
 
@@ -57,7 +66,7 @@ function WarningRow({
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const name = t(`dfm.names.${warning.type}`, { defaultValue: warning.type });
-  const threshold = thresholdSummary(warning);
+  const threshold = thresholdSummary(warning, displayOpts);
   return (
     <li className="dfm-warning">
       <div className="dfm-warning-row">
@@ -75,7 +84,13 @@ function WarningRow({
           {name} ({warning.count})
         </span>
         {threshold !== '' && (
-          <span className="dfm-info" title={`${t('dfm.threshold')}: ${threshold}`}>
+          <span
+            className="dfm-info"
+            tabIndex={0}
+            role="note"
+            title={`${t('dfm.threshold')}: ${threshold}`}
+            aria-label={`${t('dfm.threshold')}: ${threshold}`}
+          >
             ⓘ
           </span>
         )}

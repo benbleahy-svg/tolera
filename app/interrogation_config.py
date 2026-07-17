@@ -110,7 +110,10 @@ def validate_profile_inputs(family: str, inputs: dict[str, Any]) -> dict[str, An
                     message=f"'{key}' must be a number.",
                     status_code=422,
                 )
-            number = float(value)
+            try:
+                number = float(value)
+            except OverflowError:  # a valid-but-astronomical JSON int -> 422, not 500
+                number = float("inf")
             if not number > 0 or number != number or number in (float("inf"), float("-inf")):
                 raise AppError(
                     code="invalid_interrogation_input",

@@ -2945,14 +2945,33 @@ class CustomInterrogation(Base):
     which is what makes them non-disableable server-side."""
 
     __tablename__ = "custom_interrogation"
-    __table_args__ = (Index("ix_custom_interrogation_org_family", "org_id", "family"),)
+    __table_args__ = (
+        Index("ix_custom_interrogation_org_family", "org_id", "family"),
+        # One org default (no material link) per family — mirrors migration
+        # 0031 so autogenerate never proposes dropping it.
+        Index(
+            "uq_custom_interrogation_org_family_default",
+            "org_id",
+            "family",
+            unique=True,
+            postgresql_where=text(
+                "material_class_id IS NULL AND material_family_id IS NULL AND material_id IS NULL"
+            ),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = _org_fk()
     name: Mapped[str] = mapped_column(Text, nullable=False)
     family: Mapped[ProcessFamily] = mapped_column(_process_family_enum, nullable=False)
     inputs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    material_class_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    material_family_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    material_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    material_class_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("material_class.id")
+    )
+    material_family_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("material_family.id")
+    )
+    material_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("material.id")
+    )
     created_at: Mapped[datetime] = _ts()

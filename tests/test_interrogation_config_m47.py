@@ -108,6 +108,7 @@ def test_input_validation_rejects_bad_values(seeder: Seeder, app_client: TestCli
         for bad in (
             {"deep_hole_ratio_threshold": -1},
             {"deep_hole_ratio_threshold": True},
+            {"deep_hole_ratio_threshold": 10**400},
             {"should_detect_deep_hole": "yes"},
             {"totally_made_up": 1.0},
         ):

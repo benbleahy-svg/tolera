@@ -92,7 +92,7 @@ describe('InterrogationsPage', () => {
     // localized warning names
     expect(screen.getByText('Tiefe Bohrung')).toBeInTheDocument();
     // always-on row: disabled checked checkbox + badge
-    const alwaysOn = screen.getByLabelText(/uncut_faces Immer aktiv/);
+    const alwaysOn = screen.getByLabelText(/Nicht zerspanbare Flächen Immer aktiv/);
     expect(alwaysOn).toBeChecked();
     expect(alwaysOn).toBeDisabled();
     expect(screen.getByText('Immer aktiv')).toBeInTheDocument();
@@ -111,7 +111,7 @@ describe('InterrogationsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Tiefe Bohrung')).toBeInTheDocument();
     });
-    await userEvent.click(screen.getByLabelText(/deep_hole Aktiv/));
+    await userEvent.click(screen.getByLabelText(/Tiefe Bohrung Aktiv/));
     const threshold = screen.getByLabelText('deep_hole_ratio_threshold');
     await userEvent.clear(threshold);
     await userEvent.type(threshold, '12.5');

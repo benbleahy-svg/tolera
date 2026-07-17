@@ -231,7 +231,7 @@ tr.est-missing-rate td {
 /* M4.7 — Manufacturability Warnings (viewer right panel, DemoN 02/03) */
 .dfm-warnings ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.15rem; }
 .dfm-warning-row { display: flex; align-items: center; gap: 0.35rem; }
-.dfm-expand { border: none; background: none; padding: 0; cursor: pointer; color: var(--muted, #667085); font-size: 0.7rem; width: 1rem; }
+.dfm-expand { border: none; background: none; padding: 0.25rem; cursor: pointer; color: var(--muted, #667085); font-size: 0.7rem; min-width: 1.5rem; min-height: 1.5rem; }
 .dfm-severity-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #f5b942; flex: none; }
 .dfm-warning-name { font-size: 0.8rem; color: var(--text, #1a1f27); }
 .dfm-info { color: var(--muted, #667085); cursor: help; font-size: 0.75rem; }

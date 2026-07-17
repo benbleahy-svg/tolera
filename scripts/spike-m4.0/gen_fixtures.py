@@ -292,6 +292,7 @@ def bracket_tightbend() -> tuple[object, dict]:
         "k_factor": k,
         "developed_length": developed,
         "unfolded_size": [developed, w],
+        "bend_line_positions": [flats[0] + sweep * (r + k * t) / 2],
         "flat_area": volume / t,
         "total_cut_length": (area - 2 * volume / t) / t,
         "pierce_count": 0,

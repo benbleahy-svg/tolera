@@ -19,6 +19,53 @@ import {
   type InterrogationsConfigOut,
 } from './api';
 
+/** Unit hint per threshold field (metric-native storage — CLAUDE.md §5).
+ * xt = multiple of material thickness (unit-agnostic); ratio fields unitless. */
+const FIELD_UNITS: Record<string, string> = {
+  smallest_cutout_size: 'xt',
+  close_cutouts_threshold: 'xt',
+  cutout_edge_proximity: 'xt',
+  countersink_bore_proximity_threshold: 'xt',
+  countersink_bore_edge_proximity_threshold: 'xt',
+  cut_near_bend_threshold: 'xt',
+  tight_curl_threshold: 'xt',
+  curl_near_bend_threshold: 'xt',
+  tight_hem_threshold: 'xt',
+  short_hem_threshold: 'xt',
+  hem_near_bend_threshold: 'xt',
+  max_bend_radius: 'xt',
+  min_bend_radius: 'xt',
+  thin_bend_relief_threshold: 'xt',
+  shallow_bend_relief_threshold: 'xt',
+  min_flange_length: 'xt',
+  short_flange_threshold: 'L:t',
+  close_bends_same_orientation_threshold: 'xt',
+  close_bends_opposite_orientation_threshold: 'xt',
+  press_length: 'mm',
+  max_length: 'mm',
+  max_width: 'mm',
+  max_height: 'mm',
+  max_unfolded_length: 'mm',
+  max_unfolded_width: 'mm',
+  max_part_length: 'mm',
+  max_part_width: 'mm',
+  max_part_height: 'mm',
+  max_part_diameter: 'mm',
+  max_tool_diameter: 'mm',
+  small_internal_radius_threshold: 'mm',
+  small_hole_diameter: 'mm',
+  slanted_hole_angle_threshold: 'deg',
+  steep_profile_angle_threshold: 'deg',
+  max_angled_cut_threshold: 'deg',
+  close_countersinks_threshold: 'xt',
+  countersink_edge_proximity_threshold: 'xt',
+};
+
+function fieldLabel(field: string): string {
+  const unit = FIELD_UNITS[field];
+  return unit ? `${field} (${unit})` : field;
+}
+
 function FamilySection({
   catalog,
   profile,
@@ -72,10 +119,11 @@ function FamilySection({
           {catalog.warnings.map((w) => {
             const enabled =
               w.toggle == null ? true : Boolean(inputs[w.toggle] ?? w.toggle_default);
+            const localizedName = t(`dfm.names.${w.type}`, { defaultValue: w.type });
             return (
               <tr key={w.type} className={w.v1_supported ? undefined : 'interrogation-v2-row'}>
                 <td>
-                  <span title={w.detects}>
+                  <span title={t(`dfm.detects.${w.type}`, { defaultValue: w.detects })}>
                     {t(`dfm.names.${w.type}`, { defaultValue: w.type })}
                   </span>
                   {w.always_on && (
@@ -95,13 +143,17 @@ function FamilySection({
                       type="checkbox"
                       checked
                       disabled
-                      aria-label={`${w.type} ${t('configure.interrogation_always_on')}`}
+                      aria-label={`${localizedName} ${t(
+                        w.always_on
+                          ? 'configure.interrogation_always_on'
+                          : 'configure.interrogation_not_toggleable',
+                      )}`}
                     />
                   ) : (
                     <input
                       type="checkbox"
                       checked={enabled}
-                      aria-label={`${w.type} ${t('configure.interrogation_enabled')}`}
+                      aria-label={`${localizedName} ${t('configure.interrogation_enabled')}`}
                       onChange={(e) => set(w.toggle as string, e.target.checked)}
                     />
                   )}
@@ -109,7 +161,7 @@ function FamilySection({
                 <td>
                   {w.threshold_fields.map((field) => (
                     <label key={field} className="interrogation-threshold">
-                      <span>{field}</span>
+                      <span>{fieldLabel(field)}</span>
                       {/* Semi-controlled: an in-progress edit (empty box) must
                           not be snapped back by the state value; only valid
                           positive numbers commit (the API rejects the rest). */}
@@ -123,6 +175,14 @@ function FamilySection({
                           const parsed = Number(e.target.value);
                           if (Number.isFinite(parsed) && parsed > 0) set(field, parsed);
                         }}
+                        onBlur={(e) => {
+                          // an uncommitted edit (empty/zero/negative) snaps
+                          // back to the value that will actually be saved
+                          const committed = inputs[field] ?? catalog.defaults[field] ?? '';
+                          if (e.target.value !== String(committed)) {
+                            e.target.value = String(committed);
+                          }
+                        }}
                       />
                     </label>
                   ))}
@@ -130,6 +190,26 @@ function FamilySection({
               </tr>
             );
           })}
+          {Object.keys(catalog.defaults)
+            .filter(
+              (key) =>
+                typeof catalog.defaults[key] === 'boolean' &&
+                !catalog.warnings.some((w) => w.toggle === key),
+            )
+            .map((key) => (
+              <tr key={key}>
+                <td>{t(`dfm.fields.${key}`, { defaultValue: key })}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(inputs[key] ?? catalog.defaults[key])}
+                    aria-label={`${key} ${t('configure.interrogation_enabled')}`}
+                    onChange={(e) => set(key, e.target.checked)}
+                  />
+                </td>
+                <td />
+              </tr>
+            ))}
         </tbody>
       </table>
       <div className="interrogation-actions">

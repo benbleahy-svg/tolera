@@ -544,7 +544,7 @@ describe('InterrogationPanel', () => {
     // family label + localized warning name with count + the ⓘ threshold
     expect(screen.getByText('Blech')).toBeInTheDocument();
     expect(screen.getByText(/Zu kleiner Biegeradius \(1\)/)).toBeInTheDocument();
-    expect(screen.getByTitle(/min_bend_radius = 0\.75/)).toBeInTheDocument();
+    expect(screen.getByTitle(/min_bend_radius = 0,75/)).toBeInTheDocument();
     // expanding shows the per-instance row with formatted metric values
     await userEvent.click(screen.getByRole('button', { expanded: false }));
     expect(screen.getByText(/Radius: 1,00\s*mm/)).toBeInTheDocument();

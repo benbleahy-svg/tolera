@@ -58,7 +58,7 @@ from .contract import (
     MultiBodyError,
     StepParseError,
 )
-from .dfm import evaluate_feedback
+from .dfm import dfm_default_inputs, evaluate_feedback
 
 #: Quantization for the gs1 fingerprint — 6 significant digits passed every
 #: M4.0 stability case (4/6/8 all passed; 6 is the probe's verdict recipe).
@@ -2407,7 +2407,10 @@ def _analyze_tube_laser(
     matching none of the 5 profiles yields ``{"stock_type": "incompatible"}``
     and no features (never a fabricated guess, build-plan M4.6)."""
     provided = inputs or {}
-    unknown = set(provided) - set(_TUBE_DEFAULT_INPUTS)
+    # The resolved InterrogationInputs bundle (M4.7) carries the family's DFM
+    # threshold/toggle keys alongside the strategy knobs — those belong to the
+    # evaluator, not this recognizer. Only keys neither side knows are typos.
+    unknown = set(provided) - set(_TUBE_DEFAULT_INPUTS) - set(dfm_default_inputs(FAMILY_TUBE_LASER))
     if unknown:
         # a typo must not silently fall back to the default strategy
         raise GeometryError(f"unknown tube-laser inputs: {', '.join(sorted(unknown))}")

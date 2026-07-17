@@ -618,6 +618,9 @@ def _evaluate_sheet_metal(
             {"max_bend_radius": limit},
         )
     if em.enabled("abnormal_bend_angle"):
+        # The catalogue excludes hems/curls; v1 relies on the recognizer's
+        # bend-sweep cap already dropping them (occt _MAX_BEND_SWEEP_DEG) —
+        # revisit when hem/curl features land (they are v2 rows above).
         hits = [b for b in bends if abs(b["angle"] - 90.0) > _ANGLE_TOL_DEG]
         em.emit(
             "abnormal_bend_angle",

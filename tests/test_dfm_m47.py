@@ -415,3 +415,17 @@ def test_deep_hole_fixture_carries_threshold_and_respects_toggle() -> None:
         blob, family=FAMILY_MILLING, inputs={"should_detect_deep_hole": False}
     )
     assert not [w for w in result.feedback if w["type"] == "deep_hole"]
+
+
+@pytest.mark.parametrize("name", FAMILY_FIXTURES)
+def test_analyze_accepts_the_full_seeded_profile(name: str) -> None:
+    """The worker passes the org profile (strategy + DFM thresholds + toggles)
+    verbatim into analyze() — every recognizer must tolerate the DFM keys it
+    doesn't consume itself (fresh-eyes 🔴: tube-laser rejected them)."""
+    golden = GOLDENS[name]
+    family = _FAMILY_OF[golden["family"]]
+    result = get_engine().analyze(
+        (FIXTURES / name).read_bytes(), family=family, inputs=dfm_default_inputs(family)
+    )
+    fired = {w["type"]: w["count"] for w in result.feedback}
+    assert fired == golden.get("feedback", {})

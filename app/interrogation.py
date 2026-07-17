@@ -186,18 +186,21 @@ async def maybe_enqueue_for_process(
     pf = await session.get(PartFile, part.primary_file_id)
     if pf is None or FileCategory(pf.file_type) != FileCategory.brep_cad:
         return None
+    # A queued/running run resolves the CURRENT profile when it executes, so
+    # it always covers this trigger. A succeeded run only counts if it was
+    # computed under the current profile inputs — otherwise a threshold/toggle
+    # edit would keep serving stale warnings on re-assignment (M4.7).
+    current_fp = inputs_fingerprint(await resolve_default_inputs(session, str(family)))
     existing = await session.scalar(
         select(InterrogationRun.id)
         .where(
             InterrogationRun.part_id == part.id,
             InterrogationRun.file_id == pf.id,
             InterrogationRun.family == str(family),
-            InterrogationRun.status.in_(
-                [
-                    InterrogationStatus.queued,
-                    InterrogationStatus.running,
-                    InterrogationStatus.succeeded,
-                ]
+            InterrogationRun.status.in_([InterrogationStatus.queued, InterrogationStatus.running])
+            | (
+                (InterrogationRun.status == InterrogationStatus.succeeded)
+                & (InterrogationRun.inputs_hash == current_fp)
             ),
         )
         .limit(1)
