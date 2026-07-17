@@ -311,8 +311,11 @@ def test_duplicate_delivery_never_overwrites_success(
         run = app_client.get(f"/api/parts/{part_id}/interrogation").json()["run"]
         assert run["status"] == "succeeded"
 
-        # Second delivery of the SAME task message.
-        out = interrogate_part_task.run(str(org), run["id"])
+        # Second delivery of the SAME task message. Eager context: the skip
+        # path still chains the requote-diff enqueue, which must not publish
+        # to a real broker (or instantiate the redis result backend) mid-test.
+        with eager_celery():
+            out = interrogate_part_task.run(str(org), run["id"])
         # part_id rides along so the redelivery still chains the M4.12
         # requote-diff job (idempotent) even when the success already committed.
         assert out == {
