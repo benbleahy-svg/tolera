@@ -169,13 +169,26 @@ async def list_purchased_components(
     return [_pc_out(pc) for pc in rows]
 
 
+async def _org_currency(session: AsyncSession, org_id: uuid.UUID) -> str:
+    from .models import Organization
+
+    org = await session.get(Organization, org_id)
+    return org.currency if org is not None else "EUR"
+
+
 @purchased_components_router.post("/purchased-components", status_code=status.HTTP_201_CREATED)
 async def create_purchased_component(
     payload: PurchasedComponentCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> PurchasedComponentOut:
-    pc = PurchasedComponent(org_id=principal.active_org_id, **payload.model_dump())
+    # piece prices carry the org's currency (EUR/CHF) — a CHF shop's library
+    # must never be silently EUR-labelled (fresh-eyes review)
+    pc = PurchasedComponent(
+        org_id=principal.active_org_id,
+        currency=await _org_currency(session, principal.active_org_id),
+        **payload.model_dump(),
+    )
     session.add(pc)
     await session.flush()
     return _pc_out(pc)
@@ -412,7 +425,11 @@ async def convert_to_purchased(
         )
 
     if payload.create is not None:
-        pc = PurchasedComponent(org_id=principal.active_org_id, **payload.create.model_dump())
+        pc = PurchasedComponent(
+            org_id=principal.active_org_id,
+            currency=await _org_currency(session, principal.active_org_id),
+            **payload.create.model_dump(),
+        )
         session.add(pc)
         await session.flush()
     else:
@@ -424,6 +441,15 @@ async def convert_to_purchased(
                 status_code=status.HTTP_404_NOT_FOUND,
             )
         pc = found
+
+    # tier-1 money: the frozen piece price flows into the quote's costing —
+    # its currency must match the org's (EUR/CHF are never mixed silently)
+    if pc.currency != await _org_currency(session, principal.active_org_id):
+        raise AppError(
+            "currency_mismatch",
+            "Die Währung des Kaufteils passt nicht zur Angebotswährung.",
+            status_code=422,
+        )
 
     part = await session.get(Part, component.part_id)
     assert part is not None  # FK-guaranteed

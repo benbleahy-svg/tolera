@@ -209,16 +209,19 @@ async def get_assembly_components(
         part_self_total[child.part.id] = totals
         unit_self[child.part.id] = units
 
+    # every node's part — including nodes without a quoting layer, which the
+    # pricing pass skips (a listing must render the tree it prices, not 500)
+    node_part_ids = {n.part_id for n in nodes}
     parts = {
         p.id: p
-        for p in (await session.scalars(select(Part).where(Part.id.in_(counts.keys())))).all()
+        for p in (await session.scalars(select(Part).where(Part.id.in_(node_part_ids)))).all()
     }
     components_by_part = {
         c.part_id: c
         for c in (
             await session.scalars(
                 select(Component).where(
-                    Component.part_id.in_(counts.keys()),
+                    Component.part_id.in_(node_part_ids),
                     Component.is_root_component.is_(False),
                 )
             )
@@ -274,7 +277,7 @@ async def get_assembly_components(
     def build(node: Node, multiplier: int) -> AssemblyNodeOut:
         part = parts.get(node.part_id)
         component = components_by_part.get(node.part_id)
-        assert part is not None  # every non-root node's part is in counts
+        assert part is not None  # loaded for every node part id above
         flat = multiplier * node.qty_relative_to_parent
         is_assembly = bool(component.is_assembly) if component else part.is_assembly
         obtain = (component.obtain_method if component else part.obtain_method).value.upper()
@@ -378,13 +381,30 @@ async def bulk_update_components(
             component.material_id = payload.material_id
         await session.flush()
         await generate_router(session, component.org_id, component)
-        roots.add(component.id)
+        # dedupe on the actual root so 200 selected children reprice it once
+        root_part_id = (
+            component.part_id
+            if component.is_root_component
+            else await session.scalar(
+                select(Node.root_part_id).where(Node.part_id == component.part_id).limit(1)
+            )
+        )
+        if root_part_id is not None:
+            root_id = await session.scalar(
+                select(Component.id)
+                .where(Component.part_id == root_part_id, Component.is_root_component)
+                .limit(1)
+            )
+            if root_id is not None:
+                roots.add(root_id)
         updated += 1
 
-    for component_id in roots:
-        component = await session.get(Component, component_id)
-        if component is not None:
-            await _recalculate_root_for(session, component)
+    from .costing import recalculate_component
+
+    for root_id in roots:
+        root = await session.get(Component, root_id)
+        if root is not None:
+            await recalculate_component(session, root.org_id, root.id)
     return {"updated": updated}
 
 
@@ -418,7 +438,10 @@ async def reorder_components(
     session: Annotated[AsyncSession, Depends(get_session)],
     _: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> dict[str, int]:
-    _item, _root_component, root_part = await _load_item(session, quote_item_id)
+    from .operations import _lock_editable_quote
+
+    _item, root_component, root_part = await _load_item(session, quote_item_id)
+    await _lock_editable_quote(session, root_component)
     siblings = (
         await session.scalars(
             select(Node).where(
@@ -470,6 +493,16 @@ async def copy_pricing(
     ).all()
     if payload.copy_material:
         target.material_id = source.material_id
+    # Copy REPLACES the copied categories on the target (fresh-eyes review:
+    # appending onto an auto-routed target would double the router/cost).
+    existing_target_ops = (
+        await session.scalars(select(Operation).where(Operation.component_id == target.id))
+    ).all()
+    for existing in existing_target_ops:
+        is_material = existing.category.value == "material"
+        if (is_material and payload.copy_material) or (not is_material and payload.copy_operations):
+            await session.delete(existing)
+    await session.flush()
     for op in operations:
         is_material = op.category.value == "material"
         if is_material and not payload.copy_material:
@@ -535,30 +568,68 @@ async def delete_component(
             status_code=422,
         )
     await _lock_editable_quote(session, component)
+    # Resolve the root BEFORE the nodes vanish (fresh-eyes review: resolving
+    # afterwards finds nothing and the quote keeps the deleted child's cost),
+    # and scope deletion to THIS item's tree, never the part's other trees.
+    root_part_id = await session.scalar(
+        select(Node.root_part_id).where(Node.part_id == component.part_id).limit(1)
+    )
+    root_component_id = (
+        await session.scalar(
+            select(Component.id)
+            .where(Component.part_id == root_part_id, Component.is_root_component)
+            .limit(1)
+        )
+        if root_part_id is not None
+        else None
+    )
     # remove every occurrence (and its subtree) of this part from the tree
     levels: list[list[uuid.UUID]] = [
         [
             n.id
             for n in (
-                await session.scalars(select(Node).where(Node.part_id == component.part_id))
+                await session.scalars(
+                    select(Node).where(
+                        Node.part_id == component.part_id,
+                        Node.root_part_id == root_part_id,
+                    )
+                )
             ).all()
             if n.parent_node_id is not None
         ]
     ]
+    subtree_part_ids: set[uuid.UUID] = set()
     while levels[-1]:
         children = (
             await session.scalars(select(Node).where(Node.parent_node_id.in_(levels[-1])))
         ).all()
+        subtree_part_ids.update(c.part_id for c in children)
         levels.append([c.id for c in children])
     # bottom-up: children first (fk_node_parent_org forbids orphaning)
     for level in reversed(levels):
         if level:
             await session.execute(sa_delete(Node).where(Node.id.in_(level)))
     await session.flush()
-    root = component
     await session.delete(component)
+    # subtree parts nothing references anymore lose their quoting layer too
+    # (the publish-removal precedent — orphan components would linger forever)
+    for part_id in subtree_part_ids:
+        still_referenced = await session.scalar(
+            select(Node.id).where(Node.part_id == part_id).limit(1)
+        )
+        if still_referenced is None:
+            await session.execute(
+                sa_delete(Component).where(
+                    Component.part_id == part_id, Component.is_root_component.is_(False)
+                )
+            )
     await session.flush()
-    await _recalculate_root_for(session, root)
+    if root_component_id is not None:
+        root = await session.get(Component, root_component_id)
+        if root is not None:
+            from .costing import recalculate_component
+
+            await recalculate_component(session, root.org_id, root.id)
     return {"deleted": True}
 
 

@@ -301,7 +301,7 @@ def test_copy_pricing_material_and_operations(seeder: Seeder, app_client: TestCl
 def test_delete_component_removes_subtree(seeder: Seeder, app_client: TestClient) -> None:
     org, admin = _org_admin(seeder, "asm-delete")
     with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
-        ids = _new_item(app_client)
+        ids = _new_item(app_client, quantities=[1])
         s = _plant_child(
             seeder, org, ids["part_id"], part_number="S-1", position=0, is_assembly=True
         )
@@ -315,9 +315,23 @@ def test_delete_component_removes_subtree(seeder: Seeder, app_client: TestClient
             obtain_method="PURCHASED",
             piece_price="0.1000",
         )
+        # reprice once so the planted children land in the persisted cells
+        res = app_client.put(
+            f"/api/quotes/{ids['quote_id']}/items/{ids['item_id']}/quantities",
+            json={"quantities": [1]},
+        )
+        assert res.status_code == 200, res.text
+        # the purchased grandchild prices into the root before the delete
+        pricing = app_client.get(f"/api/components/{ids['component_id']}/pricing").json()
+        before = next(c for c in pricing["costing"] if c["quantity"] == 1)
+        assert before["purchased_component"] == "0.4000"
         res = app_client.delete(f"/api/components/{s['component']}")
         assert res.status_code == 200, res.text
         after = _listing(app_client, ids["item_id"])
+        # review fix: the delete itself reprices the root — no stale cost
+        pricing = app_client.get(f"/api/components/{ids['component_id']}/pricing").json()
+        emptied = next(c for c in pricing["costing"] if c["quantity"] == 1)
+        assert emptied["purchased_component"] in ("0.0000", "0")
     assert after["tree"] == []
 
     # the root component itself is not deletable here

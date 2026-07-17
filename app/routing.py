@@ -52,7 +52,7 @@ async def setup_count_for(session: AsyncSession, component: Component, family: s
             InterrogationRun.family == family,
             InterrogationRun.status == "succeeded",
         )
-        .order_by(InterrogationRun.created_at.desc())
+        .order_by(InterrogationRun.created_at.desc(), InterrogationRun.id.desc())
         .limit(1)
     )
     scalars: dict[str, Any] = (run.result or {}).get("family_scalars", {}) if run else {}
@@ -146,13 +146,20 @@ async def _analyzers_for(session: AsyncSession, component: Component) -> dict[st
                 InterrogationRun.part_id == component.part_id,
                 InterrogationRun.status == "succeeded",
             )
-            .order_by(InterrogationRun.created_at.desc())
+            .order_by(InterrogationRun.created_at.desc(), InterrogationRun.id.desc())
         )
     ).all()
     scalars_by_family: dict[str, dict[str, Any]] = {}
     for run in runs:
         if run.family and run.family not in scalars_by_family:
-            scalars_by_family[run.family] = (run.result or {}).get("family_scalars", {})
+            raw = (run.result or {}).get("family_scalars", {})
+            # sandbox input policy parity (generate_operation's whitelist):
+            # only scalars cross into Kalk — nested JSON stays out
+            scalars_by_family[run.family] = {
+                key: value
+                for key, value in raw.items()
+                if isinstance(value, int | float | str | bool) or value is None
+            }
 
     def make(family: str) -> Any:
         obj = KalkObject("analysis")

@@ -344,3 +344,48 @@ def test_generation_formula_routes_from_analysis_result(
     assert [op["name"] for op in geometric_ops] == ["Drehen gross", "Entgraten"]
     assert {op["origin"] for op in geometric_ops} == {"auto_routing"}
     assert [op["name"] for op in plain_ops] == ["Drehen klein", "Entgraten"]
+
+
+def test_setup_index_flows_into_cost_cells(seeder: Seeder, app_client: TestClient) -> None:
+    """Review fix: the persisted setup_index reaches the cost evaluation —
+    INDEX and get_operation_property() differ per generated setup instance."""
+    org, admin = _org_admin(seeder, "route-index")
+    seeder.configure_catalog(org)
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _new_item(app_client)
+        file_id = seeder.part_file(org, uuid.UUID(ids["part_id"]), "block.step")
+        seeder.sql(
+            """
+            INSERT INTO interrogation_run
+                (id, org_id, part_id, file_id, family, status, result)
+            VALUES
+                (:id, :org, :part, :file, 'MILLING', 'succeeded', CAST(:result AS jsonb))
+            """,
+            {
+                "id": uuid.uuid4(),
+                "org": org,
+                "part": uuid.UUID(ids["part_id"]),
+                "file": file_id,
+                "result": json.dumps({"family_scalars": {"setup_count": 3}}),
+            },
+        )
+        _set_process(app_client, ids["component_id"], _process_id(app_client, "Milling"))
+        setups = [op for op in _ops(app_client, ids["component_id"]) if op["name"] == "Fräsen"]
+        assert len(setups) == 3
+        costs = []
+        for op in setups:
+            res = app_client.patch(
+                f"/api/operations/{op['id']}",
+                json={
+                    "cost_formula": (
+                        "COST = (INDEX + 1) * 10 + get_operation_property('setup_index', 0)\n"
+                        "DAYS = 0\n"
+                    )
+                },
+            )
+            assert res.status_code == 200, res.text
+        for op in [o for o in _ops(app_client, ids["component_id"]) if o["name"] == "Fräsen"]:
+            cell = next(c for c in op["cells"] if c["quantity"] == 1)
+            costs.append(cell["calc_cost"])
+    # setup 0 → 10+0, setup 1 → 20+1, setup 2 → 30+2 (order-independent set)
+    assert sorted(costs) == ["10.0000", "21.0000", "32.0000"]

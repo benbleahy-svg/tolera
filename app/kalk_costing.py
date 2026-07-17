@@ -344,6 +344,7 @@ def evaluate_cell(
         overrides["setup_time"] = float(op.manual_setup_mins) / _MINUTES_PER_HOUR
 
     def_name = env.def_names.get(op.operation_def_id) if op.operation_def_id else None
+    op_properties = dict(op.operation_properties or {})
     result = evaluate(
         op.cost_formula,
         context_type="operation_cost",
@@ -353,6 +354,9 @@ def evaluate_cell(
             "line_item": KalkObject("line_item", {"is_export_controlled": env.export_controlled}),
             "quantity": make_qty,
             "manual_nest": lambda: kalk_nest_object(env, break_qty),
+            # M4.10 auto-routing: the 0-based per-setup index a generated op
+            # was instantiated with (KB milling-process; 0 for manual rows)
+            "INDEX": op_properties.get("setup_index", 0),
         },
         quantity=break_qty,
         overrides=overrides,
@@ -364,6 +368,8 @@ def evaluate_cell(
             cost_values=dict(cost_values),
             workpiece=dict(workpiece),
             custom_attributes=dict(custom_attributes),
+            # generate_operation()'s payload, read back by get_operation_property
+            operation_properties=op_properties,
         ),
     )
 
@@ -498,6 +504,7 @@ async def operation_kalk_report(
                 ),
                 "quantity": make_qty,
                 "manual_nest": lambda brk_qty=brk.quantity: kalk_nest_object(env, brk_qty),
+                "INDEX": (operation.operation_properties or {}).get("setup_index", 0),
             },
             quantity=brk.quantity,  # override key = the UI-visible break value
             overrides=overrides,
@@ -509,6 +516,7 @@ async def operation_kalk_report(
                 cost_values=cost_values,
                 workpiece=workpiece,
                 custom_attributes=custom_attributes,
+                operation_properties=dict(operation.operation_properties or {}),
             ),
         )
         reports.append(
