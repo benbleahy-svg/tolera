@@ -2079,11 +2079,20 @@ def _classify_tube_section(
                 "is_outside_corner_round": False,
             }
         if loops == 1 and len(lines) == 6 and len(loop_areas) == 1:
-            # The two longest lines are the legs' OUTER edges; they meet at
-            # the outer corner. Orienting both directions AWAY from that
-            # shared corner gives the true interior angle — an obtuse profile
-            # reports 135°, never the 45° supplement (CodeRabbit, M4.6).
-            leg_a, leg_b = sorted(lines, key=lambda ln: ln.length, reverse=True)[:2]
+            # The legs' OUTER edges meet at the outer corner. The second leg
+            # is the longest line NOT parallel to the first — on unequal-leg
+            # stock (60x40) the two longest lines are the long leg's outer AND
+            # inner edges, which never meet (CodeRabbit, M4.6). Orienting both
+            # directions AWAY from the shared corner gives the true interior
+            # angle — an obtuse profile reports 135°, never the 45° supplement.
+            by_length = sorted(lines, key=lambda ln: ln.length, reverse=True)
+            leg_a = by_length[0]
+            leg_b = next(
+                (ln for ln in by_length[1:] if abs(_v_dot(ln.dir, leg_a.dir)) < 0.999),
+                None,
+            )
+            if leg_b is None:
+                return None
             corner_pair = min(
                 ((pa, pb) for pa in (leg_a.p1, leg_a.p2) for pb in (leg_b.p1, leg_b.p2)),
                 key=lambda pair: _v_dot(_v_sub(pair[1], pair[0]), _v_sub(pair[1], pair[0])),

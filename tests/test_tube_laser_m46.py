@@ -310,6 +310,28 @@ def test_solid_bars_never_fabricate_a_profile() -> None:
         assert result.features == []
 
 
+def test_unequal_leg_angle_profile_classifies() -> None:
+    """60x40 t4 angle stock: the two LONGEST section lines are the long leg's
+    outer and inner edges (parallel — they never meet), so leg pairing must
+    pick the longest NON-parallel line instead (CodeRabbit, M4.6)."""
+    poly: list[tuple[float, float]] = [
+        (0.0, 0.0),
+        (60.0, 0.0),
+        (60.0, 4.0),
+        (4.0, 4.0),
+        (4.0, 40.0),
+        (0.0, 40.0),
+    ]
+    result = get_engine().analyze(
+        _step_bytes_of(bar_from_polygon(poly, 100.0)), family=FAMILY_TUBE_LASER
+    )
+    assert result.family_scalars["stock_type"] == "angle"
+    assert result.family_scalars["leg_angle"] == pytest.approx(90.0, abs=0.5)
+    assert result.family_scalars["thickness"] == pytest.approx(4.0, rel=1e-3)
+    assert result.family_scalars["width"] == pytest.approx(60.0, rel=1e-3)
+    assert result.family_scalars["height"] == pytest.approx(40.0, rel=1e-3)
+
+
 def test_obtuse_angle_profile_reports_true_leg_angle() -> None:
     """A 135-deg bent-angle profile reports 135, never the 45 supplement
     (CodeRabbit, M4.6): leg directions are oriented away from the shared
