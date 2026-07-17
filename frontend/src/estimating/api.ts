@@ -10,6 +10,10 @@ import { useAuth } from '@clerk/clerk-react';
 import { apiFetch, type TokenGetter } from '../api/client';
 import type {
   AddOnCreateBody,
+  AssemblyComponentsOut,
+  PurchaseMatchesOut,
+  PurchasedComponentCreateBody,
+  PurchasedComponentOut,
   BulkCreatePrefill,
   BulkCreateRowBody,
   AddOnDefOut,
@@ -121,6 +125,35 @@ export interface EstimatingApi {
     body: { standard_lead_time_days?: number | null; tiers: ExpediteTierBody[] },
   ) => Promise<unknown>;
   getQuoteTotals: (quoteId: string) => Promise<QuoteTotals>;
+  // M4.10 — Assembly Components (spec #assembly)
+  getAssemblyComponents: (quoteItemId: string) => Promise<AssemblyComponentsOut>;
+  bulkUpdateComponents: (
+    componentIds: string[],
+    processId: string,
+    materialId: string | null,
+  ) => Promise<{ updated: number }>;
+  reorderAssemblyComponents: (
+    quoteItemId: string,
+    parentNodeId: string,
+    orderedNodeIds: string[],
+  ) => Promise<{ reordered: number }>;
+  copyPricing: (
+    componentId: string,
+    targetComponentId: string,
+    copyMaterial: boolean,
+    copyOperations: boolean,
+  ) => Promise<{ copied_operations: number }>;
+  deleteComponent: (componentId: string) => Promise<{ deleted: boolean }>;
+  addPurchasedComponents: (
+    quoteItemId: string,
+    items: { purchased_component_id: string; node_qty: number }[],
+  ) => Promise<{ added: number }>;
+  getPurchaseMatches: (componentId: string) => Promise<PurchaseMatchesOut>;
+  convertToPurchased: (
+    componentId: string,
+    body: { purchased_component_id: string } | { create: PurchasedComponentCreateBody },
+  ) => Promise<unknown>;
+  listPurchasedComponents: (q: string) => Promise<PurchasedComponentOut[]>;
   // M3.4 — Bulk Create Line Items (prefill + explicit Accept)
   getBulkCreatePrefill: (quoteId: string) => Promise<BulkCreatePrefill>;
   bulkCreateLineItems: (quoteId: string, rows: BulkCreateRowBody[]) => Promise<QuoteSummary>;
@@ -253,6 +286,43 @@ export function useEstimatingApi(): EstimatingApi {
           body,
         }),
       getQuoteTotals: (quoteId) => apiFetch(`/api/quotes/${quoteId}/totals`, token),
+      getAssemblyComponents: (quoteItemId) =>
+        apiFetch(`/api/quote-items/${quoteItemId}/assembly-components`, token),
+      bulkUpdateComponents: (componentIds, processId, materialId) =>
+        apiFetch('/api/components/bulk-update', token, {
+          method: 'POST',
+          body: { component_ids: componentIds, process_id: processId, material_id: materialId },
+        }),
+      reorderAssemblyComponents: (quoteItemId, parentNodeId, orderedNodeIds) =>
+        apiFetch(`/api/quote-items/${quoteItemId}/assembly-components/reorder`, token, {
+          method: 'POST',
+          body: { parent_node_id: parentNodeId, ordered_node_ids: orderedNodeIds },
+        }),
+      copyPricing: (componentId, targetComponentId, copyMaterial, copyOperations) =>
+        apiFetch(`/api/components/${componentId}/copy-pricing`, token, {
+          method: 'POST',
+          body: {
+            target_component_id: targetComponentId,
+            copy_material: copyMaterial,
+            copy_operations: copyOperations,
+          },
+        }),
+      deleteComponent: (componentId) =>
+        apiFetch(`/api/components/${componentId}`, token, { method: 'DELETE' }),
+      addPurchasedComponents: (quoteItemId, items) =>
+        apiFetch(`/api/quote-items/${quoteItemId}/purchased-components`, token, {
+          method: 'POST',
+          body: { items },
+        }),
+      getPurchaseMatches: (componentId) =>
+        apiFetch(`/api/components/${componentId}/purchase-matches`, token),
+      convertToPurchased: (componentId, body) =>
+        apiFetch(`/api/components/${componentId}/convert-to-purchased`, token, {
+          method: 'POST',
+          body,
+        }),
+      listPurchasedComponents: (q) =>
+        apiFetch(`/api/purchased-components?q=${encodeURIComponent(q)}`, token),
       getNestingOverview: (quoteId) => apiFetch(`/api/quotes/${quoteId}/nesting`, token),
       createNest: (quoteId, body) =>
         apiFetch(`/api/quotes/${quoteId}/nests`, token, { method: 'POST', body }),

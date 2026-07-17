@@ -142,6 +142,15 @@ vi.mock('./api', () => ({
     getBulkCreatePrefill,
     bulkCreateLineItems,
     getNestingOverview,
+    // M4.10 — the Assembly Components section renders nothing on an empty tree
+    getAssemblyComponents: vi.fn(() =>
+      Promise.resolve({
+        quantities: [],
+        root_node_id: null,
+        tree: [],
+        summary: { flat_qty_total: 0, totals: [] },
+      }),
+    ),
   }),
 }));
 

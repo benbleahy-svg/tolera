@@ -27,6 +27,7 @@ import {
 import { CreateRuleModal, type NewRule } from '../review/CreateRuleModal';
 import { useHasPermission } from '../session/session';
 import { AddOnsSection } from './AddOnsSection';
+import AssemblyComponentsSection from './AssemblyComponentsSection';
 import { CommunicationsSection } from './CommunicationsSection';
 import { BulkCreateDialog } from './BulkCreateDialog';
 import { useEstimatingApi } from './api';
@@ -478,6 +479,22 @@ export function EstimatingPage() {
               .catch(() => undefined);
           }}
           onClose={() => setBomBuilderOpen(false)}
+        />
+      )}
+
+      {/* M4.10 (spec #assembly): the Assembly Components section — renders
+          nothing when the item has no published children. */}
+      {quoteItemId && (
+        <AssemblyComponentsSection
+          api={api}
+          quoteItemId={quoteItemId}
+          editable={editable}
+          formatMoney={formatMoney}
+          refreshToken={bomPublishedToast ? 1 : 0}
+          onChanged={() => {
+            if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+            loadPricing();
+          }}
         />
       )}
 
