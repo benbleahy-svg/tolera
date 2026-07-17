@@ -385,6 +385,66 @@ describe('InterrogationPanel', () => {
     expect(screen.queryByText('Drehanalyse – Ergebnisse')).not.toBeInTheDocument();
   });
 
+  it('renders the tube-laser results block with profile + cut metrics (M4.6)', async () => {
+    // The angled-60° fixture's analytic values (goldens.json → tube_laser):
+    // rectangular 40×20 t2, machining_required (60° > 45° threshold).
+    const tube = succeeded();
+    tube.run!.family = 'TUBE_LASER';
+    tube.run!.result = {
+      ...tube.run!.result!,
+      family: 'TUBE_LASER',
+      family_scalars: {
+        stock_type: 'rectangular',
+        width: 40,
+        height: 20,
+        thickness: 2,
+        length: 114.64,
+        total_cut_length: 112,
+        pierce_count: 0,
+        machining_required: true,
+        is_outside_corner_round: false,
+      },
+      features: [
+        {
+          name: 'angled_cut',
+          properties: { angle: 60, cut_length: 129.3, machining_required: true },
+          geometry_refs: [],
+        },
+        { name: 'cut', properties: { angle: 0, cut_length: 112 }, geometry_refs: [] },
+      ],
+    };
+    getInterrogation.mockResolvedValue(tube);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Rohrlaser-Analyse – Ergebnisse')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Rechteckrohr')).toBeInTheDocument();
+    expect(screen.getByText(/40,00\s*mm\s*×\s*20,00\s*mm/)).toBeInTheDocument();
+    expect(screen.getByText('Schnittlänge gesamt')).toBeInTheDocument();
+    expect(screen.getByText('Schrägschnitte')).toBeInTheDocument();
+    // machining_required → the flagged-not-costed note
+    expect(screen.getByRole('note')).toHaveTextContent(/Zusätzliche Bearbeitung erforderlich/);
+  });
+
+  it('says a TUBE_LASER body matched no profile, not "pending" (M4.6)', async () => {
+    // The recognizer's honest path: incompatible — never a fabricated guess.
+    const tube = succeeded();
+    tube.run!.family = 'TUBE_LASER';
+    tube.run!.result = {
+      ...tube.run!.result!,
+      family: 'TUBE_LASER',
+      family_scalars: { stock_type: 'incompatible' },
+      features: [],
+    };
+    getInterrogation.mockResolvedValue(tube);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText(/Kein Rohrprofil erkannt/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Merkmalserkennung folgt/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Rohrlaser-Analyse – Ergebnisse')).not.toBeInTheDocument();
+  });
+
   it('omits unfolded dims and thumbnail when the recognizer could not unfold', async () => {
     const sheet = succeeded();
     sheet.run!.family = 'SHEET_METAL';

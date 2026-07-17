@@ -31,10 +31,13 @@ SIGNATURE_VERSION = "gs1"
 FAMILY_SHEET_METAL = "SHEET_METAL"
 FAMILY_MILLING = "MILLING"
 FAMILY_LATHE = "LATHE"
+FAMILY_TUBE_LASER = "TUBE_LASER"
 
 #: Families with a per-family recognizer behind :meth:`GeometryService.analyze`
 #: — any other family degrades to the dims-only pass, never fabricated scalars.
-RECOGNIZED_FAMILIES = frozenset({FAMILY_SHEET_METAL, FAMILY_MILLING, FAMILY_LATHE})
+RECOGNIZED_FAMILIES = frozenset(
+    {FAMILY_SHEET_METAL, FAMILY_MILLING, FAMILY_LATHE, FAMILY_TUBE_LASER}
+)
 
 
 class GeometryError(Exception):

@@ -50,6 +50,7 @@ from .contract import (
     FAMILY_LATHE,
     FAMILY_MILLING,
     FAMILY_SHEET_METAL,
+    FAMILY_TUBE_LASER,
     SIGNATURE_VERSION,
     AnalysisResult,
     Dimensions,
@@ -1747,6 +1748,604 @@ def _analyze_lathe(
     return scalars, features
 
 
+# --------------------------------------------------------------------------- #
+# Tube laser (M4.6) — cross-section classification + cut metrics
+# --------------------------------------------------------------------------- #
+
+#: Strategy inputs (DFM-WARNINGS §Tube Laser): countersinks lasered by default
+#: (True → they count toward cut length & pierce count); an end cut tilted
+#: beyond the threshold is reclassified ``machining_required`` (45°).
+_TUBE_DEFAULT_INPUTS: dict[str, Any] = {
+    "should_countersinks_be_lasered": True,
+    "max_angled_cut_threshold": 45.0,  # deg
+}
+_TUBE_NUMERIC_INPUTS = ("max_angled_cut_threshold",)
+_TUBE_BOOLEAN_INPUTS = ("should_countersinks_be_lasered",)
+
+#: Fractions of the axial extent where the classification section is tried —
+#: mid-length first (the M4.0-proven probe recipe); the alternates recover a
+#: clean profile when the mid plane happens to slice through a wall cutout
+#: (a cutout merges the section's loops and no profile matches). The first
+#: station that yields a known profile wins.
+_TUBE_STATIONS = (0.5, 0.35, 0.65, 0.42, 0.58, 0.25, 0.75)
+
+#: |n·axis| below this = a wall (skin) face; above = an end-cut face.
+_TUBE_AXIS_TOL = 0.02
+#: End cuts within this tilt of perpendicular count as straight cuts.
+_TUBE_STRAIGHT_DEG = 0.5
+
+_TUBE_INCOMPATIBLE: dict[str, Any] = {"stock_type": "incompatible"}
+
+
+def _wire_length(wire: Any) -> float:
+    props = GProp_GProps()
+    BRepGProp.LinearProperties_s(wire, props)
+    return float(props.Mass())
+
+
+def _inner_wires(face: TopoDS_Face) -> list[Any]:
+    outer = BRepTools.OuterWire_s(face)
+    wires = []
+    ex = TopExp_Explorer(face, TopAbs_WIRE)
+    while ex.More():
+        if not ex.Current().IsSame(outer):
+            wires.append(ex.Current())
+        ex.Next()
+    return wires
+
+
+class _TubeFace:
+    """One face of the candidate tube body, pre-measured."""
+
+    def __init__(self, face: TopoDS_Face) -> None:
+        surf = BRepAdaptor_Surface(face)
+        self.face = face
+        self.kind = surf.GetType()  # 0 plane, 1 cylinder, 2 cone
+        self.area = _face_area(face)
+        self.normal: tuple[float, float, float] | None = None
+        self.origin: tuple[float, float, float] | None = None
+        self.axis: tuple[float, float, float] | None = None
+        if self.kind == 0:
+            self.normal = _outward_normal(face)
+            loc = surf.Plane().Location()
+            self.origin = (loc.X(), loc.Y(), loc.Z())
+        elif self.kind == 1:
+            d = surf.Cylinder().Axis().Direction()
+            self.axis = _v_unit((d.X(), d.Y(), d.Z()))
+        elif self.kind == 2:
+            d = surf.Cone().Axis().Direction()
+            self.axis = _v_unit((d.X(), d.Y(), d.Z()))
+
+
+def _tube_axis(faces: list[_TubeFace]) -> tuple[float, float, float] | None:
+    """The extrusion axis: the candidate direction with the most wall support
+    (planar walls are parallel to the axis; skin cylinders are coaxial).
+    Candidates come from the faces themselves — cylinder/cone axes plus cross
+    products of planar-normal pairs — so the pick is orientation-free."""
+    candidates: list[tuple[float, float, float]] = []
+    planes = [f for f in faces if f.kind == 0 and f.normal is not None]
+    for f in faces:
+        if f.axis is not None:
+            candidates.append(f.axis)
+    for i, a in enumerate(planes):
+        for b in planes[i + 1 :]:
+            assert a.normal is not None and b.normal is not None
+            c = _v_cross(a.normal, b.normal)
+            norm = math.sqrt(_v_dot(c, c))
+            if norm > 0.1:
+                candidates.append(_v_unit(c))
+
+    def support(c: tuple[float, float, float]) -> float:
+        total = 0.0
+        for f in faces:
+            if f.kind == 0 and f.normal is not None:
+                if abs(_v_dot(f.normal, c)) < _TUBE_AXIS_TOL:
+                    total += f.area
+            elif f.kind == 1 and f.axis is not None and abs(_v_dot(f.axis, c)) > 0.999:
+                total += f.area
+        return total
+
+    best: tuple[float, float, float] | None = None
+    best_support = 0.0
+    for c in candidates:
+        s = support(c)
+        if s > best_support + 1e-9:
+            best, best_support = c, s
+    return best
+
+
+class _SectionLine:
+    def __init__(self, p1: tuple[float, float, float], p2: tuple[float, float, float]) -> None:
+        self.p1 = p1
+        self.p2 = p2
+        self.vec = _v_sub(p2, p1)
+        self.length = math.sqrt(_v_dot(self.vec, self.vec))
+        self.dir = _v_unit(self.vec) if self.length > 0 else (0.0, 0.0, 0.0)
+        self.mid = tuple((a + b) / 2 for a, b in zip(p1, p2, strict=True))
+
+
+class _TubeSection:
+    """One planar cross-section, decomposed into lines / arcs / full circles."""
+
+    def __init__(
+        self,
+        shape: TopoDS_Shape,
+        origin: tuple[float, float, float],
+        axis: tuple[float, float, float],
+    ) -> None:
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+        from OCP.gp import gp_Dir, gp_Pln
+
+        plane = gp_Pln(gp_Pnt(*origin), gp_Dir(*axis))
+        sec = BRepAlgoAPI_Section(shape, plane)
+        sec.Build()
+        self.ok = sec.IsDone()
+        self.lines: list[_SectionLine] = []
+        self.arc_radii: list[tuple[float, tuple[float, float, float]]] = []  # (r, arc midpoint)
+        self.circle_radii: list[float] = []
+        self.points: list[tuple[float, float, float]] = []
+        self.unsupported = False
+        self._loop_pts: list[list[tuple[float, float, float]]] = []
+        if not self.ok:
+            return
+        ex = TopExp_Explorer(sec.Shape(), TopAbs_EDGE)
+        while ex.More():
+            edge = TopoDS.Edge_s(ex.Current())
+            curve = BRepAdaptor_Curve(edge)
+            kind = curve.GetType()
+            first, last = curve.FirstParameter(), curve.LastParameter()
+            p1, p2 = curve.Value(first), curve.Value(last)
+            e1 = (p1.X(), p1.Y(), p1.Z())
+            e2 = (p2.X(), p2.Y(), p2.Z())
+            if kind == 0:  # line
+                self.lines.append(_SectionLine(e1, e2))
+                self.points.extend((e1, e2))
+                self._loop_pts.append([e1, e2])
+            elif kind == 1:  # circle — full ring or a corner arc
+                radius = curve.Circle().Radius()
+                if last - first >= 2 * math.pi - 1e-3:
+                    self.circle_radii.append(radius)
+                else:
+                    pm = curve.Value((first + last) / 2)
+                    self.arc_radii.append((radius, (pm.X(), pm.Y(), pm.Z())))
+                    self._loop_pts.append([e1, e2])
+                for i in range(16):
+                    p = curve.Value(first + (last - first) * i / 15)
+                    self.points.append((p.X(), p.Y(), p.Z()))
+            else:
+                self.unsupported = True
+            ex.Next()
+
+    def loop_count(self) -> int:
+        """Connected components of the non-circle edges (probe D recipe)."""
+        parent: dict[tuple[float, float, float], tuple[float, float, float]] = {}
+
+        def find(x: tuple[float, float, float]) -> tuple[float, float, float]:
+            parent.setdefault(x, x)
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def q(p: tuple[float, float, float]) -> tuple[float, float, float]:
+            return (round(p[0], 4), round(p[1], 4), round(p[2], 4))
+
+        for pts in self._loop_pts:
+            head = find(q(pts[0]))
+            for p in pts[1:]:
+                parent[find(q(p))] = head
+        return len({find(p) for p in parent})
+
+    def thickness(self) -> float | None:
+        """Wall thickness: the minimum gap between antiparallel, overlapping
+        line pairs (outer wall vs inner wall of the same leg)."""
+        best: float | None = None
+        for i, a in enumerate(self.lines):
+            for b in self.lines[i + 1 :]:
+                if abs(_v_dot(a.dir, b.dir)) < 0.999:
+                    continue
+                gap_vec = _v_sub(b.mid, a.mid)
+                along = _v_dot(gap_vec, a.dir)
+                perp = math.sqrt(max(_v_dot(gap_vec, gap_vec) - along * along, 0.0))
+                if perp <= 1e-6:
+                    continue
+                a_span = sorted((_v_dot(a.p1, a.dir), _v_dot(a.p2, a.dir)))
+                b_span = sorted((_v_dot(b.p1, a.dir), _v_dot(b.p2, a.dir)))
+                if min(a_span[1], b_span[1]) - max(a_span[0], b_span[0]) <= 1e-6:
+                    continue
+                if best is None or perp < best:
+                    best = perp
+        return best
+
+
+def _classify_tube_section(
+    section: _TubeSection, axis: tuple[float, float, float]
+) -> dict[str, Any] | None:
+    """Profile + section dims from one cross-section, or ``None`` when no
+    known profile matches (the caller tries the next station)."""
+    if not section.ok or section.unsupported:
+        return None
+    lines, arcs, circles = section.lines, section.arc_radii, section.circle_radii
+
+    if len(circles) == 2 and not lines and not arcs:
+        r_out, r_in = max(circles), min(circles)
+        if r_out - r_in <= 1e-6:
+            return None
+        return {
+            "stock_type": "round",
+            "diameter": 2 * r_out,
+            "thickness": r_out - r_in,
+        }
+    if not lines or circles:
+        return None
+
+    thickness = section.thickness()
+    if thickness is None:
+        return None
+    loops = section.loop_count()
+
+    # in-plane frame: u along the longest wall segment, v perpendicular
+    u = max(lines, key=lambda ln: ln.length).dir
+    v = _v_unit(_v_cross(axis, u))
+    us = [_v_dot(p, u) for p in section.points]
+    vs = [_v_dot(p, v) for p in section.points]
+    width, height = max(us) - min(us), max(vs) - min(vs)
+
+    if not arcs:
+        if loops == 2 and len(lines) == 8:
+            return {
+                "stock_type": "rectangular",
+                "width": width,
+                "height": height,
+                "thickness": thickness,
+                "is_outside_corner_round": False,
+            }
+        if loops == 1 and len(lines) == 6:
+            longest = sorted(lines, key=lambda ln: ln.length, reverse=True)
+            leg_angle = None
+            for other in longest[1:]:
+                dot = abs(_v_dot(longest[0].dir, other.dir))
+                if dot < 0.999:
+                    leg_angle = math.degrees(math.acos(min(max(dot, 0.0), 1.0)))
+                    break
+            return {
+                "stock_type": "angle",
+                "width": width,
+                "height": height,
+                "thickness": thickness,
+                **({"leg_angle": leg_angle} if leg_angle is not None else {}),
+            }
+        if loops == 1 and len(lines) == 8:
+            return {
+                "stock_type": "u_channel",
+                "width": width,
+                "height": height,
+                "thickness": thickness,
+            }
+        return None
+
+    if loops == 2 and len(lines) == 8 and len(arcs) == 8:
+        # rounded rectangle: outer-loop arcs = corner radius, inner = relief.
+        # An arc's MIDPOINT bulges toward its own boundary, so outer-corner
+        # arcs sit strictly farther from the section centre than inner ones
+        # (endpoints do not — corners of the inner loop can outrank far-side
+        # outer endpoints).
+        cu = (max(us) + min(us)) / 2
+        cv = (max(vs) + min(vs)) / 2
+        by_dist = sorted(
+            arcs,
+            key=lambda ra: math.hypot(_v_dot(ra[1], u) - cu, _v_dot(ra[1], v) - cv),
+        )
+        inner = [r for r, _ in by_dist[:4]]
+        outer = [r for r, _ in by_dist[4:]]
+        return {
+            "stock_type": "rectangular_radiused",
+            "width": width,
+            "height": height,
+            "thickness": thickness,
+            "internal_radius": sum(inner) / len(inner),
+            "outside_corner_radius": sum(outer) / len(outer),
+            "is_outside_corner_round": True,
+        }
+    return None
+
+
+def _tube_cut_metrics(
+    faces: list[_TubeFace],
+    axis: tuple[float, float, float],
+    thickness: float,
+    max_angled_deg: float,
+    countersinks_lasered: bool,
+) -> tuple[float, int, bool, list[dict[str, Any]]]:
+    """End cuts + wall cutouts + countersinks → (total_cut_length,
+    pierce_count, machining_required, features)."""
+    features: list[dict[str, Any]] = []
+    total_cut = 0.0
+    machining_required = False
+
+    # -- end cuts: planar faces whose normal has an axial component ---------- #
+    groups: dict[tuple[float, ...], dict[str, float]] = {}
+    for f in faces:
+        if f.kind != 0 or f.normal is None or f.origin is None:
+            continue
+        cos_ax = abs(_v_dot(f.normal, axis))
+        if cos_ax <= _TUBE_AXIS_TOL:
+            continue
+        key = (
+            round(f.normal[0], 3),
+            round(f.normal[1], 3),
+            round(f.normal[2], 3),
+            round(_v_dot(f.normal, f.origin), 3),
+        )
+        entry = groups.setdefault(key, {"area": 0.0, "cos": cos_ax})
+        entry["area"] += f.area
+    for entry in groups.values():
+        angle = math.degrees(math.acos(min(max(entry["cos"], 0.0), 1.0)))
+        cut_length = entry["area"] / thickness
+        if angle <= _TUBE_STRAIGHT_DEG:
+            total_cut += cut_length
+            features.append(
+                {
+                    "name": "cut",
+                    "properties": {"angle": 0.0, "cut_length": cut_length},
+                    "geometry_refs": [],
+                }
+            )
+            continue
+        needs_machining = angle > max_angled_deg
+        machining_required = machining_required or needs_machining
+        if not needs_machining:
+            total_cut += cut_length
+        features.append(
+            {
+                "name": "angled_cut",
+                "properties": {
+                    "angle": angle,
+                    "cut_length": cut_length,
+                    "machining_required": needs_machining,
+                },
+                "geometry_refs": [],
+            }
+        )
+
+    # -- wall cutouts: paired inner wires on outer+inner skins (M4.2 rule:
+    #    min() per wall pair — a one-sided recess is never a piercing) -------- #
+    pierce = 0
+    perimeters: list[float] = []
+    skins = [
+        f
+        for f in faces
+        if f.kind == 0 and f.normal is not None and abs(_v_dot(f.normal, axis)) <= _TUBE_AXIS_TOL
+    ]
+    used: set[int] = set()
+    for i, outer_f in enumerate(skins):
+        if i in used:
+            continue
+        assert outer_f.normal is not None and outer_f.origin is not None
+        for j in range(i + 1, len(skins)):
+            if j in used:
+                continue
+            inner_f = skins[j]
+            assert inner_f.normal is not None and inner_f.origin is not None
+            if _v_dot(outer_f.normal, inner_f.normal) > -0.999:
+                continue
+            gap = abs(_v_dot(_v_sub(inner_f.origin, outer_f.origin), outer_f.normal))
+            if not (0.4 * thickness <= gap <= 1.6 * thickness):
+                continue
+            used.update((i, j))
+            # outer wall of the pair = normal points away from the partner
+            away = _v_dot(_v_sub(outer_f.origin, inner_f.origin), outer_f.normal)
+            out_face = outer_f.face if away > 0 else inner_f.face
+            in_face = inner_f.face if away > 0 else outer_f.face
+            out_wires = sorted((_wire_length(w) for w in _inner_wires(out_face)), reverse=True)
+            count = min(len(out_wires), len(_inner_wires(in_face)))
+            pierce += count
+            perimeters.extend(out_wires[:count])
+            break
+    # coaxial cylinder skins (round tubes): outer = max radius group
+    cyl_skins = [
+        f for f in faces if f.kind == 1 and f.axis is not None and abs(_v_dot(f.axis, axis)) > 0.999
+    ]
+    if cyl_skins:
+        radii = sorted(
+            {round(BRepAdaptor_Surface(f.face).Cylinder().Radius(), 6) for f in cyl_skins}
+        )
+        if len(radii) >= 2:
+            outer_wires: list[float] = []
+            inner_count = 0
+            for f in cyl_skins:
+                r = round(BRepAdaptor_Surface(f.face).Cylinder().Radius(), 6)
+                if r == radii[-1]:
+                    outer_wires.extend(_wire_length(w) for w in _inner_wires(f.face))
+                elif r == radii[0]:
+                    inner_count += len(_inner_wires(f.face))
+            outer_wires.sort(reverse=True)
+            count = min(len(outer_wires), inner_count)
+            pierce += count
+            perimeters.extend(outer_wires[:count])
+
+    # -- countersinks: radial cone faces; the toggle moves them between the
+    #    laser pass and a secondary op (DFM-WARNINGS §Tube strategy) ---------- #
+    for f in faces:
+        if f.kind != 2 or f.axis is None or abs(_v_dot(f.axis, axis)) > 0.9:
+            continue
+        radii_c: list[float] = []
+        ee = TopExp_Explorer(f.face, TopAbs_EDGE)
+        while ee.More():
+            curve = BRepAdaptor_Curve(TopoDS.Edge_s(ee.Current()))
+            if curve.GetType() == 1:
+                radii_c.append(curve.Circle().Radius())
+            ee.Next()
+        if not radii_c:
+            continue
+        sink_d, hole_d = 2 * max(radii_c), 2 * min(radii_c)
+        features.append(
+            {
+                "name": "countersink",
+                "properties": {
+                    "hole_diameter": hole_d,
+                    "sink_diameter": sink_d,
+                    "lasered": countersinks_lasered,
+                },
+                "geometry_refs": [],
+            }
+        )
+        if not countersinks_lasered:
+            # drop the sink's pierced wire from the laser metrics
+            target = math.pi * sink_d
+            match = min(
+                (p for p in perimeters if abs(p - target) <= 0.02 * target),
+                default=None,
+            )
+            if match is not None:
+                perimeters.remove(match)
+                pierce = max(pierce - 1, 0)
+
+    sink_perims = {
+        round(math.pi * f["properties"]["sink_diameter"], 3)
+        for f in features
+        if f["name"] == "countersink"
+    }
+    for p in perimeters:
+        total_cut += p
+        if round(p, 3) not in sink_perims:
+            features.append({"name": "cutout", "properties": {"perimeter": p}, "geometry_refs": []})
+
+    return total_cut, pierce, machining_required, features
+
+
+def _analyze_tube_laser(
+    shape: TopoDS_Shape, inputs: dict[str, Any] | None
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The M4.6 recognizer. Returns ``(family_scalars, features)`` — a body
+    matching none of the 5 profiles yields ``{"stock_type": "incompatible"}``
+    and no features (never a fabricated guess, build-plan M4.6)."""
+    resolved = {**_TUBE_DEFAULT_INPUTS, **(inputs or {})}
+    for name in _TUBE_NUMERIC_INPUTS:
+        value = resolved[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise GeometryError(f"tube-laser input {name} must be a finite non-negative number")
+        resolved[name] = float(value)
+    for name in _TUBE_BOOLEAN_INPUTS:
+        if not isinstance(resolved[name], bool):
+            raise GeometryError(f"tube-laser input {name} must be a boolean")
+
+    shape = _canonicalize(shape)
+    faces: list[_TubeFace] = []
+    ex = TopExp_Explorer(shape, TopAbs_FACE)
+    while ex.More():
+        faces.append(_TubeFace(TopoDS.Face_s(ex.Current())))
+        ex.Next()
+    axis = _tube_axis(faces)
+    if axis is None:
+        return dict(_TUBE_INCOMPATIBLE), []
+
+    # axial extent from the body's vertices (tube stock length incl. any tip)
+    projections: list[float] = []
+    vx = TopExp_Explorer(shape, TopAbs_VERTEX)
+    while vx.More():
+        p = BRep_Tool.Pnt_s(TopoDS.Vertex_s(vx.Current()))
+        projections.append(_v_dot((p.X(), p.Y(), p.Z()), axis))
+        vx.Next()
+    if not projections:
+        return dict(_TUBE_INCOMPATIBLE), []
+    lo, hi = min(projections), max(projections)
+    if hi - lo <= 1e-6:
+        return dict(_TUBE_INCOMPATIBLE), []
+    centroid_s = sum(projections) / len(projections)
+
+    profile: dict[str, Any] | None = None
+    for station in _TUBE_STATIONS:
+        s = lo + station * (hi - lo)
+        centroid = _shape_centroid(shape)
+        origin = (
+            centroid[0] + (s - centroid_s) * axis[0],
+            centroid[1] + (s - centroid_s) * axis[1],
+            centroid[2] + (s - centroid_s) * axis[2],
+        )
+        profile = _classify_tube_section(_TubeSection(shape, origin, axis), axis)
+        if profile is not None:
+            break
+    if profile is None:
+        return dict(_TUBE_INCOMPATIBLE), []
+
+    # Constant-wall gate (the M4.2 sheet gate, tube form): a real tube/profile
+    # is a constant-thickness shell, so its wall skins account for 2·V/t of
+    # surface — regardless of end shape or cutouts (both sides lose alike).
+    # A solid body whose cross-section merely LOOKS like a profile (a pocketed
+    # block sections as a u_channel) fails this by a wide margin. Open-profile
+    # leg-tip walls are counted with the skins, hence the 4·t·L allowance.
+    thickness = float(profile["thickness"])
+    skin_area = sum(
+        f.area
+        for f in faces
+        if (f.kind == 0 and f.normal is not None and abs(_v_dot(f.normal, axis)) <= _TUBE_AXIS_TOL)
+        or (f.kind == 1 and f.axis is not None and abs(_v_dot(f.axis, axis)) > 0.999)
+    )
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape, props)
+    volume = float(props.Mass())
+    expected_skins = 2.0 * volume / thickness
+    if abs(skin_area - expected_skins) > 0.02 * expected_skins + 4.0 * thickness * (hi - lo):
+        return dict(_TUBE_INCOMPATIBLE), []
+    # …and never MORE material than the profile section swept over the full
+    # length allows (angled ends and cutouts only remove material, so real
+    # tubes sit at or under). A pocketed solid whose one cross-section apes a
+    # profile (u_channel-shaped milled block) is overfull and rejected here.
+    if volume / (hi - lo) > 1.02 * _profile_section_area(profile):
+        return dict(_TUBE_INCOMPATIBLE), []
+
+    total_cut, pierce, machining_required, features = _tube_cut_metrics(
+        faces,
+        axis,
+        profile["thickness"],
+        resolved["max_angled_cut_threshold"],
+        resolved["should_countersinks_be_lasered"],
+    )
+    scalars: dict[str, Any] = {
+        **profile,
+        "length": hi - lo,
+        "total_cut_length": total_cut,
+        "pierce_count": pierce,
+        "machining_required": machining_required,
+    }
+    return scalars, features
+
+
+def _profile_section_area(profile: dict[str, Any]) -> float:
+    """Analytic cross-section area of the claimed stock profile (mm²)."""
+    t = float(profile["thickness"])
+    kind = profile["stock_type"]
+    if kind == "round":
+        r_out = float(profile["diameter"]) / 2.0
+        return math.pi * (r_out**2 - (r_out - t) ** 2)
+    w, h = float(profile["width"]), float(profile["height"])
+    if kind == "rectangular":
+        return w * h - (w - 2 * t) * (h - 2 * t)
+    if kind == "rectangular_radiused":
+        r_out = float(profile["outside_corner_radius"])
+        r_in = float(profile["internal_radius"])
+        return (w * h - (4 - math.pi) * r_out**2) - (
+            (w - 2 * t) * (h - 2 * t) - (4 - math.pi) * r_in**2
+        )
+    if kind == "angle":
+        return t * (w + h - t)
+    # u_channel
+    return t * (w + 2 * h - 2 * t)
+
+
+def _shape_centroid(shape: TopoDS_Shape) -> tuple[float, float, float]:
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape, props)
+    c = props.CentreOfMass()
+    return (c.X(), c.Y(), c.Z())
+
+
 class OcctGeometryService:
     """v1 engine (OCCT via OCP). Implements :class:`GeometryService`."""
 
@@ -1771,6 +2370,8 @@ class OcctGeometryService:
             family_scalars, features = _analyze_sheet_metal(shape, volume, area)
         elif family == FAMILY_MILLING:
             family_scalars, features, confidence = _analyze_mill3(shape, volume, inputs)
+        elif family == FAMILY_TUBE_LASER:
+            family_scalars, features = _analyze_tube_laser(shape, inputs)
         elif family == FAMILY_LATHE:
             # attributes + stock only (v2.15); no runtime -> no confidence
             family_scalars, features = _analyze_lathe(shape, inputs)

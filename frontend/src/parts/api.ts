@@ -168,6 +168,37 @@ export interface LatheScalars {
   stock_length: number;
 }
 
+/** Tube-laser `family_scalars` (M4.6): the classified stock profile with its
+ * section dims + laser cut metrics. `incompatible` = the body matched none of
+ * the 5 profiles — nothing else is reported (never a fabricated guess). Cut
+ * details arrive as `features` (cut / angled_cut / cutout / countersink). */
+export interface TubeLaserScalars {
+  stock_type:
+    | 'round'
+    | 'rectangular'
+    | 'rectangular_radiused'
+    | 'angle'
+    | 'u_channel'
+    | 'incompatible';
+  /** Wall thickness, mm. */
+  thickness?: number;
+  /** Stock length along the tube axis, mm. */
+  length?: number;
+  width?: number;
+  height?: number;
+  diameter?: number;
+  internal_radius?: number;
+  outside_corner_radius?: number;
+  is_outside_corner_round?: boolean;
+  /** Angle between the legs (angle profile), degrees. */
+  leg_angle?: number;
+  /** Total laser cut length (end cuts + cutouts), mm. */
+  total_cut_length?: number;
+  pierce_count?: number;
+  /** An end cut exceeds max_angled_cut_threshold → secondary machining op. */
+  machining_required?: boolean;
+}
+
 export interface InterrogationRun {
   id: string;
   part_id: string;
@@ -193,7 +224,12 @@ export interface InterrogationRun {
       weight: number | null;
       bbox_source: 'obb' | 'aabb';
     };
-    family_scalars?: SheetMetalScalars | MillingScalars | LatheScalars | Record<string, never>;
+    family_scalars?:
+      | SheetMetalScalars
+      | MillingScalars
+      | LatheScalars
+      | TubeLaserScalars
+      | Record<string, never>;
     features?: InterrogationFeature[];
     /** Engine trust rating where runtime is estimated (milling — M4.4). */
     confidence?: 'High' | 'Medium' | 'Low' | null;
