@@ -44,6 +44,7 @@ from app.models import (
     CalcType,
     CalculationMode,
     CostCategory,
+    CustomInterrogation,
     CustomTable,
     DiscountDef,
     EmailTemplate,
@@ -358,6 +359,7 @@ class ConfigureSeedResult:
     custom_tables_created: int
     email_templates_created: int
     rules_created: int
+    interrogation_profiles_created: int
 
 
 async def seed_configure_catalog(
@@ -391,6 +393,7 @@ async def seed_configure_catalog(
     tables_created = await _seed_custom_tables(session, org_id)
     templates_created = await _seed_email_templates(session, org_id)
     rules_created = await _seed_rules(session, org_id)
+    interrogation_profiles_created = await _seed_interrogation_profiles(session, org_id)
 
     await session.flush()
     return ConfigureSeedResult(
@@ -406,6 +409,7 @@ async def seed_configure_catalog(
         custom_tables_created=tables_created,
         email_templates_created=templates_created,
         rules_created=rules_created,
+        interrogation_profiles_created=interrogation_profiles_created,
     )
 
 
@@ -981,4 +985,51 @@ async def _seed_rules(session: AsyncSession, org_id: uuid.UUID) -> int:
         )
         created += 1
     await session.flush()
+    return created
+
+
+#: Default interrogation-profile names per Core-4 family. The sheet-metal name
+#: is DFM-WARNINGS §Implementation 1 verbatim ("Default Sheet Metal (Laser)");
+#: the others follow the same convention (ASSUMED, cheap to rename).
+_INTERROGATION_PROFILE_NAMES: dict[ProcessFamily, str] = {
+    ProcessFamily.SHEET_METAL: "Default Sheet Metal (Laser)",
+    ProcessFamily.MILLING: "Default CNC Milling",
+    ProcessFamily.LATHE: "Default CNC Lathe",
+    ProcessFamily.TUBE_LASER: "Default Tube Laser",
+}
+
+
+async def _seed_interrogation_profiles(session: AsyncSession, org_id: uuid.UUID) -> int:
+    """M4.7: one org-default ``CustomInterrogation`` per Core-4 family, its
+    ``inputs`` the DFM-WARNINGS seed defaults (thresholds + toggles, metric).
+    Natural key = (org, family, no material link) — a re-seed never touches an
+    existing default, so edited thresholds survive (the catalog_seed rule)."""
+    from app.geometry.dfm import dfm_default_inputs
+
+    existing = {
+        row.family
+        for row in (
+            await session.scalars(
+                select(CustomInterrogation).where(
+                    CustomInterrogation.org_id == org_id,
+                    CustomInterrogation.material_class_id.is_(None),
+                    CustomInterrogation.material_family_id.is_(None),
+                    CustomInterrogation.material_id.is_(None),
+                )
+            )
+        ).all()
+    }
+    created = 0
+    for family, name in _INTERROGATION_PROFILE_NAMES.items():
+        if family in existing:
+            continue
+        session.add(
+            CustomInterrogation(
+                org_id=org_id,
+                name=name,
+                family=family,
+                inputs=dfm_default_inputs(family.value),
+            )
+        )
+        created += 1
     return created
