@@ -387,6 +387,35 @@ class Seeder:
         async with AsyncSession(self._engine) as session, session.begin():
             return await seed_configure_catalog(session, org_id=org_id)
 
+    def process_router_ops(self, org_id: uuid.UUID, *, family: str) -> list[uuid.UUID]:
+        """The op-def ids a seeded process of ``family`` routes, in router
+        order (M4.8 op-link tests need real process→op wiring)."""
+        return self._loop.run_until_complete(self._process_router_ops(org_id, family))
+
+    async def _process_router_ops(self, org_id: uuid.UUID, family: str) -> list[uuid.UUID]:
+        from sqlalchemy import select
+
+        from app.models import Process, ProcessOperation
+
+        async with AsyncSession(self._engine) as session:
+            process_id = await session.scalar(
+                select(Process.id)
+                .where(Process.org_id == org_id, Process.family == family)
+                .order_by(Process.name)
+                .limit(1)
+            )
+            if process_id is None:
+                return []
+            return list(
+                (
+                    await session.scalars(
+                        select(ProcessOperation.operation_def_id)
+                        .where(ProcessOperation.process_id == process_id)
+                        .order_by(ProcessOperation.position)
+                    )
+                ).all()
+            )
+
     async def _org(
         self, slug: str, name: str | None, *, country: str, currency: str, locale: str
     ) -> uuid.UUID:

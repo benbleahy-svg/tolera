@@ -1002,3 +1002,14 @@ The spec's operation-definition editor shows a Variables table (VARIABLE | VALUE
 ## [2026-07-15] OPEN: estimating route shape — `/quotes/edit/:id/:lineItemId` + line-item sidebar
 
 Spec `#partview` routes per line item with a left sidebar; the built page is `/quotes/:quoteId` with a line-item select (deferral previously only a code comment — now logged). Belongs to the quote-detail screen block; revisit when that block lands.
+
+## [2026-07-17] M4.8 resolution micro-contracts + seed variant names (assumptions recorded)
+
+**Context.** M4.8 (custom interrogations, PR #60) ships three grill-time `ASSUMED:` decisions that the sources do not pin; CodeRabbit asked for them on the log. All were classified **cheap to reverse** (pure ranking logic + a name-keyed idempotent seed — no schema, money, tenancy or external contract), so per §6.3 they were applied with inline notes rather than halting; recorded here for the audit trail.
+
+**Assumed (applied):**
+- **Op-match vs default precedence:** op-def links are an *eligibility filter*; an op-matched profile outranks the bare org default only at equal material rank; material specificity always dominates (KB "most applicable … based on its material"). Sort key `(material_rank, op_matched)`.
+- **Equal-rank tie-break:** `created_at ASC, id ASC` (oldest wins) — any total order satisfies the "re-resolution is deterministic" acceptance; oldest-first keeps the seeded default winning over later same-rank rows. Changing it is a one-line, migration-free edit (`app/interrogation.py::select_most_specific`).
+- **Seed variant names:** "CNC-Fräsen Aluminium" / "CNC-Fräsen Nichtrostender Stahl" (German-first §5; family display names from the M1.7 catalog). The name is the reseed natural key: renaming the constant later would create a second variant on reseed rather than update the old one — acceptable (old row stays, estimator deletes it), but rename via a data migration if it ever matters.
+
+**Revisit trigger:** PP-parity evidence (KB/screenshot) contradicting the precedence or tie-break; or Fechner feedback on the seed names.

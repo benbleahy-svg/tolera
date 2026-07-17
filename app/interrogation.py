@@ -23,6 +23,8 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -46,14 +48,18 @@ from .geometry import RECOGNIZED_FAMILIES
 from .models import (
     Component,
     CustomInterrogation,
+    CustomInterrogationOperationDef,
     InterrogationRun,
     InterrogationStatus,
     Material,
+    MaterialFamily,
+    OperationDef,
     Part,
     PartFile,
     PartGeometry,
     Process,
     ProcessFamily,
+    ProcessOperation,
 )
 from .storage import ObjectStorage
 from .task_resources import resolve as resolve_task_resources
@@ -186,23 +192,39 @@ async def maybe_enqueue_for_process(
     pf = await session.get(PartFile, part.primary_file_id)
     if pf is None or FileCategory(pf.file_type) != FileCategory.brep_cad:
         return None
-    # A queued run resolves the CURRENT profile when it executes, so it always
-    # covers this trigger. A running run may have resolved a just-edited
-    # profile's predecessor — accepted: its fingerprint isn't visible
-    # mid-flight, matching on it would double-enqueue every in-flight run
-    # (the duplicate-dispatch pile-up this dedupe prevents), and once it
+    # A queued run resolves the CURRENT profile when it executes — but with
+    # the material frozen on its own row (M4.8), so an in-flight run only
+    # covers this trigger when it carries the part's CURRENT material;
+    # otherwise a material switch under a queued/running run would leave the
+    # old material's thresholds standing with no successor. A run under a
+    # just-edited profile's predecessor stays accepted (its fingerprint isn't
+    # visible mid-flight; matching on it would double-enqueue every in-flight
+    # run — the duplicate-dispatch pile-up this dedupe prevents), and once it
     # commits the next trigger sees the hash mismatch below and re-runs. A
     # succeeded run only counts if it was computed under the current profile
-    # inputs — otherwise a threshold/toggle edit would keep serving stale
-    # warnings on re-assignment (M4.7).
-    current_fp = inputs_fingerprint(await resolve_default_inputs(session, str(family)))
+    # inputs — otherwise a threshold/toggle/link edit would keep serving stale
+    # warnings on re-assignment (M4.7; material-specific resolution M4.8).
+    current_material_id = await resolve_part_material_id(session, part.id)
+    current_fp = inputs_fingerprint(
+        await resolve_interrogation_inputs(
+            session,
+            family=str(family),
+            material_id=current_material_id,
+            part_id=part.id,
+        )
+    )
     existing = await session.scalar(
         select(InterrogationRun.id)
         .where(
             InterrogationRun.part_id == part.id,
             InterrogationRun.file_id == pf.id,
             InterrogationRun.family == str(family),
-            InterrogationRun.status.in_([InterrogationStatus.queued, InterrogationStatus.running])
+            (
+                InterrogationRun.status.in_(
+                    [InterrogationStatus.queued, InterrogationStatus.running]
+                )
+                & InterrogationRun.material_id.is_not_distinct_from(current_material_id)
+            )
             | (
                 (InterrogationRun.status == InterrogationStatus.succeeded)
                 & (InterrogationRun.inputs_hash == current_fp)
@@ -259,19 +281,152 @@ def inputs_fingerprint(inputs: dict[str, Any] | None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-async def resolve_default_inputs(session: AsyncSession, family: str) -> dict[str, Any] | None:
-    """The org's DEFAULT ``CustomInterrogation`` inputs for a family (all
-    material links NULL — seeded by ``configure_seed``); None when the org has
-    no profile row (engine defaults apply). Org scoping rides the session RLS."""
-    profile = await session.scalar(
-        select(CustomInterrogation).where(
-            CustomInterrogation.family == family,
-            CustomInterrogation.material_class_id.is_(None),
-            CustomInterrogation.material_family_id.is_(None),
-            CustomInterrogation.material_id.is_(None),
+def select_most_specific(
+    candidates: Sequence[Any],
+    *,
+    material_id: uuid.UUID | None,
+    material_family_id: uuid.UUID | None,
+    material_class_id: uuid.UUID | None,
+    op_links: Mapping[uuid.UUID, AbstractSet[uuid.UUID]],
+    process_operation_def_ids: AbstractSet[uuid.UUID],
+) -> Any | None:
+    """The §4 MOST-SPECIFIC pick over a family's ``CustomInterrogation`` rows.
+
+    Material rank per row = its most specific link on the part's material
+    chain: material (3) > family (2) > class (1) > the org default (0); a row
+    whose links all miss the chain is no candidate, and an unlinked row ranks
+    0 only when it IS the default or enters via an op match. Op-def links
+    (``op_links``: profile id → linked op-def ids) are an eligibility filter —
+    an op-linked row is a candidate only when the part's process routing
+    contains one of its ops — and an op match outranks the bare default at
+    equal material rank (ASSUMED: filter-not-rank, KB is silent). Ties break
+    oldest-first then by id, so re-resolution is deterministic (ASSUMED —
+    acceptance requires determinism, no source names the ordering).
+    """
+    best: Any | None = None
+    best_key: tuple[int, bool, float, str] | None = None
+    for row in candidates:
+        linked_ops = op_links.get(row.id, frozenset())
+        if linked_ops and not (linked_ops & process_operation_def_ids):
+            continue
+        has_material_links = (
+            row.material_id is not None
+            or row.material_family_id is not None
+            or row.material_class_id is not None
         )
+        if not has_material_links:
+            # Rank 0 is the org DEFAULT's slot. An unlinked non-default
+            # profile (authoring in progress, or a viewer-pick bundle à la
+            # the KB Laser/Punch example) must not silently compete with it —
+            # it becomes auto-resolvable only through an op-def match.
+            if not row.is_default and not linked_ops:
+                continue
+            rank = 0
+        elif row.material_id is not None and row.material_id == material_id:
+            rank = 3
+        elif row.material_family_id is not None and row.material_family_id == material_family_id:
+            rank = 2
+        elif row.material_class_id is not None and row.material_class_id == material_class_id:
+            rank = 1
+        else:
+            continue
+        # Negate the tie-breakers so one max() comparison prefers OLDEST.
+        key = (rank, bool(linked_ops), -row.created_at.timestamp(), str(row.id))
+        if best_key is None or _key_beats(key, best_key):
+            best, best_key = row, key
+    return best
+
+
+def _key_beats(a: tuple[int, bool, float, str], b: tuple[int, bool, float, str]) -> bool:
+    # id descends lexicographically after the negated timestamp, so invert it:
+    # higher rank / op-matched / older created_at / SMALLER id wins.
+    return (a[0], a[1], a[2], _InvertedStr(a[3])) > (b[0], b[1], b[2], _InvertedStr(b[3]))
+
+
+class _InvertedStr(str):
+    """Orders descending under ``>`` — the smaller original string wins."""
+
+    def __gt__(self, other: str) -> bool:
+        return str.__lt__(self, other)
+
+
+async def resolve_interrogation_inputs(
+    session: AsyncSession,
+    *,
+    family: str,
+    material_id: uuid.UUID | None,
+    part_id: uuid.UUID | None,
+) -> dict[str, Any] | None:
+    """Resolve the ``InterrogationInputs`` the engine runs with (M4.8):
+    the most-specific ``CustomInterrogation`` for the part's material among
+    the org's rows for this family — or None (engine defaults) when the org
+    has none that applies. Org scoping rides the session RLS.
+
+    The material chain (family/class) comes from the run's material; the
+    process-op context is every non-deleted op def routed by a process of
+    this family on the part's quote components.
+    """
+    material_family_id: uuid.UUID | None = None
+    material_class_id: uuid.UUID | None = None
+    if material_id is not None:
+        chain = (
+            await session.execute(
+                select(Material.family_id, MaterialFamily.class_id)
+                .join(MaterialFamily, MaterialFamily.id == Material.family_id)
+                .where(Material.id == material_id)
+            )
+        ).first()
+        if chain is not None:
+            material_family_id, material_class_id = chain
+    process_op_ids: set[uuid.UUID] = set()
+    if part_id is not None:
+        process_op_ids = set(
+            (
+                await session.scalars(
+                    select(ProcessOperation.operation_def_id)
+                    .join(Process, Process.id == ProcessOperation.process_id)
+                    .join(Component, Component.process_id == Process.id)
+                    .join(OperationDef, OperationDef.id == ProcessOperation.operation_def_id)
+                    .where(
+                        Component.part_id == part_id,
+                        Process.family == family,
+                        Process.deleted_at.is_(None),
+                        OperationDef.deleted_at.is_(None),
+                    )
+                    .distinct()
+                )
+            ).all()
+        )
+    profiles = (
+        await session.scalars(
+            select(CustomInterrogation).where(CustomInterrogation.family == family)
+        )
+    ).all()
+    op_links: dict[uuid.UUID, set[uuid.UUID]] = {}
+    if profiles:
+        link_rows = (
+            await session.execute(
+                select(
+                    CustomInterrogationOperationDef.custom_interrogation_id,
+                    CustomInterrogationOperationDef.operation_def_id,
+                ).where(
+                    CustomInterrogationOperationDef.custom_interrogation_id.in_(
+                        [p.id for p in profiles]
+                    )
+                )
+            )
+        ).all()
+        for profile_id, op_def_id in link_rows:
+            op_links.setdefault(profile_id, set()).add(op_def_id)
+    winner = select_most_specific(
+        profiles,
+        material_id=material_id,
+        material_family_id=material_family_id,
+        material_class_id=material_class_id,
+        op_links=op_links,
+        process_operation_def_ids=process_op_ids,
     )
-    return dict(profile.inputs) if profile is not None else None
+    return dict(winner.inputs) if winner is not None else None
 
 
 def _fail(run: InterrogationRun, code: str, detail: str) -> dict[str, Any]:
@@ -351,15 +506,20 @@ async def run_interrogation(
                 if material is not None and material.density is not None:
                     density = float(material.density)
 
-            # M4.7: resolve the org's DEFAULT interrogation profile for this
-            # family (all material links NULL — material-specific resolution is
-            # M4.8) and stamp its hash BEFORE the cache probe, so a threshold
-            # or toggle edit changes the cache key and never serves a result
-            # computed under the old profile. No profile / no family -> engine
-            # defaults, hash stays ''.
+            # M4.8: resolve the most-specific interrogation profile for this
+            # family + the run's material (falling back to the org default,
+            # then engine defaults) and stamp its hash BEFORE the cache probe,
+            # so a threshold, toggle or link edit changes the cache key and
+            # never serves a result computed under the old profile. No
+            # applicable profile / no family -> engine defaults, hash stays ''.
             inputs: dict[str, Any] | None = None
             if run.family is not None:
-                inputs = await resolve_default_inputs(session, run.family)
+                inputs = await resolve_interrogation_inputs(
+                    session,
+                    family=run.family,
+                    material_id=run.material_id,
+                    part_id=run.part_id,
+                )
                 run.inputs_hash = inputs_fingerprint(inputs)
 
             geometry = get_engine()

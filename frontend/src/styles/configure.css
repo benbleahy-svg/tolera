@@ -92,3 +92,14 @@
 .interrogation-threshold { display: flex; gap: 0.4rem; align-items: center; font-size: 0.75rem; }
 .interrogation-threshold input { width: 6rem; }
 .interrogation-actions { margin-top: 0.5rem; display: flex; gap: 0.75rem; align-items: center; }
+
+/* M4.8 — custom-interrogation authoring (links, create, dispatch ⚠️) */
+.interrogation-family-group { margin-bottom: 2rem; }
+.interrogation-default { background: #e6f4ea; color: #1e7e34; }
+.interrogation-links { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.5rem 0 0.75rem; }
+.interrogation-links label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--muted, #667085); }
+.interrogation-links select { min-width: 11rem; font-size: 0.85rem; }
+.interrogation-delete { color: #b42318; }
+.interrogation-create { display: flex; gap: 0.5rem; align-items: center; margin: 0.25rem 0 0.75rem; }
+.interrogation-create input { min-width: 14rem; }
+.interrogation-dispatch-warnings { margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; color: #b54708; }
