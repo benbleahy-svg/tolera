@@ -29,7 +29,8 @@ export interface BomTableRowOut {
   item_no: string | null;
   part_number: string | null;
   revision: string | null;
-  qty: number;
+  /** null = no quantity printed on the table (never-hallucinate). */
+  qty: number | null;
   description: string | null;
   type_hint: 'subassembly' | 'manufactured' | 'purchased' | null;
 }

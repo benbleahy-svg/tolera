@@ -587,6 +587,9 @@ def test_publish_uses_stored_draft_when_no_payload(app_client: TestClient, seede
         res = app_client.post(f"/api/quote-items/{sc.item_id}/bom-builder/publish", json={})
         assert res.status_code == 200, res.text
         assert len(res.json()["tree"]["children"]) == 1
+        # Publishing consumed the stored draft (stale-draft retention guard).
+        state = app_client.get(f"/api/quote-items/{sc.item_id}/bom-builder").json()
+        assert state["draft"] is None
 
 
 def test_publish_without_draft_or_payload_409s(app_client: TestClient, seeder: Seeder) -> None:
@@ -672,6 +675,91 @@ def test_publish_rejects_file_outside_scope(app_client: TestClient, seeder: Seed
         assert "file_not_in_scope" in {e["code"] for e in details["errors"]}
 
 
+def test_flat_qty_multiplies_down_the_tree(app_client: TestClient, seeder: Seeder) -> None:
+    """Sub qty 3 x child qty 2 -> flat 6 (DOMAIN-MODEL §1: derived, multiplied)."""
+    org, admin = _org_with_admin(seeder, f"bom-flat-{uuid.uuid4().hex[:6]}")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        sc = Scenario(app_client, seeder, org)
+        sub = _row(
+            "SUB-3X",
+            row_type="subassembly",
+            qty=3,
+            children=[_row("CHILD-2X", qty=2)],
+        )
+        tree = app_client.post(
+            f"/api/quote-items/{sc.item_id}/bom-builder/publish",
+            json={"payload": _doc([sub])},
+        ).json()["tree"]
+        sub_out = tree["children"][0]
+        assert sub_out["flat_qty"] == 3
+        assert sub_out["children"][0]["flat_qty"] == 6
+
+
+def test_check_bom_file_conflict_and_root_reference(app_client: TestClient, seeder: Seeder) -> None:
+    org, admin = _org_with_admin(seeder, f"bom-fconf-{uuid.uuid4().hex[:6]}")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        sc = Scenario(app_client, seeder, org)
+        shared_file = sc.page_files["002-00025-000"]
+        a = _row("PART-A", primary_file_id=shared_file)
+        b = _row("PART-B", primary_file_id=shared_file)  # different part, same file
+        self_ref = _row("002-00001", revision="000")  # the root's own identity
+        result = app_client.post(
+            f"/api/quote-items/{sc.item_id}/bom-builder/check",
+            json={"payload": _doc([a, b, self_ref])},
+        ).json()
+        codes = {e["code"] for e in result["errors"]}
+        assert "file_conflict" in codes
+        assert "root_reference" in codes
+
+
+def test_publish_merges_linked_row_gaps(app_client: TestClient, seeder: Seeder) -> None:
+    """A later linked row's description/file fills the first occurrence's gaps —
+    linking must not silently discard data (canonical merge on commit)."""
+    org, admin = _org_with_admin(seeder, f"bom-merge-{uuid.uuid4().hex[:6]}")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        sc = Scenario(app_client, seeder, org)
+        bare = _row("002-00025-000", revision="000")  # no file, no description
+        sub = _row(
+            "SUB-M",
+            row_type="subassembly",
+            children=[
+                _row(
+                    "002-00025-000",
+                    revision="000",
+                    description="Side panel",
+                    primary_file_id=sc.page_files["002-00025-000"],
+                )
+            ],
+        )
+        tree = app_client.post(
+            f"/api/quote-items/{sc.item_id}/bom-builder/publish",
+            json={"payload": _doc([bare, sub])},
+        ).json()["tree"]
+        panel = tree["children"][0]
+        assert panel["part_number"] == "002-00025-000"
+        assert panel["description"] == "Side panel"
+        files = app_client.get(f"/api/parts/{panel['part_id']}/files").json()
+        assert any(
+            f["id"] == sc.page_files["002-00025-000"] and f["role"] == "primary" for f in files
+        )
+
+
+def test_draft_save_locked_quote_409s(app_client: TestClient, seeder: Seeder) -> None:
+    org, admin = _org_with_admin(seeder, f"bom-dlock-{uuid.uuid4().hex[:6]}")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        sc = Scenario(app_client, seeder, org)
+        seeder.sql(
+            "UPDATE quote SET status = :st WHERE id = :id",
+            {"st": QuoteStatus.sent.value, "id": sc.quote_id},
+        )
+        res = app_client.put(
+            f"/api/quote-items/{sc.item_id}/bom-builder/draft",
+            json={"payload": _doc([_row("X-1")])},
+        )
+        assert res.status_code == 409
+        assert res.json()["code"] == "quote_locked"
+
+
 # --------------------------------------------------------------------------- #
 # Tenancy
 # --------------------------------------------------------------------------- #
@@ -722,10 +810,11 @@ def test_parse_bom_table_value_reads_contract() -> None:
     assert table.root_part_number == "002-00001"
     assert [r.qty for r in table.rows] == [1, 2, 16, 12]
     assert table.rows[2].type_hint == "purchased"
-    # Unknown keys are ignored, defaults fill gaps (never an error).
+    # Unknown keys are ignored; an unprinted qty stays None (never-hallucinate) —
+    # the builder UI shows the editable default, the human confirms.
     loose = parse_bom_table_value('{"rows": [{"part_number": "A", "extra": 1}]}')
     assert loose is not None
-    assert loose.rows[0].qty == 1
+    assert loose.rows[0].qty is None
 
 
 # --------------------------------------------------------------------------- #

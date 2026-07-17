@@ -91,13 +91,21 @@ export function EstimatingPage() {
   // M4.9 — the "BOM table found … OPEN IN BOM BUILDER" banner state per line
   // item; a part without findings or children simply shows no banner.
   useEffect(() => {
+    let cancelled = false;
     setBomStatus(null);
     setBomPublishedToast(false);
     if (!quoteItemId) return;
     bomApi
       .getBomStatus(quoteItemId)
-      .then(setBomStatus)
-      .catch(() => setBomStatus(null));
+      .then((bomState) => {
+        if (!cancelled) setBomStatus(bomState);
+      })
+      .catch(() => {
+        if (!cancelled) setBomStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [bomApi, quoteItemId]);
 
   useEffect(() => {

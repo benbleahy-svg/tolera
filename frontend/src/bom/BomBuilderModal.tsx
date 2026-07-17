@@ -69,6 +69,8 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [filesBannerDismissed, setFilesBannerDismissed] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [savedSeq, setSavedSeq] = useState(0);
 
   const doc = docState.doc;
 
@@ -83,19 +85,41 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
       .catch((e: unknown) => setLoadError(String(e instanceof Error ? e.message : e)));
   }, [api, quoteItemId]);
 
-  // Draft autosave: every committed edit (dirtySeq) schedules one debounced PUT.
+  // Draft autosave: every committed edit (dirtySeq) schedules one debounced
+  // PUT. The in-flight promise is tracked so discard can wait it out (an
+  // autosave landing after discard would silently recreate the draft), and
+  // savedSeq records WHICH document version reached the server so the header
+  // never claims unsaved work is saved.
   const docRef = useRef(doc);
   docRef.current = doc;
+  const saveTimerRef = useRef<number | null>(null);
+  const inFlightSaveRef = useRef<Promise<unknown> | null>(null);
   useEffect(() => {
     if (docState.dirtySeq === 0) return;
-    const handle = window.setTimeout(() => {
-      api
+    const seq = docState.dirtySeq;
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      const save = api
         .saveDraft(quoteItemId, docRef.current)
-        .then((res) => setSavedAt(res.updated_at))
-        .catch(() => undefined); // autosave is best-effort; publish revalidates
+        .then((res) => {
+          setSavedAt(res.updated_at);
+          setSavedSeq(seq);
+        })
+        .catch(() => undefined) // autosave is best-effort; publish revalidates
+        .finally(() => {
+          if (inFlightSaveRef.current === save) inFlightSaveRef.current = null;
+        });
+      inFlightSaveRef.current = save;
     }, AUTOSAVE_DELAY_MS);
-    return () => window.clearTimeout(handle);
+    return () => {
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    };
   }, [api, quoteItemId, docState.dirtySeq]);
+
+  // A stale CHECK result describes an older document — drop it on any edit.
+  useEffect(() => {
+    setCheck(null);
+  }, [docState.dirtySeq]);
 
   // ESC closes (the BulkCreateDialog affordance).
   useEffect(() => {
@@ -105,6 +129,42 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // Modal focus management (the BulkCreateDialog pattern): focus lands inside
+  // when the dialog opens, Tab/Shift+Tab wrap, and the opener regains focus
+  // on close.
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const container = containerRef.current;
+    if (!container) return;
+    const focusables = () =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(
+          'button, input, select, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute('disabled'));
+    focusables()[0]?.focus();
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    container.addEventListener('keydown', trap);
+    return () => {
+      container.removeEventListener('keydown', trap);
+      opener?.focus();
+    };
+  }, [state]);
 
   const edit = useCallback((next: BomDoc) => dispatch({ kind: 'edit', doc: next }), []);
 
@@ -133,11 +193,21 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
   const discard = async () => {
     if (!state) return;
     setBusy(true);
+    setActionError(null);
     try {
+      // An autosave racing the discard would recreate the row server-side.
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (inFlightSaveRef.current) await inFlightSaveRef.current;
       await api.discardDraft(quoteItemId);
       setSavedAt(null);
+      setSavedSeq(0);
       setCheck(null);
       dispatch({ kind: 'reset', doc: state.initial });
+    } catch (e: unknown) {
+      setActionError(String(e instanceof Error ? e.message : e));
     } finally {
       setBusy(false);
     }
@@ -145,8 +215,11 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
 
   const runCheck = async () => {
     setBusy(true);
+    setActionError(null);
     try {
       setCheck(await api.checkBom(quoteItemId, doc));
+    } catch (e: unknown) {
+      setActionError(String(e instanceof Error ? e.message : e));
     } finally {
       setBusy(false);
     }
@@ -154,16 +227,23 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
 
   const publish = async () => {
     setBusy(true);
+    setActionError(null);
     try {
       const result = await api.publishBom(quoteItemId, doc);
       onPublished(result.tree);
     } catch (e: unknown) {
       // The backend 409s with the CHECK result in details — surface it in place.
-      const details = (e as { details?: { errors?: CheckResult['errors'] } }).details;
+      const details = (
+        e as { details?: { errors?: CheckResult['errors']; notices?: CheckResult['notices'] } }
+      ).details;
       if (details?.errors) {
-        setCheck({ errors: details.errors, notices: [], unique_parts: uniqueCount });
+        setCheck({
+          errors: details.errors,
+          notices: details.notices ?? [],
+          unique_parts: uniqueCount,
+        });
       } else {
-        setLoadError(String(e instanceof Error ? e.message : e));
+        setActionError(String(e instanceof Error ? e.message : e));
       }
     } finally {
       setBusy(false);
@@ -225,7 +305,7 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
           <span className="bom-drag" aria-hidden="true">
             ⠿
           </span>
-          {numbers.get(row.row_id)}
+          {isRoot ? t('bom.item_root') : numbers.get(row.row_id)}
         </td>
         <td className="bom-cell-pn" style={{ paddingLeft: `${depth * 18 + 4}px` }}>
           {row.children.length > 0 && (
@@ -332,7 +412,7 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
               edit(
                 updateRow(doc, row.row_id, (r) => ({
                   ...r,
-                  qty: Math.max(1, Number(e.target.value) || 1),
+                  qty: Math.max(1, Math.floor(Number(e.target.value) || 1)),
                 })),
               )
             }
@@ -370,12 +450,14 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
 
   return (
     <div className="bom-backdrop" role="dialog" aria-modal="true" aria-label={t('bom.title')}>
-      <div className="bom-modal">
+      <div className="bom-modal" ref={containerRef}>
         <header className="bom-header">
           <h2>{t('bom.title')}</h2>
           <div className="bom-header-actions">
             <span className="bom-draft-state" role="status">
-              {savedAt ? t('bom.draft_saved') : t('bom.draft_unsaved')}
+              {savedAt && savedSeq === docState.dirtySeq
+                ? t('bom.draft_saved')
+                : t('bom.draft_unsaved')}
             </span>
             <button
               type="button"
@@ -456,6 +538,12 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
           </div>
         )}
 
+        {actionError && (
+          <p className="bom-error bom-action-error" role="alert">
+            {actionError}
+          </p>
+        )}
+
         <div className="bom-body">
           <aside className="bom-files-pane">
             <h3>{t('bom.quote_files')}</h3>
@@ -505,7 +593,7 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
                   <ul className="bom-check-errors">
                     {check.errors.map((issue, i) => (
                       <li key={`${issue.code}-${i}`} className="bom-error">
-                        {issue.message}
+                        {t(`bom.issue_${issue.code}`, { defaultValue: issue.message })}
                       </li>
                     ))}
                   </ul>
@@ -513,7 +601,9 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
                 {check.notices.length > 0 && (
                   <ul className="bom-check-notices">
                     {check.notices.map((issue, i) => (
-                      <li key={`${issue.code}-${i}`}>{issue.message}</li>
+                      <li key={`${issue.code}-${i}`}>
+                        {t(`bom.issue_${issue.code}`, { defaultValue: issue.message })}
+                      </li>
                     ))}
                   </ul>
                 )}

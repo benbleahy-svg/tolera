@@ -1207,6 +1207,20 @@
     "published_toast": "Successfully published BOM",
     "banner_found": "BOM table found in {{file}}, page {{page}}",
     "banner_open": "OPEN IN BOM BUILDER",
-    "banner_edit": "BOM published — edit in BOM Builder"
+    "banner_edit": "BOM published — edit in BOM Builder",
+    "item_root": "Root",
+    "issue_root_invalid": "The root row must be an assembly root or a manufactured part with quantity 1.",
+    "issue_row_id_duplicate": "Row ids must be unique.",
+    "issue_qty_invalid": "Quantities must be at least 1.",
+    "issue_row_incomplete": "A row needs a part number or a primary file.",
+    "issue_purchased_with_children": "A purchased part cannot have child parts.",
+    "issue_duplicate_at_level": "The same part cannot appear twice at one level.",
+    "issue_part_conflict": "Rows with the same part number carry conflicting information.",
+    "issue_root_reference": "A child row cannot reuse the root part's part number.",
+    "issue_file_conflict": "A file can only be assigned to one part.",
+    "issue_file_not_in_scope": "Assigned files must belong to this line item.",
+    "issue_capacity_exceeded": "A BOM may contain at most 1000 unique parts.",
+    "issue_missing_primary_file": "No drawing or model is assigned to this part yet.",
+    "issue_purchased_unassigned": "Purchased parts are not linked to a component library record yet (arrives with M4.10)."
   }
 }

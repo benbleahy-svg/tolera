@@ -113,7 +113,9 @@ class BomTableRow(BaseModel):
     item_no: str | None = None
     part_number: str | None = None
     revision: str | None = None
-    qty: int = 1
+    #: None = not printed on the table (never-hallucinate: the provider omits
+    #: unprinted values; the UI shows the editable default, the human confirms).
+    qty: int | None = None
     description: str | None = None
     type_hint: Literal["subassembly", "manufactured", "purchased"] | None = None
 
@@ -288,6 +290,48 @@ def validate_doc(
                         row_ids=[row.row_id],
                     )
                 )
+
+    # A non-root row that reuses the ROOT's identity would silently mint a
+    # duplicate Part on publish (the root is never in the child reuse map) —
+    # a self-referencing assembly is a structural error instead.
+    root_key = _part_key(root)
+    if root_key is not None:
+        self_refs = [r for r in rows if r is not root and _part_key(r) == root_key]
+        if self_refs:
+            errors.append(
+                BomIssue(
+                    code="root_reference",
+                    message="A child row cannot reuse the root part's part number.",
+                    row_ids=[r.row_id for r in self_refs],
+                )
+            )
+
+    # One file belongs to one part: rows of DIFFERENT parts claiming the same
+    # file would move it back and forth on publish (linked rows already share).
+    file_claims: dict[uuid.UUID, set[tuple[str, str] | str]] = {}
+    for row in rows:
+        claimant: tuple[str, str] | str = _part_key(row) or row.row_id
+        for file_id in [row.primary_file_id, *row.supporting_file_ids]:
+            if file_id is not None:
+                file_claims.setdefault(file_id, set()).add(claimant)
+    conflicted = [fid for fid, claimants in file_claims.items() if len(claimants) > 1]
+    if conflicted:
+        conflict_rows = [
+            row.row_id
+            for row in rows
+            if any(
+                fid in conflicted
+                for fid in [row.primary_file_id, *row.supporting_file_ids]
+                if fid is not None
+            )
+        ]
+        errors.append(
+            BomIssue(
+                code="file_conflict",
+                message="A file can only be assigned to one part.",
+                row_ids=conflict_rows,
+            )
+        )
 
     # Linked rows (same part#+rev) must carry no conflicting information.
     for key, linked in by_key.items():
@@ -583,7 +627,7 @@ def _doc_from_table(ctx: _Context, table: BomTable) -> BomDoc:
             part_number=row.part_number,
             revision=row.revision,
             description=row.description,
-            qty=max(row.qty, 1),
+            qty=row.qty if row.qty is not None and row.qty >= 1 else 1,
         )
         for index, row in enumerate(table.rows, start=1)
     ]
@@ -680,7 +724,7 @@ def _suggestion_out(
 async def get_builder_state(
     quote_item_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
-    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+    _: Annotated[Principal, Depends(require(Permission.view_all))],
 ) -> BuilderStateOut:
     """Everything the modal needs: draft, seeded initial doc, files, suggestions."""
     ctx = await _load_context(session, quote_item_id)
@@ -758,6 +802,12 @@ async def save_draft(
 ) -> DraftSavedOut:
     """Autosave the staging state (one row per quote item; last write wins)."""
     ctx = await _load_context(session, quote_item_id)
+    if not _is_editable(ctx.quote):
+        raise AppError(
+            "quote_locked",
+            "The BOM can only be edited while the quote is a draft.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
     now = datetime.now(UTC)
     payload = body.payload.model_dump(mode="json")
     await session.execute(
@@ -839,6 +889,12 @@ async def publish_bom(
     One transaction (the request session): validation errors 409 before any
     mutation; success deletes the draft. Republish reuses parts by part#+rev."""
     ctx = await _load_context(session, quote_item_id)
+    # Serialise concurrent publishes on the quote-item row (the add-item
+    # precedent, models.py quote_item docstring): two interleaved publishes
+    # would otherwise both rebuild the child nodes and double the tree.
+    await session.execute(
+        select(QuoteItem.id).where(QuoteItem.id == ctx.quote_item.id).with_for_update()
+    )
     if not _is_editable(ctx.quote):
         raise AppError(
             "quote_locked",
@@ -869,7 +925,7 @@ async def publish_bom(
 async def get_bom_status(
     quote_item_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
-    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+    _: Annotated[Principal, Depends(require(Permission.view_all))],
 ) -> BomStatusOut:
     """The line-item banner: detected BOM table + published/draft state."""
     ctx = await _load_context(session, quote_item_id)
@@ -916,14 +972,42 @@ async def _commit_tree(
     non_root_rows = [r for r in rows if r is not doc.root]
 
     # First occurrence of a key carries the part data (conflicts already blocked).
+    # Canonicalize linked rows first: conflicting non-null data was already
+    # rejected by validate_doc, so merging here only FILLS gaps — a later
+    # linked row's description/files must not be silently discarded just
+    # because the first occurrence left them blank (CodeRabbit 2026-07-17).
+    canonical: dict[str, BomRow] = {}
+    canonical_for_key: dict[tuple[str, str], BomRow] = {}
+    for row in non_root_rows:
+        key = _part_key(row)
+        if key is None:
+            canonical[row.row_id] = row
+            continue
+        merged = canonical_for_key.get(key)
+        if merged is None:
+            canonical_for_key[key] = row
+            canonical[row.row_id] = row
+            continue
+        supporting = list(dict.fromkeys([*merged.supporting_file_ids, *row.supporting_file_ids]))
+        filled = merged.model_copy(
+            update={
+                "description": merged.description or row.description,
+                "primary_file_id": merged.primary_file_id or row.primary_file_id,
+                "supporting_file_ids": supporting,
+            }
+        )
+        canonical_for_key[key] = filled
+        canonical[merged.row_id] = filled
+
     part_for_key: dict[tuple[str, str], Part] = {}
     part_for_row: dict[str, Part] = {}
     reused_part_ids: set[uuid.UUID] = set()
-    for row in non_root_rows:
-        key = _part_key(row)
+    for raw_row in non_root_rows:
+        key = _part_key(raw_row)
         if key is not None and key in part_for_key:
-            part_for_row[row.row_id] = part_for_key[key]
+            part_for_row[raw_row.row_id] = part_for_key[key]
             continue
+        row = canonical.get(raw_row.row_id, raw_row)
         is_assembly = row.row_type == "subassembly" or bool(row.children)
         if row.row_type == "purchased":
             is_assembly = False
@@ -939,7 +1023,7 @@ async def _commit_tree(
         part.description = row.description
         part.is_assembly = is_assembly
         part.obtain_method = _obtain_method_for(row.row_type)
-        part_for_row[row.row_id] = part
+        part_for_row[raw_row.row_id] = part
         if key is not None:
             part_for_key[key] = part
     await session.flush()
@@ -1018,18 +1102,24 @@ async def _commit_tree(
         if part.id in removed_seen:
             continue
         removed_seen.add(part.id)
+        # Only a part NO tree references anymore loses its child component —
+        # a part still nodded elsewhere keeps it (deleting would CASCADE its
+        # ComponentQuantity pricing cells away). Latent today (builder parts
+        # are per-tree) but load-bearing once library parts join BOMs (M4.10).
+        still_referenced = await session.scalar(
+            select(Node.id).where(Node.part_id == part.id).limit(1)
+        )
+        if still_referenced is not None:
+            continue
         await session.execute(
             sa_delete(Component).where(
                 Component.part_id == part.id, Component.is_root_component.is_(False)
             )
         )
-        still_referenced = await session.scalar(
-            select(Node.id).where(Node.part_id == part.id).limit(1)
-        )
         other_component = await session.scalar(
             select(Component.id).where(Component.part_id == part.id).limit(1)
         )
-        if still_referenced is None and other_component is None:
+        if other_component is None:
             # ASSUMED (M4.9): a builder-created part nothing references anymore
             # is soft-deleted rather than left to pollute the Part Library.
             part.deleted_at = now
@@ -1056,6 +1146,13 @@ async def _commit_tree(
         for file_id in row.supporting_file_ids:
             file = files[file_id]
             if file.part_id != part.id:
+                # Moving a part's PRIMARY away as another part's supporting
+                # file must clear the source pointer, or the composite FK
+                # (primary_file_id, id) → part_file(id, part_id) breaks.
+                source_part = parts.get(file.part_id)
+                if source_part is not None and source_part.primary_file_id == file.id:
+                    source_part.primary_file_id = None
+                    await session.flush()
                 file.part_id = part.id
                 file.role = "supporting"
 
@@ -1064,7 +1161,9 @@ async def _commit_tree(
         if part.id in assigned:
             continue
         assigned.add(part.id)
-        await assign_files(row, part)
+        # The canonical (merged) row — a later linked row's file assignment
+        # must land even when the first occurrence carried none.
+        await assign_files(canonical.get(row.row_id, row), part)
     await assign_files(root_row, root_part)
     await session.flush()
 

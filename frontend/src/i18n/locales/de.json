@@ -1207,6 +1207,20 @@
     "published_toast": "Stückliste erfolgreich veröffentlicht",
     "banner_found": "Stückliste gefunden in {{file}}, Seite {{page}}",
     "banner_open": "IM BOM BUILDER ÖFFNEN",
-    "banner_edit": "Stückliste veröffentlicht — im BOM Builder bearbeiten"
+    "banner_edit": "Stückliste veröffentlicht — im BOM Builder bearbeiten",
+    "item_root": "Wurzel",
+    "issue_root_invalid": "Die Wurzelzeile muss eine Baugruppe oder ein Fertigungsteil mit Menge 1 sein.",
+    "issue_row_id_duplicate": "Zeilen-IDs müssen eindeutig sein.",
+    "issue_qty_invalid": "Mengen müssen mindestens 1 betragen.",
+    "issue_row_incomplete": "Eine Zeile benötigt eine Teilenummer oder eine Hauptdatei.",
+    "issue_purchased_with_children": "Ein Kaufteil kann keine Unterpositionen haben.",
+    "issue_duplicate_at_level": "Dasselbe Teil kann nicht zweimal auf einer Ebene stehen.",
+    "issue_part_conflict": "Zeilen mit derselben Teilenummer tragen widersprüchliche Angaben.",
+    "issue_root_reference": "Eine Unterposition kann nicht die Teilenummer der Wurzel verwenden.",
+    "issue_file_conflict": "Eine Datei kann nur einem Teil zugeordnet werden.",
+    "issue_file_not_in_scope": "Zugeordnete Dateien müssen zu dieser Position gehören.",
+    "issue_capacity_exceeded": "Eine Stückliste darf höchstens 1000 eindeutige Teile enthalten.",
+    "issue_missing_primary_file": "Diesem Teil ist noch keine Zeichnung oder kein Modell zugeordnet.",
+    "issue_purchased_unassigned": "Kaufteile sind noch nicht mit der Komponentenbibliothek verknüpft (kommt mit M4.10)."
   }
 }

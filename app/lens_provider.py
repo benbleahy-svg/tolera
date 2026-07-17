@@ -102,7 +102,8 @@ _QUOTE_SETUP_PROMPT = (
     "'bom_tables' whose value is a JSON document (DECISIONS.md 2026-07-17 "
     'contract): {"root_part_number": string|null, "rows": [{"item_no": '
     'string|null, "part_number": string|null, "revision": string|null, '
-    '"qty": integer, "description": string|null, "type_hint": '
+    '"qty": integer|null (null when no quantity is printed), '
+    '"description": string|null, "type_hint": '
     '"subassembly"|"manufactured"|"purchased"|null}]} — one entry per '
     "table row, `page` set to the page the table appears on, `raw_text` the "
     "verbatim table header row. BOM-table headers may be German (Pos., "

@@ -212,11 +212,12 @@
   width: 100%;
 }
 
-.bom-grid input:focus,
-.bom-grid select:focus {
-  border-color: #93c5fd;
+.bom-grid input:focus-visible,
+.bom-grid select:focus-visible {
+  border-color: #1d4ed8;
   background: #fff;
-  outline: none;
+  outline: 2px solid #1d4ed8;
+  outline-offset: 1px;
 }
 
 .bom-input-rev {
@@ -324,4 +325,9 @@
   border-radius: 4px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.bom-action-error {
+  padding: 0.4rem 1rem;
+  margin: 0;
 }

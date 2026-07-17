@@ -180,7 +180,8 @@ describe('BomBuilderModal', () => {
     const state = builderState();
     const api = makeApi(state);
     (api.checkBom as ReturnType<typeof vi.fn>).mockResolvedValue({
-      errors: [{ code: 'row_incomplete', message: 'Zeile 3 ist unvollständig.', row_ids: [] }],
+      // The backend message is English fallback; the UI localizes by code.
+      errors: [{ code: 'row_incomplete', message: 'A row needs …', row_ids: [] }],
       notices: [],
       unique_parts: 3,
     });
@@ -189,7 +190,9 @@ describe('BomBuilderModal', () => {
     );
     await screen.findByDisplayValue('002-00008-000');
     await userEvent.click(screen.getByRole('button', { name: 'STÜCKLISTE PRÜFEN' }));
-    expect(await screen.findByText('Zeile 3 ist unvollständig.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Eine Zeile benötigt eine Teilenummer oder eine Hauptdatei.'),
+    ).toBeInTheDocument();
     expect(api.publishBom).not.toHaveBeenCalled();
   });
 
