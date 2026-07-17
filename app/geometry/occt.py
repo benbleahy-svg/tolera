@@ -47,6 +47,7 @@ from OCP.TopoDS import TopoDS, TopoDS_Face, TopoDS_Shape
 from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
 
 from .contract import (
+    FAMILY_LATHE,
     FAMILY_MILLING,
     FAMILY_SHEET_METAL,
     SIGNATURE_VERSION,
@@ -1227,6 +1228,525 @@ def _analyze_mill3(
     return scalars, all_features, confidence
 
 
+# --------------------------------------------------------------------------- #
+# Lathe recognizer (M4.5) — recommended stock + setups + turned-cut split
+# --------------------------------------------------------------------------- #
+# The v2.15 decision caps lathe at ATTRIBUTES + STOCK RECOMMENDATION — no full
+# turning feature tree (that arrives with Spatial; spec #geometry-engine,
+# DECISIONS.md 2026-07-14 M4.0 GO item 5). What v1 emits, per the capability
+# map (GEOMETRY.md §5):
+#   * stock_radius / stock_length — probe-proven exact (the load-bearing math),
+#   * setup_count — the in-house "feature ends/faces per side" heuristic,
+#   * ONE aggregate external_cut + one internal_cut per bore, carrying the
+#     radial-vs-axial split as area properties (laterals = axial feed,
+#     axis-normal turned planes = radial feed) — estimation-grade, not a tree,
+#   * live-tooling callouts: off_axis_hole (coaxial-vs-off-axis is the `~`
+#     item) and asymmetric_cavity (the residual bucket) — FLAGGED, NOT COSTED.
+#     Tight-corner detection is NOT in v1 (needs corner geometry beyond the
+#     probe's verdict); it lands with the DFM catalogue work (M4.7).
+# A body that is not dominantly turned yields {} — never a fabricated stock.
+
+#: Strategy-input defaults, metric-native (DACH delta over the KB inch values:
+#: 5.0 in / 0.75 in / 0.5 in). v1 validates + resolves them at the boundary —
+#: their EVALUATION (bored-hole relief, protrusion, live-tooling warnings) is
+#: the M4.7 DFM engine's job; callout FEATURES are geometry facts and are
+#: emitted regardless of the toggles (the toggles gate the M4.7 Warning).
+_LATHE_DEFAULT_INPUTS: dict[str, Any] = {
+    "max_tool_protrusion_length": 127.0,  # mm (5.0 in)
+    "axial_max_hooked_tool_radius": 19.05,  # mm (0.75 in)
+    "radial_max_hooked_tool_radius": 12.7,  # mm (0.5 in)
+    "should_perform_live_tooling": True,
+    "can_perform_axial_live_tooling": True,
+    "can_perform_radial_live_tooling": True,
+}
+_LATHE_NUMERIC_INPUTS = (
+    "max_tool_protrusion_length",
+    "axial_max_hooked_tool_radius",
+    "radial_max_hooked_tool_radius",
+)
+_LATHE_BOOLEAN_INPUTS = (
+    "should_perform_live_tooling",
+    "can_perform_axial_live_tooling",
+    "can_perform_radial_live_tooling",
+)
+
+#: A turned axis-normal plane is a full ring: area == pi*(max_r^2 - min_r^2).
+#: The tolerance absorbs small piercings (a bolt circle through a flange face
+#: deviates ~7%) while rejecting anything wall-like (a keyway end sits at ~95%
+#: deviation) — ASSUMED calibratable recognizer internal.
+_RING_RTOL = 0.2
+
+#: Turnability gate: the coaxially-classified (+ flagged off-axis-hole) area
+#: must dominate the body, else nothing is recognized — a prismatic part with
+#: one drilled hole has a candidate axis but is NOT a turned part. ASSUMED
+#: calibratable recognizer internal.
+_TURNED_COVERAGE_MIN = 0.8
+
+#: Off-axis concave cylinders only group into a HOLE callout when their
+#: combined sweep closes the bore (mirrors the bend-sweep guard: a partial
+#: concave fillet must not masquerade as a drilled hole).
+_MIN_HOLE_SWEEP_DEG = 350.0
+
+
+def _canonical_dir(d: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Sign-canonical axis direction (first above-tolerance component made
+    positive) so the reported axis is stable across CAD exports that flip the
+    surface axis. First-nonzero (not largest-|component|) keeps a diagonal
+    axis's sign stable when a sub-tolerance perturbation reorders which
+    component is largest (fresh-eyes review, M4.5)."""
+    lead = next((c for c in d if abs(c) > _DIR_TOL), 1.0)
+    return d if lead > 0 else (-d[0], -d[1], -d[2])
+
+
+class _LatheFace:
+    """One face classified against the turning axis."""
+
+    def __init__(self, face: TopoDS_Face) -> None:
+        surf = BRepAdaptor_Surface(face)
+        self.face = face
+        self.kind = surf.GetType()
+        self.area = _face_area(face)
+        self.points = _face_vertices(face)
+        if self.kind != 0:
+            # curved: interior extremes (a dome pole, a groove torus's OD)
+            # matter — n=32 bounds the sampling understatement of a radial
+            # extreme to ~0.12% of the local radius, inside the 0.1%-ish
+            # geometry gate (fresh-eyes review, M4.5)
+            self.points = self.points + _surface_grid_points(face, n=32)
+        self.axis: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
+        self.radius: float | None = None
+        self.sweep_deg = 0.0
+        self.center = (0.0, 0.0, 0.0)
+        self.origin = (0.0, 0.0, 0.0)
+        # classification scratch, filled by the recognizer pass
+        self.s_lo = 0.0
+        self.s_hi = 0.0
+        self.max_r = 0.0
+        self.s_face = 0.0
+        self.bore: list[_LatheFace] | None = None
+        if self.kind == 1:
+            cyl = surf.Cylinder()
+            d, o = cyl.Axis().Direction(), cyl.Axis().Location()
+            self.axis = ((d.X(), d.Y(), d.Z()), (o.X(), o.Y(), o.Z()))
+            self.radius = float(cyl.Radius())
+            self.sweep_deg = math.degrees(abs(surf.LastUParameter() - surf.FirstUParameter()))
+        elif self.kind == 2:
+            cone = surf.Cone()
+            d, o = cone.Axis().Direction(), cone.Axis().Location()
+            self.axis = ((d.X(), d.Y(), d.Z()), (o.X(), o.Y(), o.Z()))
+        elif self.kind == 3:
+            sph = surf.Sphere()
+            o = sph.Location()
+            self.center = (o.X(), o.Y(), o.Z())
+            self.radius = float(sph.Radius())
+        elif self.kind == 4:
+            tor = surf.Torus()
+            d, o = tor.Axis().Direction(), tor.Axis().Location()
+            self.axis = ((d.X(), d.Y(), d.Z()), (o.X(), o.Y(), o.Z()))
+        self.normal = _outward_normal(face)
+        if self.kind == 0:
+            plane_pnt = surf.Plane().Location()
+            self.origin = (plane_pnt.X(), plane_pnt.Y(), plane_pnt.Z())
+
+
+def _radial_offset(
+    point: tuple[float, float, float],
+    axis_dir: tuple[float, float, float],
+    axis_loc: tuple[float, float, float],
+) -> float:
+    gap = _v_sub(point, axis_loc)
+    along = _v_dot(gap, axis_dir)
+    return math.sqrt(max(_v_dot(gap, gap) - along * along, 0.0))
+
+
+def _is_concave(lf: _LatheFace) -> bool:
+    """Outward normal points toward the surface's own axis/centre — a bore or
+    cavity wall (the mill-bore concavity test, generalized)."""
+    surf = BRepAdaptor_Surface(lf.face)
+    mid = surf.Value(
+        0.5 * (surf.FirstUParameter() + surf.LastUParameter()),
+        0.5 * (surf.FirstVParameter() + surf.LastVParameter()),
+    )
+    p = (mid.X(), mid.Y(), mid.Z())
+    if lf.kind == 3:
+        outward = _v_sub(p, lf.center)
+    else:
+        assert lf.axis is not None
+        d, o = lf.axis
+        gap = _v_sub(p, o)
+        along = _v_dot(gap, d)
+        outward = _v_sub(gap, (along * d[0], along * d[1], along * d[2]))
+    return _v_dot(lf.normal, outward) < 0
+
+
+#: Bin width for the angular-union measurement. Curved boundary edges are
+#: sampled at ``_CURVE_SAMPLES`` (256) points — ~1.4 degrees apart on a full
+#: circle — so 3-degree bins are always seeded by a covered arc and an
+#: uncovered half-circumference stays visibly uncovered.
+_ANGLE_BIN_DEG = 3
+
+
+def _angular_union_deg(
+    group: list[_LatheFace],
+    axis_dir: tuple[float, float, float],
+    axis_loc: tuple[float, float, float],
+) -> float:
+    """Degrees of the circumference covered by the UNION of the group's faces
+    about their shared axis. Sweep angles must not simply be summed: two
+    half-cylinder faces over the same half (an interrupted groove) sum to a
+    full turn but enclose nothing (CodeRabbit, M4.5)."""
+    seed = (0.0, 0.0, 1.0) if abs(axis_dir[2]) < 0.9 else (1.0, 0.0, 0.0)
+    u = _v_unit(_v_cross(axis_dir, seed))
+    v = _v_unit(_v_cross(axis_dir, u))
+    bins = [False] * (360 // _ANGLE_BIN_DEG)
+    for lf in group:
+        for p in lf.points:
+            gap = _v_sub(p, axis_loc)
+            theta = math.degrees(math.atan2(_v_dot(gap, v), _v_dot(gap, u))) % 360.0
+            bins[min(int(theta / _ANGLE_BIN_DEG), len(bins) - 1)] = True
+    return sum(bins) * float(_ANGLE_BIN_DEG)
+
+
+def _face_contains_axis_point(face: TopoDS_Face, point: tuple[float, float, float]) -> bool:
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.TopAbs import TopAbs_State
+
+    classifier = BRepClass_FaceClassifier()
+    classifier.Perform(face, gp_Pnt(*point), 1e-6)
+    return classifier.State() in (TopAbs_State.TopAbs_IN, TopAbs_State.TopAbs_ON)
+
+
+def _analyze_lathe(
+    shape: TopoDS_Shape, inputs: dict[str, Any] | None
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The M4.5 recognizer. Returns ``(family_scalars, features)`` — or
+    ``({}, [])`` when the body is not dominantly turned (never fabricates)."""
+    resolved = {**_LATHE_DEFAULT_INPUTS, **(inputs or {})}
+    for name in _LATHE_NUMERIC_INPUTS:
+        value = resolved[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise GeometryError(f"lathe input {name} must be a finite non-negative number")
+        resolved[name] = float(value)
+    for name in _LATHE_BOOLEAN_INPUTS:
+        if not isinstance(resolved[name], bool):
+            raise GeometryError(f"lathe input {name} must be a boolean")
+
+    shape = _canonicalize(shape)
+    faces: list[_LatheFace] = []
+    ex = TopExp_Explorer(shape, TopAbs_FACE)
+    while ex.More():
+        faces.append(_LatheFace(TopoDS.Face_s(ex.Current())))
+        ex.Next()
+    total_area = sum(f.area for f in faces)
+    if total_area <= 0.0:
+        return {}, []
+
+    # -- turning axis: the coaxial cylinder cluster with the most area -------- #
+    clusters: list[dict[str, Any]] = []
+    for lf in faces:
+        if lf.kind != 1:
+            continue
+        assert lf.axis is not None
+        d = _canonical_dir(_v_unit(lf.axis[0]))
+        for cluster in clusters:
+            if (
+                abs(abs(_v_dot(d, cluster["dir"])) - 1.0) <= _DIR_TOL
+                and _radial_offset(lf.axis[1], cluster["dir"], cluster["loc"]) <= _DIST_TOL
+            ):
+                cluster["area"] += lf.area
+                break
+        else:
+            clusters.append({"dir": d, "loc": lf.axis[1], "area": lf.area})
+    if not clusters:
+        return {}, []  # no cylindrical structure at all: nothing turnable
+    winner = max(enumerate(clusters), key=lambda pair: (pair[1]["area"], -pair[0]))[1]
+    axis_dir: tuple[float, float, float] = winner["dir"]
+    axis_loc: tuple[float, float, float] = winner["loc"]
+
+    def s_of(p: tuple[float, float, float]) -> float:
+        return _v_dot(p, axis_dir)
+
+    def r_of(p: tuple[float, float, float]) -> float:
+        return _radial_offset(p, axis_dir, axis_loc)
+
+    def coaxial(lf: _LatheFace) -> bool:
+        if lf.kind == 3:
+            return r_of(lf.center) <= _DIST_TOL
+        if lf.axis is None:
+            return False
+        return (
+            abs(abs(_v_dot(_v_unit(lf.axis[0]), axis_dir)) - 1.0) <= _DIR_TOL
+            and _radial_offset(lf.axis[1], axis_dir, axis_loc) <= _DIST_TOL
+        )
+
+    # -- classify every face --------------------------------------------------- #
+    external_axial: list[_LatheFace] = []
+    internal_axial: list[_LatheFace] = []  # coaxial bore walls (cyl/cone/torus)
+    turned_planes: list[_LatheFace] = []  # axis-normal, ring-symmetric
+    off_axis_cyls: list[_LatheFace] = []
+    asymmetric: list[_LatheFace] = []
+    for lf in faces:
+        if lf.kind == 0:
+            if abs(abs(_v_dot(lf.normal, axis_dir)) - 1.0) <= _DIR_TOL:
+                radii = [r_of(p) for p in lf.points]
+                max_r = max(radii)
+                s_face = s_of(lf.origin)
+                axis_point = (
+                    axis_loc[0] + (s_face - s_of(axis_loc)) * axis_dir[0],
+                    axis_loc[1] + (s_face - s_of(axis_loc)) * axis_dir[1],
+                    axis_loc[2] + (s_face - s_of(axis_loc)) * axis_dir[2],
+                )
+                min_r = 0.0 if _face_contains_axis_point(lf.face, axis_point) else min(radii)
+                ring_area = math.pi * (max_r**2 - min_r**2)
+                if ring_area > 0 and abs(lf.area - ring_area) <= _RING_RTOL * ring_area:
+                    lf.max_r, lf.s_face = max_r, s_face
+                    turned_planes.append(lf)
+                    continue
+            asymmetric.append(lf)
+        elif lf.kind in (1, 2, 4):
+            if coaxial(lf):
+                (internal_axial if _is_concave(lf) else external_axial).append(lf)
+            elif lf.kind == 1 and _is_concave(lf):
+                off_axis_cyls.append(lf)
+            else:
+                asymmetric.append(lf)
+        elif lf.kind == 3:
+            if coaxial(lf):
+                (internal_axial if _is_concave(lf) else external_axial).append(lf)
+            else:
+                asymmetric.append(lf)
+        else:
+            asymmetric.append(lf)
+
+    # -- stock: max radial reach x axial extent (GEOMETRY.md §5, probed exact) - #
+    all_points = [p for lf in faces for p in lf.points]
+    s_values = [s_of(p) for p in all_points]
+    body_lo, body_hi = min(s_values), max(s_values)
+    stock_length = body_hi - body_lo
+    stock_radius = max(r_of(p) for p in all_points)
+    for lf in (*external_axial, *internal_axial):
+        # exact promotion for CYLINDERS only: a coaxial cylinder's defining
+        # radius IS its radial extent. A sphere's defining radius is not — a
+        # shallow SR-crowned face would inflate the stock 5x (fresh-eyes
+        # review, M4.5); spheres/tori rely on the sampled extent above.
+        if lf.kind == 1 and lf.radius is not None:
+            stock_radius = max(stock_radius, lf.radius)
+    if stock_radius <= 0.0 or stock_length <= 0.0:
+        return {}, []
+
+    # -- bores: contiguous coaxial concave spans -> internal_cut each ---------- #
+    # Span-overlap merging is exact for coaxial cylindrical voids: two coaxial
+    # bores whose spans overlap intersect physically (the smaller lies inside
+    # the larger over the shared span), so overlap ⇒ one cavity. B-rep
+    # face-connectivity components (the general answer for exotic multi-cavity
+    # cases) are the Spatial-tier feature tree, out of v1 scope — these
+    # aggregates are estimation-grade attributes, not costed features.
+    bore_walls = [lf for lf in internal_axial if lf.kind == 1]
+    for lf in bore_walls:
+        spans = sorted(s_of(p) for p in lf.points)
+        lf.s_lo, lf.s_hi = spans[0], spans[-1]
+    bore_walls.sort(key=lambda lf: (lf.s_lo, -(lf.radius or 0.0)))
+    bores: list[list[_LatheFace]] = []
+    for lf in bore_walls:
+        for group in bores:
+            if lf.s_lo <= max(g.s_hi for g in group) + _DIST_TOL:
+                group.append(lf)
+                break
+        else:
+            bores.append([lf])
+
+    # internal turned planes = bore bottoms: within a bore's radius at its end
+    internal_planes: list[_LatheFace] = []
+    for plane in turned_planes:
+        max_r = plane.max_r
+        s_face = plane.s_face
+        for group in bores:
+            radius = max(g.radius or 0.0 for g in group)
+            lo = min(g.s_lo for g in group)
+            hi = max(g.s_hi for g in group)
+            if max_r <= radius + _DIST_TOL and (
+                abs(s_face - lo) <= _DIST_TOL or abs(s_face - hi) <= _DIST_TOL
+            ):
+                plane.bore = group
+                internal_planes.append(plane)
+                break
+    external_planes = [p for p in turned_planes if p not in internal_planes]
+
+    # -- off-axis holes: group coaxial-among-themselves concave cylinders ------ #
+    # (grouped BEFORE the coverage gate so a partial concave fillet that fails
+    # the sweep guard counts as asymmetric — not as recognized hole area that
+    # would weaken the non-turned rejection; fresh-eyes review, M4.5.
+    # Shared-axis grouping treats a cross-hole's split entry/exit walls as ONE
+    # drilled hole — correct for drilling; two genuinely separate collinear
+    # holes would merge, an accepted estimation-grade ceiling for a flagged,
+    # never-costed callout.)
+    hole_groups: list[list[_LatheFace]] = []
+    for lf in off_axis_cyls:
+        assert lf.axis is not None
+        for group in hole_groups:
+            g0 = group[0]
+            assert g0.axis is not None
+            if (
+                abs(abs(_v_dot(_v_unit(lf.axis[0]), _v_unit(g0.axis[0]))) - 1.0) <= _DIR_TOL
+                and _radial_offset(lf.axis[1], _v_unit(g0.axis[0]), g0.axis[1]) <= _DIST_TOL
+            ):
+                group.append(lf)
+                break
+        else:
+            hole_groups.append([lf])
+    off_axis_holes: list[dict[str, Any]] = []
+    accepted_hole_area = 0.0
+    for group in hole_groups:
+        g0 = group[0]
+        assert g0.axis is not None
+        # ANGULAR UNION, not sweep sum: two 180-degree faces over the SAME
+        # half-circumference (an interrupted half-round groove) sum to 360
+        # but enclose nothing (CodeRabbit, M4.5) — only combined coverage of
+        # the circumference makes a drilled hole.
+        if _angular_union_deg(group, _v_unit(g0.axis[0]), g0.axis[1]) < _MIN_HOLE_SWEEP_DEG:
+            asymmetric.extend(group)  # a partial fillet / open groove, not a hole
+            continue
+        # min radius over the group: a counterbored hole reports its drill
+        # size for the full depth (facts), not a traversal-order-dependent
+        # mix of the largest bore with the whole span (fresh-eyes, M4.5)
+        radius = min(g.radius or 0.0 for g in group)
+        own_dir = _v_unit(g0.axis[0])
+        spans = [_v_dot(p, own_dir) for g in group for p in g.points]
+        accepted_hole_area += sum(g.area for g in group)
+        off_axis_holes.append(
+            {
+                "name": "off_axis_hole",
+                "properties": {
+                    "radius": radius,
+                    "diameter": 2 * radius,
+                    "depth": max(spans) - min(spans),
+                    "area": sum(g.area for g in group),
+                },
+                "geometry_refs": [],
+            }
+        )
+    off_axis_holes.sort(
+        key=lambda h: (h["properties"]["radius"], h["properties"]["depth"], h["properties"]["area"])
+    )
+
+    # -- coverage gate: TURNED area must dominate, else nothing ---------------- #
+    # Off-axis holes are NEUTRAL: they neither prove turnedness (a prismatic
+    # manifold drilled full of parallel holes must not buy its way past the
+    # gate on hole-wall area — CodeRabbit, M4.5) nor count against it (a
+    # bolt circle is normal on a real flange), so their area leaves both
+    # sides of the ratio.
+    turned_area = (
+        sum(lf.area for lf in external_axial)
+        + sum(lf.area for lf in internal_axial)
+        + sum(lf.area for lf in turned_planes)
+    )
+    coverage_basis = total_area - accepted_hole_area
+    if coverage_basis <= 0.0 or turned_area / coverage_basis < _TURNED_COVERAGE_MIN:
+        return {}, []
+
+    # -- setups: distinct axial sides carrying INTERMEDIATE turned work -------- #
+    # (shoulders + blind-bore bottoms + concave cone tips; the extreme end
+    # faces exist on every part and do not force a chucking side — in-house
+    # heuristic per the capability map, ASSUMED)
+    sides: set[int] = set()
+    for plane in turned_planes:
+        s_face = plane.s_face
+        if body_lo + _DIST_TOL < s_face < body_hi - _DIST_TOL:
+            sides.add(1 if _v_dot(plane.normal, axis_dir) > 0 else -1)
+    for lf in internal_axial:
+        if lf.kind == 2:  # drill-tip cone: opens toward its outward axial side
+            axial = _v_dot(lf.normal, axis_dir)
+            if abs(axial) > _DIR_TOL:
+                sides.add(1 if axial > 0 else -1)
+    ordered_sides = sorted(sides, reverse=True) or [1]
+    setup_count = len(ordered_sides)
+
+    # -- emit ------------------------------------------------------------------ #
+    features: list[dict[str, Any]] = [
+        {
+            "name": "lathe_stock",
+            "properties": {
+                "radius": stock_radius,
+                "diameter": 2 * stock_radius,
+                "length": stock_length,
+            },
+            "geometry_refs": [],
+        }
+    ]
+    for side in ordered_sides:
+        features.append(
+            {
+                "name": "setup",
+                "properties": {"direction": [side * c for c in axis_dir]},
+                "geometry_refs": [],
+            }
+        )
+    ext_axial_area = sum(lf.area for lf in external_axial)
+    ext_radial_area = sum(lf.area for lf in external_planes)
+    if ext_axial_area + ext_radial_area > 0:
+        features.append(
+            {
+                "name": "external_cut",
+                "properties": {
+                    "axial_area": ext_axial_area,
+                    "radial_area": ext_radial_area,
+                    "area": ext_axial_area + ext_radial_area,
+                    "max_radius": stock_radius,
+                    "length": stock_length,
+                },
+                "geometry_refs": [],
+            }
+        )
+    for group in sorted(
+        bores,
+        key=lambda g: (-max(f.radius or 0.0 for f in g), min(f.s_lo for f in g)),
+    ):
+        lo = min(f.s_lo for f in group)
+        hi = max(f.s_hi for f in group)
+        radius = min(f.radius or 0.0 for f in group)
+        bottoms = [p for p in internal_planes if getattr(p, "bore", None) is group]
+        thru = lo <= body_lo + _DIST_TOL and hi >= body_hi - _DIST_TOL
+        features.append(
+            {
+                "name": "internal_cut",
+                "properties": {
+                    "radius": radius,
+                    "diameter": 2 * radius,
+                    "depth": hi - lo,
+                    "thru": thru,
+                    "axial_area": sum(f.area for f in group),
+                    "radial_area": sum(p.area for p in bottoms),
+                    "area": sum(f.area for f in group) + sum(p.area for p in bottoms),
+                },
+                "geometry_refs": [],
+            }
+        )
+    features.extend(off_axis_holes)
+    if asymmetric:
+        features.append(
+            {
+                "name": "asymmetric_cavity",
+                "properties": {
+                    "face_count": len(asymmetric),
+                    "area": sum(lf.area for lf in asymmetric),
+                },
+                "geometry_refs": [],
+            }
+        )
+
+    scalars: dict[str, Any] = {
+        "setup_count": setup_count,
+        "stock_radius": stock_radius,
+        "stock_length": stock_length,
+    }
+    return scalars, features
+
+
 class OcctGeometryService:
     """v1 engine (OCCT via OCP). Implements :class:`GeometryService`."""
 
@@ -1251,6 +1771,9 @@ class OcctGeometryService:
             family_scalars, features = _analyze_sheet_metal(shape, volume, area)
         elif family == FAMILY_MILLING:
             family_scalars, features, confidence = _analyze_mill3(shape, volume, inputs)
+        elif family == FAMILY_LATHE:
+            # attributes + stock only (v2.15); no runtime -> no confidence
+            family_scalars, features = _analyze_lathe(shape, inputs)
         return AnalysisResult(
             family=family,
             dimensions=Dimensions(
