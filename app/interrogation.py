@@ -186,10 +186,15 @@ async def maybe_enqueue_for_process(
     pf = await session.get(PartFile, part.primary_file_id)
     if pf is None or FileCategory(pf.file_type) != FileCategory.brep_cad:
         return None
-    # A queued/running run resolves the CURRENT profile when it executes, so
-    # it always covers this trigger. A succeeded run only counts if it was
-    # computed under the current profile inputs — otherwise a threshold/toggle
-    # edit would keep serving stale warnings on re-assignment (M4.7).
+    # A queued run resolves the CURRENT profile when it executes, so it always
+    # covers this trigger. A running run may have resolved a just-edited
+    # profile's predecessor — accepted: its fingerprint isn't visible
+    # mid-flight, matching on it would double-enqueue every in-flight run
+    # (the duplicate-dispatch pile-up this dedupe prevents), and once it
+    # commits the next trigger sees the hash mismatch below and re-runs. A
+    # succeeded run only counts if it was computed under the current profile
+    # inputs — otherwise a threshold/toggle edit would keep serving stale
+    # warnings on re-assignment (M4.7).
     current_fp = inputs_fingerprint(await resolve_default_inputs(session, str(family)))
     existing = await session.scalar(
         select(InterrogationRun.id)
