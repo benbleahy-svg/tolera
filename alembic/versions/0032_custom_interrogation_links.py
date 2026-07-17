@@ -66,20 +66,43 @@ def upgrade() -> None:
     # KB custom-interrogations: "Each custom interrogation has a unique name".
     # 0031 allowed duplicates, so deterministically rename any first (oldest
     # keeps the plain name) — the index must never block a deploy on data
-    # that was legal when written.
+    # that was legal when written. Collision-safe: a candidate suffix that is
+    # itself taken (an existing "A (2)" beside two "A" rows) bumps the
+    # counter until the (org_id, name) slot is free.
     op.execute(
         """
-        WITH ranked AS (
-            SELECT id, name,
-                   row_number() OVER (
-                       PARTITION BY org_id, name ORDER BY created_at, id
-                   ) AS rn
-            FROM custom_interrogation
-        )
-        UPDATE custom_interrogation c
-        SET name = ranked.name || ' (' || ranked.rn || ')'
-        FROM ranked
-        WHERE c.id = ranked.id AND ranked.rn > 1
+        DO $$
+        DECLARE
+            dup record;
+            candidate text;
+            n bigint;
+        BEGIN
+            FOR dup IN
+                SELECT id, org_id, name
+                FROM (
+                    SELECT id, org_id, name,
+                           row_number() OVER (
+                               PARTITION BY org_id, name ORDER BY created_at, id
+                           ) AS rn
+                    FROM custom_interrogation
+                ) ranked
+                WHERE rn > 1
+                ORDER BY org_id, name, id
+            LOOP
+                n := 2;
+                LOOP
+                    candidate := dup.name || ' (' || n || ')';
+                    EXIT WHEN NOT EXISTS (
+                        SELECT 1 FROM custom_interrogation
+                        WHERE org_id = dup.org_id
+                          AND name = candidate
+                          AND id <> dup.id
+                    );
+                    n := n + 1;
+                END LOOP;
+                UPDATE custom_interrogation SET name = candidate WHERE id = dup.id;
+            END LOOP;
+        END $$
         """
     )
     op.execute(

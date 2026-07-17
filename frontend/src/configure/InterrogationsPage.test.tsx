@@ -291,6 +291,43 @@ describe('InterrogationsPage', () => {
     confirmSpy.mockRestore();
   });
 
+  it('keeps Save enabled when inputs change while a save is in flight', async () => {
+    let resolveSave: (v: unknown) => void = () => undefined;
+    updateInterrogationProfile.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    await renderWithProviders(<InterrogationsPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText('Tiefe Bohrung').length).toBe(2);
+    });
+    const threshold = screen.getByLabelText('Standard CNC-Fräsen deep_hole_ratio_threshold');
+    await userEvent.clear(threshold);
+    await userEvent.type(threshold, '12.5');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Speichern' })[0]);
+    // edit lands while the request is still pending…
+    await userEvent.clear(threshold);
+    await userEvent.type(threshold, '14');
+    resolveSave({ ...DEFAULT_PROFILE, warnings: [] });
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Gespeichert.');
+    });
+    // …so the late response must NOT clear the dirty flag
+    expect(screen.getAllByRole('button', { name: 'Speichern' })[0]).toBeEnabled();
+  });
+
+  it('disables link editors until both lookup lists have loaded', async () => {
+    materialTree.mockImplementation(() => new Promise(() => undefined)); // never resolves
+    await renderWithProviders(<InterrogationsPage />);
+    await waitFor(() => {
+      expect(screen.getByText(/CNC-Fräsen Aluminium/)).toBeInTheDocument();
+    });
+    expect(variantSection().getByLabelText(/Werkstofffamilie/)).toBeDisabled();
+    expect(variantSection().getByLabelText(/Arbeitsgänge/)).toBeDisabled();
+  });
+
   it('does not delete when the confirm dialog is dismissed', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     await renderWithProviders(<InterrogationsPage />);

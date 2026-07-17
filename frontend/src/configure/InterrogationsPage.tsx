@@ -12,7 +12,7 @@
  * and delete them (the seeded default is undeletable). Saving op links may
  * return the advisory duplicate-dispatch ⚠️.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
@@ -80,6 +80,8 @@ interface OpDefOption {
   name: string;
 }
 
+type LookupState = 'loading' | 'ready' | 'failed';
+
 type SaveProfile = (
   profileId: string,
   body: InterrogationProfileUpdate,
@@ -89,20 +91,22 @@ type SaveProfile = (
  * changes save immediately — a link is a small, atomic act, unlike the
  * threshold table's batched Save. The editor locks while a save is in
  * flight (each response replaces the whole profile, so concurrent PUTs
- * could land out of order) and stays disabled when the lookup lists failed
- * to load (options missing ≠ links cleared). */
+ * could land out of order) and stays disabled until BOTH lookup lists have
+ * loaded — while they are pending or failed, existing bindings would render
+ * blank and a save could silently overwrite them (options missing ≠ links
+ * cleared). */
 function LinkEditor({
   profile,
   materials,
   opDefs,
-  lookupsFailed,
+  lookupState,
   onSave,
   onNote,
 }: {
   profile: InterrogationProfileOut;
   materials: ClassNode[];
   opDefs: OpDefOption[];
-  lookupsFailed: boolean;
+  lookupState: LookupState;
   onSave: SaveProfile;
   onNote: (note: string | null, warnings: DispatchWarningOut[]) => void;
 }) {
@@ -128,7 +132,7 @@ function LinkEditor({
       });
   };
 
-  if (lookupsFailed) {
+  if (lookupState === 'failed') {
     return (
       <p className="interrogation-links" role="alert">
         {t('configure.interrogation_lookups_failed')}
@@ -136,7 +140,7 @@ function LinkEditor({
     );
   }
 
-  const disabled = saving;
+  const disabled = saving || lookupState !== 'ready';
   const families = materials.flatMap((c) => c.families);
   const allMaterials = families.flatMap((f) => f.materials);
   const none = t('configure.interrogation_link_none');
@@ -217,7 +221,7 @@ function FamilySection({
   profile,
   materials,
   opDefs,
-  lookupsFailed,
+  lookupState,
   onSave,
   onDelete,
 }: {
@@ -225,7 +229,7 @@ function FamilySection({
   profile: InterrogationProfileOut;
   materials: ClassNode[];
   opDefs: OpDefOption[];
-  lookupsFailed: boolean;
+  lookupState: LookupState;
   onSave: SaveProfile;
   onDelete: (profileId: string) => Promise<void>;
 }) {
@@ -234,8 +238,13 @@ function FamilySection({
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [dispatchWarnings, setDispatchWarnings] = useState<DispatchWarningOut[]>([]);
+  // Every edit bumps the revision; a save response only clears the dirty
+  // flag when no edit landed while the request was in flight — a late
+  // response must never hide unsaved edits behind a disabled Save.
+  const editRev = useRef(0);
 
   const set = (key: string, value: number | boolean) => {
+    editRev.current += 1;
     setInputs((prev) => ({ ...prev, [key]: value }));
     setDirty(true);
     setNote(null);
@@ -247,9 +256,10 @@ function FamilySection({
   };
 
   const save = () => {
+    const submittedRev = editRev.current;
     void onSave(profile.id, { inputs })
       .then((warnings) => {
-        setDirty(false);
+        if (editRev.current === submittedRev) setDirty(false);
         onNote(t('configure.interrogation_saved'), warnings);
       })
       .catch((e: unknown) => {
@@ -292,7 +302,7 @@ function FamilySection({
           profile={profile}
           materials={materials}
           opDefs={opDefs}
-          lookupsFailed={lookupsFailed}
+          lookupState={lookupState}
           onSave={onSave}
           onNote={onNote}
         />
@@ -478,7 +488,7 @@ export function InterrogationsPage() {
   const [config, setConfig] = useState<InterrogationsConfigOut | null>(null);
   const [materials, setMaterials] = useState<ClassNode[]>([]);
   const [opDefs, setOpDefs] = useState<OpDefOption[]>([]);
-  const [lookupsFailed, setLookupsFailed] = useState(false);
+  const [lookupState, setLookupState] = useState<LookupState>('loading');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -491,17 +501,22 @@ export function InterrogationsPage() {
   }, [api]);
 
   useEffect(() => {
-    // Link-picker data; the threshold tables work without it — but a failed
-    // load must DISABLE the link editors, not render them empty (existing
-    // links would look cleared and could be overwritten).
+    // Link-picker data; the threshold tables work without it — but the link
+    // editors stay DISABLED until both lists are in (and lock out on
+    // failure): rendered empty, existing links would look cleared and could
+    // be overwritten.
     Promise.all([
       estimatingApi.materialTree().then(setMaterials),
       api.listOperationDefs('').then((defs) => {
         setOpDefs(defs.map((d) => ({ id: d.id, name: d.name })));
       }),
-    ]).catch(() => {
-      setLookupsFailed(true);
-    });
+    ])
+      .then(() => {
+        setLookupState('ready');
+      })
+      .catch(() => {
+        setLookupState('failed');
+      });
   }, [api, estimatingApi]);
 
   const onSave = useCallback<SaveProfile>(
@@ -571,7 +586,7 @@ export function InterrogationsPage() {
                 profile={profile}
                 materials={materials}
                 opDefs={opDefs}
-                lookupsFailed={lookupsFailed}
+                lookupState={lookupState}
                 onSave={onSave}
                 onDelete={onDelete}
               />
