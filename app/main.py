@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from .accounts import accounts_router, contacts_router
 from .addons import addons_router
+from .assembly import assembly_router
 from .bom_builder import bom_router
 from .bulk_create import bulk_create_router
 from .collab import collab_router
@@ -101,6 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(materials_router)
     app.include_router(operations_router)
     app.include_router(purchased_components_router)
+    app.include_router(assembly_router)
     app.include_router(pricing_router)
     app.include_router(addons_router)
     app.include_router(custom_tables_router)

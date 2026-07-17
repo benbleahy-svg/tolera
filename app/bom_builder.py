@@ -1176,6 +1176,25 @@ async def _commit_tree(
     ctx.root_component.is_assembly = root_part.is_assembly
     ctx.root_component.obtain_method = ObtainMethod.manufactured
 
+    # M4.10 (spec #assembly "Assembly | Parent-Level"): an assembly root
+    # without a process is assigned the built-in parent-level process and its
+    # assembly-labour router (Assembly | Manufactured + Shipping Prep — the
+    # ASSEMBLY/PER-QUOTE-ITEM-flagged template rows). Never overrides a
+    # process the estimator already chose.
+    if root_part.is_assembly and ctx.root_component.process_id is None:
+        from .models import Process
+        from .routing import generate_router
+
+        parent_level = await session.scalar(
+            select(Process).where(
+                Process.name == "Assembly | Parent-Level", Process.deleted_at.is_(None)
+            )
+        )
+        if parent_level is not None:
+            ctx.root_component.process_id = parent_level.id
+            await session.flush()
+            await generate_router(session, org_id, ctx.root_component)
+
     # ---- rebuild nodes (order = sibling position; flat qty stays derived) --- #
     await session.execute(
         sa_delete(Node).where(Node.root_part_id == root_part.id, Node.parent_node_id.is_not(None))
