@@ -185,6 +185,44 @@ def test_flatted_shaft_flags_asymmetric_cavity() -> None:
     assert_close(cavity["properties"]["area"], 60.0 * 2 * (225 - 169) ** 0.5, "flat area")
 
 
+def test_crowned_pin_stock_uses_radial_extent_not_sphere_radius() -> None:
+    """A shallow SR-crowned end (SR50 on a d20 pin) must NOT inflate the
+    recommended stock to the sphere's defining radius — the stock is the
+    body's radial extent (fresh-eyes review, M4.5)."""
+    import tempfile
+
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Fuse
+    from OCP.BRepPrimAPI import (
+        BRepPrimAPI_MakeBox,
+        BRepPrimAPI_MakeCylinder,
+        BRepPrimAPI_MakeSphere,
+    )
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    body = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 10.0, 40.0).Shape()
+    # SR50 crown meeting the d20 lateral exactly at z=40: centre at
+    # z = 40 - sqrt(50^2 - 10^2), apex at centre + 50; only the cap above
+    # z=40 becomes part of the body
+    center_z = 40.0 - (2500.0 - 100.0) ** 0.5
+    sphere = BRepPrimAPI_MakeSphere(gp_Pnt(0, 0, center_z), 50.0).Shape()
+    upper = BRepPrimAPI_MakeBox(gp_Pnt(-60, -60, 40.0), gp_Pnt(60, 60, 60)).Shape()
+    cap = BRepAlgoAPI_Common(sphere, upper).Shape()
+    crowned = BRepAlgoAPI_Fuse(body, cap).Shape()
+
+    writer = STEPControl_Writer()
+    assert writer.Transfer(crowned, STEPControl_AsIs) == IFSelect_RetDone
+    with tempfile.NamedTemporaryFile(suffix=".step") as f:
+        assert writer.Write(f.name) == IFSelect_RetDone
+        step_bytes = Path(f.name).read_bytes()
+
+    result = get_engine().analyze(step_bytes, family=FAMILY_LATHE)
+    scalars = result.family_scalars
+    assert_close(scalars["stock_radius"], 10.0, "crowned stock_radius")
+    assert_close(scalars["stock_length"], center_z + 50.0, "crowned stock_length")
+
+
 # --------------------------------------------------------------------------- #
 # Honest ceilings: never fabricate on a non-turned body; junk inputs rejected
 # --------------------------------------------------------------------------- #

@@ -365,6 +365,26 @@ describe('InterrogationPanel', () => {
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
   });
 
+  it('says a LATHE body was rejected as not turnable, not "pending" (M4.5)', async () => {
+    // The recognizer's designed honest path: a non-turned body yields {} —
+    // the panel must not claim recognition is still unshipped.
+    const lathe = succeeded();
+    lathe.run!.family = 'LATHE';
+    lathe.run!.result = {
+      ...lathe.run!.result!,
+      family: 'LATHE',
+      family_scalars: {},
+      features: [],
+    };
+    getInterrogation.mockResolvedValue(lathe);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText(/Kein Drehteil erkannt/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Merkmalserkennung folgt/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Drehanalyse – Ergebnisse')).not.toBeInTheDocument();
+  });
+
   it('omits unfolded dims and thumbnail when the recognizer could not unfold', async () => {
     const sheet = succeeded();
     sheet.run!.family = 'SHEET_METAL';

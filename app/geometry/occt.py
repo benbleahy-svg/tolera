@@ -1289,10 +1289,13 @@ _MIN_HOLE_SWEEP_DEG = 350.0
 
 
 def _canonical_dir(d: tuple[float, float, float]) -> tuple[float, float, float]:
-    """Sign-canonical axis direction (largest-|component| positive) so the
-    reported axis is stable across CAD exports that flip the surface axis."""
-    idx = max(range(3), key=lambda i: abs(d[i]))
-    return d if d[idx] > 0 else (-d[0], -d[1], -d[2])
+    """Sign-canonical axis direction (first above-tolerance component made
+    positive) so the reported axis is stable across CAD exports that flip the
+    surface axis. First-nonzero (not largest-|component|) keeps a diagonal
+    axis's sign stable when a sub-tolerance perturbation reorders which
+    component is largest (fresh-eyes review, M4.5)."""
+    lead = next((c for c in d if abs(c) > _DIR_TOL), 1.0)
+    return d if lead > 0 else (-d[0], -d[1], -d[2])
 
 
 class _LatheFace:
@@ -1304,8 +1307,12 @@ class _LatheFace:
         self.kind = surf.GetType()
         self.area = _face_area(face)
         self.points = _face_vertices(face)
-        if self.kind != 0:  # curved: interior extremes (a dome pole) matter
-            self.points = self.points + _surface_grid_points(face)
+        if self.kind != 0:
+            # curved: interior extremes (a dome pole, a groove torus's OD)
+            # matter — n=32 bounds the sampling understatement of a radial
+            # extreme to ~0.12% of the local radius, inside the 0.1%-ish
+            # geometry gate (fresh-eyes review, M4.5)
+            self.points = self.points + _surface_grid_points(face, n=32)
         self.axis: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
         self.radius: float | None = None
         self.sweep_deg = 0.0
@@ -1495,7 +1502,11 @@ def _analyze_lathe(
     stock_length = body_hi - body_lo
     stock_radius = max(r_of(p) for p in all_points)
     for lf in (*external_axial, *internal_axial):
-        if lf.kind in (1, 3) and lf.radius is not None:  # exact where OCCT gives it
+        # exact promotion for CYLINDERS only: a coaxial cylinder's defining
+        # radius IS its radial extent. A sphere's defining radius is not — a
+        # shallow SR-crowned face would inflate the stock 5x (fresh-eyes
+        # review, M4.5); spheres/tori rely on the sampled extent above.
+        if lf.kind == 1 and lf.radius is not None:
             stock_radius = max(stock_radius, lf.radius)
     if stock_radius <= 0.0 or stock_length <= 0.0:
         return {}, []
@@ -1532,12 +1543,61 @@ def _analyze_lathe(
                 break
     external_planes = [p for p in turned_planes if p not in internal_planes]
 
+    # -- off-axis holes: group coaxial-among-themselves concave cylinders ------ #
+    # (grouped BEFORE the coverage gate so a partial concave fillet that fails
+    # the sweep guard counts as asymmetric — not as recognized hole area that
+    # would weaken the non-turned rejection; fresh-eyes review, M4.5)
+    hole_groups: list[list[_LatheFace]] = []
+    for lf in off_axis_cyls:
+        assert lf.axis is not None
+        for group in hole_groups:
+            g0 = group[0]
+            assert g0.axis is not None
+            if (
+                abs(abs(_v_dot(_v_unit(lf.axis[0]), _v_unit(g0.axis[0]))) - 1.0) <= _DIR_TOL
+                and _radial_offset(lf.axis[1], _v_unit(g0.axis[0]), g0.axis[1]) <= _DIST_TOL
+            ):
+                group.append(lf)
+                break
+        else:
+            hole_groups.append([lf])
+    off_axis_holes: list[dict[str, Any]] = []
+    accepted_hole_area = 0.0
+    for group in hole_groups:
+        if sum(g.sweep_deg for g in group) < _MIN_HOLE_SWEEP_DEG:
+            asymmetric.extend(group)  # a partial concave fillet, not a hole
+            continue
+        g0 = group[0]
+        assert g0.axis is not None
+        # min radius over the group: a counterbored hole reports its drill
+        # size for the full depth (facts), not a traversal-order-dependent
+        # mix of the largest bore with the whole span (fresh-eyes, M4.5)
+        radius = min(g.radius or 0.0 for g in group)
+        own_dir = _v_unit(g0.axis[0])
+        spans = [_v_dot(p, own_dir) for g in group for p in g.points]
+        accepted_hole_area += sum(g.area for g in group)
+        off_axis_holes.append(
+            {
+                "name": "off_axis_hole",
+                "properties": {
+                    "radius": radius,
+                    "diameter": 2 * radius,
+                    "depth": max(spans) - min(spans),
+                    "area": sum(g.area for g in group),
+                },
+                "geometry_refs": [],
+            }
+        )
+    off_axis_holes.sort(
+        key=lambda h: (h["properties"]["radius"], h["properties"]["depth"], h["properties"]["area"])
+    )
+
     # -- coverage gate: recognized area must dominate, else nothing ------------ #
     recognized = (
         sum(lf.area for lf in external_axial)
         + sum(lf.area for lf in internal_axial)
         + sum(lf.area for lf in turned_planes)
-        + sum(lf.area for lf in off_axis_cyls)
+        + accepted_hole_area
     )
     if recognized / total_area < _TURNED_COVERAGE_MIN:
         return {}, []
@@ -1558,46 +1618,6 @@ def _analyze_lathe(
                 sides.add(1 if axial > 0 else -1)
     ordered_sides = sorted(sides, reverse=True) or [1]
     setup_count = len(ordered_sides)
-
-    # -- off-axis holes: group coaxial-among-themselves concave cylinders ------ #
-    hole_groups: list[list[_LatheFace]] = []
-    for lf in off_axis_cyls:
-        assert lf.axis is not None
-        for group in hole_groups:
-            g0 = group[0]
-            assert g0.axis is not None
-            if (
-                abs(abs(_v_dot(_v_unit(lf.axis[0]), _v_unit(g0.axis[0]))) - 1.0) <= _DIR_TOL
-                and _radial_offset(lf.axis[1], _v_unit(g0.axis[0]), g0.axis[1]) <= _DIST_TOL
-            ):
-                group.append(lf)
-                break
-        else:
-            hole_groups.append([lf])
-    off_axis_holes: list[dict[str, Any]] = []
-    for group in hole_groups:
-        if sum(g.sweep_deg for g in group) < _MIN_HOLE_SWEEP_DEG:
-            asymmetric.extend(group)  # a partial concave fillet, not a hole
-            continue
-        g0 = group[0]
-        assert g0.axis is not None and g0.radius is not None
-        own_dir = _v_unit(g0.axis[0])
-        spans = [_v_dot(p, own_dir) for g in group for p in g.points]
-        off_axis_holes.append(
-            {
-                "name": "off_axis_hole",
-                "properties": {
-                    "radius": g0.radius,
-                    "diameter": 2 * g0.radius,
-                    "depth": max(spans) - min(spans),
-                    "area": sum(g.area for g in group),
-                },
-                "geometry_refs": [],
-            }
-        )
-    off_axis_holes.sort(
-        key=lambda h: (h["properties"]["radius"], h["properties"]["depth"], h["properties"]["area"])
-    )
 
     # -- emit ------------------------------------------------------------------ #
     features: list[dict[str, Any]] = [

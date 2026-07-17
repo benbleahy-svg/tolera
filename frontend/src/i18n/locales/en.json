@@ -640,6 +640,7 @@
     "lathe_off_axis": "Off-Axis Holes",
     "lathe_asymmetric": "Asymmetric Faces",
     "lathe_live_tooling_hint": "Live tooling required: off-axis or asymmetric work detected — it is flagged, but never costed automatically.",
+    "lathe_not_turnable": "Not recognized as a turned part: the geometry is not predominantly rotationally symmetric — no stock or setups are estimated.",
     "sheetmetal_title": "Sheet Metal Interrogation Results",
     "sheetmetal_thickness": "Sheet Thickness",
     "sheetmetal_flat_area": "Flat Surface Area",

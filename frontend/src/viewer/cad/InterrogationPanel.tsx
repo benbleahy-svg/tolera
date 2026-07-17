@@ -158,10 +158,17 @@ export function InterrogationPanel({
           </div>
         </dl>
       </section>
-      {/* Families without a recognizer yet (M4.6+) keep the pending note. */}
-      {sheetMetal == null && milling == null && lathe == null && (
-        <p className="cad-features-pending">{t('viewer.interrogation_features_pending')}</p>
+      {/* A LATHE run that returned no scalars DID run — the recognizer
+          rejected the body as not turnable (the designed honest path), which
+          is not the same as "recognition not shipped yet". */}
+      {lathe == null && status.run.result.family === 'LATHE' && (
+        <p className="cad-features-pending">{t('viewer.lathe_not_turnable')}</p>
       )}
+      {/* Families without a recognizer yet (M4.6+) keep the pending note. */}
+      {sheetMetal == null && milling == null && lathe == null &&
+        status.run.result.family !== 'LATHE' && (
+          <p className="cad-features-pending">{t('viewer.interrogation_features_pending')}</p>
+        )}
     </div>
   );
 }
