@@ -258,6 +258,44 @@ def bracket_z3() -> tuple[object, dict]:
         "flat_area": volume / t,
         "total_cut_length": (area - 2 * volume / t) / t,
         "pierce_count": 1,
+        # M4.7 DFM golden: the 45-deg bend is the one non-90 bend
+        "feedback": {"abnormal_bend_angle": 1},
+    }
+    return shape, golden
+
+
+# --- 1c. Tight-bend bracket (M4.7 DFM): r=1 on t=2 -> 0.5xt < 0.75xt default ---
+def bracket_tightbend() -> tuple[object, dict]:
+    """M4.7 acceptance fixture: a single 90-deg bend at inner r=1 on t=2
+    (0.5xt) — below the min_bend_radius seed default (0.75xt, DFM-WARNINGS
+    §Sheet Metal) -> small_bend_radius fires, carrying the threshold."""
+    flats = [30.0, 20.0]
+    bends = [(90.0, 1)]
+    t, r, w = 2.0, 1.0, 40.0
+    shape = prism_from_profile(bend_chain_profile(flats, bends, t, r), (0, w, 0))
+    sweep = math.pi / 2
+    sum_flats = sum(flats)
+    profile_area = t * sum_flats + sweep * t * (r + t / 2)
+    volume = profile_area * w
+    bottom_len = sum_flats + sweep * (r + t)  # direction +1: bottom is outer
+    top_len = sum_flats + sweep * r
+    area = (bottom_len + top_len) * w + 2 * profile_area + 2 * t * w
+    k = (0.65 + 0.5 * math.log10(r / t)) * 0.5
+    developed = sum_flats + sweep * (r + k * t)
+    golden = {
+        "family": "sheet_metal",
+        "volume": volume,
+        "area": area,
+        "thickness": t,
+        "bend_count": 1,
+        "bends": [{"radius": r, "angle_deg": 90.0, "line_length": w, "k_factor": k}],
+        "k_factor": k,
+        "developed_length": developed,
+        "unfolded_size": [developed, w],
+        "flat_area": volume / t,
+        "total_cut_length": (area - 2 * volume / t) / t,
+        "pierce_count": 0,
+        "feedback": {"small_bend_radius": 1},
     }
     return shape, golden
 
@@ -316,6 +354,8 @@ def milled_block() -> tuple[object, dict]:
         # is feature-parameterized (pocket + 3 holes) → confidence High (KB
         # milling-feature-iteration: parameterized-removal fraction ≥ 0.8).
         "milling": _milled_block_milling_golden(),
+        # M4.7 DFM golden: the d6 blind hole has a flat machined bottom
+        "feedback": {"flat_bottom_hole": 1},
     }
     return shape, golden
 
@@ -472,6 +512,8 @@ def block_3setups() -> tuple[object, dict]:
                 }
             ],
         },
+        # M4.7 DFM golden: both blind holes bottom flat (cylinder cuts)
+        "feedback": {"flat_bottom_hole": 2},
     }
     return shape, golden
 
@@ -568,6 +610,28 @@ def block_bevel() -> tuple[object, dict]:
             "holes": [],
             "pockets": [],
         },
+        # M4.7 DFM golden: the sub-gate slant face is reachable by no setup
+        # -> the always-on Uncut Faces warning
+        "feedback": {"uncut_faces": 1},
+    }
+    return shape, golden
+
+
+# --- 2e. Deep-hole block (M4.7 DFM): d3 through hole in a 30-deep block ---
+def block_deephole() -> tuple[object, dict]:
+    """M4.7 acceptance fixture: 40x40x30 block, one d3 through hole along Z —
+    depth/diameter = 10 > the deep_hole_ratio_threshold seed default (8.0,
+    DFM-WARNINGS §CNC Milling) -> deep_hole fires, carrying the threshold."""
+    shape = BRepPrimAPI_MakeBox(40, 40, 30).Shape()
+    hole = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 20, -1), gp_Dir(0, 0, 1)), 1.5, 32.0).Shape()
+    shape = BRepAlgoAPI_Cut(shape, hole).Shape()
+    golden = {
+        "family": "milling",
+        "volume": 40 * 40 * 30 - math.pi * 1.5**2 * 30,
+        # box faces - 2 hole discs + hole wall
+        "area": 2 * 40 * 40 + 4 * 40 * 30 - 2 * math.pi * 1.5**2 + math.pi * 3 * 30,
+        "bbox": [40, 40, 30],
+        "feedback": {"deep_hole": 1},
     }
     return shape, golden
 
@@ -688,6 +752,8 @@ def flange() -> tuple[object, dict]:
             "off_axis_holes": {"count": 4, "diameter": 5.0, "depth": 15.0},
             "asymmetric_faces": 0,
         },
+        # M4.7 DFM golden: the bolt circle is live-tooling work
+        "feedback": {"off_axis_hole": 4},
     }
     return shape, golden
 
@@ -964,6 +1030,8 @@ def _angled_tube_golden(angle_deg: float, length: float, lasered: bool) -> dict:
             "angled_cut_degrees": [angle_deg],
             "machining_required": not lasered,
         },
+        # M4.7 DFM golden: one angled end cut (rect tube -> detected)
+        "feedback": {"angled_cut": 1},
     }
 
 
@@ -1122,10 +1190,12 @@ def main() -> int:
     solids = {
         "bracket-L-60x40x2-r3.step": bracket,
         "bracket-Z3-3bend-t2-r3.step": bracket_z3,
+        "bracket-tightbend-t2-r1.step": bracket_tightbend,
         "block-milled-80x50x20.step": milled_block,
         "block-3setups-60x40x20.step": block_3setups,
         "block-dome-50x50x20.step": block_dome,
         "block-bevel-40x40x20.step": block_bevel,
+        "block-deephole-40x40x30.step": block_deephole,
         "shaft-stepped-d30-d20-d12.step": shaft,
         "bushing-d40-d30-bore-d16.step": bushing,
         "flange-d40-4bolt.step": flange,

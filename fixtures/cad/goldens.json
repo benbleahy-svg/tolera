@@ -93,7 +93,37 @@
     ],
     "flat_area": 6257.12382951514,
     "total_cut_length": 370.2654824574365,
-    "pierce_count": 1
+    "pierce_count": 1,
+    "feedback": {
+      "abnormal_bend_angle": 1
+    }
+  },
+  "bracket-tightbend-t2-r1.step": {
+    "family": "sheet_metal",
+    "volume": 4251.3274122871835,
+    "area": 4623.893782901543,
+    "thickness": 2.0,
+    "bend_count": 1,
+    "bends": [
+      {
+        "radius": 1.0,
+        "angle_deg": 90.0,
+        "line_length": 40.0,
+        "k_factor": 0.2497425010840047
+      }
+    ],
+    "k_factor": 0.2497425010840047,
+    "developed_length": 52.355385533489546,
+    "unfolded_size": [
+      52.355385533489546,
+      40.0
+    ],
+    "flat_area": 2125.6637061435918,
+    "total_cut_length": 186.2831853071798,
+    "pierce_count": 0,
+    "feedback": {
+      "small_bend_radius": 1
+    }
   },
   "block-milled-80x50x20.step": {
     "family": "milling",
@@ -172,6 +202,9 @@
           "has_transition": false
         }
       ]
+    },
+    "feedback": {
+      "flat_bottom_hole": 1
     }
   },
   "block-3setups-60x40x20.step": {
@@ -262,6 +295,9 @@
           "has_transition": false
         }
       ]
+    },
+    "feedback": {
+      "flat_bottom_hole": 2
     }
   },
   "block-dome-50x50x20.step": {
@@ -319,6 +355,22 @@
       "setups": [],
       "holes": [],
       "pockets": []
+    },
+    "feedback": {
+      "uncut_faces": 1
+    }
+  },
+  "block-deephole-40x40x30.step": {
+    "family": "milling",
+    "volume": 47787.942495882686,
+    "area": 8268.606171881927,
+    "bbox": [
+      40,
+      40,
+      30
+    ],
+    "feedback": {
+      "deep_hole": 1
     }
   },
   "shaft-stepped-d30-d20-d12.step": {
@@ -444,6 +496,9 @@
         "depth": 15.0
       },
       "asymmetric_faces": 0
+    },
+    "feedback": {
+      "off_axis_hole": 4
     }
   },
   "pin-domed-d20-l50.step": {
@@ -619,6 +674,9 @@
         30.0
       ],
       "machining_required": false
+    },
+    "feedback": {
+      "angled_cut": 1
     }
   },
   "tube-rect-angled60-40x20-t2-l80.step": {
@@ -643,6 +701,9 @@
         60.0
       ],
       "machining_required": true
+    },
+    "feedback": {
+      "angled_cut": 1
     }
   },
   "tube-rect-csk-40x20-t3-d8-l120.step": {
