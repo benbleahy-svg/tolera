@@ -484,7 +484,15 @@
     "area": 35537.69609740774,
     "thickness": 2.0,
     "diameter": 30.0,
-    "length": 200.0
+    "length": 200.0,
+    "tube_laser": {
+      "stock_type": "round",
+      "diameter": 30.0,
+      "thickness": 2.0,
+      "length": 200.0,
+      "total_cut_length": 175.92918860102841,
+      "pierce_count": 0
+    }
   },
   "tube-rect-40x20-t2-l200.step": {
     "family": "tube_laser",
@@ -494,7 +502,16 @@
     "thickness": 2.0,
     "width": 40.0,
     "height": 20.0,
-    "length": 200.0
+    "length": 200.0,
+    "tube_laser": {
+      "stock_type": "rectangular",
+      "width": 40.0,
+      "height": 20.0,
+      "thickness": 2.0,
+      "length": 200.0,
+      "total_cut_length": 224.0,
+      "pierce_count": 0
+    }
   },
   "profile-angle-40x40x4-l100.step": {
     "family": "tube_laser",
@@ -506,7 +523,17 @@
       40.0
     ],
     "thickness": 4.0,
-    "length": 100.0
+    "length": 100.0,
+    "tube_laser": {
+      "stock_type": "angle",
+      "width": 40.0,
+      "height": 40.0,
+      "thickness": 4.0,
+      "length": 100.0,
+      "leg_angle": 90.0,
+      "total_cut_length": 152.0,
+      "pierce_count": 0
+    }
   },
   "profile-u-channel-40x20x3-l100.step": {
     "family": "tube_laser",
@@ -516,7 +543,133 @@
     "width": 40.0,
     "height": 20.0,
     "thickness": 3.0,
-    "length": 100.0
+    "length": 100.0,
+    "tube_laser": {
+      "stock_type": "u_channel",
+      "width": 40.0,
+      "height": 20.0,
+      "thickness": 3.0,
+      "length": 100.0,
+      "total_cut_length": 148.0,
+      "pierce_count": 0
+    }
+  },
+  "tube-rect-radiused-40x20-t2-r4-l150.step": {
+    "family": "tube_laser",
+    "stock_type": "rectangular_radiused",
+    "volume": 32054.866776461626,
+    "area": 32482.26500014778,
+    "bbox": [
+      40,
+      20,
+      150
+    ],
+    "tube_laser": {
+      "stock_type": "rectangular_radiused",
+      "width": 40.0,
+      "height": 20.0,
+      "thickness": 2.0,
+      "length": 150.0,
+      "outside_corner_radius": 4.0,
+      "internal_radius": 2.0,
+      "is_outside_corner_round": true,
+      "total_cut_length": 213.6991118430775,
+      "pierce_count": 0
+    }
+  },
+  "tube-rect-cutout-40x20-t2-d10-l150.step": {
+    "family": "tube_laser",
+    "stock_type": "rectangular",
+    "volume": 33442.92036732051,
+    "area": 33953.75222039231,
+    "bbox": [
+      40,
+      20,
+      150
+    ],
+    "tube_laser": {
+      "stock_type": "rectangular",
+      "width": 40.0,
+      "height": 20.0,
+      "thickness": 2.0,
+      "length": 150.0,
+      "total_cut_length": 255.41592653589794,
+      "pierce_count": 1
+    }
+  },
+  "tube-rect-angled30-40x20-t2-l150.step": {
+    "family": "tube_laser",
+    "stock_type": "rectangular",
+    "volume": 34893.26460298476,
+    "area": 35375.91752358171,
+    "bbox": [
+      40,
+      20,
+      161.5470053837925
+    ],
+    "tube_laser": {
+      "stock_type": "rectangular",
+      "width": 40.0,
+      "height": 20.0,
+      "thickness": 2.0,
+      "length": 161.5470053837925,
+      "total_cut_length": 229.56921938165306,
+      "pierce_count": 0,
+      "angled_cut_degrees": [
+        30.0
+      ],
+      "machining_required": false
+    }
+  },
+  "tube-rect-angled60-40x20-t2-l80.step": {
+    "family": "tube_laser",
+    "stock_type": "rectangular",
+    "volume": 21799.793808954284,
+    "area": 22471.793808954284,
+    "bbox": [
+      40,
+      20,
+      114.64101615137753
+    ],
+    "tube_laser": {
+      "stock_type": "rectangular",
+      "width": 40.0,
+      "height": 20.0,
+      "thickness": 2.0,
+      "length": 114.64101615137753,
+      "total_cut_length": 112.0,
+      "pierce_count": 0,
+      "angled_cut_degrees": [
+        60.0
+      ],
+      "machining_required": true
+    }
+  },
+  "tube-rect-csk-40x20-t3-d8-l120.step": {
+    "family": "tube_laser",
+    "stock_type": "rectangular",
+    "volume": 38670.56048976068,
+    "area": 26518.627582005218,
+    "bbox": [
+      40,
+      20,
+      120
+    ],
+    "tube_laser": {
+      "stock_type": "rectangular",
+      "width": 40.0,
+      "height": 20.0,
+      "thickness": 3.0,
+      "length": 120.0,
+      "total_cut_length": 253.6991118430775,
+      "pierce_count": 1,
+      "countersink": {
+        "hole_diameter": 8.0,
+        "sink_diameter": 12.0
+      },
+      "total_cut_length_not_lasered": 216.0,
+      "pierce_count_not_lasered": 0
+    }
   },
   "cube-20mm-splitface.step": {
     "family": "milling",

@@ -16,6 +16,7 @@ import {
   type LatheScalars,
   type MillingScalars,
   type SheetMetalScalars,
+  type TubeLaserScalars,
 } from '../../parts/api';
 import {
   formatArea,
@@ -27,6 +28,7 @@ import {
 import { LatheResults } from './LatheResults';
 import { MillingResults } from './MillingResults';
 import { SheetMetalResults } from './SheetMetalResults';
+import { TubeLaserResults } from './TubeLaserResults';
 
 /** Default poll cadence while a run is in flight. */
 export const POLL_INTERVAL_MS = 3000;
@@ -114,6 +116,10 @@ export function InterrogationPanel({
     status.run.result.family === 'LATHE' && scalars != null && 'stock_radius' in scalars
       ? (scalars as LatheScalars)
       : null;
+  const tubeLaser =
+    status.run.result.family === 'TUBE_LASER' && scalars != null && 'stock_type' in scalars
+      ? (scalars as TubeLaserScalars)
+      : null;
   return (
     <div className="cad-interrogation-result">
       {sheetMetal != null && (
@@ -129,6 +135,13 @@ export function InterrogationPanel({
       {lathe != null && (
         <LatheResults
           scalars={lathe}
+          features={status.run.result.features ?? []}
+          displayOpts={displayOpts}
+        />
+      )}
+      {tubeLaser != null && tubeLaser.stock_type !== 'incompatible' && (
+        <TubeLaserResults
+          scalars={tubeLaser}
           features={status.run.result.features ?? []}
           displayOpts={displayOpts}
         />
@@ -164,8 +177,14 @@ export function InterrogationPanel({
       {lathe == null && status.run.result.family === 'LATHE' && (
         <p className="cad-features-pending">{t('viewer.lathe_not_turnable')}</p>
       )}
-      {/* Families without a recognizer yet (M4.6+) keep the pending note. */}
-      {sheetMetal == null && milling == null && lathe == null &&
+      {/* Same honest path for TUBE_LASER: the run classified the body as
+          matching none of the 5 stock profiles — nothing is fabricated. */}
+      {tubeLaser != null && tubeLaser.stock_type === 'incompatible' && (
+        <p className="cad-features-pending">{t('viewer.tube_incompatible')}</p>
+      )}
+      {/* Families without a recognizer (Wire EDM / Cast / Additive — post-
+          pilot) keep the pending note. */}
+      {sheetMetal == null && milling == null && lathe == null && tubeLaser == null &&
         status.run.result.family !== 'LATHE' && (
           <p className="cad-features-pending">{t('viewer.interrogation_features_pending')}</p>
         )}

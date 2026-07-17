@@ -27,12 +27,13 @@ from OCP.BRepBuilderAPI import (
 from OCP.BRepGProp import BRepGProp
 from OCP.BRepPrimAPI import (
     BRepPrimAPI_MakeBox,
+    BRepPrimAPI_MakeCone,
     BRepPrimAPI_MakeCylinder,
     BRepPrimAPI_MakePrism,
     BRepPrimAPI_MakeSphere,
 )
 from OCP.GC import GC_MakeArcOfCircle
-from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+from OCP.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 from OCP.GProp import GProp_GProps
 from OCP.IFSelect import IFSelect_RetDone
 from OCP.STEPCAFControl import STEPCAFControl_Writer
@@ -736,6 +737,16 @@ def tube_round() -> tuple[object, dict]:
         "thickness": 2.0,
         "diameter": 30.0,
         "length": 200.0,
+        # M4.6 recognizer golden: 2 end cuts, each the mid-wall circumference
+        # (end-face area / t = pi*(15^2-13^2)/2 = 28pi); no wall cutouts.
+        "tube_laser": {
+            "stock_type": "round",
+            "diameter": 30.0,
+            "thickness": 2.0,
+            "length": 200.0,
+            "total_cut_length": 56 * math.pi,
+            "pierce_count": 0,
+        },
     }
     return shape, golden
 
@@ -753,6 +764,17 @@ def tube_rect() -> tuple[object, dict]:
         "width": 40.0,
         "height": 20.0,
         "length": 200.0,
+        # M4.6: end-cut length per end = section area / t = 224/2 = 112 (the
+        # mid-wall perimeter); 2 ends, no cutouts.
+        "tube_laser": {
+            "stock_type": "rectangular",
+            "width": 40.0,
+            "height": 20.0,
+            "thickness": 2.0,
+            "length": 200.0,
+            "total_cut_length": 224.0,
+            "pierce_count": 0,
+        },
     }
     return shape, golden
 
@@ -770,6 +792,17 @@ def profile_angle() -> tuple[object, dict]:
         "leg_lengths": [40.0, 40.0],
         "thickness": 4.0,
         "length": 100.0,
+        # M4.6: end cut = section area / t = 304/4 = 76 per end; sharp legs.
+        "tube_laser": {
+            "stock_type": "angle",
+            "width": 40.0,
+            "height": 40.0,
+            "thickness": 4.0,
+            "length": 100.0,
+            "leg_angle": 90.0,
+            "total_cut_length": 152.0,
+            "pierce_count": 0,
+        },
     }
     return shape, golden
 
@@ -787,6 +820,196 @@ def profile_u_channel() -> tuple[object, dict]:
         "height": 20.0,
         "thickness": 3.0,
         "length": 100.0,
+        # M4.6: end cut = section area / t = 222/3 = 74 per end.
+        "tube_laser": {
+            "stock_type": "u_channel",
+            "width": 40.0,
+            "height": 20.0,
+            "thickness": 3.0,
+            "length": 100.0,
+            "total_cut_length": 148.0,
+            "pierce_count": 0,
+        },
+    }
+    return shape, golden
+
+
+# --- M4.6 tube-laser fixtures: radiused profile, cutout, angled cuts, countersink ---
+def rounded_rect_edges(x0: float, y0: float, w: float, h: float, r: float, z: float = 0.0):
+    """Closed rounded-rectangle profile (4 lines + 4 quarter arcs, CCW) at z=const."""
+    x1, y1 = x0 + w, y0 + h
+    c = math.sqrt(0.5) * r  # in-plane offset of the 45-deg arc midpoint
+    lines = [
+        ((x0 + r, y0), (x1 - r, y0)),
+        ((x1, y0 + r), (x1, y1 - r)),
+        ((x1 - r, y1), (x0 + r, y1)),
+        ((x0, y1 - r), (x0, y0 + r)),
+    ]
+    arcs = [
+        ((x1 - r, y0), (x1 - r + c, y0 + r - c), (x1, y0 + r)),
+        ((x1, y1 - r), (x1 - r + c, y1 - r + c), (x1 - r, y1)),
+        ((x0 + r, y1), (x0 + r - c, y1 - r + c), (x0, y1 - r)),
+        ((x0, y0 + r), (x0 + r - c, y0 + r - c), (x0 + r, y0)),
+    ]
+    edges = []
+    for (p1, p2), (a1, am, a2) in zip(lines, arcs, strict=True):
+        edges.append(edge_line((*p1, z), (*p2, z)))
+        edges.append(edge_arc((*a1, z), (*am, z), (*a2, z)))
+    return edges
+
+
+def tube_rect_radiused() -> tuple[object, dict]:
+    """40x20 rect tube, t=2, outer corner r=4 (inner r=2 by offset), l=150 —
+    the M4.0-untested 5th profile (`rectangular_radiused`), now claimed."""
+    outer = prism_from_profile(rounded_rect_edges(0, 0, 40, 20, 4), (0, 0, 150))
+    inner = prism_from_profile(rounded_rect_edges(2, 2, 36, 16, 2, z=-1.0), (0, 0, 152))
+    shape = BRepAlgoAPI_Cut(outer, inner).Shape()
+    # sections: outer 800-4r^2(1-pi/4) = 736+16pi; inner 576-4*4(1-pi/4) = 560+4pi
+    section = 176 + 12 * math.pi
+    golden = {
+        "family": "tube_laser",
+        "stock_type": "rectangular_radiused",
+        "volume": section * 150,
+        # P_outer + P_inner = (88+8pi)+(88+4pi) = section (coincidence of t=2)
+        "area": section * 150 + section * 2,
+        "bbox": [40, 20, 150],
+        "tube_laser": {
+            "stock_type": "rectangular_radiused",
+            "width": 40.0,
+            "height": 20.0,
+            "thickness": 2.0,
+            "length": 150.0,
+            "outside_corner_radius": 4.0,
+            "internal_radius": 2.0,
+            "is_outside_corner_round": True,
+            "total_cut_length": section,  # 2 ends x (section/t), t=2
+            "pierce_count": 0,
+        },
+    }
+    return shape, golden
+
+
+def tube_rect_cutout() -> tuple[object, dict]:
+    """40x20 rect tube t=2 l=150 with a d10 hole through the TOP wall only —
+    pierce/cut-length golden (1 pierce; hole perimeter on the outer skin)."""
+    outer = BRepPrimAPI_MakeBox(40, 20, 150).Shape()
+    inner = BRepPrimAPI_MakeBox(gp_Pnt(2, 2, -1), 36, 16, 152).Shape()
+    tube = BRepAlgoAPI_Cut(outer, inner).Shape()
+    drill = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 21, 75), gp_Dir(0, -1, 0)), 5.0, 4.0).Shape()
+    shape = BRepAlgoAPI_Cut(tube, drill).Shape()
+    golden = {
+        "family": "tube_laser",
+        "stock_type": "rectangular",
+        "volume": 224 * 150 - math.pi * 25 * 2,
+        # skins lose the two d10 discs; hole wall adds 2pi*5*2
+        "area": 120 * 150 + 104 * 150 - 2 * math.pi * 25 + 2 * 224 + 2 * math.pi * 5 * 2,
+        "bbox": [40, 20, 150],
+        "tube_laser": {
+            "stock_type": "rectangular",
+            "width": 40.0,
+            "height": 20.0,
+            "thickness": 2.0,
+            "length": 150.0,
+            "total_cut_length": 224.0 + 10 * math.pi,
+            "pierce_count": 1,
+        },
+    }
+    return shape, golden
+
+
+def _angled_rect_tube(angle_deg: float, length: float):
+    """40x20 t=2 rect tube along z with one square end (z=0) and one end cut by
+    a plane tilted ``angle_deg`` from perpendicular (about the x axis, hinged at
+    y=20, so the y=0 wall extends to length + 20*tan(angle))."""
+    rad = math.radians(angle_deg)
+    over = length + 20 * math.tan(rad) + 10
+    outer = BRepPrimAPI_MakeBox(40, 20, over).Shape()
+    inner = BRepPrimAPI_MakeBox(gp_Pnt(2, 2, -1), 36, 16, over + 2).Shape()
+    tube = BRepAlgoAPI_Cut(outer, inner).Shape()
+    cutter = BRepPrimAPI_MakeBox(gp_Pnt(-50, -100, 0), 140, 200, 120).Shape()
+    rot = gp_Trsf()
+    rot.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)), -rad)
+    cutter = BRepBuilderAPI_Transform(cutter, rot, True).Shape()
+    shift = gp_Trsf()
+    shift.SetTranslation(gp_Vec(0, 20, length))
+    cutter = BRepBuilderAPI_Transform(cutter, shift, True).Shape()
+    return BRepAlgoAPI_Cut(tube, cutter).Shape()
+
+
+def _angled_tube_golden(angle_deg: float, length: float, lasered: bool) -> dict:
+    rad = math.radians(angle_deg)
+    # V = section * mean height over the section (centroid y=10)
+    volume = 224 * (length + 10 * math.tan(rad))
+    # skin area = integral of wall height along each perimeter:
+    # outer rect (40x20): integral(20-y)ds = 1200; inner (36x16): 1040
+    area = (120 + 104) * length + math.tan(rad) * (1200 + 1040) + 224 + 224 / math.cos(rad)
+    # laser PATH on the mitered end: only the mid-line segments perpendicular
+    # to the tilt axis stretch (the two 18 mm height runs -> 36/cos), the two
+    # 38 mm width runs are parallel to the tilt axis and keep their length.
+    cut = 112.0 + (76.0 + 36.0 / math.cos(rad) if lasered else 0.0)
+    return {
+        "family": "tube_laser",
+        "stock_type": "rectangular",
+        "volume": volume,
+        "area": area,
+        "bbox": [40, 20, length + 20 * math.tan(rad)],
+        "tube_laser": {
+            "stock_type": "rectangular",
+            "width": 40.0,
+            "height": 20.0,
+            "thickness": 2.0,
+            "length": length + 20 * math.tan(rad),
+            "total_cut_length": cut,
+            "pierce_count": 0,
+            "angled_cut_degrees": [angle_deg],
+            "machining_required": not lasered,
+        },
+    }
+
+
+def tube_rect_angled30() -> tuple[object, dict]:
+    """30-deg end cut — at/below the 45-deg default: stays a lasered cut."""
+    return _angled_rect_tube(30.0, 150.0), _angled_tube_golden(30.0, 150.0, lasered=True)
+
+
+def tube_rect_angled60() -> tuple[object, dict]:
+    """60-deg end cut — beyond max_angled_cut_threshold: machining_required,
+    excluded from the laser cut length (secondary op, ASSUMED — see M4.6)."""
+    return _angled_rect_tube(60.0, 80.0), _angled_tube_golden(60.0, 80.0, lasered=False)
+
+
+def tube_rect_csk() -> tuple[object, dict]:
+    """40x20 rect tube t=3 l=120 with a countersunk hole in the top wall
+    (through d8, sink to d12 at 45 deg) — the should_countersinks_be_lasered
+    strategy golden: lasered -> sink perimeter + 1 pierce; else excluded."""
+    outer = BRepPrimAPI_MakeBox(40, 20, 120).Shape()
+    inner = BRepPrimAPI_MakeBox(gp_Pnt(3, 3, -1), 34, 14, 122).Shape()
+    tube = BRepAlgoAPI_Cut(outer, inner).Shape()
+    drill = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 21, 60), gp_Dir(0, -1, 0)), 4.0, 5.0).Shape()
+    sink = BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(20, 20, 60), gp_Dir(0, -1, 0)), 6.0, 4.0, 2.0).Shape()
+    shape = BRepAlgoAPI_Cut(BRepAlgoAPI_Cut(tube, drill).Shape(), sink).Shape()
+    golden = {
+        "family": "tube_laser",
+        "stock_type": "rectangular",
+        # removed: cone frustum r6->r4 h2 (152pi/3) + hole cylinder r4 h1 (16pi)
+        "volume": 324 * 120 - 200 * math.pi / 3,
+        # outer skin -d12 disc, inner skin -d8 disc, +cone lateral, +hole wall
+        "area": 120 * 120 + 96 * 120 + 2 * 324 + math.pi * (20 * math.sqrt(2) - 44),
+        "bbox": [40, 20, 120],
+        "tube_laser": {
+            "stock_type": "rectangular",
+            "width": 40.0,
+            "height": 20.0,
+            "thickness": 3.0,
+            "length": 120.0,
+            "total_cut_length": 216.0 + 12 * math.pi,
+            "pierce_count": 1,
+            "countersink": {"hole_diameter": 8.0, "sink_diameter": 12.0},
+            # not-lasered: the sink leaves the laser metrics entirely and
+            # becomes a secondary machining op (machining_required)
+            "total_cut_length_not_lasered": 216.0,
+            "pierce_count_not_lasered": 0,
+        },
     }
     return shape, golden
 
@@ -911,6 +1134,11 @@ def main() -> int:
         "tube-rect-40x20-t2-l200.step": tube_rect,
         "profile-angle-40x40x4-l100.step": profile_angle,
         "profile-u-channel-40x20x3-l100.step": profile_u_channel,
+        "tube-rect-radiused-40x20-t2-r4-l150.step": tube_rect_radiused,
+        "tube-rect-cutout-40x20-t2-d10-l150.step": tube_rect_cutout,
+        "tube-rect-angled30-40x20-t2-l150.step": tube_rect_angled30,
+        "tube-rect-angled60-40x20-t2-l80.step": tube_rect_angled60,
+        "tube-rect-csk-40x20-t3-d8-l120.step": tube_rect_csk,
         "cube-20mm-splitface.step": cube_splitface,
     }
     for name, builder in solids.items():

@@ -168,6 +168,43 @@ export interface LatheScalars {
   stock_length: number;
 }
 
+/** The 5 tube-laser stock profiles the engine classifies (M4.6). */
+export type TubeStockProfile =
+  | 'round'
+  | 'rectangular'
+  | 'rectangular_radiused'
+  | 'angle'
+  | 'u_channel';
+
+/** A classified tube profile with its section dims + laser cut metrics. Cut
+ * details arrive as `features` (cut / angled_cut / cutout / countersink). */
+export interface TubeProfileScalars {
+  stock_type: TubeStockProfile;
+  /** Wall thickness, mm. */
+  thickness: number;
+  /** Stock length along the tube axis, mm. */
+  length: number;
+  width?: number;
+  height?: number;
+  diameter?: number;
+  internal_radius?: number;
+  outside_corner_radius?: number;
+  is_outside_corner_round?: boolean;
+  /** Angle between the legs (angle profile), degrees. */
+  leg_angle?: number;
+  /** Total laser cut length (end cuts + cutouts), mm. */
+  total_cut_length: number;
+  pierce_count: number;
+  /** An end cut beyond max_angled_cut_threshold (or a non-lasered
+   * countersink) → secondary machining op. */
+  machining_required: boolean;
+}
+
+/** Tube-laser `family_scalars` (M4.6): a discriminated union — a body that
+ * matches none of the 5 profiles reports `incompatible` and NOTHING else
+ * (never a fabricated guess), so the incompatible branch carries no dims. */
+export type TubeLaserScalars = { stock_type: 'incompatible' } | TubeProfileScalars;
+
 export interface InterrogationRun {
   id: string;
   part_id: string;
@@ -193,7 +230,12 @@ export interface InterrogationRun {
       weight: number | null;
       bbox_source: 'obb' | 'aabb';
     };
-    family_scalars?: SheetMetalScalars | MillingScalars | LatheScalars | Record<string, never>;
+    family_scalars?:
+      | SheetMetalScalars
+      | MillingScalars
+      | LatheScalars
+      | TubeLaserScalars
+      | Record<string, never>;
     features?: InterrogationFeature[];
     /** Engine trust rating where runtime is estimated (milling — M4.4). */
     confidence?: 'High' | 'Medium' | 'Low' | null;
