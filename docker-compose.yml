@@ -3,7 +3,9 @@
 # (`docker compose exec app pytest`, `... mypy app/`, `... python -m scripts.seed_demo`).
 services:
   db:
-    image: postgres:16
+    # pgvector build of Postgres 16 — the Part-Library similarity index
+    # (part.geometry_vector, M4.11) needs CREATE EXTENSION vector.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: tolera
       POSTGRES_PASSWORD: tolera

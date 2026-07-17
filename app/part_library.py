@@ -9,11 +9,16 @@ equality probes are cheap at this scale):
 * **part_number** — manual part# (``part.part_number``) or STEP-extracted
   ``part_number_extracted`` agree (case-insensitive);
 * **historical** — identity match (part# or name) that has actually been
-  quoted, with click-through refs to the prior quotes (the import source).
-
-**exact_geometric** / **similar_geometries** render as ``pending_m4`` stubs —
-both need the GeometryService signature/vector (``geom_hash`` + pgvector),
-which lands with M4 (build-plan M2.12 scope-out).
+  quoted, with click-through refs to the prior quotes (the import source);
+* **exact_geometric** (M4.11) — same ``gs1`` geometry signature
+  (``part.geom_hash``, topology-tolerant per the M4.0 probe): the same
+  manufactured geometry regardless of originating CAD/export;
+* **similar_geometries** (M4.11) — pgvector L2 nearest-neighbour over the
+  ``gv1`` scalar feature vector (``part.geometry_vector``) under the
+  calibrated threshold; identical-signature parts are excluded ("similar"
+  means non-identical, spec ``#partlib``). While a CAD subject's async
+  interrogation is still queued/running the two geometry buckets report
+  ``processing`` instead of a false empty result.
 
 Selecting a match copies the historical router — the ``Operation`` rows with
 their calc/manual pairs, Kalk ``cost_formula`` snapshots and
@@ -34,7 +39,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
@@ -43,7 +48,19 @@ from .costing import recalculate_component
 from .deps import get_session
 from .errors import AppError
 from .file_types import FileCategory, primary_rank
-from .models import Component, FileRole, Node, Operation, Part, PartFile, Quote, QuoteItem
+from .geometry.vector import SIMILAR_L2_THRESHOLD
+from .models import (
+    Component,
+    FileRole,
+    InterrogationRun,
+    InterrogationStatus,
+    Node,
+    Operation,
+    Part,
+    PartFile,
+    Quote,
+    QuoteItem,
+)
 from .operations import ComponentCosting, _component_costing, _get_component_or_404
 from .operations import _lock_editable_quote as _lock_editable_quote_of
 from .parts import PartOut, _get_part_or_404, _part_out
@@ -61,7 +78,7 @@ _BUCKET_ORDER = (
     "similar_geometries",
     "historical",
 )
-_PENDING_M4 = {"exact_geometric", "similar_geometries"}
+_GEOMETRY_BUCKETS = {"exact_geometric", "similar_geometries"}
 
 # Cards shown per bucket; the count still reports the full match total.
 _BUCKET_CARD_CAP = 50
@@ -91,7 +108,7 @@ class MatchCard(BaseModel):
 
 class MatchBucket(BaseModel):
     key: str
-    status: Literal["ready", "pending_m4"]
+    status: Literal["ready", "processing"]
     count: int
     matches: list[MatchCard]
 
@@ -267,36 +284,104 @@ async def get_part_matches(
     refs = await _quote_refs(session, list(identity_ids))
     historical = [pid for pid in identity_ids if refs.get(pid)]
 
-    all_ids = list({*exact_file, *file_name, *part_number, *historical})
+    # Geometry buckets (M4.11): signature equality + pgvector NN. RLS scopes
+    # both probes to the active org like every other bucket.
+    primary_file = None
+    if part.primary_file_id is not None:
+        primary_file = await session.get(PartFile, part.primary_file_id)
+    exact_geometric: list[uuid.UUID] = []
+    similar_geometries: list[uuid.UUID] = []
+    geometry_processing = False
+    if part.geom_hash is None:
+        # A CAD PRIMARY without a signature: "processing" only while the
+        # async job is actually queued/running — a failed run (multi-body,
+        # parse error) reads as ready-and-empty, never a stuck spinner.
+        is_cad = primary_file is not None and (
+            FileCategory(primary_file.file_type) is FileCategory.brep_cad
+        )
+        if is_cad:
+            run_status = await session.scalar(
+                select(InterrogationRun.status)
+                .where(InterrogationRun.part_id == part.id)
+                .order_by(InterrogationRun.created_at.desc(), InterrogationRun.id.desc())
+                .limit(1)
+            )
+            geometry_processing = run_status in (
+                InterrogationStatus.queued,
+                InterrogationStatus.running,
+            )
+    else:
+        exact_geometric = list(
+            (
+                await session.scalars(
+                    select(Part.id).where(
+                        Part.geom_hash == part.geom_hash, _live_other_parts(part_id)
+                    )
+                )
+            ).all()
+        )
+        if part.geometry_vector is not None:
+            # If the planner takes the HNSW path, a plain ordered scan yields
+            # at most ef_search candidates BEFORE the org/hash filters —
+            # iterative scan (pgvector >= 0.8) keeps fetching until the LIMIT
+            # is genuinely filled, so filtered recall doesn't degrade as other
+            # tenants' vectors grow the table.
+            await session.execute(text("SET LOCAL hnsw.iterative_scan = 'strict_order'"))
+            distance = Part.geometry_vector.l2_distance(part.geometry_vector)
+            similar_geometries = list(
+                (
+                    await session.scalars(
+                        select(Part.id)
+                        .where(
+                            _live_other_parts(part_id),
+                            Part.geometry_vector.is_not(None),
+                            # "Similar" is non-identical — the twins live in
+                            # exact_geometric (spec #partlib).
+                            Part.geom_hash.is_distinct_from(part.geom_hash),
+                            distance <= SIMILAR_L2_THRESHOLD,
+                        )
+                        .order_by(distance, Part.id)
+                        # Bounded fuzzy bucket: count caps with the cards.
+                        .limit(_BUCKET_CARD_CAP)
+                    )
+                ).all()
+            )
+
+    all_ids = list(
+        {*exact_file, *file_name, *part_number, *historical, *exact_geometric, *similar_geometries}
+    )
     cards = await _cards(session, all_ids)
 
     ready: dict[str, list[uuid.UUID]] = {
         "exact_file": exact_file,
+        "exact_geometric": exact_geometric,
         "file_name": file_name,
         "part_number": part_number,
+        "similar_geometries": similar_geometries,
         "historical": historical,
     }
     buckets: list[MatchBucket] = []
     for key in _BUCKET_ORDER:
-        if key in _PENDING_M4:
-            buckets.append(MatchBucket(key=key, status="pending_m4", count=0, matches=[]))
+        if key in _GEOMETRY_BUCKETS and geometry_processing:
+            buckets.append(MatchBucket(key=key, status="processing", count=0, matches=[]))
             continue
         ids = ready[key]
-        # Most-quoted first (the demo's card order), id as a deterministic tiebreak.
-        ordered = sorted(
-            (cards[pid] for pid in ids),
-            key=lambda c: (c.quote_count, c.part_id.hex),
-            reverse=True,
-        )
+        if key == "similar_geometries":
+            # Nearest-first — the SQL's distance order IS the ranking here;
+            # a much-quoted distant part must not evict a close neighbour.
+            ordered = [cards[pid] for pid in ids]
+        else:
+            # Most-quoted first (the demo's card order), id as a tiebreak.
+            ordered = sorted(
+                (cards[pid] for pid in ids),
+                key=lambda c: (c.quote_count, c.part_id.hex),
+                reverse=True,
+            )
         buckets.append(
             MatchBucket(key=key, status="ready", count=len(ids), matches=ordered[:_BUCKET_CARD_CAP])
         )
 
-    primary_filename = None
-    if part.primary_file_id is not None:
-        primary_filename = await session.scalar(
-            select(PartFile.filename).where(PartFile.id == part.primary_file_id)
-        )
+    primary_filename = primary_file.filename if primary_file is not None else None
     return MatchesOut(
         part_id=part_id,
         subject=MatchSubject(

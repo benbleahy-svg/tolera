@@ -44,6 +44,7 @@ from .auth import Principal
 from .authz import Permission, require
 from .deps import get_session
 from .errors import AppError
+from .interrogation import clear_extracted_geometry, maybe_enqueue_for_primary
 from .models import (
     BomDraft,
     Component,
@@ -1150,6 +1151,7 @@ async def _commit_tree(
 
     # ---- file assignments: move staged files onto their parts --------------- #
     async def assign_files(row: BomRow, part: Part) -> None:
+        old_primary_id = part.primary_file_id
         if row.primary_file_id is not None:
             file = files[row.primary_file_id]
             if file.part_id != part.id or file.role != "primary":
@@ -1161,12 +1163,21 @@ async def _commit_tree(
                 source_part = parts.get(file.part_id)
                 if source_part is not None and source_part.primary_file_id == file.id:
                     source_part.primary_file_id = None
+                    # Losing the PRIMARY invalidates the extracted signature/
+                    # similarity vector (M4.11 — no stale library matches).
+                    await clear_extracted_geometry(session, source_part)
                 file.part_id = part.id
                 file.role = "primary"
                 # The composite FK (primary_file_id, id) → part_file(id, part_id)
                 # needs the file's move flushed before the pointer can reference it.
                 await session.flush()
             part.primary_file_id = file.id
+            if part.primary_file_id != old_primary_id:
+                # A different PRIMARY: the old extraction no longer describes
+                # this part; queue the new file's interrogation so the part
+                # (re-)enters the M4.11 library indexes.
+                await clear_extracted_geometry(session, part)
+                await maybe_enqueue_for_primary(session, part, file)
         for file_id in row.supporting_file_ids:
             file = files[file_id]
             if file.part_id == part.id and file.role == "primary":
@@ -1174,6 +1185,7 @@ async def _commit_tree(
                 # is the authority for roles at publish).
                 if row.primary_file_id != file.id:
                     part.primary_file_id = None
+                    await clear_extracted_geometry(session, part)
                     await session.flush()
                     file.role = "supporting"
                 continue
@@ -1184,6 +1196,7 @@ async def _commit_tree(
                 source_part = parts.get(file.part_id)
                 if source_part is not None and source_part.primary_file_id == file.id:
                     source_part.primary_file_id = None
+                    await clear_extracted_geometry(session, source_part)
                     await session.flush()
                 file.part_id = part.id
                 file.role = "supporting"

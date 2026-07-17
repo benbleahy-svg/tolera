@@ -1257,6 +1257,9 @@ async def delete_part_file(
             )
         # Last file: clear the pointer first so the FK doesn't block the row delete.
         part.primary_file_id = None
+        # A part with no files has no geometry — drop the extracted signature/
+        # vector so it stops serving Part-Library geometry matches (M4.11).
+        await clear_extracted_geometry(session, part)
         await session.flush()
 
     key = target.storage_key

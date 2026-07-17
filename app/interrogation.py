@@ -45,6 +45,7 @@ from .deps import get_session
 from .errors import AppError
 from .file_types import FileCategory
 from .geometry import RECOGNIZED_FAMILIES
+from .geometry.vector import build_geometry_vector
 from .models import (
     Component,
     CustomInterrogation,
@@ -243,6 +244,9 @@ async def clear_extracted_geometry(session: AsyncSession, part: Part) -> None:
     the human's, not the file's); a queued run for the new PRIMARY refills the
     raw side on success — and a non-CAD PRIMARY simply has no geometry."""
     part.geom_hash = None
+    # The similarity vector describes the old PRIMARY too — a stale one would
+    # keep serving this part as a "similar geometry" match (M4.11).
+    part.geometry_vector = None
     geom = await session.scalar(select(PartGeometry).where(PartGeometry.part_id == part.id))
     if geom is None:
         return
@@ -588,6 +592,9 @@ async def run_interrogation(
             run.status = InterrogationStatus.succeeded
             run.finished_at = datetime.now(UTC)
             part.geom_hash = geom_hash
+            # gv1 similarity vector (M4.11) — derived from the same result on
+            # both the fresh and cache-hit paths, so a re-run can't go stale.
+            part.geometry_vector = build_geometry_vector(result)
             await _apply_to_geometry(session, run, result)
             return {
                 "run_id": str(run.id),

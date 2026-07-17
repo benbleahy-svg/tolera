@@ -25,10 +25,10 @@ function matches(overrides: Partial<PartMatches> = {}): PartMatches {
     total: 3,
     buckets: [
       { key: 'exact_file', status: 'ready', count: 1, matches: [card('twin')] },
-      { key: 'exact_geometric', status: 'pending_m4', count: 0, matches: [] },
+      { key: 'exact_geometric', status: 'ready', count: 0, matches: [] },
       { key: 'file_name', status: 'ready', count: 0, matches: [] },
       { key: 'part_number', status: 'ready', count: 0, matches: [] },
-      { key: 'similar_geometries', status: 'pending_m4', count: 0, matches: [] },
+      { key: 'similar_geometries', status: 'processing', count: 0, matches: [] },
       {
         key: 'historical',
         status: 'ready',
@@ -78,7 +78,7 @@ describe('PartMatchesChip + MatchingPartsModal (M2.12)', () => {
     expect(screen.queryByTestId('match-chip')).not.toBeInTheDocument();
   });
 
-  it('opens the modal with all six buckets; geometry buckets read pending', async () => {
+  it('opens the modal with all six buckets; a processing bucket is disabled', async () => {
     getMatches.mockResolvedValue(matches());
     await renderWithProviders(<PartMatchesChip partId="subject" />);
 
@@ -91,7 +91,11 @@ describe('PartMatchesChip + MatchingPartsModal (M2.12)', () => {
       'Exakte Datei-Übereinstimmung (1)',
     );
     expect(screen.getByTestId('bucket-exact_geometric')).toHaveTextContent(
-      'Geometrie-Indizierung folgt',
+      'Exakte Geometrie-Übereinstimmung (0)',
+    );
+    // The similar bucket is still interrogating — chip + disabled toggle.
+    expect(screen.getByTestId('bucket-similar_geometries')).toHaveTextContent(
+      'Geometrie wird analysiert …',
     );
     expect(screen.getByTestId('bucket-similar_geometries')).toBeDisabled();
     expect(screen.getByTestId('bucket-historical')).toHaveTextContent('Frühere Angebote (1)');
