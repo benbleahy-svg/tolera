@@ -598,6 +598,7 @@ async def run_interrogation(
             await _apply_to_geometry(session, run, result)
             return {
                 "run_id": str(run.id),
+                "part_id": str(part.id),
                 "status": "succeeded",
                 "cached": cached is not None,
             }
@@ -629,6 +630,13 @@ def interrogate_part_task(self: Any, org_id: str, run_id: str) -> dict[str, Any]
     out = cast("dict[str, Any]", result)
     # Structured completion log — ids only, never filenames or geometry values.
     logger.info("interrogation_finished", extra={"org_id": org_id, "run_id": run_id, **out})
+    if out.get("status") == "succeeded" and out.get("part_id"):
+        # M4.12: a fresh geometry signature may pair the part with a prior
+        # quote (exact file/geometric match) — chain the requote-diff job,
+        # which no-ops when there is no draft quote or no baseline.
+        from .requote_diff import enqueue_requote_diff
+
+        enqueue_requote_diff(uuid.UUID(org_id), uuid.UUID(out["part_id"]))
     return out
 
 

@@ -38,6 +38,7 @@ import { ReviewItemsPanel } from '../review/ReviewItemsPanel';
 import { OperationsSection } from './OperationsSection';
 import { PricingSection } from './PricingSection';
 import { QuoteTotalsPanel } from './QuoteTotalsPanel';
+import { RequoteDiffPanel } from './RequoteDiffPanel';
 import type {
   BulkCreatePrefill,
   ComponentCosting,
@@ -49,6 +50,7 @@ import type {
   ProcessOut,
   QuoteSummary,
   QuoteTotals,
+  RequoteDiffEntry,
 } from './types';
 
 export function EstimatingPage() {
@@ -73,6 +75,8 @@ export function EstimatingPage() {
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkPrefill, setBulkPrefill] = useState<BulkCreatePrefill | null>(null);
   const [nesting, setNesting] = useState<NestingOverview | null>(null);
+  const [requoteEntries, setRequoteEntries] = useState<RequoteDiffEntry[]>([]);
+  const [requoteBusy, setRequoteBusy] = useState(false);
   const [bomStatus, setBomStatus] = useState<BomStatus | null>(null);
   const [bomBuilderOpen, setBomBuilderOpen] = useState(false);
   const [bomPublishedToast, setBomPublishedToast] = useState(false);
@@ -124,6 +128,12 @@ export function EstimatingPage() {
       .getNestingOverview(quoteId)
       .then(setNesting)
       .catch(() => setNesting(null));
+    // M4.12 — requote diff entries for the "Previous quote found" banner;
+    // absence (no match / task not run yet) is not an error.
+    api
+      .getRequoteDiff(quoteId)
+      .then((r) => setRequoteEntries(r.entries))
+      .catch(() => setRequoteEntries([]));
   }, [api, quoteId, fail]);
 
   const loadPricing = useCallback(() => {
@@ -132,6 +142,41 @@ export function EstimatingPage() {
     // quote-level VAT totals move with every price/add-on change
     if (quoteId) api.getQuoteTotals(quoteId).then(setTotals).catch(fail);
   }, [api, componentId, quoteId, fail]);
+
+  // M4.12 — the explicit three-choice requote gate. Every choice is recorded
+  // for the audit trail; ONLY the import button touches the router.
+  const recordRequoteChoice = useCallback(
+    (entry: RequoteDiffEntry, choice: 'import_router' | 'review' | 'start_fresh') => {
+      if (!quoteId) return Promise.resolve();
+      setRequoteBusy(true);
+      return api
+        .postRequoteChoice(quoteId, entry.part_id, choice)
+        .then((r) => setRequoteEntries(r.entries))
+        .catch(fail)
+        .finally(() => setRequoteBusy(false));
+    },
+    [api, quoteId, fail],
+  );
+
+  const importRequoteRouter = useCallback(
+    (entry: RequoteDiffEntry) => {
+      if (!quoteId) return;
+      setRequoteBusy(true);
+      api
+        .importRouter(entry.target_component_id, entry.matched.component_id)
+        .then(() => api.postRequoteChoice(quoteId, entry.part_id, 'import_router'))
+        .then((r) => {
+          setRequoteEntries(r.entries);
+          if (componentId) {
+            api.getCosting(componentId).then(setCosting).catch(fail);
+            loadPricing();
+          }
+        })
+        .catch(fail)
+        .finally(() => setRequoteBusy(false));
+    },
+    [api, quoteId, componentId, fail, loadPricing],
+  );
 
   // Guards the async rule-suggestion probe against a line-item switch (M3.10):
   // a probe fired for component A must not paint A's chip after the user moved
@@ -480,6 +525,29 @@ export function EstimatingPage() {
           onClose={() => setBomBuilderOpen(false)}
         />
       )}
+
+      {/* M4.12 (spec #ai-requote-diff): "Previous quote found — see what
+          changed". Visible until an explicit choice dismisses it; a recorded
+          "review" keeps the panel available. */}
+      {(() => {
+        const entry = requoteEntries.find(
+          (e) =>
+            e.part_id === partId &&
+            (e.choice === null || e.choice.choice === 'review'),
+        );
+        if (!entry) return null;
+        return (
+          <RequoteDiffPanel
+            entry={entry}
+            busy={requoteBusy}
+            onImport={() => importRequoteRouter(entry)}
+            onReview={() => {
+              if (entry.choice === null) void recordRequoteChoice(entry, 'review');
+            }}
+            onStartFresh={() => void recordRequoteChoice(entry, 'start_fresh')}
+          />
+        );
+      })()}
 
       {/* M4.3 (DemoA/12): the nest-eligibility banner on a sheet-metal part.
           Warnings detail stays M4.7 — this is the eligible/nested state only. */}

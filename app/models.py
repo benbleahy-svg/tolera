@@ -813,6 +813,11 @@ class Quote(Base):
     # triage_brief JSONB to Quote"). Regenerable cache written by the
     # ``generate_triage_brief`` task after the email-parse job; NULL until then.
     triage_brief: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # M4.12 — the cached Requote Diff (spec #ai-requote-diff build-note: "Cache
+    # as requote_diff JSONB on the new Quote"): {"version", "entries":
+    # {part_id: entry}} — one entry per matched part on the quote. Regenerable
+    # cache written by the ``generate_requote_diff`` task; NULL until then.
+    requote_diff: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Workflow-tracker + lifecycle timestamps.
     rfq_received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

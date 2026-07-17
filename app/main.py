@@ -43,6 +43,7 @@ from .part_library import library_router as part_library_router
 from .parts import parts_router
 from .pricing import pricing_router
 from .quotes import quotes_router
+from .requote_diff import requote_router
 from .review_items import review_items_router
 from .rule_suggest_api import rule_suggest_router
 from .rules import rules_router
@@ -110,6 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rules_router)
     app.include_router(review_items_router)
     app.include_router(rule_suggest_router)
+    app.include_router(requote_router)
 
     return app
 
