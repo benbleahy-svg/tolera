@@ -667,7 +667,8 @@
         "hole_diameter": 8.0,
         "sink_diameter": 12.0
       },
-      "total_cut_length_not_lasered": 216.0
+      "total_cut_length_not_lasered": 216.0,
+      "pierce_count_not_lasered": 0
     }
   },
   "cube-20mm-splitface.step": {

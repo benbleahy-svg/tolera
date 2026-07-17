@@ -194,6 +194,8 @@ def test_countersink_excluded_when_not_lasered() -> None:
     )
     csk = [f for f in result.features if f["name"] == "countersink"]
     assert len(csk) == 1 and csk[0]["properties"]["lasered"] is False
+    # drilling the sink later IS a secondary machining operation
+    assert result.family_scalars["machining_required"] is True
 
 
 def test_plain_cutout_ignores_countersink_toggle() -> None:
@@ -232,9 +234,10 @@ def _step_bytes_of(shape: object) -> bytes:
 
     writer = STEPControl_Writer()
     assert writer.Transfer(shape, STEPControl_AsIs) == IFSelect_RetDone
-    with tempfile.NamedTemporaryFile(suffix=".step") as tmp:
-        assert writer.Write(tmp.name) == IFSelect_RetDone
-        return Path(tmp.name).read_bytes()
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "shape.step"
+        assert writer.Write(str(path)) == IFSelect_RetDone
+        return path.read_bytes()
 
 
 def test_solid_bars_never_fabricate_a_profile() -> None:
@@ -296,6 +299,24 @@ def test_solid_bars_never_fabricate_a_profile() -> None:
         assert result.features == []
 
 
+def test_eccentric_bore_is_not_a_round_tube() -> None:
+    """A cylinder with an off-centre bore has the same radii, volume and skin
+    areas as a round tube — only concentricity separates them. It must
+    classify ``incompatible`` (CodeRabbit, M4.6)."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    outer = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 15.0, 200.0).Shape()
+    bore = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(1.5, 0, -1), gp_Dir(0, 0, 1)), 13.0, 202.0
+    ).Shape()
+    shape = BRepAlgoAPI_Cut(outer, bore).Shape()
+    result = get_engine().analyze(_step_bytes_of(shape), family=FAMILY_TUBE_LASER)
+    assert result.family_scalars == {"stock_type": "incompatible"}
+    assert result.features == []
+
+
 def test_feedback_stays_empty_until_m47() -> None:
     """DFM warnings are M4.7 — the recognizer never emits feedback."""
     for name in TUBE_FIXTURES:
@@ -311,6 +332,11 @@ def test_invalid_strategy_inputs_are_rejected() -> None:
         )
     with pytest.raises(GeometryError):
         engine.analyze(step, family=FAMILY_TUBE_LASER, inputs={"max_angled_cut_threshold": -5.0})
+    for threshold in (float("inf"), float("-inf")):
+        with pytest.raises(GeometryError):
+            engine.analyze(
+                step, family=FAMILY_TUBE_LASER, inputs={"max_angled_cut_threshold": threshold}
+            )
     with pytest.raises(GeometryError):
         engine.analyze(
             step, family=FAMILY_TUBE_LASER, inputs={"should_countersinks_be_lasered": "yes"}

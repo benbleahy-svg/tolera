@@ -1002,7 +1002,10 @@ def tube_rect_csk() -> tuple[object, dict]:
             "total_cut_length": 216.0 + 12 * math.pi,
             "pierce_count": 1,
             "countersink": {"hole_diameter": 8.0, "sink_diameter": 12.0},
+            # not-lasered: the sink leaves the laser metrics entirely and
+            # becomes a secondary machining op (machining_required)
             "total_cut_length_not_lasered": 216.0,
+            "pierce_count_not_lasered": 0,
         },
     }
     return shape, golden

@@ -6,7 +6,7 @@
  */
 import { useTranslation } from 'react-i18next';
 
-import type { InterrogationFeature, TubeLaserScalars } from '../../parts/api';
+import type { InterrogationFeature, TubeProfileScalars } from '../../parts/api';
 import { formatLength, type DisplayOptions } from './measureFormat';
 
 export function TubeLaserResults({
@@ -14,7 +14,7 @@ export function TubeLaserResults({
   features,
   displayOpts,
 }: {
-  scalars: TubeLaserScalars;
+  scalars: TubeProfileScalars;
   features: InterrogationFeature[];
   displayOpts: DisplayOptions;
 }) {

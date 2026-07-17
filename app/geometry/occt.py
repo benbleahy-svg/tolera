@@ -1777,10 +1777,12 @@ _TUBE_STRAIGHT_DEG = 0.5
 _TUBE_INCOMPATIBLE: dict[str, Any] = {"stock_type": "incompatible"}
 
 
-def _wire_length(wire: Any) -> float:
+def _wire_metrics(wire: Any) -> tuple[float, tuple[float, float, float]]:
+    """(total edge length, centre of mass) of a wire."""
     props = GProp_GProps()
     BRepGProp.LinearProperties_s(wire, props)
-    return float(props.Mass())
+    c = props.CentreOfMass()
+    return float(props.Mass()), (c.X(), c.Y(), c.Z())
 
 
 def _inner_wires(face: TopoDS_Face) -> list[Any]:
@@ -1882,7 +1884,7 @@ class _TubeSection:
         self.ok = sec.IsDone()
         self.lines: list[_SectionLine] = []
         self.arc_radii: list[tuple[float, tuple[float, float, float]]] = []  # (r, arc midpoint)
-        self.circle_radii: list[float] = []
+        self.circle_radii: list[tuple[float, tuple[float, float, float]]] = []  # (r, centre)
         self.points: list[tuple[float, float, float]] = []
         self.unsupported = False
         self._loop_pts: list[list[tuple[float, float, float]]] = []
@@ -1904,7 +1906,8 @@ class _TubeSection:
             elif kind == 1:  # circle — full ring or a corner arc
                 radius = curve.Circle().Radius()
                 if last - first >= 2 * math.pi - 1e-3:
-                    self.circle_radii.append(radius)
+                    centre = curve.Circle().Location()
+                    self.circle_radii.append((radius, (centre.X(), centre.Y(), centre.Z())))
                 else:
                     pm = curve.Value((first + last) / 2)
                     self.arc_radii.append((radius, (pm.X(), pm.Y(), pm.Z())))
@@ -2020,8 +2023,15 @@ def _classify_tube_section(
     lines, arcs, circles = section.lines, section.arc_radii, section.circle_radii
 
     if len(circles) == 2 and not lines and not arcs:
-        r_out, r_in = max(circles), min(circles)
+        (r_a, c_a), (r_b, c_b) = circles
+        r_out, r_in = max(r_a, r_b), min(r_a, r_b)
         if r_out - r_in <= 1e-6:
+            return None
+        # A round TUBE is concentric — an eccentric bore has the same radii,
+        # volume and skin areas (so it would survive the whole-body gates)
+        # but is not laser tube stock. Never fabricate a diameter from it.
+        gap = _v_sub(c_b, c_a)
+        if math.sqrt(_v_dot(gap, gap)) > max(0.01 * r_out, 1e-4):
             return None
         return {
             "stock_type": "round",
@@ -2188,10 +2198,36 @@ def _tube_cut_metrics(
             }
         )
 
-    # -- wall cutouts: paired inner wires on outer+inner skins (M4.2 rule:
-    #    min() per wall pair — a one-sided recess is never a piercing) -------- #
+    # -- wall cutouts: inner wires on the OUTER skin matched to inner wires on
+    #    the facing INNER skin by wire-centre proximity (a through-piercing's
+    #    two openings share a centre to within the wall crossing; unrelated
+    #    one-sided recesses on opposing walls never pair — the M4.2 rule made
+    #    positional, CodeRabbit M4.6) -------------------------------------- #
     pierce = 0
     perimeters: list[float] = []
+
+    def match_openings(
+        out_wires: list[tuple[float, tuple[float, float, float]]],
+        in_wires: list[tuple[float, tuple[float, float, float]]],
+    ) -> None:
+        nonlocal pierce
+        taken: set[int] = set()
+        for length_o, centre_o in sorted(out_wires, key=lambda w: -w[0]):
+            radius_o = length_o / (2 * math.pi)
+            best: int | None = None
+            best_d = 0.0
+            for j, (_, centre_i) in enumerate(in_wires):
+                if j in taken:
+                    continue
+                gap_v = _v_sub(centre_i, centre_o)
+                d = math.sqrt(_v_dot(gap_v, gap_v))
+                if d <= radius_o + 2 * thickness and (best is None or d < best_d):
+                    best, best_d = j, d
+            if best is not None:
+                taken.add(best)
+                pierce += 1
+                perimeters.append(length_o)
+
     skins = [
         f
         for f in faces
@@ -2217,10 +2253,10 @@ def _tube_cut_metrics(
             away = _v_dot(_v_sub(outer_f.origin, inner_f.origin), outer_f.normal)
             out_face = outer_f.face if away > 0 else inner_f.face
             in_face = inner_f.face if away > 0 else outer_f.face
-            out_wires = sorted((_wire_length(w) for w in _inner_wires(out_face)), reverse=True)
-            count = min(len(out_wires), len(_inner_wires(in_face)))
-            pierce += count
-            perimeters.extend(out_wires[:count])
+            match_openings(
+                [_wire_metrics(w) for w in _inner_wires(out_face)],
+                [_wire_metrics(w) for w in _inner_wires(in_face)],
+            )
             break
     # coaxial cylinder skins (round tubes): outer = max radius group
     cyl_skins = [
@@ -2231,18 +2267,15 @@ def _tube_cut_metrics(
             {round(BRepAdaptor_Surface(f.face).Cylinder().Radius(), 6) for f in cyl_skins}
         )
         if len(radii) >= 2:
-            outer_wires: list[float] = []
-            inner_count = 0
+            outer_cyl_wires: list[tuple[float, tuple[float, float, float]]] = []
+            inner_cyl_wires: list[tuple[float, tuple[float, float, float]]] = []
             for f in cyl_skins:
                 r = round(BRepAdaptor_Surface(f.face).Cylinder().Radius(), 6)
                 if r == radii[-1]:
-                    outer_wires.extend(_wire_length(w) for w in _inner_wires(f.face))
+                    outer_cyl_wires.extend(_wire_metrics(w) for w in _inner_wires(f.face))
                 elif r == radii[0]:
-                    inner_count += len(_inner_wires(f.face))
-            outer_wires.sort(reverse=True)
-            count = min(len(outer_wires), inner_count)
-            pierce += count
-            perimeters.extend(outer_wires[:count])
+                    inner_cyl_wires.extend(_wire_metrics(w) for w in _inner_wires(f.face))
+            match_openings(outer_cyl_wires, inner_cyl_wires)
 
     # -- countersinks: radial cone faces; the toggle moves them between the
     #    laser pass and a secondary op (DFM-WARNINGS §Tube strategy) ---------- #
@@ -2294,8 +2327,10 @@ def _tube_cut_metrics(
         if feat["properties"]["lasered"]:
             marks[best] = "sink"
         else:
+            # a non-lasered countersink IS a secondary machining operation
             marks[best] = "removed"
             pierce = max(pierce - 1, 0)
+            machining_required = True
 
     for p, mark in zip(perimeters, marks, strict=True):
         if mark == "removed":
@@ -2350,30 +2385,7 @@ def _analyze_tube_laser(
     lo, hi = min(projections), max(projections)
     if hi - lo <= 1e-6:
         return dict(_TUBE_INCOMPATIBLE), []
-    centroid_s = sum(projections) / len(projections)
 
-    profile: dict[str, Any] | None = None
-    centroid = _shape_centroid(shape)
-    for station in _TUBE_STATIONS:
-        s = lo + station * (hi - lo)
-        origin = (
-            centroid[0] + (s - centroid_s) * axis[0],
-            centroid[1] + (s - centroid_s) * axis[1],
-            centroid[2] + (s - centroid_s) * axis[2],
-        )
-        profile = _classify_tube_section(_TubeSection(shape, origin, axis), axis)
-        if profile is not None:
-            break
-    if profile is None:
-        return dict(_TUBE_INCOMPATIBLE), []
-
-    # Constant-wall gate (the M4.2 sheet gate, tube form): a real tube/profile
-    # is a constant-thickness shell, so its wall skins account for 2·V/t of
-    # surface — regardless of end shape or cutouts (both sides lose alike).
-    # A solid body whose cross-section merely LOOKS like a profile (a pocketed
-    # block sections as a u_channel) fails this by a wide margin. Open-profile
-    # leg-tip walls are counted with the skins, hence the 4·t·L allowance.
-    thickness = float(profile["thickness"])
     skin_area = sum(
         f.area
         for f in faces
@@ -2383,14 +2395,46 @@ def _analyze_tube_laser(
     props = GProp_GProps()
     BRepGProp.VolumeProperties_s(shape, props)
     volume = float(props.Mass())
-    expected_skins = 2.0 * volume / thickness
-    if abs(skin_area - expected_skins) > 0.02 * expected_skins + 4.0 * thickness * (hi - lo):
-        return dict(_TUBE_INCOMPATIBLE), []
-    # …and never MORE material than the profile section swept over the full
-    # length allows (angled ends and cutouts only remove material, so real
-    # tubes sit at or under). A pocketed solid whose one cross-section apes a
-    # profile (u_channel-shaped milled block) is overfull and rejected here.
-    if volume / (hi - lo) > 1.02 * _profile_section_area(profile):
+
+    def gates_hold(candidate: dict[str, Any]) -> bool:
+        """The two whole-body honesty gates a station's candidate must pass.
+
+        (a) Constant-wall (the M4.2 sheet gate, tube form): a real tube or
+        profile is a constant-thickness shell, so its wall skins account for
+        2·V/t of surface — regardless of end shape or cutouts (both sides
+        lose alike). A solid body whose cross-section merely LOOKS like a
+        profile fails this by a wide margin. Open-profile leg-tip walls are
+        counted with the skins, hence the 4·t·L allowance.
+
+        (b) Never MORE material than the profile section swept over the full
+        length allows (angled ends and cutouts only remove material, so real
+        tubes sit at or under). A pocketed solid whose one cross-section apes
+        a profile (a u_channel-shaped milled block) is overfull here.
+        """
+        t = float(candidate["thickness"])
+        expected_skins = 2.0 * volume / t
+        if abs(skin_area - expected_skins) > 0.02 * expected_skins + 4.0 * t * (hi - lo):
+            return False
+        return volume / (hi - lo) <= 1.02 * _profile_section_area(candidate)
+
+    # Validate INSIDE the station loop: a station slicing through a wall
+    # opening can produce a candidate the gates reject (an opening-spanning
+    # section reads like a u_channel) while a later, clean station holds.
+    profile: dict[str, Any] | None = None
+    centroid = _shape_centroid(shape)
+    centroid_s = _v_dot(centroid, axis)
+    for station in _TUBE_STATIONS:
+        s = lo + station * (hi - lo)
+        origin = (
+            centroid[0] + (s - centroid_s) * axis[0],
+            centroid[1] + (s - centroid_s) * axis[1],
+            centroid[2] + (s - centroid_s) * axis[2],
+        )
+        candidate = _classify_tube_section(_TubeSection(shape, origin, axis), axis)
+        if candidate is not None and gates_hold(candidate):
+            profile = candidate
+            break
+    if profile is None:
         return dict(_TUBE_INCOMPATIBLE), []
 
     total_cut, pierce, machining_required, features = _tube_cut_metrics(
