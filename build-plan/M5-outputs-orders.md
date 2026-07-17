@@ -12,9 +12,20 @@
 - **Credit-card checkout is v1.x** — checkout is **PO-only** ([#digitalquote](../docs/spec/Bid-Factory-Build-Spec.html#digitalquote), [#milestones](../docs/spec/Bid-Factory-Build-Spec.html#milestones)). "Charge Me for Shipping (CC)" is hidden.
 - **The quote PDF is fully white-label** — org logo + brand colours, **no Tolera branding visible to the customer**. Its design is **owned and implemented here** (M5.4) with WeasyPrint; there is no separate pre-M5 design session (`DECISIONS.md`).
 
-**Sequence:** `M5.1 → M5.3 → M5.2` (portal first, then the tax engine it needs, then the checkout that creates the Order) → `M5.4 ⟂ M5.5` (PDF and send-composer can branch in parallel once the portal exists) → `M5.6 → M5.7` (orders list, then facilitate drawer) → `M5.8 ⟂ M5.9` (settings sub-tree and the de-DE catalog are orthogonal). The AI trio `M5.10 → M5.11` lands last (depends on the live send composer). German strings are introduced incrementally per block and consolidated in M5.9.
+**Sequence:** `M5.0` (estimating shell — chartered 2026-07-17, runs first) → `M5.1 → M5.3 → M5.2` (portal first, then the tax engine it needs, then the checkout that creates the Order) → `M5.4 ⟂ M5.5` (PDF and send-composer can branch in parallel once the portal exists) → `M5.6 → M5.7` (orders list, then facilitate drawer) → `M5.8 ⟂ M5.9` (settings sub-tree and the de-DE catalog are orthogonal). The AI trio `M5.10 → M5.11` lands last (depends on the live send composer). German strings are introduced incrementally per block and consolidated in M5.9.
 
 ---
+
+### M5.0 — Estimating shell: spec route + line-item sidebar + costing-inputs band + priority + Bulk Refresh   `[L]`  *(chartered 2026-07-17 decision-review)*
+- **Vertical slice:** estimating navigates per line item at the spec route with a left line-item sidebar; the costing-inputs band matches `#partview` (PROCESS · MATERIAL · REQUESTED FINISHES · ACTIONS ▾); priority is settable per line item and drives the quotes grid; the quotes list gains multi-select with Bulk Refresh Pricing.
+- **Scope (in):** route **`/quotes/edit/:id/:lineItemId`** + left sidebar (old `/quotes/:quoteId` 301-redirects to the first line item); the **costing-inputs band** incl. the **REQUESTED FINISHES multi-select** (backed by finish data — `is_finish` operations/library) and **ACTIONS ▾**; **`line_item.priority`** column (migration) + the quote grid's derived `MAX(line-item priority)` column, filter-grammar field and "Highest Priority" saved view (replaces the "—" placeholder); **quotes-list multi-select + Bulk Refresh Pricing** (batch loop over M1.10's re-evaluate-with-preserved-overrides; Celery for large selections).
+- **Scope (out):** the Material Calculator button (→ M6.7b, per the RESOLVED 2026-07-17 entry); the digital-quote/send surfaces (M5.1+); dashboard urgency (M6.1).
+- **Depends on:** M1.10 (refresh engine mode), M1.14 (grid), M1.3 (filter grammar + saved views).
+- **Implements (spec):** [#partview](../docs/spec/Bid-Factory-Build-Spec.html#partview)
+- **Decisions:** ../docs/decisions/DECISIONS.md → the RESOLVED 2026-07-17 entries *estimating route shape*, *REQUESTED FINISHES owner*, *Quote-level priority home*, *Bulk Refresh Pricing placement*.
+- **Acceptance criteria:** the spec route renders with the sidebar and the old route redirects; the band shows all four controls and finishes persist; setting a line-item priority surfaces the MAX on the grid, filters and the Highest-Priority view; Bulk Refresh over a multi-select re-prices `is_from_factory` rows and preserves every `manual_*` (asserted against the M1.10 goldens).
+- **Test plan (fixtures):** route/redirect test; finishes round-trip; priority derivation + filter test; bulk-refresh override-preservation test on the Demo E golden quote.
+- **Golden-thread role:** the thread's estimating screen moves to the spec route — the E2E demo path updates; totals must stay golden.
 
 ### M5.1 — Digital Quote buyer portal (unauthenticated token)   `[L]`
 - **Vertical slice:** a buyer opens `/q/:token` with no login, sees the white-label read-only quote, selects one qty×lead-time row per line item (incl. expedite tiers) and optional add-ons — the selection state the checkout reads.
