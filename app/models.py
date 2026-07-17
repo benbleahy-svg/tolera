@@ -841,6 +841,14 @@ class Component(Base):
             ["process.org_id", "process.id"],
             name="fk_component_process_org",
         ),
+        # No ondelete here: the DDL (0034) uses the column-list form
+        # ``ON DELETE SET NULL (purchased_component_id)`` — nulling only the
+        # link, never org_id (the part_file/extraction_finding precedent).
+        ForeignKeyConstraint(
+            ["org_id", "purchased_component_id"],
+            ["purchased_component.org_id", "purchased_component.id"],
+            name="fk_component_purchased_component_org",
+        ),
         Index("ix_component_org_part", "org_id", "part_id"),
     )
 
@@ -863,6 +871,9 @@ class Component(Base):
     # Overrides bucket). The full purchased_component entity lands at M4.
     piece_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     manual_override_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    # M4.10: the PC-library entry a Convert linked (piece_price stays the
+    # frozen-at-convert copy; this FK is provenance + the Smart Match badge).
+    purchased_component_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1261,6 +1272,10 @@ class Process(Base):
     available_in_smart_rfq: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # M4.10: process-level Kalk (KB ``custom-operation-generation``) — a custom
+    # process generates its router from this formula; NULL = generic process
+    # (instantiate the ``process_operation`` template rows).
+    generation_formula: Mapped[str | None] = mapped_column(Text)
     deleted_at: Mapped[datetime | None] = _deleted_at()
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
@@ -1361,6 +1376,7 @@ class Operation(Base):
         CheckConstraint(
             "yield_factor > 0 AND yield_factor <= 1", name="ck_operation_yield_factor_range"
         ),
+        CheckConstraint("origin IN ('manual', 'auto_routing')", name="ck_operation_origin"),
         Index("ix_operation_org_component", "org_id", "component_id"),
     )
 
@@ -1390,6 +1406,12 @@ class Operation(Base):
     manual_runtime_mins: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     calc_attend_mins: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     manual_attend_mins: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    # M4.10 provenance — generated rows carry their source (block AC): 'manual'
+    # (attach/UI) vs 'auto_routing' (router generation). ``operation_properties``
+    # is the ``generate_operation(..., operation_properties=)`` payload read
+    # back by Kalk's ``get_operation_property`` (KB custom-operation-generation).
+    origin: Mapped[str] = mapped_column(Text, nullable=False, server_default="manual")
+    operation_properties: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     surcharge_pct: Mapped[Decimal] = mapped_column(
         Numeric(6, 3), nullable=False, server_default=text("0")
     )
@@ -3058,3 +3080,98 @@ class CustomInterrogationOperationDef(Base):
     operation_def_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     org_id: Mapped[uuid.UUID] = _org_fk()
     created_at: Mapped[datetime] = _ts()
+
+
+class PurchasedComponent(Base):
+    """An org PC-library entry (DOMAIN-MODEL §5; KB ``purchased-components``):
+    hardware costed at a piece price. ``piece_price`` is copied onto the
+    component at Convert time (E4-d freeze — later library edits never silently
+    reprice an existing quote); the FK back from ``component`` is provenance.
+    ``custom_fields`` stands in for PP's editable custom columns (the org
+    column-def editor is deferred with the Configure library page)."""
+
+    __tablename__ = "purchased_component"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_purchased_component_org_id_id"),
+        CheckConstraint("currency IN ('EUR', 'CHF')", name="ck_purchased_component_currency"),
+        CheckConstraint(
+            "piece_price IS NULL OR piece_price >= 0",
+            name="ck_purchased_component_piece_price",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "oem_product_id"],
+            ["oem_product.org_id", "oem_product.id"],
+            name="fk_purchased_component_oem_product_org",
+        ),
+        Index("ix_purchased_component_org_oem", "org_id", "oem_part_number"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    oem_part_number: Mapped[str] = mapped_column(Text, nullable=False)
+    internal_part_number: Mapped[str | None] = mapped_column(Text)
+    piece_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
+    description: Mapped[str | None] = mapped_column(Text)
+    brand: Mapped[str | None] = mapped_column(Text)
+    custom_fields: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    oem_product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class OemProduct(Base):
+    """A mock-OEM-catalog product (spec ``#assembly`` Smart Match — "org's
+    previously-used + a mock OEM catalog"; the M6 Würth adapter feeds the same
+    table). Org-scoped like every domain table; seeded per org. A row nothing
+    in ``purchased_component`` references renders as an "Unlinked OEM
+    Product" when its geometry matches."""
+
+    __tablename__ = "oem_product"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_oem_product_org_id_id"),
+        Index("ix_oem_product_org_geom", "org_id", "geom_hash"),
+        Index("ix_oem_product_org_oem", "org_id", "oem_part_number"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    brand: Mapped[str] = mapped_column(Text, nullable=False)
+    oem_part_number: Mapped[str] = mapped_column(Text, nullable=False)
+    geom_hash: Mapped[str | None] = mapped_column(Text)
+    specs: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class PcGeometryMemory(Base):
+    """The org-level geometry→purchased-component memory (spec ``#assembly``
+    "Persistent geometry memory"): once a geometry is identified as purchased,
+    every future occurrence of the same signature auto-tags — the estimator
+    never re-converts the same fastener. One row per (org, signature); a
+    re-convert to a different PC repoints the row (latest wins) and
+    ``match_count`` is the Historical Geometric Match "(N)" counter."""
+
+    __tablename__ = "pc_geometry_memory"
+    __table_args__ = (
+        UniqueConstraint("org_id", "geom_hash", name="uq_pc_geometry_memory_org_hash"),
+        ForeignKeyConstraint(
+            ["org_id", "purchased_component_id"],
+            ["purchased_component.org_id", "purchased_component.id"],
+            name="fk_pc_geometry_memory_pc_org",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    geom_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    purchased_component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    match_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
