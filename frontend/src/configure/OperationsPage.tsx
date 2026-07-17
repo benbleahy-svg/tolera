@@ -155,6 +155,7 @@ export function OperationsPage() {
         <Link to="/configure/pricing">{t('configure.pricing')}</Link>
         <span aria-current="page">{t('configure.operations')}</span>
         <Link to="/configure/rules">{t('configure.rules')}</Link>
+        <Link to="/configure/interrogations">{t('configure.interrogations')}</Link>
       </nav>
       <h1>{t('configure.operations')}</h1>
       {error && <p role="alert">{error}</p>}

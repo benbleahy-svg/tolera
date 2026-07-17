@@ -55,6 +55,7 @@ export function RulesPage() {
         <Link to="/configure/pricing">{t('configure.pricing')}</Link>
         <Link to="/configure/operations">{t('configure.operations')}</Link>
         <span aria-current="page">{t('configure.rules')}</span>
+        <Link to="/configure/interrogations">{t('configure.interrogations')}</Link>
       </nav>
       <header className="est-header">
         <h2>{t('configure.rules')}</h2>

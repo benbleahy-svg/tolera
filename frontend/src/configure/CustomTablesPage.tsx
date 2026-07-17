@@ -163,6 +163,7 @@ export function CustomTablesPage() {
         <Link to="/configure/pricing">{t('configure.pricing')}</Link>
         <Link to="/configure/operations">{t('configure.operations')}</Link>
         <Link to="/configure/rules">{t('configure.rules')}</Link>
+        <Link to="/configure/interrogations">{t('configure.interrogations')}</Link>
       </nav>
       <h1>{t('configure.custom_tables')}</h1>
       <p className="configure-hint">{t('configure.custom_tables_hint')}</p>

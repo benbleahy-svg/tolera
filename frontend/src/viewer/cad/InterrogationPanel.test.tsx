@@ -28,6 +28,7 @@ function succeeded(): InterrogationStatus {
       family: null,
       material_id: null,
       geom_hash: 'gs1:abc',
+      inputs_hash: '',
       status: 'succeeded',
       error_code: null,
       error_detail: null,
@@ -502,5 +503,74 @@ describe('InterrogationPanel', () => {
     expect(screen.getByText('Blechdicke')).toBeInTheDocument();
     expect(screen.queryByText('Abwicklungsmaße')).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: /Abwicklung/ })).not.toBeInTheDocument();
+  });
+  it('renders the Manufacturability Warnings list with expandable instances (M4.7)', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default;
+    const sheet = succeeded();
+    sheet.run!.family = 'SHEET_METAL';
+    sheet.run!.result = {
+      ...sheet.run!.result!,
+      family: 'SHEET_METAL',
+      family_scalars: {
+        thickness: 2,
+        bend_count: 1,
+        flat_area: 2062.4,
+        total_cut_length: 184,
+        pierce_count: 0,
+      },
+      features: [
+        {
+          name: 'bend',
+          properties: { radius: 1, angle: 90, length: 40, k_factor: 0.25 },
+          geometry_refs: [],
+        },
+      ],
+      feedback: [
+        {
+          type: 'small_bend_radius',
+          count: 1,
+          threshold_used: { min_bend_radius: 0.75 },
+          geometry_refs: [],
+          can_disable: true,
+          instances: [{ radius: 1, angle: 90, length: 40 }],
+        },
+      ],
+    };
+    getInterrogation.mockResolvedValue(sheet);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Fertigbarkeitswarnungen')).toBeInTheDocument();
+    });
+    // family label + localized warning name with count + the ⓘ threshold
+    expect(screen.getByText('Blech')).toBeInTheDocument();
+    expect(screen.getByText(/Zu kleiner Biegeradius \(1\)/)).toBeInTheDocument();
+    expect(screen.getByTitle(/min_bend_radius = 0\.75/)).toBeInTheDocument();
+    // expanding shows the per-instance row with formatted metric values
+    await userEvent.click(screen.getByRole('button', { expanded: false }));
+    expect(screen.getByText(/Radius: 1,00\s*mm/)).toBeInTheDocument();
+  });
+
+  it('renders no warnings block when nothing fired (M4.7)', async () => {
+    const sheet = succeeded();
+    sheet.run!.family = 'SHEET_METAL';
+    sheet.run!.result = {
+      ...sheet.run!.result!,
+      family: 'SHEET_METAL',
+      family_scalars: {
+        thickness: 2,
+        bend_count: 1,
+        flat_area: 4814.16,
+        total_cut_length: 292.57,
+        pierce_count: 0,
+      },
+      features: [],
+      feedback: [],
+    };
+    getInterrogation.mockResolvedValue(sheet);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Blechanalyse – Ergebnisse')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Fertigbarkeitswarnungen')).not.toBeInTheDocument();
   });
 });

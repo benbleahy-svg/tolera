@@ -12,6 +12,7 @@ import { CustomTablesPage } from './configure/CustomTablesPage';
 import { OperationsPage } from './configure/OperationsPage';
 import { PricingDefsPage } from './configure/PricingDefsPage';
 import { RulesPage } from './configure/RulesPage';
+import { InterrogationsPage } from './configure/InterrogationsPage';
 import { AccountDetailPage } from './contacts/AccountDetailPage';
 import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
@@ -58,6 +59,8 @@ export default function App() {
         <Route path="/configure/pricing" element={<PricingDefsPage />} />
         <Route path="/configure/operations" element={<OperationsPage />} />
         <Route path="/configure/rules" element={<RulesPage />} />
+        {/* Configure → Interrogations: DFM thresholds + toggles (M4.7). */}
+        <Route path="/configure/interrogations" element={<InterrogationsPage />} />
         {/* Settings → User Profile → Email Connection (M3.5). */}
         <Route path="/settings/email" element={<EmailConnectionPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a

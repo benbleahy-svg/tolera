@@ -205,6 +205,19 @@ export interface TubeProfileScalars {
  * (never a fabricated guess), so the incompatible branch carries no dims. */
 export type TubeLaserScalars = { stock_type: 'incompatible' } | TubeProfileScalars;
 
+/** One fired DFM warning (M4.7, INTERROGATION-ENGINE-SPEC §2 Warning):
+ * carries the threshold that fired so the UI can show "why" and the value is
+ * auditable. `instances` backs the expandable per-instance rows; face-id
+ * `geometry_refs` stay empty until the server-mesh export correlates them. */
+export interface DfmWarning {
+  type: string;
+  count: number;
+  threshold_used: Record<string, number>;
+  geometry_refs: unknown[];
+  can_disable: boolean;
+  instances: Record<string, number | string | boolean | null>[];
+}
+
 export interface InterrogationRun {
   id: string;
   part_id: string;
@@ -213,6 +226,8 @@ export interface InterrogationRun {
   material_id: string | null;
   /** Versioned geometry signature (`gs1:<sha256>`), set once the body parsed. */
   geom_hash: string | null;
+  /** Fingerprint of the resolved interrogation-profile inputs ('' = engine defaults). */
+  inputs_hash: string;
   status: 'queued' | 'running' | 'succeeded' | 'failed';
   error_code: string | null;
   error_detail: string | null;
@@ -237,6 +252,8 @@ export interface InterrogationRun {
       | TubeLaserScalars
       | Record<string, never>;
     features?: InterrogationFeature[];
+    /** DFM warnings fired by the M4.7 evaluator (only fired types appear). */
+    feedback?: DfmWarning[];
     /** Engine trust rating where runtime is estimated (milling — M4.4). */
     confidence?: 'High' | 'Medium' | 'Low' | null;
   } | null;

@@ -196,6 +196,7 @@ export function PricingDefsPage() {
         <span aria-current="page">{t('configure.pricing')}</span>
         <Link to="/configure/operations">{t('configure.operations')}</Link>
         <Link to="/configure/rules">{t('configure.rules')}</Link>
+        <Link to="/configure/interrogations">{t('configure.interrogations')}</Link>
       </nav>
       <header className="est-header">
         <h2>{t('configure.pricing')}</h2>
