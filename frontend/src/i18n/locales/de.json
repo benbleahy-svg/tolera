@@ -359,7 +359,17 @@
     "interrogation_save": "Speichern",
     "interrogation_saved": "Gespeichert.",
     "interrogation_save_failed": "Speichern fehlgeschlagen",
-    "interrogation_not_toggleable": "Nicht abschaltbar"
+    "interrogation_not_toggleable": "Nicht abschaltbar",
+    "interrogation_default": "Standard",
+    "interrogation_delete": "Profil löschen",
+    "interrogation_link_class": "Werkstoffklasse",
+    "interrogation_link_family": "Werkstofffamilie",
+    "interrogation_link_material": "Werkstoff",
+    "interrogation_link_ops": "Arbeitsgänge",
+    "interrogation_link_none": "— keine Verknüpfung —",
+    "interrogation_new": "Neues Profil ({{family}})",
+    "interrogation_new_name": "Profilname",
+    "interrogation_duplicate_dispatch": "„{{other}}“ ist im Prozess „{{process}}“ ebenfalls über einen Arbeitsgang verknüpft — dieselbe Interrogation würde doppelt ausgeführt."
   },
   "pricing": {
     "refresh_pricing": "Preise aktualisieren",

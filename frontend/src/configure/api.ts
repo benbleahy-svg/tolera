@@ -125,7 +125,36 @@ export interface InterrogationProfileOut {
   id: string;
   name: string;
   family: string;
+  /** The seeded org default (undeletable; resolution fallback). */
+  is_default: boolean;
   inputs: Record<string, number | boolean>;
+  material_class_id: string | null;
+  material_family_id: string | null;
+  material_id: string | null;
+  operation_def_ids: string[];
+}
+
+/** Advisory duplicate-dispatch finding (KB custom-interrogations) — never blocks. */
+export interface DispatchWarningOut {
+  code: string;
+  process_id: string;
+  process_name: string;
+  other_profile_id: string;
+  other_profile_name: string;
+}
+
+export interface InterrogationProfileSaved extends InterrogationProfileOut {
+  warnings: DispatchWarningOut[];
+}
+
+/** Partial PUT body — only provided fields change; null clears a material link. */
+export interface InterrogationProfileUpdate {
+  name?: string;
+  inputs?: Record<string, number | boolean>;
+  material_class_id?: string | null;
+  material_family_id?: string | null;
+  material_id?: string | null;
+  operation_def_ids?: string[];
 }
 
 export interface InterrogationsConfigOut {
@@ -164,10 +193,12 @@ export interface ConfigureApi {
   exportRules: () => Promise<{ rules_json: string; count: number }>;
   importRules: (rulesJson: string) => Promise<{ created: number; updated: number }>;
   getInterrogationsConfig: () => Promise<InterrogationsConfigOut>;
+  createInterrogationProfile: (name: string, family: string) => Promise<InterrogationProfileOut>;
   updateInterrogationProfile: (
     profileId: string,
-    inputs: Record<string, number | boolean>,
-  ) => Promise<InterrogationProfileOut>;
+    body: InterrogationProfileUpdate,
+  ) => Promise<InterrogationProfileSaved>;
+  deleteInterrogationProfile: (profileId: string) => Promise<void>;
 }
 
 export function useConfigureApi(): ConfigureApi {
@@ -218,11 +249,18 @@ export function useConfigureApi(): ConfigureApi {
       importRules: (rulesJson) =>
         apiFetch('/api/rules/import', token, { method: 'POST', body: { rules_json: rulesJson } }),
       getInterrogationsConfig: () => apiFetch('/api/configure/interrogations', token),
-      updateInterrogationProfile: (profileId, inputs) =>
+      createInterrogationProfile: (name, family) =>
+        apiFetch('/api/configure/interrogations', token, {
+          method: 'POST',
+          body: { name, family },
+        }),
+      updateInterrogationProfile: (profileId, body) =>
         apiFetch(`/api/configure/interrogations/${profileId}`, token, {
           method: 'PUT',
-          body: { inputs },
+          body,
         }),
+      deleteInterrogationProfile: (profileId) =>
+        apiFetch(`/api/configure/interrogations/${profileId}`, token, { method: 'DELETE' }),
     };
   }, [getToken]);
 }

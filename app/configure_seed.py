@@ -1000,29 +1000,55 @@ _INTERROGATION_PROFILE_NAMES: dict[ProcessFamily, str] = {
 }
 
 
+#: M4.8 material-specific tuning (spec ``#dfm-catalogue`` / KB
+#: ``custom-interrogations``): deep hole / radiused / planar cut ratios x tool
+#: diameter — Aluminium is forgiving (20/6/8), stainless is not (6/2/3).
+#: (German profile names ASSUMED — the sources pin the ratios, not the names.)
+_MILLING_MATERIAL_VARIANTS: list[tuple[str, str, dict[str, float]]] = [
+    (
+        "CNC-Fräsen Aluminium",
+        "Aluminium",
+        {
+            "deep_hole_ratio_threshold": 20.0,
+            "deep_cut_radiused_ratio_threshold": 6.0,
+            "deep_cut_planar_ratio_threshold": 8.0,
+        },
+    ),
+    (
+        "CNC-Fräsen Nichtrostender Stahl",
+        "Nichtrostender Stahl",
+        {
+            "deep_hole_ratio_threshold": 6.0,
+            "deep_cut_radiused_ratio_threshold": 2.0,
+            "deep_cut_planar_ratio_threshold": 3.0,
+        },
+    ),
+]
+
+
 async def _seed_interrogation_profiles(session: AsyncSession, org_id: uuid.UUID) -> int:
-    """M4.7: one org-default ``CustomInterrogation`` per Core-4 family, its
-    ``inputs`` the DFM-WARNINGS seed defaults (thresholds + toggles, metric).
-    Natural key = (org, family, no material link) — a re-seed never touches an
-    existing default, so edited thresholds survive (the catalog_seed rule)."""
+    """M4.7/M4.8: one org-default ``CustomInterrogation`` per Core-4 family
+    (``is_default``), its ``inputs`` the DFM-WARNINGS seed defaults, plus the
+    milling material-family variants (SEED-AND-FIXTURES §5 "material-specific
+    variants" with the spec's #dfm-catalogue tuning). Natural keys —
+    (org, family, is_default) for defaults, (org, name) for variants — so a
+    re-seed never touches an existing row and edited thresholds survive."""
     from app.geometry.dfm import dfm_default_inputs
 
-    existing = {
+    created = 0
+    existing_defaults = {
         row.family
         for row in (
             await session.scalars(
                 select(CustomInterrogation).where(
                     CustomInterrogation.org_id == org_id,
-                    CustomInterrogation.material_class_id.is_(None),
-                    CustomInterrogation.material_family_id.is_(None),
-                    CustomInterrogation.material_id.is_(None),
+                    CustomInterrogation.is_default.is_(True),
                 )
             )
         ).all()
     }
-    created = 0
     for family, name in _INTERROGATION_PROFILE_NAMES.items():
-        if family in existing:
+        if family in existing_defaults:
             continue
         session.add(
             CustomInterrogation(
@@ -1030,6 +1056,36 @@ async def _seed_interrogation_profiles(session: AsyncSession, org_id: uuid.UUID)
                 name=name,
                 family=family,
                 inputs=dfm_default_inputs(family.value),
+                is_default=True,
+            )
+        )
+        created += 1
+
+    existing_names = {
+        row.name
+        for row in (
+            await session.scalars(
+                select(CustomInterrogation).where(CustomInterrogation.org_id == org_id)
+            )
+        ).all()
+    }
+    for name, family_name, overrides in _MILLING_MATERIAL_VARIANTS:
+        if name in existing_names:
+            continue
+        material_family_id = await session.scalar(
+            select(MaterialFamily.id).where(
+                MaterialFamily.org_id == org_id, MaterialFamily.name == family_name
+            )
+        )
+        if material_family_id is None:  # materials catalog not seeded — skip, never guess
+            continue
+        session.add(
+            CustomInterrogation(
+                org_id=org_id,
+                name=name,
+                family=ProcessFamily.MILLING,
+                inputs={**dfm_default_inputs(ProcessFamily.MILLING.value), **overrides},
+                material_family_id=material_family_id,
             )
         )
         created += 1

@@ -43,11 +43,12 @@ def _org_admin(seeder: Seeder, slug: str) -> tuple[uuid.UUID, uuid.UUID]:
 def test_seed_creates_core4_default_profiles(seeder: Seeder, app_client: TestClient) -> None:
     org, user = _org_admin(seeder, "dfm-seed")
     result = seeder.configure_catalog(org)
-    assert result.interrogation_profiles_created == 4
+    # 4 family defaults (M4.7) + 2 milling material variants (M4.8)
+    assert result.interrogation_profiles_created == 6
 
     with _as_admin(app_client, org, user) as client:
         payload = client.get("/api/configure/interrogations").json()
-    profiles = {p["family"]: p for p in payload["profiles"]}
+    profiles = {p["family"]: p for p in payload["profiles"] if p["is_default"]}
     assert set(profiles) == {"SHEET_METAL", "MILLING", "LATHE", "TUBE_LASER"}
     # German-first (tier-1 UI rule; the sub-spec's English name is an "e.g.")
     assert profiles["SHEET_METAL"]["name"] == "Standard Blech (Laser)"

@@ -359,7 +359,17 @@
     "interrogation_save": "Save",
     "interrogation_saved": "Saved.",
     "interrogation_save_failed": "Saving failed",
-    "interrogation_not_toggleable": "Not toggleable"
+    "interrogation_not_toggleable": "Not toggleable",
+    "interrogation_default": "Default",
+    "interrogation_delete": "Delete profile",
+    "interrogation_link_class": "Material class",
+    "interrogation_link_family": "Material family",
+    "interrogation_link_material": "Material",
+    "interrogation_link_ops": "Operations",
+    "interrogation_link_none": "— no link —",
+    "interrogation_new": "New profile ({{family}})",
+    "interrogation_new_name": "Profile name",
+    "interrogation_duplicate_dispatch": "“{{other}}” is also linked into process “{{process}}” via an operation — the same interrogation would be dispatched twice."
   },
   "pricing": {
     "refresh_pricing": "Refresh Pricing",

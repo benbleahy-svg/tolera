@@ -2946,6 +2946,10 @@ class CustomInterrogation(Base):
 
     __tablename__ = "custom_interrogation"
     __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_custom_interrogation_org_id_id"),
+        # KB custom-interrogations: "Each custom interrogation has a unique
+        # name" — per org (M4.8, migration 0032).
+        Index("uq_custom_interrogation_org_name", "org_id", "name", unique=True),
         # same-org pins mirroring migration 0031 (a profile can never bind
         # another org's material tree — defense-in-depth beside RLS)
         ForeignKeyConstraint(
@@ -2964,16 +2968,14 @@ class CustomInterrogation(Base):
             name="fk_custom_interrogation_material",
         ),
         Index("ix_custom_interrogation_org_family", "org_id", "family"),
-        # One org default (no material link) per family — mirrors migration
-        # 0031 so autogenerate never proposes dropping it.
+        # One org default per family — since 0032 keyed by the explicit
+        # is_default flag (no-link non-default rows are legal, KB Laser/Punch).
         Index(
             "uq_custom_interrogation_org_family_default",
             "org_id",
             "family",
             unique=True,
-            postgresql_where=text(
-                "material_class_id IS NULL AND material_family_id IS NULL AND material_id IS NULL"
-            ),
+            postgresql_where=text("is_default"),
         ),
     )
 
@@ -2982,7 +2984,41 @@ class CustomInterrogation(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     family: Mapped[ProcessFamily] = mapped_column(_process_family_enum, nullable=False)
     inputs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     material_class_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     material_family_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     material_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _ts()
+
+
+class CustomInterrogationOperationDef(Base):
+    """One op-def link on a ``CustomInterrogation`` (M4.8, migration 0032):
+    the profile applies (only) when the part's process routing contains a
+    linked operation def — the KB ``custom-interrogations`` quote-tool path.
+    Links are an eligibility filter in the most-specific resolution
+    (:func:`app.interrogation.select_most_specific`); the ⚠️ duplicate-
+    dispatch guard over them is advisory, at the authoring API."""
+
+    __tablename__ = "custom_interrogation_operation_def"
+    __table_args__ = (
+        # same-org pins (migration-0031 style); CASCADE — a link has no life
+        # beyond its profile or op def.
+        ForeignKeyConstraint(
+            ["org_id", "custom_interrogation_id"],
+            ["custom_interrogation.org_id", "custom_interrogation.id"],
+            name="fk_ci_operation_def_interrogation",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "operation_def_id"],
+            ["operation_def.org_id", "operation_def.id"],
+            name="fk_ci_operation_def_operation_def",
+            ondelete="CASCADE",
+        ),
+        Index("ix_ci_operation_def_org_interrogation", "org_id", "custom_interrogation_id"),
+    )
+
+    custom_interrogation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    operation_def_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    org_id: Mapped[uuid.UUID] = _org_fk()
     created_at: Mapped[datetime] = _ts()
