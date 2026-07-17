@@ -441,7 +441,7 @@ export function EstimatingPage() {
           {t('bom.published_toast')}
         </p>
       )}
-      {bomStatus && (bomStatus.suggestion || bomStatus.has_children) && (
+      {bomStatus && (bomStatus.suggestion || bomStatus.has_children || bomStatus.has_draft) && (
         <div className="bom-line-banner" role="status">
           <span className="bom-sparkle" aria-hidden="true">
             ✦
@@ -454,7 +454,7 @@ export function EstimatingPage() {
                 })
               : t('bom.banner_edit')}
           </span>
-          {canEdit && (
+          {canEdit && quote?.status === 'draft' && (
             <button
               type="button"
               className="bom-open-builder"

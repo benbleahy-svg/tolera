@@ -68,9 +68,12 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [filesBannerDismissed, setFilesBannerDismissed] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [savedSeq, setSavedSeq] = useState(0);
+  const failAction = (e: unknown) => {
+    const detail = String(e instanceof Error ? e.message : e);
+    setActionError(t('bom.action_failed', { detail }));
+  };
 
   const doc = docState.doc;
 
@@ -99,8 +102,10 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
     const seq = docState.dirtySeq;
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
-      const save = api
-        .saveDraft(quoteItemId, docRef.current)
+      // Chain on the previous save so writes reach the server in order.
+      const previous = inFlightSaveRef.current ?? Promise.resolve();
+      const save = previous
+        .then(() => api.saveDraft(quoteItemId, docRef.current))
         .then((res) => {
           setSavedAt(res.updated_at);
           setSavedSeq(seq);
@@ -111,10 +116,25 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
         });
       inFlightSaveRef.current = save;
     }, AUTOSAVE_DELAY_MS);
+    // Re-run supersedes the pending timer with a newer document (debounce);
+    // the unmount-flush effect below covers the close-within-debounce case.
     return () => {
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     };
   }, [api, quoteItemId, docState.dirtySeq]);
+
+  // Closing the modal within the debounce window must not lose work: flush a
+  // still-pending autosave once, on true unmount (api/quoteItemId are stable
+  // for the modal's lifetime, so this cleanup runs exactly at close).
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void api.saveDraft(quoteItemId, docRef.current).catch(() => undefined);
+      }
+    };
+  }, [api, quoteItemId]);
 
   // A stale CHECK result describes an older document — drop it on any edit.
   useEffect(() => {
@@ -166,7 +186,13 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
     };
   }, [state]);
 
-  const edit = useCallback((next: BomDoc) => dispatch({ kind: 'edit', doc: next }), []);
+  const busyRef = useRef(false);
+  busyRef.current = busy;
+  const edit = useCallback((next: BomDoc) => {
+    // A CHECK/PUBLISH in flight validated the document as sent — freeze it.
+    if (busyRef.current) return;
+    dispatch({ kind: 'edit', doc: next });
+  }, []);
 
   const numbers = useMemo(() => itemNumbers(doc), [doc]);
   const uniqueCount = useMemo(() => uniquePartCount(doc), [doc]);
@@ -174,9 +200,19 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
     () => (state ? matchFilesToRows(doc, state.quote_files) : []),
     [doc, state],
   );
+  const typeLabels = useMemo(
+    () =>
+      new Map<RowType, string>([
+        ['assembly_root', t('bom.type_assembly_root')],
+        ['subassembly', t('bom.type_subassembly')],
+        ['manufactured', t('bom.type_manufactured')],
+        ['purchased', t('bom.type_purchased')],
+      ]),
+    [t],
+  );
   const searchHits = useMemo(
-    () => (state ? searchMatches(doc, search, state.quote_files) : new Set<string>()),
-    [doc, search, state],
+    () => (state ? searchMatches(doc, search, state.quote_files, typeLabels) : new Set<string>()),
+    [doc, search, state, typeLabels],
   );
   const suggestionsByFile = useMemo(() => {
     const map = new Map<string, ChildSuggestionOut>();
@@ -207,7 +243,7 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
       setCheck(null);
       dispatch({ kind: 'reset', doc: state.initial });
     } catch (e: unknown) {
-      setActionError(String(e instanceof Error ? e.message : e));
+      failAction(e);
     } finally {
       setBusy(false);
     }
@@ -219,7 +255,7 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
     try {
       setCheck(await api.checkBom(quoteItemId, doc));
     } catch (e: unknown) {
-      setActionError(String(e instanceof Error ? e.message : e));
+      failAction(e);
     } finally {
       setBusy(false);
     }
@@ -229,6 +265,12 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
     setBusy(true);
     setActionError(null);
     try {
+      // A trailing autosave must not land after publish consumed the draft.
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (inFlightSaveRef.current) await inFlightSaveRef.current;
       const result = await api.publishBom(quoteItemId, doc);
       onPublished(result.tree);
     } catch (e: unknown) {
@@ -243,7 +285,7 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
           unique_parts: uniqueCount,
         });
       } else {
-        setActionError(String(e instanceof Error ? e.message : e));
+        failAction(e);
       }
     } finally {
       setBusy(false);
@@ -511,7 +553,7 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
           />
         </div>
 
-        {matches.length > 0 && !filesBannerDismissed && (
+        {matches.length > 0 && (
           <div className="bom-files-banner" role="status">
             <span className="bom-sparkle" aria-hidden="true">
               ✦
@@ -528,10 +570,7 @@ export function BomBuilderModal({ quoteItemId, api, onPublished, onClose }: Prop
             <button
               type="button"
               className="bom-accept-files"
-              onClick={() => {
-                edit(applyFileMatches(doc, matches));
-                setFilesBannerDismissed(true);
-              }}
+              onClick={() => edit(applyFileMatches(doc, matches))}
             >
               {t('bom.add_files_accept')}
             </button>

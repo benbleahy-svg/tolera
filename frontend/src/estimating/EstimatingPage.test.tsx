@@ -89,12 +89,15 @@ vi.mock('../review/api', async () => {
 vi.mock('../configure/api', () => ({ useConfigureApi: () => ({ importRules: vi.fn() }) }));
 
 // M4.9: the BOM banner probe — no suggestion/children by default (no banner).
+// One hoisted instance: EstimatingPage keys an effect on the api object, so a
+// fresh object per render would retrigger it forever (CodeRabbit 2026-07-17).
+const bomApiMock = {
+  getBomStatus: vi
+    .fn()
+    .mockResolvedValue({ suggestion: null, has_children: false, has_draft: false }),
+};
 vi.mock('../bom/api', () => ({
-  useBomApi: () => ({
-    getBomStatus: vi
-      .fn()
-      .mockResolvedValue({ suggestion: null, has_children: false, has_draft: false }),
-  }),
+  useBomApi: () => bomApiMock,
 }));
 
 // Mock the estimating API module so the page never touches Clerk/network.

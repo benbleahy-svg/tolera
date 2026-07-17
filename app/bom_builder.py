@@ -70,6 +70,10 @@ BOM_TABLE_FINDING_TYPE = "bom_tables"
 
 RowType = Literal["assembly_root", "subassembly", "manufactured", "purchased"]
 
+#: node.qty_relative_to_parent is a PostgreSQL integer — a qty above this
+#: would pass a naive check and then blow up the INSERT at publish.
+MAX_QTY = 2_147_483_647
+
 
 # --------------------------------------------------------------------------- #
 # The draft document (staging state — what bom_draft.payload holds)
@@ -231,11 +235,11 @@ def validate_doc(
         if key is not None:
             by_key.setdefault(key, []).append(row)
 
-        if row.qty < 1:
+        if row.qty < 1 or row.qty > MAX_QTY:
             errors.append(
                 BomIssue(
                     code="qty_invalid",
-                    message="Quantities must be at least 1.",
+                    message=f"Quantities must be between 1 and {MAX_QTY}.",
                     row_ids=[row.row_id],
                 )
             )
@@ -802,6 +806,11 @@ async def save_draft(
 ) -> DraftSavedOut:
     """Autosave the staging state (one row per quote item; last write wins)."""
     ctx = await _load_context(session, quote_item_id)
+    # Serialize with publish/discard on the quote-item row: an autosave that
+    # raced publish would otherwise recreate the just-consumed draft.
+    await session.execute(
+        select(QuoteItem.id).where(QuoteItem.id == ctx.quote_item.id).with_for_update()
+    )
     if not _is_editable(ctx.quote):
         raise AppError(
             "quote_locked",
@@ -835,6 +844,9 @@ async def discard_draft(
 ) -> None:
     """Discard the draft — the BOM returns to its published state (KB §BOM drafts)."""
     ctx = await _load_context(session, quote_item_id)
+    await session.execute(
+        select(QuoteItem.id).where(QuoteItem.id == ctx.quote_item.id).with_for_update()
+    )
     await session.execute(sa_delete(BomDraft).where(BomDraft.quote_item_id == ctx.quote_item.id))
 
 
@@ -1054,11 +1066,12 @@ async def _commit_tree(
         component.is_assembly = part.is_assembly
 
     # ---- root part/component take the root row's data ----------------------- #
+    # The grid is the authority for the root's identity: publishing writes what
+    # the estimator sees, including deliberate clears (CodeRabbit 2026-07-17).
     root_row = doc.root
-    root_part.part_number = (root_row.part_number or "").strip() or root_part.part_number
-    root_part.revision = (root_row.revision or "").strip() or root_part.revision
-    if root_row.description:
-        root_part.description = root_row.description
+    root_part.part_number = (root_row.part_number or "").strip() or None
+    root_part.revision = (root_row.revision or "").strip() or None
+    root_part.description = root_row.description
     root_part.is_assembly = root_row.row_type == "assembly_root"
     root_part.obtain_method = ObtainMethod.manufactured
     ctx.root_component.is_assembly = root_part.is_assembly
@@ -1121,7 +1134,18 @@ async def _commit_tree(
         )
         if other_component is None:
             # ASSUMED (M4.9): a builder-created part nothing references anymore
-            # is soft-deleted rather than left to pollute the Part Library.
+            # is soft-deleted rather than left to pollute the Part Library. Its
+            # files return to the root's Quote Files staging first (KB
+            # §Removing files: "sent back to Quote Files") — they would
+            # otherwise vanish from the next builder session's scope.
+            orphan_files = (
+                await session.scalars(select(PartFile).where(PartFile.part_id == part.id))
+            ).all()
+            part.primary_file_id = None
+            await session.flush()
+            for orphan in orphan_files:
+                orphan.part_id = root_part.id
+                orphan.role = "supporting"
             part.deleted_at = now
 
     # ---- file assignments: move staged files onto their parts --------------- #
@@ -1145,6 +1169,14 @@ async def _commit_tree(
             part.primary_file_id = file.id
         for file_id in row.supporting_file_ids:
             file = files[file_id]
+            if file.part_id == part.id and file.role == "primary":
+                # Staged as supporting on its own part: demote (the document
+                # is the authority for roles at publish).
+                if row.primary_file_id != file.id:
+                    part.primary_file_id = None
+                    await session.flush()
+                    file.role = "supporting"
+                continue
             if file.part_id != part.id:
                 # Moving a part's PRIMARY away as another part's supporting
                 # file must clear the source pointer, or the composite FK

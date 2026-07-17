@@ -153,7 +153,7 @@ export function applyFileMatches(doc: BomDoc, matches: FileMatch[]): BomDoc {
 export function acceptChildBom(doc: BomDoc, rowId: string, rows: BomTableRowOut[]): BomDoc {
   return updateRow(doc, rowId, (row) => ({
     ...row,
-    row_type: row.row_type === 'purchased' ? row.row_type : 'subassembly',
+    row_type: 'subassembly',
     children: [
       ...row.children,
       ...rows.map((r) => ({
@@ -167,18 +167,27 @@ export function acceptChildBom(doc: BomDoc, rowId: string, rows: BomTableRowOut[
   }));
 }
 
-/** Row-ids whose subtree matches the search (part #, description, type). */
-export function searchMatches(doc: BomDoc, query: string, files: QuoteFileOut[]): Set<string> {
+/** Row-ids whose subtree matches the search (part #, description, files, type).
+ *  `typeLabels` carries the localized type names so a German user can search
+ *  "Kaufteil", not the internal enum. */
+export function searchMatches(
+  doc: BomDoc,
+  query: string,
+  files: QuoteFileOut[],
+  typeLabels?: Map<RowType, string>,
+): Set<string> {
   const q = query.trim().toLowerCase();
   const hits = new Set<string>();
   if (!q) return hits;
   const filenames = new Map(files.map((f) => [f.id, f.filename.toLowerCase()]));
   const visit = (row: BomRow): boolean => {
+    const rowFiles = [row.primary_file_id, ...row.supporting_file_ids];
     const own =
       (row.part_number ?? '').toLowerCase().includes(q) ||
       (row.description ?? '').toLowerCase().includes(q) ||
       row.row_type.includes(q) ||
-      (row.primary_file_id ? (filenames.get(row.primary_file_id) ?? '').includes(q) : false);
+      (typeLabels?.get(row.row_type) ?? '').toLowerCase().includes(q) ||
+      rowFiles.some((id) => (id ? (filenames.get(id) ?? '').includes(q) : false));
     const childHit = row.children.map(visit).some(Boolean);
     if (own || childHit) hits.add(row.row_id);
     return own || childHit;

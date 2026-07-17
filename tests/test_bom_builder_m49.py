@@ -744,6 +744,49 @@ def test_publish_merges_linked_row_gaps(app_client: TestClient, seeder: Seeder) 
         )
 
 
+def test_check_bom_qty_over_int_range(app_client: TestClient, seeder: Seeder) -> None:
+    """A qty above the PG integer range is a validation error, not a 500."""
+    org, admin = _org_with_admin(seeder, f"bom-intmax-{uuid.uuid4().hex[:6]}")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        sc = Scenario(app_client, seeder, org)
+        result = app_client.post(
+            f"/api/quote-items/{sc.item_id}/bom-builder/check",
+            json={"payload": _doc([_row("BIG-1", qty=2_147_483_648)])},
+        ).json()
+        assert "qty_invalid" in {e["code"] for e in result["errors"]}
+
+
+def test_republish_returns_removed_parts_files_to_staging(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """KB §Removing files: a retired row's files go back to Quote Files —
+    they must not vanish with the soft-deleted part."""
+    org, admin = _org_with_admin(seeder, f"bom-orphan-{uuid.uuid4().hex[:6]}")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        sc = Scenario(app_client, seeder, org)
+        filed = _row(
+            "002-00025-000",
+            revision="000",
+            primary_file_id=sc.page_files["002-00025-000"],
+        )
+        app_client.post(
+            f"/api/quote-items/{sc.item_id}/bom-builder/publish",
+            json={"payload": _doc([filed])},
+        )
+        # Republish without the filed part → its drawing returns to the root.
+        res = app_client.post(
+            f"/api/quote-items/{sc.item_id}/bom-builder/publish",
+            json={"payload": _doc([_row("002-00014-000", row_type="purchased", qty=12)])},
+        )
+        assert res.status_code == 200, res.text
+        root_files = app_client.get(f"/api/parts/{sc.root_part_id}/files").json()
+        returned = next(f for f in root_files if f["id"] == sc.page_files["002-00025-000"])
+        assert returned["role"] == "supporting"
+        # And the builder still lists it (in scope for the next session).
+        state = app_client.get(f"/api/quote-items/{sc.item_id}/bom-builder").json()
+        assert any(f["id"] == sc.page_files["002-00025-000"] for f in state["quote_files"])
+
+
 def test_draft_save_locked_quote_409s(app_client: TestClient, seeder: Seeder) -> None:
     org, admin = _org_with_admin(seeder, f"bom-dlock-{uuid.uuid4().hex[:6]}")
     with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):

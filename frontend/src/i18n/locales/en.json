@@ -1221,6 +1221,7 @@
     "issue_file_not_in_scope": "Assigned files must belong to this line item.",
     "issue_capacity_exceeded": "A BOM may contain at most 1000 unique parts.",
     "issue_missing_primary_file": "No drawing or model is assigned to this part yet.",
-    "issue_purchased_unassigned": "Purchased parts are not linked to a component library record yet (arrives with M4.10)."
+    "issue_purchased_unassigned": "Purchased parts are not linked to a component library record yet (arrives with M4.10).",
+    "action_failed": "Action failed: {{detail}}"
   }
 }
