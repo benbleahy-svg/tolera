@@ -88,6 +88,15 @@ vi.mock('../review/api', async () => {
 });
 vi.mock('../configure/api', () => ({ useConfigureApi: () => ({ importRules: vi.fn() }) }));
 
+// M4.9: the BOM banner probe — no suggestion/children by default (no banner).
+vi.mock('../bom/api', () => ({
+  useBomApi: () => ({
+    getBomStatus: vi
+      .fn()
+      .mockResolvedValue({ suggestion: null, has_children: false, has_draft: false }),
+  }),
+}));
+
 // Mock the estimating API module so the page never touches Clerk/network.
 vi.mock('./api', () => ({
   useEstimatingApi: () => ({

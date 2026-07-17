@@ -98,6 +98,16 @@ _QUOTE_SETUP_PROMPT = (
     "findings: part_number, revision, description, drawing_number, document_units "
     "(mm or in), tables, bom_tables, export_controlled keywords, pii. Title blocks "
     "may be German (Zeichnungsnummer, Benennung, Werkstoff, Maßstab, Blatt, Rev). "
+    "For each detected bill-of-materials table emit ONE finding of type "
+    "'bom_tables' whose value is a JSON document (DECISIONS.md 2026-07-17 "
+    'contract): {"root_part_number": string|null, "rows": [{"item_no": '
+    'string|null, "part_number": string|null, "revision": string|null, '
+    '"qty": integer, "description": string|null, "type_hint": '
+    '"subassembly"|"manufactured"|"purchased"|null}]} — one entry per '
+    "table row, `page` set to the page the table appears on, `raw_text` the "
+    "verbatim table header row. BOM-table headers may be German (Pos., "
+    "Teilenummer, Benennung, Menge, Stück). type_hint only when the table "
+    "states it (e.g. Kaufteil/Normteil → purchased, Baugruppe → subassembly). "
     f"{_NEVER_HALLUCINATE}"
 )
 

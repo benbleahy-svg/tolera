@@ -1,0 +1,327 @@
+/* BOM Builder (M4.9 — spec #bombuilder; DemoD frames). Near-full-screen modal;
+   AI-Governor purple for suggestion affordances (sparkles, banner, badges). */
+
+.bom-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(15 23 42 / 55%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+
+.bom-modal {
+  background: #fff;
+  width: 96vw;
+  height: 94vh;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgb(15 23 42 / 35%);
+}
+
+.bom-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.bom-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.bom-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bom-draft-state {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.bom-publish {
+  background: #1d4ed8;
+  color: #fff;
+  border: none;
+  padding: 0.45rem 0.9rem;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.bom-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.bom-toolbar .bom-link {
+  background: none;
+  border: none;
+  color: #1d4ed8;
+  cursor: pointer;
+}
+
+.bom-search {
+  margin-left: auto;
+  min-width: 320px;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+/* AI-Governor purple, 55% opacity surface (spec #ai-governor). */
+.bom-files-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: rgb(147 51 234 / 12%);
+  border-bottom: 1px solid rgb(147 51 234 / 35%);
+}
+
+.bom-accept-files {
+  margin-left: auto;
+  background: #9333ea;
+  color: #fff;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+}
+
+.bom-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.bom-files-pane {
+  width: 260px;
+  border-right: 1px solid #e2e8f0;
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+
+.bom-files-pane h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.bom-files-pane ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.bom-files-pane li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.bom-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bom-file-pn {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.bom-badge,
+.bom-sparkle {
+  color: #9333ea;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.bom-grid-wrap {
+  flex: 1;
+  overflow: auto;
+  padding: 0 1rem 1rem;
+}
+
+.bom-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.bom-grid th {
+  text-align: left;
+  padding: 0.5rem 0.4rem;
+  border-bottom: 2px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+  background: #fff;
+}
+
+.bom-grid td {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.bom-row-root {
+  background: #faf5ff;
+  font-weight: 600;
+}
+
+.bom-cell-itemno {
+  white-space: nowrap;
+  color: #475569;
+}
+
+.bom-drag {
+  color: #cbd5e1;
+  margin-right: 0.35rem;
+  cursor: grab;
+}
+
+.bom-cell-pn {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.bom-cell-pn input {
+  flex: 1;
+  min-width: 140px;
+}
+
+.bom-grid input,
+.bom-grid select {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0.25rem;
+  border-radius: 3px;
+  width: 100%;
+}
+
+.bom-grid input:focus,
+.bom-grid select:focus {
+  border-color: #93c5fd;
+  background: #fff;
+  outline: none;
+}
+
+.bom-input-rev {
+  max-width: 4rem;
+}
+
+.bom-input-qty {
+  max-width: 5rem;
+  text-align: right;
+}
+
+.bom-collapse {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #475569;
+}
+
+.bom-type-icon {
+  color: #64748b;
+}
+
+.bom-type-assembly_root,
+.bom-type-subassembly {
+  color: #9333ea;
+}
+
+.bom-type-purchased {
+  color: #16a34a;
+}
+
+.bom-file-chip {
+  color: #1d4ed8;
+  font-size: 0.8rem;
+}
+
+.bom-file-empty {
+  color: #cbd5e1;
+}
+
+.bom-cell-actions {
+  white-space: nowrap;
+}
+
+.bom-row-action {
+  background: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-left: 0.2rem;
+}
+
+.bom-check-results {
+  margin-top: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+}
+
+.bom-check-ok {
+  color: #15803d;
+  margin: 0;
+}
+
+.bom-check-errors {
+  color: #b91c1c;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.bom-check-notices {
+  color: #92400e;
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.bom-footer {
+  border-top: 1px solid #e2e8f0;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.bom-error {
+  color: #b91c1c;
+}
+
+/* The line-item banner (DemoD/12): persistent purple strip. */
+.bom-line-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: rgb(147 51 234 / 10%);
+  border: 1px solid rgb(147 51 234 / 30%);
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.bom-line-banner .bom-open-builder {
+  background: #9333ea;
+  color: #fff;
+  border: none;
+  padding: 0.45rem 0.9rem;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+}

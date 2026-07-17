@@ -212,7 +212,8 @@
     "close": "Schließen",
     "yes": "Ja",
     "no": "Nein",
-    "add": "Hinzufügen"
+    "add": "Hinzufügen",
+    "loading": "Wird geladen …"
   },
   "estimating": {
     "title": "Angebot {{number}} — Kalkulation",
@@ -1166,5 +1167,46 @@
     "fields": {
       "should_detect_angled_cuts_on_round_tubes": "Schrägschnitte auch bei Rundrohren melden"
     }
+  },
+  "bom": {
+    "title": "BOM Builder",
+    "draft_saved": "Entwurf gespeichert",
+    "draft_unsaved": "Ungespeicherte Änderungen",
+    "discard_draft": "Entwurf verwerfen",
+    "check": "STÜCKLISTE PRÜFEN",
+    "check_and_publish": "PRÜFEN UND VERÖFFENTLICHEN",
+    "undo": "RÜCKGÄNGIG",
+    "redo": "WIEDERHOLEN",
+    "expand_all": "Alle aufklappen",
+    "collapse_all": "Alle zuklappen",
+    "expand_row": "Zeile aufklappen",
+    "collapse_row": "Zeile zuklappen",
+    "search_placeholder": "Suche nach Teilenummer, Beschreibung, Dateien oder Typ",
+    "add_files_title": "Dateien passenden Teilen zuordnen?",
+    "add_files_detail": "{{files}} Angebotsdateien passen zu {{parts}} Teilen",
+    "add_files_accept": "ZUORDNEN",
+    "quote_files": "Angebotsdateien",
+    "table_detected": "Stückliste in Datei erkannt",
+    "child_suggestion_available": "Unterbaugruppen-Vorschlag verfügbar",
+    "col_item_no": "Pos.",
+    "col_part_number": "Teilenummer",
+    "col_rev": "Rev",
+    "col_type": "Typ",
+    "col_primary_file": "Hauptdatei",
+    "col_description": "Beschreibung",
+    "col_qty": "Menge",
+    "col_actions": "Aktionen",
+    "type_assembly_root": "Baugruppe (Wurzel)",
+    "type_subassembly": "Unterbaugruppe",
+    "type_manufactured": "Fertigungsteil",
+    "type_purchased": "Kaufteil",
+    "add_child": "Unterposition hinzufügen",
+    "remove_row": "Zeile entfernen",
+    "check_ok": "Keine Fehler — die Stückliste kann veröffentlicht werden.",
+    "unique_parts": "/{{cap}} eindeutige Teile",
+    "published_toast": "Stückliste erfolgreich veröffentlicht",
+    "banner_found": "Stückliste gefunden in {{file}}, Seite {{page}}",
+    "banner_open": "IM BOM BUILDER ÖFFNEN",
+    "banner_edit": "Stückliste veröffentlicht — im BOM Builder bearbeiten"
   }
 }
