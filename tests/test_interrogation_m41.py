@@ -313,7 +313,13 @@ def test_duplicate_delivery_never_overwrites_success(
 
         # Second delivery of the SAME task message.
         out = interrogate_part_task.run(str(org), run["id"])
-        assert out == {"skipped": "already_succeeded", "run_id": run["id"]}
+        # part_id rides along so the redelivery still chains the M4.12
+        # requote-diff job (idempotent) even when the success already committed.
+        assert out == {
+            "skipped": "already_succeeded",
+            "run_id": run["id"],
+            "part_id": part_id,
+        }
         after = app_client.get(f"/api/parts/{part_id}/interrogation").json()["run"]
         assert after["status"] == "succeeded"
         assert after["finished_at"] == run["finished_at"]  # untouched, not re-run

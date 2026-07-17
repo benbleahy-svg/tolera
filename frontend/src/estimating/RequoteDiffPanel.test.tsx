@@ -106,6 +106,9 @@ describe('RequoteDiffPanel', () => {
     expect(screen.getByTestId('requote-synthesis')).toHaveTextContent(
       'engere Bohrungstoleranz',
     );
+    // Deterministic diff content renders alongside the AI paragraph.
+    expect(screen.getByText(/Volumen: -2,3\s*%/)).toBeInTheDocument();
+    expect(screen.getByText(/1 neu · 0 entfernt · 1 geändert/)).toBeInTheDocument();
   });
 
   it('fires no callback without an explicit click (the human gate)', () => {
@@ -123,8 +126,11 @@ describe('RequoteDiffPanel', () => {
     expect(onImport).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText('Diff im Detail prüfen'));
     expect(onReview).toHaveBeenCalledTimes(1);
-    // Review expands the field-by-field list.
-    expect(screen.getByTestId('requote-findings')).toBeInTheDocument();
+    // Review expands the field-by-field list with the actual callouts.
+    const findings = screen.getByTestId('requote-findings');
+    expect(findings).toHaveTextContent('FAI REQUIRED');
+    expect(findings).toHaveTextContent('bore_3');
+    expect(findings).toHaveTextContent('+0.01 / -0.01 → +0.005 / -0.005');
     fireEvent.click(screen.getByText('Neu beginnen'));
     expect(onStartFresh).toHaveBeenCalledTimes(1);
   });

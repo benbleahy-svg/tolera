@@ -442,7 +442,12 @@ async def _find_baseline(
 
 
 async def build_requote_snapshot(
-    session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UUID, now: datetime
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    part_id: uuid.UUID,
+    now: datetime,
+    quote_id: uuid.UUID | None = None,
 ) -> dict[str, Any] | None:
     """Everything the task needs in one read txn, or a skip verdict.
 
@@ -453,15 +458,18 @@ async def build_requote_snapshot(
     if part is None or part.deleted_at is not None:
         return None
 
-    quote_row = (
-        await session.execute(
-            select(Quote, Component.id)
-            .join(QuoteItem, QuoteItem.quote_id == Quote.id)
-            .join(Component, Component.id == QuoteItem.root_component_id)
-            .where(Component.part_id == part_id, Quote.deleted_at.is_(None))
-            .order_by(Quote.created_at.desc())
-        )
-    ).first()
+    # The manual refresh trigger names its quote; the interrogation-chained
+    # trigger targets the part's most recent live quote.
+    stmt = (
+        select(Quote, Component.id)
+        .join(QuoteItem, QuoteItem.quote_id == Quote.id)
+        .join(Component, Component.id == QuoteItem.root_component_id)
+        .where(Component.part_id == part_id, Quote.deleted_at.is_(None))
+        .order_by(Quote.created_at.desc())
+    )
+    if quote_id is not None:
+        stmt = stmt.where(Quote.id == quote_id)
+    quote_row = (await session.execute(stmt)).first()
     if quote_row is None:
         return {"skipped": "no_quote"}
     quote, target_component_id = quote_row
@@ -471,6 +479,7 @@ async def build_requote_snapshot(
     baseline = await _find_baseline(session, part, exclude_quote_id=quote.id)
     if baseline is None:
         return {"skipped": "no_baseline"}
+    matched = baseline["part"]
 
     raw_a = await session.scalar(
         select(PartGeometry.raw).where(PartGeometry.part_id == baseline["part"].id)
@@ -490,15 +499,22 @@ async def build_requote_snapshot(
     from .ai_settings import get_ai_flags
 
     flags = await get_ai_flags(session, org_id)
-    export_controlled = bool(
-        (
-            await session.scalars(
-                select(RequestForQuote.id).where(
-                    RequestForQuote.quote_id == quote.id,
-                    RequestForQuote.export_controlled.is_(True),
+    # The RFQ flag OR the part-level dual-use flag on EITHER revision — the
+    # flag travels with the part across quotes (DECISIONS 2026-06-26), and the
+    # diff payload carries extracted print values from both revisions.
+    export_controlled = (
+        bool(part.export_controlled)
+        or bool(matched.export_controlled)
+        or bool(
+            (
+                await session.scalars(
+                    select(RequestForQuote.id).where(
+                        RequestForQuote.quote_id == quote.id,
+                        RequestForQuote.export_controlled.is_(True),
+                    )
                 )
-            )
-        ).first()
+            ).first()
+        )
     )
     if not flags.master_enabled:
         ai_reason = "master_disabled"
@@ -509,7 +525,6 @@ async def build_requote_snapshot(
     else:
         ai_reason = "ok"
 
-    matched = baseline["part"]
     return {
         "quote_id": quote.id,
         "ai_reason": ai_reason,
@@ -542,7 +557,7 @@ async def build_requote_snapshot(
 
 
 async def run_generate_requote_diff(
-    db_url: str, *, org_id: uuid.UUID, part_id: uuid.UUID
+    db_url: str, *, org_id: uuid.UUID, part_id: uuid.UUID, quote_id: uuid.UUID | None = None
 ) -> dict[str, Any]:
     """Task core — idempotent: recomputing overwrites the part's entry (an
     already-recorded choice is preserved for the audit trail). Three phases,
@@ -553,7 +568,9 @@ async def run_generate_requote_diff(
         now = datetime.now(UTC)
 
         async with org_scoped_session(sessionmaker, org_id) as session:
-            snap = await build_requote_snapshot(session, org_id=org_id, part_id=part_id, now=now)
+            snap = await build_requote_snapshot(
+                session, org_id=org_id, part_id=part_id, now=now, quote_id=quote_id
+            )
         if snap is None:
             return {"failed": True, "error_code": "part_gone"}
         if "skipped" in snap:
@@ -567,7 +584,9 @@ async def run_generate_requote_diff(
                 out = await resolve().synthesize(entry["diff"])
             except (LensProviderError, RuntimeError, AttributeError) as exc:
                 code = exc.code if isinstance(exc, LensProviderError) else "provider_unavailable"
-                logger.info("requote_synthesis_skipped", extra={"code": code})
+                logger.info(
+                    "requote_synthesis_skipped", extra={"code": code, "org_id": str(org_id)}
+                )
                 ai_reason = f"error:{code}"
             else:
                 text = out.get("synthesis")
@@ -602,11 +621,16 @@ async def run_generate_requote_diff(
         await engine.dispose()
 
 
-def enqueue_requote_diff(org_id: uuid.UUID, part_id: uuid.UUID) -> None:
+def enqueue_requote_diff(
+    org_id: uuid.UUID, part_id: uuid.UUID, quote_id: uuid.UUID | None = None
+) -> None:
     """Fire-and-forget enqueue seam (post-commit; never raises) — chained off
-    interrogation success and the manual refresh endpoint."""
+    interrogation success and the manual refresh endpoint (which pins its
+    quote so the diff can't land on a different, newer quote)."""
     try:
-        generate_requote_diff_task.delay(str(org_id), str(part_id))
+        generate_requote_diff_task.delay(
+            str(org_id), str(part_id), str(quote_id) if quote_id else None
+        )
     except Exception:  # pragma: no cover - broker hiccup must not fail caller
         logger.warning("requote_diff_enqueue_failed", extra={"part_id": str(part_id)})
 
@@ -618,7 +642,9 @@ def enqueue_requote_diff(org_id: uuid.UUID, part_id: uuid.UUID) -> None:
     soft_time_limit=120,
     time_limit=180,
 )
-def generate_requote_diff_task(self: Any, org_id: str, part_id: str) -> dict[str, Any]:
+def generate_requote_diff_task(
+    self: Any, org_id: str, part_id: str, quote_id: str | None = None
+) -> dict[str, Any]:
     """Chains after interrogation success; caches the diff on the quote."""
     from .interrogation import _run_on_own_loop
     from .task_resources import resolve as resolve_task_resources
@@ -632,7 +658,12 @@ def generate_requote_diff_task(self: Any, org_id: str, part_id: str) -> dict[str
             return cast("dict[str, Any]", prior.result)
     db_url, _storage = resolve_task_resources()
     result = _run_on_own_loop(
-        run_generate_requote_diff(db_url, org_id=uuid.UUID(org_id), part_id=uuid.UUID(part_id))
+        run_generate_requote_diff(
+            db_url,
+            org_id=uuid.UUID(org_id),
+            part_id=uuid.UUID(part_id),
+            quote_id=uuid.UUID(quote_id) if quote_id else None,
+        )
     )
     out = cast("dict[str, Any]", result)
     logger.info("requote_diff_generated", extra={"task_id": task_id, **out, **binding})
@@ -685,6 +716,12 @@ async def record_requote_choice(
     router copy itself stays on ``POST /components/{id}/import-router`` — this
     endpoint never moves a value."""
     quote = await _get_quote_or_404(session, quote_id, with_for_update=True)
+    if quote.status != QuoteStatus.draft:
+        raise AppError(
+            "quote_locked",
+            "This quote is no longer a draft; the requote gate is frozen.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
     cache = dict(quote.requote_diff or {})
     entries = dict(cache.get("entries") or {})
     entry = entries.get(str(payload.part_id))
@@ -723,5 +760,5 @@ async def refresh_requote_diff(
         )
     ).all()
     for part_id in part_ids:
-        enqueue_requote_diff(principal.active_org_id, part_id)
+        enqueue_requote_diff(principal.active_org_id, part_id, quote.id)
     return {"queued": len(part_ids)}

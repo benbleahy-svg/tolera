@@ -1041,3 +1041,15 @@ Spec `#partview` routes per line item with a left sidebar; the built page is `/q
 - **Seed variant names:** "CNC-Fräsen Aluminium" / "CNC-Fräsen Nichtrostender Stahl" (German-first §5; family display names from the M1.7 catalog). The name is the reseed natural key: renaming the constant later would create a second variant on reseed rather than update the old one — acceptable (old row stays, estimator deletes it), but rename via a data migration if it ever matters.
 
 **Revisit trigger:** PP-parity evidence (KB/screenshot) contradicting the precedence or tie-break; or Fechner feedback on the seed names.
+
+## [2026-07-17] M4.12 requote-diff significance thresholds + diff heuristics (assumptions recorded)
+
+**Context.** M4.12 (Requote Diff Assistant) emits `geometry_delta.significant` and `finding_diff.material_changes` deterministically — M4.13's server-side Accept-All suppression consumes them, so their defaults are money-adjacent even though the values themselves are plain code constants (no schema/contract surface; changing them only affects future diffs). Spec is silent; classified **cheap to reverse** per §6.3, applied with inline notes, recorded here for the audit trail.
+
+**Assumed (applied, `app/requote_diff.py`):**
+- **Geometry significance:** `|volume Δ| > 5 %` OR any bbox dimension Δ > 1.0 mm OR **any** feature-count change → `significant = true`. Geometry unavailable (PDF-only side) → `available = false`, `significant = false` (an exact-file match means byte-identical inputs).
+- **Material finding changes:** added/removed findings in category `requirements`; any tolerance change on a matched callout; any `material`/`finish`/`coating` finding added/removed/changed.
+- **Finding set-diff identity:** grouped by `(type, role)`; a lone leftover pair counts as *changed* only when anchored by a non-empty role or equal `normalized_value` — otherwise an add + a remove.
+- **Baseline choice:** exact-file match preferred over exact-geometric; within a bucket, the matched part's most recent non-trashed quote.
+
+**Revisit trigger:** M4.13 (Accept-All gate) review; Fechner feedback that a real requote was mis-labelled cosmetic/material.

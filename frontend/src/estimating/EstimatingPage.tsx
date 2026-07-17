@@ -539,7 +539,7 @@ export function EstimatingPage() {
         return (
           <RequoteDiffPanel
             entry={entry}
-            busy={requoteBusy}
+            busy={requoteBusy || !canEdit}
             onImport={() => importRequoteRouter(entry)}
             onReview={() => {
               if (entry.choice === null) void recordRequoteChoice(entry, 'review');

@@ -311,8 +311,8 @@ def _seed_requote_pair(
     part_b = uuid.UUID(new_item["part_id"])
     for pid in (part_a, part_b):
         seeder.sql(
-            "UPDATE part SET geom_hash = :h WHERE id = :id",
-            {"h": GEOM_HASH, "id": str(pid)},
+            "UPDATE part SET geom_hash = :h WHERE id = :id AND org_id = :org",
+            {"h": GEOM_HASH, "id": str(pid), "org": str(org_id)},
         )
     _plant_geometry(seeder, org_id, part_a, _raw(volume=100_000.0))
     _plant_geometry(seeder, org_id, part_b, _raw(volume=volume_b))
@@ -336,13 +336,16 @@ def _run_diff(tenancy_db: str, org_id: uuid.UUID, part_id: uuid.UUID) -> dict[st
     )
 
 
-def _fetch_requote_diff(owner_url: str, quote_id: uuid.UUID) -> dict[str, Any] | None:
+def _fetch_requote_diff(
+    owner_url: str, org_id: uuid.UUID, quote_id: uuid.UUID
+) -> dict[str, Any] | None:
     async def _run() -> dict[str, Any] | None:
         engine = create_async_engine(owner_url)
         try:
             async with engine.connect() as conn:
                 row = await conn.execute(
-                    text("SELECT requote_diff FROM quote WHERE id = :id"), {"id": str(quote_id)}
+                    text("SELECT requote_diff FROM quote WHERE id = :id AND org_id = :org"),
+                    {"id": str(quote_id), "org": str(org_id)},
                 )
                 return cast("dict[str, Any] | None", row.scalar_one())
         finally:
@@ -351,14 +354,16 @@ def _fetch_requote_diff(owner_url: str, quote_id: uuid.UUID) -> dict[str, Any] |
     return asyncio.run(_run())
 
 
-def _count_ops(owner_url: str, component_id: uuid.UUID) -> int:
+def _count_ops(owner_url: str, org_id: uuid.UUID, component_id: uuid.UUID) -> int:
     async def _run() -> int:
         engine = create_async_engine(owner_url)
         try:
             async with engine.connect() as conn:
                 row = await conn.execute(
-                    text("SELECT count(*) FROM operation WHERE component_id = :id"),
-                    {"id": str(component_id)},
+                    text(
+                        "SELECT count(*) FROM operation WHERE component_id = :id AND org_id = :org"
+                    ),
+                    {"id": str(component_id), "org": str(org_id)},
                 )
                 return int(row.scalar_one())
         finally:
@@ -410,7 +415,7 @@ def test_task_caches_diff_with_synthesis(
     out = _run_diff(tenancy_db, org, ids["part_b"])
     assert out["ok"] is True
 
-    cached = _fetch_requote_diff(tenancy_db, ids["new_quote"])
+    cached = _fetch_requote_diff(tenancy_db, org, ids["new_quote"])
     assert cached is not None
     entry = cached["entries"][str(ids["part_b"])]
     assert entry["match_type"] == "exact_geometric"
@@ -444,7 +449,7 @@ def test_task_skips_without_baseline(
         item = _quote_item(app_client, quote)
     out = _run_diff(tenancy_db, org, uuid.UUID(item["part_id"]))
     assert out.get("skipped") == "no_baseline"
-    assert _fetch_requote_diff(tenancy_db, quote) is None
+    assert _fetch_requote_diff(tenancy_db, org, quote) is None
     assert fake_synthesizer.calls == 0
 
 
@@ -463,7 +468,7 @@ def test_ai_master_off_still_caches_deterministic_diff(
         ids = _seed_requote_pair(seeder, app_client, org)
     out = _run_diff(tenancy_db, org, ids["part_b"])
     assert out["ok"] is True
-    cached = _fetch_requote_diff(tenancy_db, ids["new_quote"])
+    cached = _fetch_requote_diff(tenancy_db, org, ids["new_quote"])
     assert cached is not None
     entry = cached["entries"][str(ids["part_b"])]
     assert entry["ai"] == {"enabled": False, "reason": "master_disabled"}
@@ -488,7 +493,7 @@ def test_export_controlled_skips_synthesis(
     )
     out = _run_diff(tenancy_db, org, ids["part_b"])
     assert out["ok"] is True
-    cached = _fetch_requote_diff(tenancy_db, ids["new_quote"])
+    cached = _fetch_requote_diff(tenancy_db, org, ids["new_quote"])
     assert cached is not None
     entry = cached["entries"][str(ids["part_b"])]
     assert entry["ai"] == {"enabled": False, "reason": "export_controlled"}
@@ -511,7 +516,7 @@ def test_provider_error_degrades_to_deterministic_diff(
             ids = _seed_requote_pair(seeder, app_client, org)
         out = _run_diff(tenancy_db, org, ids["part_b"])
         assert out["ok"] is True
-        cached = _fetch_requote_diff(tenancy_db, ids["new_quote"])
+        cached = _fetch_requote_diff(tenancy_db, org, ids["new_quote"])
         assert cached is not None
         entry = cached["entries"][str(ids["part_b"])]
         assert entry["ai"]["enabled"] is False
@@ -535,7 +540,7 @@ def test_diff_never_copies_operations(
         ids = _seed_requote_pair(seeder, app_client, org)
         seeder.operation(org, ids["component_a"], name="Fräsen")
         assert _run_diff(tenancy_db, org, ids["part_b"])["ok"] is True
-    assert _count_ops(tenancy_db, ids["component_b"]) == 0
+    assert _count_ops(tenancy_db, org, ids["component_b"]) == 0
 
 
 def test_endpoints_pending_entries_and_choice(
@@ -578,17 +583,20 @@ def test_endpoints_pending_entries_and_choice(
         [entry] = ok.json()["entries"]
         assert entry["choice"]["choice"] == "start_fresh"
         assert entry["choice"]["at"]  # audit timestamp
+        # The choice survives a fresh read (persisted, not just echoed).
+        [entry] = app_client.get(f"/api/quotes/{ids['new_quote']}/requote-diff").json()["entries"]
+        assert entry["choice"]["choice"] == "start_fresh"
 
 
 def test_refresh_endpoint_enqueues(
     app_client: TestClient, seeder: Seeder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     org, admin = _org_with_admin(seeder, "org-rqd8")
-    queued: list[tuple[uuid.UUID, uuid.UUID]] = []
+    queued: list[tuple[uuid.UUID, uuid.UUID, uuid.UUID | None]] = []
     monkeypatch.setattr(
         requote_diff,
         "enqueue_requote_diff",
-        lambda org_id, part_id: queued.append((org_id, part_id)),
+        lambda org_id, part_id, quote_id=None: queued.append((org_id, part_id, quote_id)),
     )
     with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
         quote = seeder.quote(org, "Q-2026-4000")
@@ -596,7 +604,7 @@ def test_refresh_endpoint_enqueues(
         resp = app_client.post(f"/api/quotes/{quote}/requote-diff/refresh")
         assert resp.status_code == 202
         assert resp.json() == {"queued": 1}
-    assert queued == [(org, uuid.UUID(item["part_id"]))]
+    assert queued == [(org, uuid.UUID(item["part_id"]), quote)]
 
 
 def test_not_draft_quote_never_overwritten(
@@ -608,7 +616,119 @@ def test_not_draft_quote_never_overwritten(
     org, admin = _org_with_admin(seeder, "org-rqd9")
     with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
         ids = _seed_requote_pair(seeder, app_client, org)
-    seeder.sql("UPDATE quote SET status = 'sent' WHERE id = :id", {"id": str(ids["new_quote"])})
+    seeder.sql(
+        "UPDATE quote SET status = 'sent', requote_diff = CAST(:sentinel AS jsonb)"
+        " WHERE id = :id AND org_id = :org",
+        {
+            "sentinel": json.dumps({"entries": {"frozen": True}}),
+            "id": str(ids["new_quote"]),
+            "org": str(org),
+        },
+    )
     out = _run_diff(tenancy_db, org, ids["part_b"])
     assert out.get("skipped") == "not_draft"
-    assert _fetch_requote_diff(tenancy_db, ids["new_quote"]) is None
+    assert _fetch_requote_diff(tenancy_db, org, ids["new_quote"]) == {"entries": {"frozen": True}}
+
+
+def test_part_level_export_flag_skips_synthesis(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+) -> None:
+    """The dual-use flag travels with the PART (DECISIONS 2026-06-26): a
+    flagged baseline part must gate the LLM even when the new RFQ is clean."""
+    org, admin = _org_with_admin(seeder, "org-rqd10")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _seed_requote_pair(seeder, app_client, org)
+    seeder.sql(
+        "UPDATE part SET export_controlled = TRUE WHERE id = :id AND org_id = :org",
+        {"id": str(ids["part_a"]), "org": str(org)},
+    )
+    out = _run_diff(tenancy_db, org, ids["part_b"])
+    assert out["ok"] is True
+    cached = _fetch_requote_diff(tenancy_db, org, ids["new_quote"])
+    assert cached is not None
+    entry = cached["entries"][str(ids["part_b"])]
+    assert entry["ai"] == {"enabled": False, "reason": "export_controlled"}
+    assert fake_synthesizer.calls == 0
+
+
+def test_routes_are_org_scoped(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+) -> None:
+    org, admin = _org_with_admin(seeder, "org-rqd11")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _seed_requote_pair(seeder, app_client, org)
+    assert _run_diff(tenancy_db, org, ids["part_b"])["ok"] is True
+    other_org, other_admin = _org_with_admin(seeder, "org-rqd11b")
+    with authed(app_client, user_id=other_admin, org_id=other_org, roles=ADMIN):
+        assert app_client.get(f"/api/quotes/{ids['new_quote']}/requote-diff").status_code == 404
+        assert (
+            app_client.post(
+                f"/api/quotes/{ids['new_quote']}/requote-diff/choice",
+                json={"part_id": str(ids["part_b"]), "choice": "start_fresh"},
+            ).status_code
+            == 404
+        )
+        assert (
+            app_client.post(f"/api/quotes/{ids['new_quote']}/requote-diff/refresh").status_code
+            == 404
+        )
+
+
+def test_choice_rejected_on_locked_quote(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+) -> None:
+    org, admin = _org_with_admin(seeder, "org-rqd12")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _seed_requote_pair(seeder, app_client, org)
+        assert _run_diff(tenancy_db, org, ids["part_b"])["ok"] is True
+        seeder.sql(
+            "UPDATE quote SET status = 'sent' WHERE id = :id AND org_id = :org",
+            {"id": str(ids["new_quote"]), "org": str(org)},
+        )
+        resp = app_client.post(
+            f"/api/quotes/{ids['new_quote']}/requote-diff/choice",
+            json={"part_id": str(ids["part_b"]), "choice": "start_fresh"},
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "quote_locked"
+
+
+def test_refresh_pins_the_named_quote(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+) -> None:
+    """A part sitting on a NEWER quote must not steal the refreshed quote's
+    diff: the manual trigger pins its quote id through the task."""
+    org, admin = _org_with_admin(seeder, "org-rqd13")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _seed_requote_pair(seeder, app_client, org)
+        newer_quote = seeder.quote(org, "Q-2026-9000")
+        newer_item = _quote_item(app_client, newer_quote)
+    # Point the newer quote's component at the SAME part (a re-added part).
+    seeder.sql(
+        "UPDATE component SET part_id = :part WHERE id = :id AND org_id = :org",
+        {"part": str(ids["part_b"]), "id": newer_item["root_component_id"], "org": str(org)},
+    )
+    out = asyncio.run(
+        run_generate_requote_diff(
+            app_role_url(tenancy_db),
+            org_id=org,
+            part_id=ids["part_b"],
+            quote_id=ids["new_quote"],
+        )
+    )
+    assert out["ok"] is True
+    assert out["quote_id"] == str(ids["new_quote"])
+    assert _fetch_requote_diff(tenancy_db, org, ids["new_quote"]) is not None
+    assert _fetch_requote_diff(tenancy_db, org, newer_quote) is None
