@@ -27,13 +27,14 @@ SIGNATURE_VERSION = "gs1"
 
 #: Family values the engine recognizes (mirror ``app.models.ProcessFamily``
 #: values without importing app models across the boundary). M4.2: sheet metal;
-#: M4.4: milling; M4.5/M4.6 add the rest of the Core 4.
+#: M4.4: milling; M4.5: lathe; M4.6 completes the Core 4.
 FAMILY_SHEET_METAL = "SHEET_METAL"
 FAMILY_MILLING = "MILLING"
+FAMILY_LATHE = "LATHE"
 
 #: Families with a per-family recognizer behind :meth:`GeometryService.analyze`
 #: — any other family degrades to the dims-only pass, never fabricated scalars.
-RECOGNIZED_FAMILIES = frozenset({FAMILY_SHEET_METAL, FAMILY_MILLING})
+RECOGNIZED_FAMILIES = frozenset({FAMILY_SHEET_METAL, FAMILY_MILLING, FAMILY_LATHE})
 
 
 class GeometryError(Exception):

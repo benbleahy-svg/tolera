@@ -262,6 +262,109 @@ describe('InterrogationPanel', () => {
     expect(screen.getByRole('note')).toHaveTextContent(/manuell prüfen und überschreiben/);
   });
 
+  it('renders the lathe results block with stock + live-tooling callouts (M4.5)', async () => {
+    // The flange fixture's analytic values (goldens.json → lathe): stock
+    // ⌀40×15, 1 setup, 1 external / 1 internal cut, 4 off-axis bolt holes.
+    const lathe = succeeded();
+    lathe.run!.family = 'LATHE';
+    lathe.run!.result = {
+      ...lathe.run!.result!,
+      family: 'LATHE',
+      family_scalars: { setup_count: 1, stock_radius: 20, stock_length: 15 },
+      features: [
+        {
+          name: 'lathe_stock',
+          properties: { radius: 20, diameter: 40, length: 15 },
+          geometry_refs: [],
+        },
+        { name: 'setup', properties: { direction: [0, 0, 1] }, geometry_refs: [] },
+        {
+          name: 'external_cut',
+          properties: {
+            axial_area: 1884.96,
+            radial_area: 2199.11,
+            area: 4084.07,
+            max_radius: 20,
+            length: 15,
+          },
+          geometry_refs: [],
+        },
+        {
+          name: 'internal_cut',
+          properties: {
+            radius: 5,
+            diameter: 10,
+            depth: 15,
+            thru: true,
+            axial_area: 471.24,
+            radial_area: 0,
+            area: 471.24,
+          },
+          geometry_refs: [],
+        },
+        ...[1, 2, 3, 4].map(() => ({
+          name: 'off_axis_hole',
+          properties: { radius: 2.5, diameter: 5, depth: 15, area: 117.81 },
+          geometry_refs: [],
+        })),
+      ],
+    };
+    getInterrogation.mockResolvedValue(lathe);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Drehanalyse – Ergebnisse')).toBeInTheDocument();
+    });
+    // recommended stock ⌀ 40 × 15 mm, German decimal comma, mm primary
+    expect(screen.getByText('Empfohlenes Rohteil')).toBeInTheDocument();
+    expect(screen.getByText(/⌀\s*40,00\s*mm\s*×\s*15,00\s*mm/)).toBeInTheDocument();
+    expect(screen.getByText('Anzahl Aufspannungen').nextElementSibling).toHaveTextContent('1');
+    expect(screen.getByText('Außenschnitte').nextElementSibling).toHaveTextContent('1');
+    expect(screen.getByText('Innenschnitte').nextElementSibling).toHaveTextContent('1');
+    // the live-tooling callouts are flagged, with the not-auto-costed note
+    expect(screen.getByText('Außermittige Bohrungen').nextElementSibling).toHaveTextContent('4');
+    expect(screen.getByRole('note')).toHaveTextContent(/Live-Tooling erforderlich/);
+    // the family block replaces the generic pending note
+    expect(screen.queryByText(/Merkmalserkennung folgt/)).not.toBeInTheDocument();
+  });
+
+  it('omits the live-tooling rows and note on a clean turned part (M4.5)', async () => {
+    const lathe = succeeded();
+    lathe.run!.family = 'LATHE';
+    lathe.run!.result = {
+      ...lathe.run!.result!,
+      family: 'LATHE',
+      family_scalars: { setup_count: 1, stock_radius: 15, stock_length: 80 },
+      features: [
+        {
+          name: 'lathe_stock',
+          properties: { radius: 15, diameter: 30, length: 80 },
+          geometry_refs: [],
+        },
+        { name: 'setup', properties: { direction: [0, 0, 1] }, geometry_refs: [] },
+        {
+          name: 'external_cut',
+          properties: {
+            axial_area: 5466.37,
+            radial_area: 1413.72,
+            area: 6880.09,
+            max_radius: 15,
+            length: 80,
+          },
+          geometry_refs: [],
+        },
+      ],
+    };
+    getInterrogation.mockResolvedValue(lathe);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Drehanalyse – Ergebnisse')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/⌀\s*30,00\s*mm\s*×\s*80,00\s*mm/)).toBeInTheDocument();
+    expect(screen.queryByText('Außermittige Bohrungen')).not.toBeInTheDocument();
+    expect(screen.queryByText('Asymmetrische Flächen')).not.toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
   it('omits unfolded dims and thumbnail when the recognizer could not unfold', async () => {
     const sheet = succeeded();
     sheet.run!.family = 'SHEET_METAL';

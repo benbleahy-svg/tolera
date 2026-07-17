@@ -587,6 +587,137 @@ def shaft() -> tuple[object, dict]:
         "stock_radius": 15.0,
         "stock_length": 80.0,
         "diameters": [30.0, 20.0, 12.0],
+        # M4.5 lathe golden: both shoulders face +Z -> one work side -> 1 setup;
+        # axial (lateral) vs radial (facing) split is exact arithmetic.
+        "lathe": {
+            "setup_count": 1,
+            "setup_directions": [[0, 0, 1]],
+            "stock_radius": 15.0,
+            "stock_length": 80.0,
+            "external_cut": {
+                "axial_area": math.pi * 2 * 870,
+                "radial_area": math.pi * (125 + 64 + 225 + 36),
+            },
+            "internal_cuts": [],
+            "off_axis_holes": {"count": 0},
+            "asymmetric_faces": 0,
+        },
+    }
+    return shape, golden
+
+
+# --- 3b. Lathe bushing: OD d40x20 + d30x40, blind axial bore d16 depth 30 from z=0 ---
+def bushing() -> tuple[object, dict]:
+    z = gp_Dir(0, 0, 1)
+    body = BRepAlgoAPI_Fuse(
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), z), 20.0, 20.0).Shape(),
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 20), z), 15.0, 40.0).Shape(),
+    ).Shape()
+    bore = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -1), z), 8.0, 31.0).Shape()
+    shape = BRepAlgoAPI_Cut(body, bore).Shape()
+    golden = {
+        "family": "lathe",
+        "volume": math.pi * (400 * 20 + 225 * 40 - 64 * 30),
+        # OD laterals 2*(400+600) + shoulder (400-225) + ends (400-64)+225
+        # + bore wall 2*8*30 + bore bottom 64
+        "area": math.pi * (2000 + 175 + 336 + 225 + 480 + 64),
+        "bbox": [40, 40, 60],
+        # M4.5: shoulder faces +Z, blind-bore bottom faces -Z -> 2 setups.
+        "lathe": {
+            "setup_count": 2,
+            "setup_directions": [[0, 0, 1], [0, 0, -1]],
+            "stock_radius": 20.0,
+            "stock_length": 60.0,
+            "external_cut": {
+                "axial_area": math.pi * 2000,
+                "radial_area": math.pi * (175 + 336 + 225),
+            },
+            "internal_cuts": [
+                {
+                    "radius": 8.0,
+                    "diameter": 16.0,
+                    "depth": 30.0,
+                    "thru": False,
+                    "axial_area": math.pi * 480,
+                    "radial_area": math.pi * 64,
+                }
+            ],
+            "off_axis_holes": {"count": 0},
+            "asymmetric_faces": 0,
+        },
+    }
+    return shape, golden
+
+
+# --- 3c. Lathe flange (DemoN/04 shape class): disc d40x15, centre bore d10 thru,
+#         4 bolt holes d5 on a d28 bolt circle -> off-axis live-tooling callouts ---
+def flange() -> tuple[object, dict]:
+    z = gp_Dir(0, 0, 1)
+    shape = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), z), 20.0, 15.0).Shape()
+    for cx, cy, r in [(0, 0, 5.0), (14, 0, 2.5), (-14, 0, 2.5), (0, 14, 2.5), (0, -14, 2.5)]:
+        hole = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(cx, cy, -1), z), r, 17.0).Shape()
+        shape = BRepAlgoAPI_Cut(shape, hole).Shape()
+    golden = {
+        "family": "lathe",
+        "volume": math.pi * 15 * (400 - 25 - 4 * 6.25),
+        # OD lateral 600 + 2 ends 2*(400-25-25) + centre bore 150 + 4 bolt bores 300
+        "area": math.pi * (600 + 700 + 150 + 300),
+        "bbox": [40, 40, 15],
+        # M4.5: no intermediate shoulder / blind bottom -> 1 setup (the drilled
+        # bolt circle is live-tooling work, not a second chucking).
+        "lathe": {
+            "setup_count": 1,
+            "setup_directions": [[0, 0, 1]],
+            "stock_radius": 20.0,
+            "stock_length": 15.0,
+            "external_cut": {
+                "axial_area": math.pi * 600,
+                "radial_area": math.pi * 700,
+            },
+            "internal_cuts": [
+                {
+                    "radius": 5.0,
+                    "diameter": 10.0,
+                    "depth": 15.0,
+                    "thru": True,
+                    "axial_area": math.pi * 150,
+                    "radial_area": 0.0,
+                }
+            ],
+            "off_axis_holes": {"count": 4, "diameter": 5.0, "depth": 15.0},
+            "asymmetric_faces": 0,
+        },
+    }
+    return shape, golden
+
+
+# --- 3d. Lathe domed pin: cylinder d20x40 + hemispherical end (turned profile) ---
+def pin_domed() -> tuple[object, dict]:
+    z = gp_Dir(0, 0, 1)
+    body = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), z), 10.0, 40.0).Shape()
+    dome = BRepPrimAPI_MakeSphere(gp_Pnt(0, 0, 40), 10.0).Shape()
+    shape = BRepAlgoAPI_Fuse(body, dome).Shape()
+    golden = {
+        "family": "lathe",
+        "volume": math.pi * (100 * 40 + (2.0 / 3.0) * 1000),
+        # lateral 2*10*40 + flat end 100 + hemisphere 2*100
+        "area": math.pi * (800 + 100 + 200),
+        "bbox": [50, 20, 20],
+        # M4.5: the dome is turned profile work (no plane), no intermediate
+        # shoulders -> 1 setup; sphere counts into the axial (lateral) split.
+        "lathe": {
+            "setup_count": 1,
+            "setup_directions": [[0, 0, 1]],
+            "stock_radius": 10.0,
+            "stock_length": 50.0,
+            "external_cut": {
+                "axial_area": math.pi * (800 + 200),
+                "radial_area": math.pi * 100,
+            },
+            "internal_cuts": [],
+            "off_axis_holes": {"count": 0},
+            "asymmetric_faces": 0,
+        },
     }
     return shape, golden
 
@@ -773,6 +904,9 @@ def main() -> int:
         "block-dome-50x50x20.step": block_dome,
         "block-bevel-40x40x20.step": block_bevel,
         "shaft-stepped-d30-d20-d12.step": shaft,
+        "bushing-d40-d30-bore-d16.step": bushing,
+        "flange-d40-4bolt.step": flange,
+        "pin-domed-d20-l50.step": pin_domed,
         "tube-round-d30-t2-l200.step": tube_round,
         "tube-rect-40x20-t2-l200.step": tube_rect,
         "profile-angle-40x40x4-l100.step": profile_angle,

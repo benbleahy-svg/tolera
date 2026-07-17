@@ -110,7 +110,8 @@ export interface PartGeometry {
  * the milling/lathe/tube catalogs follow (M4.4–M4.6). */
 export interface InterrogationFeature {
   name: string;
-  properties: Record<string, number>;
+  /** Lathe adds non-numeric properties: `thru` (boolean), `direction` (axis). */
+  properties: Record<string, number | number[] | boolean | string>;
   /** Face/edge ids for the viewer overlay — empty until the mesh export lands. */
   geometry_refs: string[];
 }
@@ -155,6 +156,18 @@ export interface MillingScalars {
   setup_time: number;
 }
 
+/** Lathe `family_scalars` (M4.5) — v2.15 attributes-only scope: recommended
+ * cylindrical stock + the setup-side count. Cuts and live-tooling callouts
+ * arrive as `features` (external_cut / internal_cut / setup / lathe_stock /
+ * off_axis_hole / asymmetric_cavity); no runtime, no confidence. */
+export interface LatheScalars {
+  setup_count: number;
+  /** Recommended stock radius, mm. */
+  stock_radius: number;
+  /** Recommended stock length, mm. */
+  stock_length: number;
+}
+
 export interface InterrogationRun {
   id: string;
   part_id: string;
@@ -180,7 +193,7 @@ export interface InterrogationRun {
       weight: number | null;
       bbox_source: 'obb' | 'aabb';
     };
-    family_scalars?: SheetMetalScalars | MillingScalars | Record<string, never>;
+    family_scalars?: SheetMetalScalars | MillingScalars | LatheScalars | Record<string, never>;
     features?: InterrogationFeature[];
     /** Engine trust rating where runtime is estimated (milling — M4.4). */
     confidence?: 'High' | 'Medium' | 'Low' | null;

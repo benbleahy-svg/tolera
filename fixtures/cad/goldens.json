@@ -336,7 +336,146 @@
       30.0,
       20.0,
       12.0
-    ]
+    ],
+    "lathe": {
+      "setup_count": 1,
+      "setup_directions": [
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "stock_radius": 15.0,
+      "stock_length": 80.0,
+      "external_cut": {
+        "axial_area": 5466.37121724624,
+        "radial_area": 1413.7166941154069
+      },
+      "internal_cuts": [],
+      "off_axis_holes": {
+        "count": 0
+      },
+      "asymmetric_faces": 0
+    }
+  },
+  "bushing-d40-d30-bore-d16.step": {
+    "family": "lathe",
+    "volume": 47375.21721613408,
+    "area": 10304.423903774521,
+    "bbox": [
+      40,
+      40,
+      60
+    ],
+    "lathe": {
+      "setup_count": 2,
+      "setup_directions": [
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          0,
+          -1
+        ]
+      ],
+      "stock_radius": 20.0,
+      "stock_length": 60.0,
+      "external_cut": {
+        "axial_area": 6283.185307179586,
+        "radial_area": 2312.2121930420876
+      },
+      "internal_cuts": [
+        {
+          "radius": 8.0,
+          "diameter": 16.0,
+          "depth": 30.0,
+          "thru": false,
+          "axial_area": 1507.9644737231006,
+          "radial_area": 201.06192982974676
+        }
+      ],
+      "off_axis_holes": {
+        "count": 0
+      },
+      "asymmetric_faces": 0
+    }
+  },
+  "flange-d40-4bolt.step": {
+    "family": "lathe",
+    "volume": 16493.361431346413,
+    "area": 5497.787143782138,
+    "bbox": [
+      40,
+      40,
+      15
+    ],
+    "lathe": {
+      "setup_count": 1,
+      "setup_directions": [
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "stock_radius": 20.0,
+      "stock_length": 15.0,
+      "external_cut": {
+        "axial_area": 1884.9555921538758,
+        "radial_area": 2199.114857512855
+      },
+      "internal_cuts": [
+        {
+          "radius": 5.0,
+          "diameter": 10.0,
+          "depth": 15.0,
+          "thru": true,
+          "axial_area": 471.23889803846896,
+          "radial_area": 0.0
+        }
+      ],
+      "off_axis_holes": {
+        "count": 4,
+        "diameter": 5.0,
+        "depth": 15.0
+      },
+      "asymmetric_faces": 0
+    }
+  },
+  "pin-domed-d20-l50.step": {
+    "family": "lathe",
+    "volume": 14660.765716752368,
+    "area": 3455.7519189487725,
+    "bbox": [
+      50,
+      20,
+      20
+    ],
+    "lathe": {
+      "setup_count": 1,
+      "setup_directions": [
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "stock_radius": 10.0,
+      "stock_length": 50.0,
+      "external_cut": {
+        "axial_area": 3141.592653589793,
+        "radial_area": 314.1592653589793
+      },
+      "internal_cuts": [],
+      "off_axis_holes": {
+        "count": 0
+      },
+      "asymmetric_faces": 0
+    }
   },
   "tube-round-d30-t2-l200.step": {
     "family": "tube_laser",

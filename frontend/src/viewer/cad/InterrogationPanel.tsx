@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import {
   usePartsApi,
   type InterrogationStatus,
+  type LatheScalars,
   type MillingScalars,
   type SheetMetalScalars,
 } from '../../parts/api';
@@ -23,6 +24,7 @@ import {
   formatVolume,
   type DisplayOptions,
 } from './measureFormat';
+import { LatheResults } from './LatheResults';
 import { MillingResults } from './MillingResults';
 import { SheetMetalResults } from './SheetMetalResults';
 
@@ -108,6 +110,10 @@ export function InterrogationPanel({
     status.run.result.family === 'MILLING' && scalars != null && 'setup_count' in scalars
       ? (scalars as MillingScalars)
       : null;
+  const lathe =
+    status.run.result.family === 'LATHE' && scalars != null && 'stock_radius' in scalars
+      ? (scalars as LatheScalars)
+      : null;
   return (
     <div className="cad-interrogation-result">
       {sheetMetal != null && (
@@ -117,6 +123,13 @@ export function InterrogationPanel({
         <MillingResults
           scalars={milling}
           confidence={status.run.result.confidence}
+          displayOpts={displayOpts}
+        />
+      )}
+      {lathe != null && (
+        <LatheResults
+          scalars={lathe}
+          features={status.run.result.features ?? []}
           displayOpts={displayOpts}
         />
       )}
@@ -145,8 +158,8 @@ export function InterrogationPanel({
           </div>
         </dl>
       </section>
-      {/* Families without a recognizer yet (M4.5+) keep the pending note. */}
-      {sheetMetal == null && milling == null && (
+      {/* Families without a recognizer yet (M4.6+) keep the pending note. */}
+      {sheetMetal == null && milling == null && lathe == null && (
         <p className="cad-features-pending">{t('viewer.interrogation_features_pending')}</p>
       )}
     </div>
