@@ -187,6 +187,18 @@ def test_analyzers_are_m4_stubs() -> None:
     assert "not available until M4" in result.errors[0].message
 
 
+def test_index_defaults_to_zero_and_is_overridable() -> None:
+    """The per-setup operation constant (KB milling-process, M4.4): 0-based,
+    default 0 so single-op programs evaluate; auto-routing (M4.10) supplies
+    the real per-setup value via eval_context."""
+    assert cost("COST = INDEX") == 0.0
+    assert cost("COST = INDEX", eval_context={"part": part_object(), "INDEX": 2}) == 2.0
+
+
+def test_index_is_operation_context_only() -> None:
+    assert not check("PRICE = INDEX\nDAYS = 0", context_type="pricing_item").ok
+
+
 # ---------------------------------------------------------------------------
 # pricing-item context (KALK-REFERENCE §11.3)
 # ---------------------------------------------------------------------------

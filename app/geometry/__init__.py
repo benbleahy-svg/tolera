@@ -9,6 +9,7 @@ API code stays safe on an image without OCP.
 from __future__ import annotations
 
 from .contract import (
+    FAMILY_MILLING,
     FAMILY_SHEET_METAL,
     RECOGNIZED_FAMILIES,
     SIGNATURE_VERSION,
@@ -21,6 +22,7 @@ from .contract import (
 )
 
 __all__ = [
+    "FAMILY_MILLING",
     "FAMILY_SHEET_METAL",
     "RECOGNIZED_FAMILIES",
     "SIGNATURE_VERSION",

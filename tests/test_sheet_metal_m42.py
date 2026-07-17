@@ -157,10 +157,10 @@ def test_dims_only_run_unchanged() -> None:
 
 
 def test_unknown_family_returns_dims_only() -> None:
-    """A family without a recognizer (M4.4+ families) degrades to dims-only —
+    """A family without a recognizer (M4.5+ families) degrades to dims-only —
     no fabricated scalars."""
     result = get_engine().analyze(
-        (FIXTURES / "bracket-L-60x40x2-r3.step").read_bytes(), family="MILLING"
+        (FIXTURES / "bracket-L-60x40x2-r3.step").read_bytes(), family="LATHE"
     )
-    assert result.family == "MILLING"
+    assert result.family == "LATHE"
     assert result.family_scalars == {}
