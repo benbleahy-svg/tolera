@@ -451,7 +451,7 @@ async def reorder_components(
         )
     ).all()
     by_id = {n.id: n for n in siblings}
-    if set(payload.ordered_node_ids) != set(by_id):
+    if len(payload.ordered_node_ids) != len(by_id) or set(payload.ordered_node_ids) != set(by_id):
         raise AppError(
             "invalid_order",
             "The order must list exactly the children of one level.",
@@ -610,7 +610,13 @@ async def delete_component(
         if level:
             await session.execute(sa_delete(Node).where(Node.id.in_(level)))
     await session.flush()
-    await session.delete(component)
+    # the part may still be nodded in another tree (CodeRabbit): the quoting
+    # layer follows the LAST reference, mirroring the publish-removal rule
+    target_still_referenced = await session.scalar(
+        select(Node.id).where(Node.part_id == component.part_id).limit(1)
+    )
+    if target_still_referenced is None:
+        await session.delete(component)
     # subtree parts nothing references anymore lose their quoting layer too
     # (the publish-removal precedent — orphan components would linger forever)
     for part_id in subtree_part_ids:

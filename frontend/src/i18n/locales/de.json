@@ -1239,7 +1239,7 @@
     "group_manufactured": "Fertigungsteile ({{count}})",
     "group_purchased": "Kaufteile ({{count}})",
     "summary": "Komponenten-Summe",
-    "selected": "{{count}} Komponenten ausgewählt",
+    "selected": "Ausgewählt: {{count}}",
     "select_row": "{{name}} auswählen",
     "row_menu": "Menü für {{name}}",
     "menu_component": "Komponente",
@@ -1280,6 +1280,7 @@
     "addpc_title": "Kaufteile aus der Bibliothek hinzufügen",
     "addpc_search": "Bibliothek durchsuchen",
     "addpc_qty": "Stückzahl für {{name}}",
-    "addpc_confirm": "HINZUFÜGEN"
+    "addpc_confirm": "HINZUFÜGEN",
+    "delete_confirm": "{{name}} wirklich aus der Baugruppe löschen?"
   }
 }

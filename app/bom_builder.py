@@ -441,6 +441,32 @@ async def resolve_purchased_links(
         )
         (errors if library_has_records else notices).append(issue)
 
+    # linked rows (same part#+rev = ONE part) must agree on the library record
+    # — otherwise commit order would silently pick the winner (CodeRabbit)
+    by_key: dict[tuple[str, str], set[uuid.UUID]] = {}
+    key_rows: dict[tuple[str, str], list[str]] = {}
+    for row in purchased_rows:
+        pc_id = links.get(row.row_id)
+        if pc_id is None:
+            continue
+        key = _part_key(row)
+        if key is None:
+            continue
+        by_key.setdefault(key, set()).add(pc_id)
+        key_rows.setdefault(key, []).append(row.row_id)
+    for key, pc_ids in by_key.items():
+        if len(pc_ids) > 1:
+            errors.append(
+                BomIssue(
+                    code="purchased_link_conflict",
+                    message=(
+                        "Verknüpfte Zeilen desselben Teils zeigen auf "
+                        "unterschiedliche Kaufteil-Einträge."
+                    ),
+                    row_ids=key_rows[key],
+                )
+            )
+
     return links, errors, notices
 
 
@@ -1130,6 +1156,13 @@ async def _commit_tree(
             session.add(component)
         component.obtain_method = part.obtain_method
         component.is_assembly = part.is_assembly
+        if part.obtain_method is not ObtainMethod.purchased and (
+            component.purchased_component_id is not None
+        ):
+            # republished as manufactured: the stale library link and its
+            # frozen price must not keep pricing the row (CodeRabbit)
+            component.purchased_component_id = None
+            component.piece_price = None
 
     # ---- purchased rows: tie components to their PC-library records --------- #
     # (M4.10, D34 tightening) — the frozen-at-publish piece price becomes the

@@ -1239,7 +1239,7 @@
     "group_manufactured": "Manufactured Components ({{count}})",
     "group_purchased": "Purchased Components ({{count}})",
     "summary": "Component Summary",
-    "selected": "{{count}} components selected",
+    "selected": "Selected: {{count}}",
     "select_row": "Select {{name}}",
     "row_menu": "Menu for {{name}}",
     "menu_component": "Component",
@@ -1280,6 +1280,7 @@
     "addpc_title": "Add purchased components from the library",
     "addpc_search": "Search the library",
     "addpc_qty": "Quantity for {{name}}",
-    "addpc_confirm": "ADD"
+    "addpc_confirm": "ADD",
+    "delete_confirm": "Really delete {{name}} from the assembly?"
   }
 }

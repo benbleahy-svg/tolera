@@ -86,7 +86,9 @@ def upgrade() -> None:
             specs jsonb NOT NULL DEFAULT '{}'::jsonb,
             created_at timestamptz NOT NULL DEFAULT now(),
             updated_at timestamptz NOT NULL DEFAULT now(),
-            CONSTRAINT uq_oem_product_org_id_id UNIQUE (org_id, id)
+            CONSTRAINT uq_oem_product_org_id_id UNIQUE (org_id, id),
+            CONSTRAINT uq_oem_product_org_brand_part
+                UNIQUE (org_id, brand, oem_part_number)
         )
         """
     )

@@ -77,6 +77,7 @@ export function EstimatingPage() {
   const [bomStatus, setBomStatus] = useState<BomStatus | null>(null);
   const [bomBuilderOpen, setBomBuilderOpen] = useState(false);
   const [bomPublishedToast, setBomPublishedToast] = useState(false);
+  const [bomPublishCount, setBomPublishCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
@@ -473,6 +474,7 @@ export function EstimatingPage() {
           onPublished={() => {
             setBomBuilderOpen(false);
             setBomPublishedToast(true);
+            setBomPublishCount((n) => n + 1);
             bomApi
               .getBomStatus(quoteItemId)
               .then(setBomStatus)
@@ -490,7 +492,7 @@ export function EstimatingPage() {
           quoteItemId={quoteItemId}
           editable={editable}
           formatMoney={formatMoney}
-          refreshToken={bomPublishedToast ? 1 : 0}
+          refreshToken={bomPublishCount}
           onChanged={() => {
             if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
             loadPricing();

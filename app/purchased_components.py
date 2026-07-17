@@ -305,8 +305,8 @@ async def get_purchase_matches(
     cards.sort(
         key=lambda c: (
             c.oem_part_number_match,
-            c.historical_geometric_matches,
             c.oem_geometric_match,
+            c.historical_geometric_matches,
         ),
         reverse=True,
     )
@@ -362,19 +362,23 @@ async def link_component_to_pc(
 async def _upsert_memory(
     session: AsyncSession, org_id: uuid.UUID, geom_hash: str, pc_id: uuid.UUID
 ) -> None:
-    memory = await session.scalar(
-        select(PcGeometryMemory).where(PcGeometryMemory.geom_hash == geom_hash)
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    # atomic upsert (CodeRabbit): concurrent converts must neither duplicate
+    # the (org, signature) row nor lose an increment. Latest conversion wins
+    # the link; every (re-)conversion counts as one historical match.
+    statement = pg_insert(PcGeometryMemory).values(
+        org_id=org_id, geom_hash=geom_hash, purchased_component_id=pc_id, match_count=1
     )
-    if memory is None:
-        session.add(
-            PcGeometryMemory(
-                org_id=org_id, geom_hash=geom_hash, purchased_component_id=pc_id, match_count=1
-            )
+    await session.execute(
+        statement.on_conflict_do_update(
+            constraint="uq_pc_geometry_memory_org_hash",
+            set_={
+                "purchased_component_id": pc_id,
+                "match_count": PcGeometryMemory.match_count + 1,
+            },
         )
-    else:
-        # latest wins; every (re-)conversion counts as one historical match
-        memory.purchased_component_id = pc_id
-        memory.match_count += 1
+    )
     await session.flush()
 
 
@@ -417,6 +421,11 @@ async def convert_to_purchased(
             "Nur Fertigungsteile können in Kaufteile umgewandelt werden.",
             status_code=422,
         )
+    # a convert changes quote costing — same Draft editability gate + race
+    # lock as every operation edit (CodeRabbit)
+    from .operations import _lock_editable_quote
+
+    await _lock_editable_quote(session, component)
     if (payload.purchased_component_id is None) == (payload.create is None):
         raise AppError(
             "invalid_payload",
@@ -488,6 +497,10 @@ async def apply_purchased_memory_by_hash(
     pc = await session.get(PurchasedComponent, memory.purchased_component_id)
     if pc is None or pc.deleted_at is not None:
         return False
+    # money guard (CodeRabbit): the frozen price must match the org currency —
+    # a stale-currency library entry never silently mixes EUR/CHF
+    if pc.currency != await _org_currency(session, org_id):
+        return False
     part = await session.get(Part, part_id)
     if part is None:
         return False
@@ -506,13 +519,53 @@ async def apply_purchased_memory_by_hash(
     ).all()
     if not components:
         return False
+    # only quotes still in Draft may be mutated by the background job
+    # (CodeRabbit): a quote finalized while interrogation ran keeps its
+    # costing untouched — the estimator converts manually if wanted
+    from .operations import _quote_is_editable
+
+    tagged: list[Component] = []
     for component in components:
+        quote = await _owning_quote(session, component)
+        if quote is not None and not _quote_is_editable(quote):
+            continue
         await link_component_to_pc(session, component, part, pc, record_memory=False)
-    memory.match_count += len(components)
+        tagged.append(component)
+    if not tagged:
+        return False
+    memory.match_count += len(tagged)
     await session.flush()
-    for component in components:
+    for component in tagged:
         await _reprice_root_for(session, component)
     return True
+
+
+async def _owning_quote(session: AsyncSession, component: Component) -> Any:
+    """The Quote owning this component's tree (None when unattached)."""
+    from .models import Quote
+
+    root_component_id = await session.scalar(
+        select(QuoteItem.root_component_id).where(QuoteItem.root_component_id == component.id)
+    )
+    if root_component_id is None:
+        root_part_id = await session.scalar(
+            select(Node.root_part_id).where(Node.part_id == component.part_id).limit(1)
+        )
+        if root_part_id is None:
+            return None
+        root_component_id = await session.scalar(
+            select(Component.id)
+            .where(Component.part_id == root_part_id, Component.is_root_component)
+            .limit(1)
+        )
+    if root_component_id is None:
+        return None
+    return await session.scalar(
+        select(Quote)
+        .join(QuoteItem, QuoteItem.quote_id == Quote.id)
+        .where(QuoteItem.root_component_id == root_component_id)
+        .limit(1)
+    )
 
 
 async def auto_link_purchased_by_name(

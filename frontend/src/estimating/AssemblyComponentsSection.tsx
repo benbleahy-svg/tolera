@@ -448,10 +448,22 @@ export default function AssemblyComponentsSection({
   const [dragId, setDragId] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api.getAssemblyComponents(quoteItemId).then(setData).catch(() => setData(null));
+    let live = true;
+    api
+      .getAssemblyComponents(quoteItemId)
+      .then((next) => live && setData(next))
+      .catch(() => live && setData(null));
+    return () => {
+      live = false;
+    };
   }, [api, quoteItemId]);
 
-  useEffect(load, [load, refreshToken]);
+  useEffect(() => {
+    // switching line items must never leave the previous tree interactive
+    setData(null);
+    setSelection(new Set());
+    return load();
+  }, [load, refreshToken]);
 
   const reload = () => {
     load();
@@ -586,7 +598,10 @@ export default function AssemblyComponentsSection({
                 className="asm-menu-danger"
                 disabled={!editable}
                 onClick={async () => {
-                  if (row.component_id) await api.deleteComponent(row.component_id);
+                  if (!row.component_id) return;
+                  if (!window.confirm(t('assembly.delete_confirm', { name: rowName(row) })))
+                    return;
+                  await api.deleteComponent(row.component_id);
                   reload();
                 }}
               >

@@ -3133,6 +3133,10 @@ class OemProduct(Base):
     __tablename__ = "oem_product"
     __table_args__ = (
         UniqueConstraint("org_id", "id", name="uq_oem_product_org_id_id"),
+        # natural key — concurrent provisioning must not duplicate catalog rows
+        UniqueConstraint(
+            "org_id", "brand", "oem_part_number", name="uq_oem_product_org_brand_part"
+        ),
         Index("ix_oem_product_org_geom", "org_id", "geom_hash"),
         Index("ix_oem_product_org_oem", "org_id", "oem_part_number"),
     )

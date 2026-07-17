@@ -215,6 +215,8 @@ async def _generate_from_formula(
             quantities=env.quantities.copy(),
             make_quantities=env.make_quantities.copy(),
             bom_quantities=env.quantities.copy(),
+            # attribute-driven routing (KB): the part's stored custom attrs
+            custom_attributes=dict(env.part.custom_attributes or {}),
         ),
         allowed_operations=list(allowed),
     )
