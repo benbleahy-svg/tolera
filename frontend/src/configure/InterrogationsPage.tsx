@@ -168,7 +168,7 @@ function FamilySection({
                       <input
                         type="number"
                         step="any"
-                        min="0"
+                        min="0.000001"
                         defaultValue={String(inputs[field] ?? catalog.defaults[field] ?? '')}
                         aria-label={field}
                         onChange={(e) => {
