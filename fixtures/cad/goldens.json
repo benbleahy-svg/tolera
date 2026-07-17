@@ -122,7 +122,204 @@
     },
     "machine_directions_expected": [
       "Z"
-    ]
+    ],
+    "milling": {
+      "setup_count": 1,
+      "setup_time_hr": 1.0,
+      "runtime_hr": 0.03755555555555556,
+      "confidence": "High",
+      "setups": [
+        {
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "setup_time_hr": 1.0,
+          "runtime_hr": 0.03755555555555556,
+          "confidence": "High",
+          "machine_direction": {
+            "profiled_area": 960,
+            "derived_area": 800.0,
+            "surfaced_area": 0.0
+          }
+        }
+      ],
+      "holes": [
+        {
+          "bottom_type": "thru",
+          "diameter": 8.0,
+          "depth": 20.0,
+          "volume": 1005.3096491487338,
+          "area": 502.6548245743669,
+          "count": 2
+        },
+        {
+          "bottom_type": "flat",
+          "diameter": 6.0,
+          "depth": 10.0,
+          "volume": 282.7433388230814,
+          "area": 216.7698930976957,
+          "count": 1
+        }
+      ],
+      "pockets": [
+        {
+          "area": 1760.0,
+          "volume": 6400.0,
+          "max_depth": 8.0,
+          "bottom_type": "flat",
+          "has_transition": false
+        }
+      ]
+    }
+  },
+  "block-3setups-60x40x20.step": {
+    "family": "milling",
+    "volume": 45314.07087168768,
+    "area": 9710.088453960008,
+    "bbox": [
+      60,
+      40,
+      20
+    ],
+    "milling": {
+      "setup_count": 3,
+      "setup_time_hr": 3.0,
+      "runtime_hr": 0.021055555555555557,
+      "confidence": "High",
+      "setups": [
+        {
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "setup_time_hr": 1.0,
+          "runtime_hr": 0.0031666666666666666,
+          "confidence": "High",
+          "machine_direction": {
+            "profiled_area": 420,
+            "derived_area": 300.0,
+            "surfaced_area": 0.0
+          }
+        },
+        {
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "setup_time_hr": 1.0,
+          "runtime_hr": 0.009000000000000001,
+          "confidence": "High",
+          "machine_direction": {
+            "profiled_area": 0.0,
+            "derived_area": 0.0,
+            "surfaced_area": 0.0
+          }
+        },
+        {
+          "direction": [
+            0,
+            -1,
+            0
+          ],
+          "setup_time_hr": 1.0,
+          "runtime_hr": 0.008888888888888889,
+          "confidence": "High",
+          "machine_direction": {
+            "profiled_area": 0.0,
+            "derived_area": 0.0,
+            "surfaced_area": 0.0
+          }
+        }
+      ],
+      "holes": [
+        {
+          "bottom_type": "flat",
+          "diameter": 8.0,
+          "depth": 12.0,
+          "volume": 603.1857894892403,
+          "area": 351.85837720205683,
+          "count": 1
+        },
+        {
+          "bottom_type": "flat",
+          "diameter": 6.0,
+          "depth": 10.0,
+          "volume": 282.7433388230814,
+          "area": 216.7698930976957,
+          "count": 1
+        }
+      ],
+      "pockets": [
+        {
+          "area": 720.0,
+          "volume": 1800.0,
+          "max_depth": 6.0,
+          "bottom_type": "flat",
+          "has_transition": false
+        }
+      ]
+    }
+  },
+  "block-dome-50x50x20.step": {
+    "family": "milling",
+    "volume": 46905.604897606805,
+    "area": 9614.15926535898,
+    "bbox": [
+      50,
+      50,
+      20
+    ],
+    "milling": {
+      "setup_count": 1,
+      "setup_time_hr": 1.0,
+      "runtime_hr": 0.011252867121747535,
+      "confidence": "Low",
+      "setups": [
+        {
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "setup_time_hr": 1.0,
+          "runtime_hr": 0.011252867121747535,
+          "confidence": "Low",
+          "machine_direction": {
+            "profiled_area": 300,
+            "derived_area": 200.0,
+            "surfaced_area": 628.3185307179587
+          }
+        }
+      ],
+      "holes": [],
+      "pockets": [
+        {
+          "area": 500.0,
+          "volume": 1000.0,
+          "max_depth": 5.0,
+          "bottom_type": "flat",
+          "has_transition": false
+        }
+      ]
+    }
+  },
+  "block-bevel-40x40x20.step": {
+    "family": "milling",
+    "volume": 31040.0,
+    "area": 6240,
+    "milling": {
+      "setup_count": 0,
+      "setup_time_hr": 0.0,
+      "runtime_hr": 0.0,
+      "confidence": "Low",
+      "setups": [],
+      "holes": [],
+      "pockets": []
+    }
   },
   "shaft-stepped-d30-d20-d12.step": {
     "family": "lathe",

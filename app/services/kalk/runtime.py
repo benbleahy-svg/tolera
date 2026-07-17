@@ -1054,6 +1054,11 @@ class Runtime:
                     "quote": None,
                     "op_def": None,
                     "line_item": None,
+                    # per-setup operation index (KB milling-process): 0-based,
+                    # one operation per detected CNC setup. The default keeps
+                    # single-op programs evaluable; the real per-setup value is
+                    # wired by auto-routing (M4.10) via eval_context.
+                    "INDEX": 0,
                 }
             )
             # geometry analyzers arrive with M4 (GeometryService)
@@ -1210,6 +1215,7 @@ OPERATION_COST_NAMES = frozenset(
         "quote",
         "op_def",
         "line_item",
+        "INDEX",
         *ANALYZER_NAMES,
     }
 )

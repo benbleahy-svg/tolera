@@ -163,6 +163,105 @@ describe('InterrogationPanel', () => {
     expect(screen.queryByText(/Merkmalserkennung folgt/)).not.toBeInTheDocument();
   });
 
+  it('renders the milling results block with per-setup runtimes (M4.4)', async () => {
+    // The block-3setups fixture's analytic values (goldens.json → milling).
+    const mill = succeeded();
+    mill.run!.family = 'MILLING';
+    mill.run!.result = {
+      ...mill.run!.result!,
+      family: 'MILLING',
+      confidence: 'High',
+      family_scalars: {
+        setup_count: 3,
+        runtime: 0.021055,
+        setup_time: 3,
+        setups: [
+          {
+            direction: [0, 0, 1],
+            setup_time: 1,
+            runtime: 0.003166,
+            confidence: 'High',
+            features: [],
+            feedback: [],
+          },
+          {
+            direction: [1, 0, 0],
+            setup_time: 1,
+            runtime: 0.009,
+            confidence: 'High',
+            features: [],
+            feedback: [],
+          },
+          {
+            direction: [0, -1, 0],
+            setup_time: 1,
+            runtime: 0.008888,
+            confidence: 'High',
+            features: [],
+            feedback: [],
+          },
+        ],
+      },
+      features: [],
+    };
+    getInterrogation.mockResolvedValue(mill);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Fräsanalyse – Ergebnisse')).toBeInTheDocument();
+    });
+    // setup count: the dd next to the label (the # also appears as a table
+    // row index, so scope the query)
+    expect(
+      screen.getByText('Anzahl Aufspannungen').nextElementSibling,
+    ).toHaveTextContent('3');
+    // aggregate setup time (3 h) and runtime (~1,3 min), German decimal comma
+    expect(screen.getByText(/3,00\s*h/)).toBeInTheDocument();
+    expect(screen.getByText(/1,3\s*min/)).toBeInTheDocument();
+    expect(screen.getByText('Verlässlichkeit')).toBeInTheDocument();
+    expect(screen.getByText('Hoch')).toBeInTheDocument();
+    // per-setup table with direction labels
+    expect(screen.getByText('+Z')).toBeInTheDocument();
+    expect(screen.getByText('+X')).toBeInTheDocument();
+    expect(screen.getByText('−Y')).toBeInTheDocument();
+    // High confidence → no manual-override note; family block replaces the
+    // pending note.
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Merkmalserkennung folgt/)).not.toBeInTheDocument();
+  });
+
+  it('surfaces the manual-override hint on low confidence (M4.4)', async () => {
+    const mill = succeeded();
+    mill.run!.family = 'MILLING';
+    mill.run!.result = {
+      ...mill.run!.result!,
+      family: 'MILLING',
+      confidence: 'Low',
+      family_scalars: {
+        setup_count: 1,
+        runtime: 0.011253,
+        setup_time: 1,
+        setups: [
+          {
+            direction: [0, 0, 1],
+            setup_time: 1,
+            runtime: 0.011253,
+            confidence: 'Low',
+            features: [],
+            feedback: [],
+          },
+        ],
+      },
+      features: [],
+    };
+    getInterrogation.mockResolvedValue(mill);
+    await renderWithProviders(<InterrogationPanel partId="part-1" displayOpts={OPTS} />);
+    await waitFor(() => {
+      expect(screen.getByText('Fräsanalyse – Ergebnisse')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Niedrig')).toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent(/manuell prüfen und überschreiben/);
+  });
+
   it('omits unfolded dims and thumbnail when the recognizer could not unfold', async () => {
     const sheet = succeeded();
     sheet.run!.family = 'SHEET_METAL';

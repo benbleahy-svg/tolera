@@ -136,6 +136,25 @@ export interface SheetMetalScalars {
   };
 }
 
+/** One detected mill setup (M4.4). Times are HOURS (KB milling-process). */
+export interface MillingSetup {
+  direction: number[];
+  setup_time: number;
+  runtime: number;
+  confidence: 'High' | 'Medium' | 'Low';
+  features: InterrogationFeature[];
+  feedback: unknown[];
+}
+
+export interface MillingScalars {
+  setup_count: number;
+  setups: MillingSetup[];
+  /** Aggregate runtime across setups, hours. */
+  runtime: number;
+  /** Aggregate setup time across setups, hours. */
+  setup_time: number;
+}
+
 export interface InterrogationRun {
   id: string;
   part_id: string;
@@ -161,8 +180,10 @@ export interface InterrogationRun {
       weight: number | null;
       bbox_source: 'obb' | 'aabb';
     };
-    family_scalars?: SheetMetalScalars | Record<string, never>;
+    family_scalars?: SheetMetalScalars | MillingScalars | Record<string, never>;
     features?: InterrogationFeature[];
+    /** Engine trust rating where runtime is estimated (milling — M4.4). */
+    confidence?: 'High' | 'Medium' | 'Low' | null;
   } | null;
   created_at: string;
   started_at: string | null;

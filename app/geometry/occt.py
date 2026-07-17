@@ -20,6 +20,7 @@ fixtures land (DECISIONS.md 2026-07-12 OPEN).
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import math
 import tempfile
@@ -33,8 +34,9 @@ from OCP.Bnd import Bnd_Box, Bnd_OBB
 from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepBndLib import BRepBndLib
-from OCP.BRepGProp import BRepGProp
+from OCP.BRepGProp import BRepGProp, BRepGProp_Face
 from OCP.BRepTools import BRepTools
+from OCP.gp import gp_Pnt, gp_Vec
 from OCP.GProp import GProp_GProps
 from OCP.IFSelect import IFSelect_RetDone
 from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
@@ -45,6 +47,7 @@ from OCP.TopoDS import TopoDS, TopoDS_Face, TopoDS_Shape
 from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
 
 from .contract import (
+    FAMILY_MILLING,
     FAMILY_SHEET_METAL,
     SIGNATURE_VERSION,
     AnalysisResult,
@@ -630,6 +633,541 @@ def _longest_edge_direction(face: TopoDS_Face) -> tuple[float, float, float] | N
     return best[1] if best else None
 
 
+# --------------------------------------------------------------------------- #
+# Milling recognizer (M4.4) — setups, features, in-house runtime + confidence
+# --------------------------------------------------------------------------- #
+# Verdicts from the M4.0 capability map (GEOMETRY.md §4): hole/pocket
+# recognition is OCCT-proven; the setup-ALLOCATION heuristic and the runtime
+# estimate are in-house (runtime has NO OCCT support — the designed honest
+# ceiling). Everything below is estimation-grade with surfaced confidence;
+# low confidence → manual override drives cost. 5-axis is never auto-costed:
+# work the 3-axis model cannot reach stays UNCOVERED (degrading confidence)
+# instead of being priced.
+#
+# v1 ceilings (return what is found, never fabricate — GEOMETRY.md §9):
+# feature taxonomy follows the KB reference (milling-feature-iteration):
+# ``machine_direction`` / ``hole`` / ``circular_pocket`` / ``pocket`` are the
+# emitted FEATURES; chamfer/fillet/tapered-wall/tight-corner/uncut-face
+# objects are FEEDBACK and arrive with the DFM catalogue (M4.7). Not detected
+# in v1: partial holes, holes-through-cavity, counterbore/-sink children,
+# through-pockets (no floor), non-axis-aligned bores (their removal degrades
+# the parameterized fraction instead).
+
+#: Strategy-input defaults, metric-native (DACH delta overrides the KB inch
+#: defaults; 1000 mm² is KB's own metric value). 45.72 mm = exactly 1.80 in —
+#: the KB parenthetical "45.65 mm" is a rounding slip of its inch default.
+_MILL_DEFAULT_INPUTS = {
+    "depth_profiling_threshold": 50.8,  # mm (2.0 in) — max profiled-cut depth
+    "depth_surfacing_threshold": 45.72,  # mm (1.80 in) — max surfaced-cut depth
+    "minimum_area_for_setup": 1000.0,  # mm² — gate for surfacing-only setups
+    "maximum_hole_diameter": 50.8,  # mm (2.0 in) — above: circular pocket
+}
+
+# In-house runtime heuristic constants — ASSUMED calibratable engineering
+# defaults (no spec/OCCT formula exists; build-plan M4.4). MUST mirror
+# scripts/spike-m4.0/gen_fixtures.py MILL_* so the goldens pin them.
+_MILL_MRR_MM3_MIN = 15000.0  # roughing removal rate
+_MILL_DRILL_MM_MIN = 300.0  # drill axial penetration rate
+_MILL_HOLE_HANDLING_MIN = 0.5  # per-hole positioning/tool time
+_MILL_SURF_MM2_MIN = 1500.0  # surfacing area rate
+_MILL_PROFILE_MM2_MIN = 6000.0  # wall-profiling finish area rate
+
+#: Confidence rubric: share of removed material that is feature-parameterized
+#: (KB milling-feature-iteration: "usually above 80%" for straightforward
+#: 3-axis parts). Any uncovered face additionally caps the rating at Medium.
+_CONF_HIGH_FRACTION = 0.8
+_CONF_MEDIUM_FRACTION = 0.5
+_CONF_ORDER = {"High": 2, "Medium": 1, "Low": 0}
+
+#: The six 3-axis tool directions, canonical order = the deterministic
+#: tie-break for setup ordering.
+_AXIS_DIRS: tuple[tuple[float, float, float], ...] = (
+    (1.0, 0.0, 0.0),
+    (-1.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0),
+    (0.0, -1.0, 0.0),
+    (0.0, 0.0, 1.0),
+    (0.0, 0.0, -1.0),
+)
+
+#: Minimum |dot| for a surfaced face to be reachable from an existing setup.
+_SURFACE_REACH_DOT = 0.1
+
+
+def _snap_dir(v: tuple[float, float, float]) -> int | None:
+    """Index into ``_AXIS_DIRS`` when ``v`` is axis-aligned, else None."""
+    for i, d in enumerate(_AXIS_DIRS):
+        if _v_dot(v, d) > 1.0 - _DIR_TOL:
+            return i
+    return None
+
+
+def _outward_normal(face: TopoDS_Face) -> tuple[float, float, float]:
+    """The solid's outward normal at the face's mid-parameter point
+    (``BRepGProp_Face`` accounts for the face orientation)."""
+    surf = BRepAdaptor_Surface(face)
+    u = 0.5 * (surf.FirstUParameter() + surf.LastUParameter())
+    v = 0.5 * (surf.FirstVParameter() + surf.LastVParameter())
+    p, vn = gp_Pnt(), gp_Vec()
+    BRepGProp_Face(face).Normal(u, v, p, vn)
+    return _v_unit((vn.X(), vn.Y(), vn.Z()))
+
+
+def _surface_grid_points(face: TopoDS_Face, n: int = 8) -> list[tuple[float, float, float]]:
+    """UV-grid samples — extents of curved faces whose extreme points lie in
+    the face INTERIOR (a dome's pole has no boundary vertex)."""
+    surf = BRepAdaptor_Surface(face)
+    u0, u1 = surf.FirstUParameter(), surf.LastUParameter()
+    v0, v1 = surf.FirstVParameter(), surf.LastVParameter()
+    pts = []
+    for i in range(n + 1):
+        for j in range(n + 1):
+            p = surf.Value(u0 + (u1 - u0) * i / n, v0 + (v1 - v0) * j / n)
+            pts.append((p.X(), p.Y(), p.Z()))
+    return pts
+
+
+class _MillBore:
+    """A full-sweep concave cylinder — a drilled bore (or circular pocket)."""
+
+    def __init__(self, face: TopoDS_Face, surf: BRepAdaptor_Surface, axis_idx: int) -> None:
+        cyl = surf.Cylinder()
+        direction = cyl.Axis().Direction()
+        location = cyl.Axis().Location()
+        e = _AXIS_DIRS[axis_idx]
+        sign = 1.0 if _v_dot((direction.X(), direction.Y(), direction.Z()), e) > 0 else -1.0
+        s_loc = _v_dot((location.X(), location.Y(), location.Z()), e)
+        v0, v1 = surf.FirstVParameter(), surf.LastVParameter()
+        self.face = face
+        self.radius = float(cyl.Radius())
+        self.axis = axis_idx  # POSITIVE axis index (0/2/4)
+        self.axis_point = (location.X(), location.Y(), location.Z())
+        self.s_lo = float(min(s_loc + sign * v0, s_loc + sign * v1))
+        self.s_hi = float(max(s_loc + sign * v0, s_loc + sign * v1))
+        self.area = _face_area(face)
+
+
+class _MillHole:
+    """One (possibly compound) hole feature along a single axis."""
+
+    def __init__(self, bores: list[_MillBore]) -> None:
+        self.bores = bores
+        self.axis = bores[0].axis
+        self.s_lo = min(b.s_lo for b in bores)
+        self.s_hi = max(b.s_hi for b in bores)
+        self.min_radius = min(b.radius for b in bores)
+        self.volume = sum(math.pi * b.radius**2 * (b.s_hi - b.s_lo) for b in bores)
+        self.area = sum(b.area for b in bores)
+        self.depth = self.s_hi - self.s_lo
+        self.bottom_type = "obstructed"
+        self.entry_dir: int | None = None  # _AXIS_DIRS index; None = flexible
+        self.is_circular_pocket = False
+
+
+class _MillPocket:
+    """A 2.5D pocket: an axis-normal floor + its edge-adjacent walls."""
+
+    def __init__(self, direction: int, floor_area: float, depth: float) -> None:
+        self.direction = direction
+        self.floor_area = floor_area
+        self.depth = depth
+        self.wall_faces: list[tuple[float, float]] = []  # (area, depth along dir)
+        self.has_transition = False
+
+    @property
+    def volume(self) -> float:
+        return self.floor_area * self.depth  # prismatic v1
+
+    @property
+    def area(self) -> float:
+        return self.floor_area + sum(a for a, _ in self.wall_faces)
+
+
+class _MillSetup:
+    """One machine direction with its attributed work."""
+
+    def __init__(self, direction: int) -> None:
+        self.direction = direction
+        self.holes: list[_MillHole] = []
+        self.pockets: list[_MillPocket] = []
+        self.rough_mm3 = 0.0
+        self.profiled = 0.0
+        self.derived = 0.0
+        self.surfaced = 0.0
+
+    @property
+    def volume(self) -> float:
+        return (
+            sum(h.volume for h in self.holes) + sum(p.volume for p in self.pockets) + self.rough_mm3
+        )
+
+    def runtime_hours(self) -> float:
+        drilled = [h for h in self.holes if not h.is_circular_pocket]
+        minutes = (
+            (self.rough_mm3 + sum(p.volume for p in self.pockets)) / _MILL_MRR_MM3_MIN
+            + sum(h.depth / _MILL_DRILL_MM_MIN + _MILL_HOLE_HANDLING_MIN for h in drilled)
+            + self.profiled / _MILL_PROFILE_MM2_MIN
+            + self.surfaced / _MILL_SURF_MM2_MIN
+        )
+        return minutes / 60.0
+
+
+def _aabb_bounds(shape: TopoDS_Shape) -> tuple[tuple[float, float, float], ...]:
+    box = Bnd_Box()
+    box.SetGap(0.0)
+    BRepBndLib.Add_s(shape, box, False)
+    x0, y0, z0, x1, y1, z1 = box.Get()
+    return ((x0, y0, z0), (x1, y1, z1))
+
+
+def _s_bound_max(lo: tuple[float, ...], hi: tuple[float, ...], d: tuple[float, ...]) -> float:
+    """max over the AABB of the position along direction ``d``."""
+    return sum(max(a * c, b * c) for a, b, c in zip(lo, hi, d, strict=True))
+
+
+def _analyze_mill3(
+    shape: TopoDS_Shape, volume: float, inputs: dict[str, Any] | None
+) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+    """The M4.4 recognizer: 3-axis features → deterministic setup allocation →
+    in-house runtime + confidence. Returns ``(family_scalars, features,
+    confidence)``; a body with no reachable work returns zero setups and zero
+    runtime — never a fabricated estimate."""
+    resolved = {**_MILL_DEFAULT_INPUTS, **(inputs or {})}
+    shape = _canonicalize(shape)
+    lo, hi = _aabb_bounds(shape)
+    stock_volume = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2])
+    total_removal = max(stock_volume - volume, 0.0)
+
+    # -- classify faces ----------------------------------------------------- #
+    skin: list[TopoDS_Face] = []
+    planes: list[tuple[TopoDS_Face, tuple[float, float, float], float]] = []  # face, n_out, area
+    bores: list[_MillBore] = []
+    surface_candidates: list[TopoDS_Face] = []  # tapers, partial cyls, cones, freeform
+    ex = TopExp_Explorer(shape, TopAbs_FACE)
+    while ex.More():
+        face = TopoDS.Face_s(ex.Current())
+        surf = BRepAdaptor_Surface(face)
+        kind = surf.GetType()
+        if kind == 0:  # plane
+            n_out = _outward_normal(face)
+            idx = _snap_dir(n_out)
+            if idx is not None:
+                # stock skin: an axis-normal plane ON the AABB boundary
+                point = surf.Plane().Location()
+                s = _v_dot((point.X(), point.Y(), point.Z()), _AXIS_DIRS[idx])
+                if abs(s - _s_bound_max(lo, hi, _AXIS_DIRS[idx])) <= _DIST_TOL:
+                    skin.append(face)
+                    ex.Next()
+                    continue
+            planes.append((face, n_out, _face_area(face)))
+        elif kind == 1 and abs(surf.LastUParameter() - surf.FirstUParameter()) >= (
+            2 * math.pi - 1e-6
+        ):
+            cyl_dir = surf.Cylinder().Axis().Direction()
+            axis_idx = _snap_dir((cyl_dir.X(), cyl_dir.Y(), cyl_dir.Z()))
+            if axis_idx is None:
+                axis_idx = _snap_dir((-cyl_dir.X(), -cyl_dir.Y(), -cyl_dir.Z()))
+            n_out = _outward_normal(face)
+            cyl = surf.Cylinder()
+            mid = surf.Value(
+                0.5 * (surf.FirstUParameter() + surf.LastUParameter()),
+                0.5 * (surf.FirstVParameter() + surf.LastVParameter()),
+            )
+            axis_loc = cyl.Axis().Location()
+            axis_d = cyl.Axis().Direction()
+            to_mid = _v_sub((mid.X(), mid.Y(), mid.Z()), (axis_loc.X(), axis_loc.Y(), axis_loc.Z()))
+            along = _v_dot(to_mid, (axis_d.X(), axis_d.Y(), axis_d.Z()))
+            radial = _v_sub(
+                to_mid,
+                (along * axis_d.X(), along * axis_d.Y(), along * axis_d.Z()),
+            )
+            concave = _v_dot(n_out, radial) < 0
+            if axis_idx is not None and concave:
+                # normalize to the positive axis of the pair for grouping
+                bores.append(_MillBore(face, surf, axis_idx - (axis_idx % 2)))
+            elif concave:
+                surface_candidates.append(face)  # tilted bore: not 3-axis work
+            # convex full cylinders (bosses/pins) bound the stock — their
+            # surround is roughed; nothing to allocate directly (v1)
+        else:
+            surface_candidates.append(face)  # partial cyl, cone, sphere, freeform
+        ex.Next()
+
+    # -- holes (merge coaxial contiguous bores; classify ends) -------------- #
+    edge_faces = TopTools_IndexedDataMapOfShapeListOfShape()
+    TopExp.MapShapesAndAncestors_s(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces)
+
+    def adjacent(face: TopoDS_Face) -> list[TopoDS_Shape]:
+        out: list[TopoDS_Shape] = []
+        ee = TopExp_Explorer(face, TopAbs_EDGE)
+        while ee.More():
+            if edge_faces.Contains(ee.Current()):
+                out.extend(list(edge_faces.FindFromKey(ee.Current())))
+            ee.Next()
+        return out
+
+    holes: list[_MillHole] = []
+    used_bores: set[int] = set()
+    for i, bore in enumerate(bores):
+        if i in used_bores:
+            continue
+        stack = [bore]
+        used_bores.add(i)
+        for j in range(i + 1, len(bores)):
+            if j in used_bores or bores[j].axis != bore.axis:
+                continue
+            gap = _v_sub(bores[j].axis_point, bore.axis_point)
+            e = _AXIS_DIRS[bore.axis]
+            along = _v_dot(gap, e)
+            off_axis = math.sqrt(max(_v_dot(gap, gap) - along * along, 0.0))
+            if off_axis > _DIST_TOL:
+                continue
+            spans = sorted([*stack, bores[j]], key=lambda b: b.s_lo)
+            if all(b.s_lo <= a.s_hi + _DIST_TOL for a, b in itertools.pairwise(spans)):
+                stack.append(bores[j])
+                used_bores.add(j)
+        holes.append(_MillHole(stack))
+
+    consumed_planes: set[int] = set()  # indices into ``planes``
+
+    def plane_index(face: TopoDS_Shape) -> int | None:
+        for k, (pf, _, _) in enumerate(planes):
+            if face.IsSame(pf):
+                return k
+        return None
+
+    for hole in holes:
+        e = _AXIS_DIRS[hole.axis]
+        lo_open = abs(hole.s_lo - (-_s_bound_max(lo, hi, tuple(-c for c in e)))) <= _DIST_TOL
+        hi_open = abs(hole.s_hi - _s_bound_max(lo, hi, e)) <= _DIST_TOL
+        if lo_open and hi_open:
+            hole.bottom_type = "thru"
+            continue  # entry stays flexible (either end)
+        closed_s = hole.s_lo if not lo_open else hole.s_hi
+        hole.entry_dir = hole.axis if not lo_open else hole.axis + 1  # +e or -e
+        for neighbor in {id(n): n for b in hole.bores for n in adjacent(b.face)}.values():
+            k = plane_index(neighbor)
+            if k is None or k in consumed_planes:
+                continue
+            face_k, n_out, _ = planes[k]
+            if abs(abs(_v_dot(n_out, e)) - 1.0) > _DIR_TOL:
+                continue
+            pnt = BRepAdaptor_Surface(face_k).Plane().Location()
+            if abs(_v_dot((pnt.X(), pnt.Y(), pnt.Z()), e) - closed_s) <= _DIST_TOL:
+                hole.bottom_type = "flat"
+                hole.area += planes[k][2]
+                consumed_planes.add(k)
+                break
+        else:
+            # a conical end (drill tip) among the adjacent faces → tipped
+            for neighbor in {id(n): n for b in hole.bores for n in adjacent(b.face)}.values():
+                nf = TopoDS.Face_s(neighbor)
+                if BRepAdaptor_Surface(nf).GetType() == 2:  # cone
+                    hole.bottom_type = "tipped"
+                    break
+        hole.is_circular_pocket = 2 * hole.min_radius > resolved["maximum_hole_diameter"]
+    for hole in holes:
+        if hole.bottom_type == "thru":
+            hole.is_circular_pocket = 2 * hole.min_radius > resolved["maximum_hole_diameter"]
+
+    # -- pockets (floor + adjacent walls) ------------------------------------ #
+    pockets: list[_MillPocket] = []
+    floor_order = sorted(
+        (k for k in range(len(planes)) if k not in consumed_planes),
+        key=lambda k: -planes[k][2],
+    )
+    uncovered_area = 0.0
+    for k in floor_order:
+        if k in consumed_planes:
+            continue
+        face_k, n_out, area_k = planes[k]
+        idx = _snap_dir(n_out)
+        if idx is None:
+            continue  # tapered plane → surfacing path below
+        e = _AXIS_DIRS[idx]
+        pnt = BRepAdaptor_Surface(face_k).Plane().Location()
+        depth = _s_bound_max(lo, hi, e) - _v_dot((pnt.X(), pnt.Y(), pnt.Z()), e)
+        if depth <= _DIST_TOL:
+            continue
+        pocket = _MillPocket(idx, area_k, depth)
+        consumed_planes.add(k)
+        for neighbor in {id(n): n for n in adjacent(face_k)}.values():
+            w = plane_index(neighbor)
+            if w is None or w in consumed_planes:
+                continue
+            wall_face, wall_n, wall_area = planes[w]
+            if abs(_v_dot(wall_n, e)) > _DIR_TOL:
+                continue  # not parallel to the tool axis
+            wall_depth = _extent(_face_vertices(wall_face), e)
+            consumed_planes.add(w)
+            pocket.wall_faces.append((wall_area, wall_depth))
+        for neighbor in {id(n): n for n in adjacent(face_k)}.values():
+            nf = TopoDS.Face_s(neighbor)
+            if BRepAdaptor_Surface(nf).GetType() in (1, 2) and not any(
+                nf.IsSame(b.face) for b in bores
+            ):
+                pocket.has_transition = True
+        pockets.append(pocket)
+
+    # -- allocate setups ------------------------------------------------------ #
+    setups: dict[int, _MillSetup] = {}
+
+    def setup_for(idx: int) -> _MillSetup:
+        if idx not in setups:
+            setups[idx] = _MillSetup(idx)
+        return setups[idx]
+
+    for pocket in pockets:
+        setup_for(pocket.direction).pockets.append(pocket)
+    for hole in holes:
+        if hole.entry_dir is not None:
+            setup_for(hole.entry_dir).holes.append(hole)
+    for hole in holes:
+        if hole.entry_dir is None:  # through/obstructed: prefer an existing setup
+            pair = (hole.axis, hole.axis + 1)
+            existing = [p for p in pair if p in setups]
+            if len(existing) == 2:
+                chosen = max(existing, key=lambda p: (setups[p].volume, -p))
+            elif existing:
+                chosen = existing[0]
+            else:
+                chosen = hole.axis  # canonical positive direction (ASSUMED)
+            setup_for(chosen).holes.append(hole)
+
+    # surfaced work: tapers/cones/partial cylinders/freeform faces
+    orphans: dict[int, list[tuple[TopoDS_Face, float, float]]] = {}
+    for k in range(len(planes)):
+        if k not in consumed_planes:
+            surface_candidates.append(planes[k][0])
+            consumed_planes.add(k)
+    for face in surface_candidates:
+        n_rep = _outward_normal(face)
+        f_area = _face_area(face)
+        pts = _surface_grid_points(face)
+        best, best_dot = None, _SURFACE_REACH_DOT
+        for idx in setups:
+            reach = _v_dot(n_rep, _AXIS_DIRS[idx])
+            if reach > best_dot:
+                best, best_dot = idx, reach
+        if best is not None and _extent(pts, _AXIS_DIRS[best]) <= (
+            resolved["depth_surfacing_threshold"] + _DIST_TOL
+        ):
+            setups[best].surfaced += f_area
+            continue
+        dominant = max(range(3), key=lambda a: abs(n_rep[a]))
+        idx = 2 * dominant + (0 if n_rep[dominant] > 0 else 1)
+        if idx in setups:
+            uncovered_area += f_area  # reachable direction exists but depth fails
+        else:
+            orphans.setdefault(idx, []).append((face, f_area, 0.0))
+    for idx, faces_ in orphans.items():
+        group_area = sum(a for _, a, _ in faces_)
+        depth_ok = all(
+            _extent(_surface_grid_points(f), _AXIS_DIRS[idx])
+            <= resolved["depth_surfacing_threshold"] + _DIST_TOL
+            for f, _, _ in faces_
+        )
+        if group_area >= resolved["minimum_area_for_setup"] and depth_ok:
+            setup_for(idx).surfaced += group_area
+        else:
+            uncovered_area += group_area
+
+    # pocket walls: profiled in the pocket's setup, gated by profiling depth
+    for setup in setups.values():
+        for pocket in setup.pockets:
+            setup.derived += pocket.floor_area
+            for wall_area, wall_depth in pocket.wall_faces:
+                if wall_depth <= resolved["depth_profiling_threshold"] + _DIST_TOL:
+                    setup.profiled += wall_area
+                else:
+                    uncovered_area += wall_area
+        for hole in setup.holes:
+            if hole.is_circular_pocket:  # profiled, not drilled
+                setup.rough_mm3 += hole.volume
+                setup.profiled += hole.area
+
+    # deterministic order: attributed removal volume desc, then canonical axis
+    ordered = sorted(setups.values(), key=lambda s: (-s.volume, s.direction))
+    parameterized = sum(h.volume for h in holes) + sum(p.volume for p in pockets)
+    if ordered:
+        ordered[0].rough_mm3 += max(total_removal - parameterized, 0.0)
+
+    # -- confidence ---------------------------------------------------------- #
+    fraction = parameterized / total_removal if total_removal > 1e-9 else 1.0
+    if fraction >= _CONF_HIGH_FRACTION:
+        confidence = "High"
+    elif fraction >= _CONF_MEDIUM_FRACTION:
+        confidence = "Medium"
+    else:
+        confidence = "Low"
+    if uncovered_area > _DIST_TOL and _CONF_ORDER[confidence] > _CONF_ORDER["Medium"]:
+        confidence = "Medium"
+
+    # -- emit ------------------------------------------------------------------ #
+    def hole_dict(hole: _MillHole) -> dict[str, Any]:
+        return {
+            "name": "circular_pocket" if hole.is_circular_pocket else "hole",
+            "properties": {
+                "area": hole.area,
+                "volume": hole.volume,
+                "depth": hole.depth,
+                "bottom_type": hole.bottom_type,
+                "min_radius": hole.min_radius,
+                "diameter": 2 * hole.min_radius,
+            },
+            "geometry_refs": [],
+        }
+
+    def pocket_dict(pocket: _MillPocket) -> dict[str, Any]:
+        return {
+            "name": "pocket",
+            "properties": {
+                "area": pocket.area,
+                "volume": pocket.volume,
+                "max_depth": pocket.depth,
+                "bottom_type": "flat",
+                "has_transition": pocket.has_transition,
+            },
+            "geometry_refs": [],
+        }
+
+    setup_dicts: list[dict[str, Any]] = []
+    all_features: list[dict[str, Any]] = []
+    for setup in ordered:
+        md = {
+            "name": "machine_direction",
+            "properties": {
+                "direction": list(_AXIS_DIRS[setup.direction]),
+                "area": setup.profiled + setup.derived + setup.surfaced,
+                "profiled_area": setup.profiled,
+                "derived_area": setup.derived,
+                "surfaced_area": setup.surfaced,
+            },
+            "geometry_refs": [],
+        }
+        features = [md, *map(hole_dict, setup.holes), *map(pocket_dict, setup.pockets)]
+        setup_dicts.append(
+            {
+                "direction": list(_AXIS_DIRS[setup.direction]),
+                "setup_time": 1.0,  # hours — the spec/KB default
+                "runtime": setup.runtime_hours(),
+                "confidence": confidence,  # v1: uniform body-level rating
+                "features": features,
+                "feedback": [],  # DFM warnings arrive with M4.7
+            }
+        )
+        all_features.extend(features)
+
+    scalars: dict[str, Any] = {
+        "setup_count": len(setup_dicts),
+        "setups": setup_dicts,
+        # aggregates for the Kalk single-operation pattern (KB milling-process)
+        "runtime": sum(s["runtime"] for s in setup_dicts),
+        "setup_time": sum(s["setup_time"] for s in setup_dicts),
+    }
+    return scalars, all_features, confidence
+
+
 class OcctGeometryService:
     """v1 engine (OCCT via OCP). Implements :class:`GeometryService`."""
 
@@ -649,8 +1187,11 @@ class OcctGeometryService:
         weight = (volume / 1000.0) * density_g_cm3 if density_g_cm3 is not None else None
         family_scalars: dict[str, Any] = {}
         features: list[dict[str, Any]] = []
+        confidence: str | None = None
         if family == FAMILY_SHEET_METAL:
             family_scalars, features = _analyze_sheet_metal(shape, volume, area)
+        elif family == FAMILY_MILLING:
+            family_scalars, features, confidence = _analyze_mill3(shape, volume, inputs)
         return AnalysisResult(
             family=family,
             dimensions=Dimensions(
@@ -667,6 +1208,7 @@ class OcctGeometryService:
             ),
             family_scalars=family_scalars,
             features=features,
+            confidence=confidence,  # type: ignore[arg-type]
         )
 
     def compute_signature(self, step_bytes: bytes) -> str:

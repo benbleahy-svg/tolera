@@ -25,7 +25,12 @@ from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_Transform,
 )
 from OCP.BRepGProp import BRepGProp
-from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakePrism
+from OCP.BRepPrimAPI import (
+    BRepPrimAPI_MakeBox,
+    BRepPrimAPI_MakeCylinder,
+    BRepPrimAPI_MakePrism,
+    BRepPrimAPI_MakeSphere,
+)
 from OCP.GC import GC_MakeArcOfCircle
 from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 from OCP.GProp import GProp_GProps
@@ -256,7 +261,35 @@ def bracket_z3() -> tuple[object, dict]:
     return shape, golden
 
 
-# --- 2. Milled block 80x50x20: pocket 40x20x8 + 2 through holes d8 + blind d6x10 ---
+# --- 2. Milling fixtures (M4.4) -------------------------------------------------
+# Runtime-heuristic constants — MUST mirror app/geometry/occt.py (the engine's
+# _MILL_* block). The goldens below hand-compute the per-setup runtimes from
+# these, so a silent drift of either side fails tests/test_milling_m44.py.
+# All are ASSUMED calibratable engineering defaults (build-plan M4.4: runtime
+# is the in-house honest-ceiling heuristic — no OCCT/spec formula exists).
+MILL_MRR_MM3_MIN = 15000.0  # roughing removal rate
+MILL_DRILL_MM_MIN = 300.0  # drill axial penetration rate
+MILL_HOLE_HANDLING_MIN = 0.5  # per-hole positioning/tool time
+MILL_SURF_MM2_MIN = 1500.0  # surfacing area rate
+MILL_PROFILE_MM2_MIN = 6000.0  # wall-profiling finish area rate
+
+
+def mill_minutes(
+    rough_mm3: float = 0.0,
+    hole_depths: tuple[float, ...] = (),
+    profiled_mm2: float = 0.0,
+    surfaced_mm2: float = 0.0,
+) -> float:
+    """The M4.4 per-setup runtime heuristic, in minutes (engine mirror)."""
+    return (
+        rough_mm3 / MILL_MRR_MM3_MIN
+        + sum(d / MILL_DRILL_MM_MIN + MILL_HOLE_HANDLING_MIN for d in hole_depths)
+        + profiled_mm2 / MILL_PROFILE_MM2_MIN
+        + surfaced_mm2 / MILL_SURF_MM2_MIN
+    )
+
+
+# --- 2a. Milled block 80x50x20: pocket 40x20x8 + 2 through holes d8 + blind d6x10 ---
 def milled_block() -> tuple[object, dict]:
     shape = BRepPrimAPI_MakeBox(80, 50, 20).Shape()
     pocket = BRepPrimAPI_MakeBox(gp_Pnt(20, 15, 12), 40, 20, 8).Shape()
@@ -278,6 +311,262 @@ def milled_block() -> tuple[object, dict]:
         "blind_holes": {"count": 1, "diameter": 6.0, "depth": 10.0},
         "pocket": {"size": [40, 20], "depth": 8.0},
         "machine_directions_expected": ["Z"],
+        # M4.4 golden: everything is cut from +Z → one setup; every removed mm³
+        # is feature-parameterized (pocket + 3 holes) → confidence High (KB
+        # milling-feature-iteration: parameterized-removal fraction ≥ 0.8).
+        "milling": _milled_block_milling_golden(),
+    }
+    return shape, golden
+
+
+def _milled_block_milling_golden() -> dict:
+    pocket_walls = 2 * (40 * 8) + 2 * (20 * 8)  # 960 — profiled
+    pocket_floor = 40 * 20.0  # derived
+    runtime_min = mill_minutes(
+        rough_mm3=40 * 20 * 8,
+        hole_depths=(20.0, 20.0, 10.0),
+        profiled_mm2=pocket_walls,
+    )
+    return {
+        "setup_count": 1,
+        "setup_time_hr": 1.0,
+        "runtime_hr": runtime_min / 60.0,
+        "confidence": "High",
+        "setups": [
+            {
+                "direction": [0, 0, 1],
+                "setup_time_hr": 1.0,
+                "runtime_hr": runtime_min / 60.0,
+                "confidence": "High",
+                "machine_direction": {
+                    "profiled_area": pocket_walls,
+                    "derived_area": pocket_floor,
+                    "surfaced_area": 0.0,
+                },
+            }
+        ],
+        "holes": [
+            {
+                "bottom_type": "thru",
+                "diameter": 8.0,
+                "depth": 20.0,
+                "volume": math.pi * 16 * 20,
+                "area": math.pi * 8 * 20,
+                "count": 2,
+            },
+            {
+                "bottom_type": "flat",
+                "diameter": 6.0,
+                "depth": 10.0,
+                "volume": math.pi * 9 * 10,
+                "area": math.pi * 6 * 10 + math.pi * 9,
+                "count": 1,
+            },
+        ],
+        "pockets": [
+            {
+                "area": pocket_floor + pocket_walls,
+                "volume": 40 * 20 * 8.0,
+                "max_depth": 8.0,
+                "bottom_type": "flat",
+                "has_transition": False,
+            }
+        ],
+    }
+
+
+# --- 2b. Three-setup block 60x40x20 (M4.4): pocket from +Z, blind holes from +X / -Y ---
+def block_3setups() -> tuple[object, dict]:
+    shape = BRepPrimAPI_MakeBox(60, 40, 20).Shape()
+    pocket = BRepPrimAPI_MakeBox(gp_Pnt(10, 12.5, 14), 20, 15, 6).Shape()
+    shape = BRepAlgoAPI_Cut(shape, pocket).Shape()
+    # blind flat-bottom d8x12 along +X (entry on the x=60 face)
+    hole_x = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(48, 20, 8), gp_Dir(1, 0, 0)), 4.0, 13.0).Shape()
+    shape = BRepAlgoAPI_Cut(shape, hole_x).Shape()
+    # blind flat-bottom d6x10 along -Y (entry on the y=0 face)
+    hole_y = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(40, -1, 10), gp_Dir(0, 1, 0)), 3.0, 11.0
+    ).Shape()
+    shape = BRepAlgoAPI_Cut(shape, hole_y).Shape()
+
+    pocket_walls = 2 * (20 * 6) + 2 * (15 * 6)  # 420 — profiled
+    pocket_floor = 20 * 15.0  # derived
+    # deterministic setup order: attributed removal volume desc → +Z, +X, -Y
+    runtimes_min = [
+        mill_minutes(rough_mm3=20 * 15 * 6, profiled_mm2=pocket_walls),
+        mill_minutes(hole_depths=(12.0,)),
+        mill_minutes(hole_depths=(10.0,)),
+    ]
+    golden = {
+        "family": "milling",
+        "volume": 60 * 40 * 20 - 20 * 15 * 6 - math.pi * 16 * 12 - math.pi * 9 * 10,
+        # box 8800 + pocket walls net +420 + hole X net bore 96π + hole Y net 60π
+        "area": 8800 + 420 + 96 * math.pi + 60 * math.pi,
+        "bbox": [60, 40, 20],
+        "milling": {
+            "setup_count": 3,
+            "setup_time_hr": 3.0,
+            "runtime_hr": sum(runtimes_min) / 60.0,
+            "confidence": "High",
+            "setups": [
+                {
+                    "direction": [0, 0, 1],
+                    "setup_time_hr": 1.0,
+                    "runtime_hr": runtimes_min[0] / 60.0,
+                    "confidence": "High",
+                    "machine_direction": {
+                        "profiled_area": pocket_walls,
+                        "derived_area": pocket_floor,
+                        "surfaced_area": 0.0,
+                    },
+                },
+                {
+                    "direction": [1, 0, 0],
+                    "setup_time_hr": 1.0,
+                    "runtime_hr": runtimes_min[1] / 60.0,
+                    "confidence": "High",
+                    "machine_direction": {
+                        "profiled_area": 0.0,
+                        "derived_area": 0.0,
+                        "surfaced_area": 0.0,
+                    },
+                },
+                {
+                    "direction": [0, -1, 0],
+                    "setup_time_hr": 1.0,
+                    "runtime_hr": runtimes_min[2] / 60.0,
+                    "confidence": "High",
+                    "machine_direction": {
+                        "profiled_area": 0.0,
+                        "derived_area": 0.0,
+                        "surfaced_area": 0.0,
+                    },
+                },
+            ],
+            "holes": [
+                {
+                    "bottom_type": "flat",
+                    "diameter": 8.0,
+                    "depth": 12.0,
+                    "volume": math.pi * 16 * 12,
+                    "area": math.pi * 8 * 12 + math.pi * 16,
+                    "count": 1,
+                },
+                {
+                    "bottom_type": "flat",
+                    "diameter": 6.0,
+                    "depth": 10.0,
+                    "volume": math.pi * 9 * 10,
+                    "area": math.pi * 6 * 10 + math.pi * 9,
+                    "count": 1,
+                },
+            ],
+            "pockets": [
+                {
+                    "area": pocket_floor + pocket_walls,
+                    "volume": 20 * 15 * 6.0,
+                    "max_depth": 6.0,
+                    "bottom_type": "flat",
+                    "has_transition": False,
+                }
+            ],
+        },
+    }
+    return shape, golden
+
+
+# --- 2c. Dome block 50x50x20 (M4.4 low-confidence): pocket from +Z + hemisphere r10 ---
+def block_dome() -> tuple[object, dict]:
+    shape = BRepPrimAPI_MakeBox(50, 50, 20).Shape()
+    pocket = BRepPrimAPI_MakeBox(gp_Pnt(25, 20, 15), 20, 10, 5).Shape()
+    shape = BRepAlgoAPI_Cut(shape, pocket).Shape()
+    dome = BRepPrimAPI_MakeSphere(gp_Pnt(12, 25, 20), 10.0).Shape()
+    shape = BRepAlgoAPI_Cut(shape, dome).Shape()
+
+    pocket_walls = 2 * (20 * 5) + 2 * (10 * 5)  # 300 — profiled
+    pocket_floor = 20 * 10.0  # derived
+    dome_area = 2 * math.pi * 100  # hemisphere skin — surfaced (freeform)
+    dome_volume = (2.0 / 3.0) * math.pi * 1000  # NOT feature-parameterized
+    # unparameterized removal is roughed in the primary setup; the sphere face
+    # is surfaced from +Z — but the parameterized fraction 1000/3094 ≈ 0.32
+    # < 0.5 makes the whole estimate Low (KB's ≥80% High band).
+    runtime_min = mill_minutes(
+        rough_mm3=20 * 10 * 5 + dome_volume,
+        profiled_mm2=pocket_walls,
+        surfaced_mm2=dome_area,
+    )
+    golden = {
+        "family": "milling",
+        "volume": 50 * 50 * 20 - 20 * 10 * 5 - dome_volume,
+        # box 9000 + pocket net +300 + dome net (-100pi opening + 200pi dome)
+        "area": 9000 + 300 + 100 * math.pi,
+        "bbox": [50, 50, 20],
+        "milling": {
+            "setup_count": 1,
+            "setup_time_hr": 1.0,
+            "runtime_hr": runtime_min / 60.0,
+            "confidence": "Low",
+            "setups": [
+                {
+                    "direction": [0, 0, 1],
+                    "setup_time_hr": 1.0,
+                    "runtime_hr": runtime_min / 60.0,
+                    "confidence": "Low",
+                    "machine_direction": {
+                        "profiled_area": pocket_walls,
+                        "derived_area": pocket_floor,
+                        "surfaced_area": dome_area,
+                    },
+                }
+            ],
+            "holes": [],
+            "pockets": [
+                {
+                    "area": pocket_floor + pocket_walls,
+                    "volume": 20 * 10 * 5.0,
+                    "max_depth": 5.0,
+                    "bottom_type": "flat",
+                    "has_transition": False,
+                }
+            ],
+        },
+    }
+    return shape, golden
+
+
+# --- 2d. Bevel block 40x40x20 (M4.4): only work is a 400 mm2 tapered face ---
+def block_bevel() -> tuple[object, dict]:
+    """The minimum_area_for_setup fixture: a 3-4-5 bevel (slant 10 x 40 =
+    400 mm2, outward normal (-0.6, 0, -0.8) -> dominant -Z) along the bottom
+    x=0 edge. Below the default 1000 mm2 gate no setup is allocated (nothing
+    else needs cutting): setups stay empty, confidence Low, runtime 0 — the
+    manual-override path, never a fabricated estimate."""
+    shape = BRepPrimAPI_MakeBox(40, 40, 20).Shape()
+    wedge = prism_from_profile(
+        [
+            edge_line((0, 0, 0), (8, 0, 0)),
+            edge_line((8, 0, 0), (0, 0, 6)),
+            edge_line((0, 0, 6), (0, 0, 0)),
+        ],
+        (0, 40, 0),
+    )
+    shape = BRepAlgoAPI_Cut(shape, wedge).Shape()
+    # no "bbox" golden (bracket-Z3 precedent): the min-volume OBB legitimately
+    # beats the construction-frame AABB on this beveled profile.
+    golden = {
+        "family": "milling",
+        "volume": 40 * 40 * 20 - 0.5 * 8 * 6 * 40,
+        # box 6400 - bottom strip 320 - x=0 strip 240 + slant 400
+        "area": 6400 - 320 - 240 + 400,
+        "milling": {
+            "setup_count": 0,
+            "setup_time_hr": 0.0,
+            "runtime_hr": 0.0,
+            "confidence": "Low",
+            "setups": [],
+            "holes": [],
+            "pockets": [],
+        },
     }
     return shape, golden
 
@@ -480,6 +769,9 @@ def main() -> int:
         "bracket-L-60x40x2-r3.step": bracket,
         "bracket-Z3-3bend-t2-r3.step": bracket_z3,
         "block-milled-80x50x20.step": milled_block,
+        "block-3setups-60x40x20.step": block_3setups,
+        "block-dome-50x50x20.step": block_dome,
+        "block-bevel-40x40x20.step": block_bevel,
         "shaft-stepped-d30-d20-d12.step": shaft,
         "tube-round-d30-t2-l200.step": tube_round,
         "tube-rect-40x20-t2-l200.step": tube_rect,

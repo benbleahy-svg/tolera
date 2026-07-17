@@ -102,6 +102,14 @@ export function formatMass(kg: number | null, opts: DisplayOptions): string {
   return formatQuantity(kg, opts, MASS, Math.max(precision(opts), MASS_DECIMAL_FLOOR));
 }
 
+/** Machine time (hours in, unit-system independent): short times read as
+ * minutes ("2,3 min"), longer ones as hours ("1,25 h"). */
+export function formatHours(hours: number | null, opts: DisplayOptions): string {
+  if (hours == null) return EM_DASH;
+  if (hours < 0.1) return `${fixed(hours * 60, opts.language, 1)} min`;
+  return `${fixed(hours, opts.language, 2)} h`;
+}
+
 export function formatAngle(deg: number | null, opts: DisplayOptions): string {
   // Angle is unitless across systems and always whole degrees (precision-exempt).
   return fixed(deg, opts.language, 0)?.concat('°') ?? EM_DASH;
