@@ -3537,6 +3537,131 @@ class OrderLine(Base):
     updated_at: Mapped[datetime] = _updated_ts()
 
 
+class OrderLineAdjustmentKind(enum.StrEnum):
+    """The two per-line adjustment sections of the Build Order drawer (spec
+    ``#order`` Step 1). ``discount`` is a **Percent** deduction ("Customer loyalty
+    program — 5.00%"); ``additional_charge`` is a fixed **Price** add ("Tooling
+    (Required) — €500.00"). Both apply to that OrderLine's net at build time."""
+
+    discount = "discount"
+    additional_charge = "additional_charge"
+
+
+_order_line_adjustment_kind_enum = Enum(
+    OrderLineAdjustmentKind, name="order_line_adjustment_kind", create_type=False
+)
+
+
+class OrderLineAdjustment(Base):
+    """A per-line adjustment on a facilitated order (spec ``#order`` Build Order —
+    "Discounts" / "Additional Charges"; ``DOMAIN-MODEL §6`` OrderAdjustment).
+
+    A **discount** carries a ``percent`` (percentages **sum, they don't compound**
+    — mirrors :class:`Discount`, applied to the break total); an
+    **additional_charge** carries a fixed ``amount_minor`` (integer minor units +
+    the parent order's currency). Exactly one of the two is set per row (a check
+    constraint keyed on ``kind``). Snapshotted onto the line at creation so a later
+    library edit never silently reprices a placed order."""
+
+    __tablename__ = "order_line_adjustment"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_order_line_adjustment_org_id_id"),
+        # discount ⇒ percent set, amount NULL; additional_charge ⇒ amount set, percent NULL.
+        CheckConstraint(
+            "(kind = 'discount' AND percent IS NOT NULL AND amount_minor IS NULL) "
+            "OR (kind = 'additional_charge' AND amount_minor IS NOT NULL AND percent IS NULL)",
+            name="ck_order_line_adjustment_kind_shape",
+        ),
+        CheckConstraint(
+            "percent IS NULL OR (percent >= 0 AND percent <= 100)",
+            name="ck_order_line_adjustment_percent_range",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "order_line_id"],
+            ["order_line.org_id", "order_line.id"],
+            name="fk_order_line_adjustment_line_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_order_line_adjustment_org_line", "org_id", "order_line_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    order_line_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    kind: Mapped[OrderLineAdjustmentKind] = mapped_column(
+        _order_line_adjustment_kind_enum, nullable=False
+    )
+    #: Human label ("Customer loyalty program", "Tooling (Required)").
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    #: Discount percentage (NULL for an additional charge).
+    percent: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    #: Additional-charge amount in minor units (NULL for a discount).
+    amount_minor: Mapped[int | None] = mapped_column(BigInteger)
+    #: The resolved money effect on the line net, in minor units: **negative** for
+    #: a discount, **positive** for a charge — persisted so the order total is a
+    #: pure read (the money invariant), never a recompute from ``percent``.
+    effect_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class OrderHistoryEventKind(enum.StrEnum):
+    """What an :class:`OrderHistoryEvent` records. ``created`` anchors the trail
+    when the order is built; ``edited`` is one pre-shipment edit (spec ``#order``
+    "order history trail"; KB ``post-order-changes-and-limitations``)."""
+
+    created = "created"
+    edited = "edited"
+
+
+_order_history_event_kind_enum = Enum(
+    OrderHistoryEventKind, name="order_history_event_kind", create_type=False
+)
+
+
+class OrderHistoryEvent(Base):
+    """One entry in an order's history trail (spec ``#order`` "order history +
+    optional buyer notification"; KB ``post-order-changes-and-limitations`` — the
+    hover-icon edit log). Append-only: a facilitated build writes ``created``, each
+    pre-ship :func:`edit` writes ``edited`` with a ``changes`` diff and whether the
+    buyer was notified. ``actor_user_id`` is the estimator (nullable — the trail
+    survives a membership removal, so no FK to ``app_user``)."""
+
+    __tablename__ = "order_history_event"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_order_history_event_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "order_id"],
+            ["order_.org_id", "order_.id"],
+            name="fk_order_history_event_order_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_order_history_event_org_order", "org_id", "order_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    kind: Mapped[OrderHistoryEventKind] = mapped_column(
+        _order_history_event_kind_enum, nullable=False
+    )
+    #: The estimator who made the change (NULL if unattributable). No FK — the
+    #: trail outlives a membership; the id is provenance, not a live reference.
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: Structured diff of what changed, e.g. {"po_number": ["PO-1", "PO-2"],
+    #: "lines_added": 1}. Free-form so new editable fields need no migration.
+    changes: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    #: Whether the buyer was emailed about this change ("Notify customer of update
+    #: to order" — KB). The email itself is M5.5/M5.8; this records the intent.
+    buyer_notified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+
+
 class PurchasedComponent(Base):
     """An org PC-library entry (DOMAIN-MODEL §5; KB ``purchased-components``):
     hardware costed at a piece price. ``piece_price`` is copied onto the

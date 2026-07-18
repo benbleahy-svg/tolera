@@ -17,6 +17,11 @@ import { useBomApi } from '../bom/api';
 import { BomBuilderModal } from '../bom/BomBuilderModal';
 import type { BomStatus } from '../bom/types';
 import { useConfigureApi } from '../configure/api';
+import { useOrdersApi } from '../orders/api';
+import {
+  FacilitateOrderDrawer,
+  type FacilitatePricedLine,
+} from '../orders/FacilitateOrderDrawer';
 import { PartMatchesChip } from '../parts/MatchingParts';
 import {
   RULE_SEED_DOCUMENT_PATHS,
@@ -91,6 +96,11 @@ export function EstimatingPage() {
   const [bomPublishedToast, setBomPublishedToast] = useState(false);
   const [bomPublishCount, setBomPublishCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // M5.7 — Facilitate Order (Build Order drawer). Priced breaks are assembled on
+  // open (one getPricing per line item), then the drawer emits the request.
+  const ordersApi = useOrdersApi();
+  const [buildLines, setBuildLines] = useState<FacilitatePricedLine[] | null>(null);
+  const [buildSubmitting, setBuildSubmitting] = useState(false);
 
   // The active line item is derived SYNCHRONOUSLY from the URL (M5.0) — never a
   // state+effect, so a deep link to a non-first item never briefly loads item 0's
@@ -121,6 +131,35 @@ export function EstimatingPage() {
   const fail = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : String(e));
   }, []);
+
+  // M5.7 — assemble each line item's priced breaks (Qty / Lead Time / Unit /
+  // Total) from its pricing summary and open the Build Order drawer. Unpriced
+  // breaks are dropped; a line with no priced break is skipped.
+  const openBuildOrder = useCallback(() => {
+    if (!quote) return;
+    Promise.all(
+      quote.items.map(async (item, i) => {
+        const pricing = await api.getPricing(item.root_component_id);
+        const breaks = pricing.totals
+          .filter((row) => row.total_price != null && row.unit_price != null)
+          .map((row) => ({
+            quantity: row.quantity,
+            lead_time_days:
+              pricing.lead_times.find((l) => l.quantity === row.quantity)?.lead_time_days ?? null,
+            unit_price_minor: Math.round(Number(row.unit_price) * 100),
+            total_price_minor: Math.round(Number(row.total_price) * 100),
+          }));
+        if (breaks.length === 0) return null;
+        return {
+          quote_item_id: item.id,
+          part_label: t('orders.detail.line_position', { position: item.position ?? i + 1 }),
+          breaks,
+        } satisfies FacilitatePricedLine;
+      }),
+    )
+      .then((rows) => setBuildLines(rows.filter((r): r is FacilitatePricedLine => r !== null)))
+      .catch(fail);
+  }, [quote, api, t, fail]);
 
   const bomApi = useBomApi();
 
@@ -524,6 +563,16 @@ export function EstimatingPage() {
               }
             }}
           />
+        )}
+        {quote.items.length > 0 && (
+          <button
+            type="button"
+            className="btn btn-ghost est-facilitate-order"
+            onClick={openBuildOrder}
+            disabled={!canEdit}
+          >
+            {t('estimating.facilitate_order')}
+          </button>
         )}
         <span className="bulk-create-entry">
           <button
@@ -976,6 +1025,30 @@ export function EstimatingPage() {
             );
           }}
           onClose={() => setChangingProcess(false)}
+        />
+      )}
+      {buildLines && (
+        <FacilitateOrderDrawer
+          lines={buildLines}
+          currency={quote.currency}
+          placedOn={new Date().toISOString().slice(0, 10)}
+          submitting={buildSubmitting}
+          onSubmit={(req) => {
+            if (!quoteId) return;
+            setBuildSubmitting(true);
+            ordersApi
+              .facilitateOrder(quoteId, req)
+              .then((res) => {
+                setBuildLines(null);
+                setBuildSubmitting(false);
+                navigate(`/orders/${res.order_id}`);
+              })
+              .catch((e) => {
+                setBuildSubmitting(false);
+                fail(e);
+              });
+          }}
+          onClose={() => setBuildLines(null)}
         />
       )}
       {sendingQuote && (

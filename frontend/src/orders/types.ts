@@ -136,3 +136,92 @@ export interface ErpPushResult {
   order_id: string;
   status: string;
 }
+
+// --------------------------------------------------------------------------- //
+// M5.7 — Facilitate Order (Build Order drawer) + pre-ship edit + history
+// --------------------------------------------------------------------------- //
+
+/** A per-line Discount (Percent) on the Build Order drawer. */
+export interface FacilitateDiscount {
+  label: string;
+  /** Percentage 0–100 (decimal string on the wire, e.g. "5.00"). */
+  percent: string;
+}
+
+/** A per-line Additional Charge (Price) on the Build Order drawer. */
+export interface FacilitateCharge {
+  label: string;
+  /** Money amount (decimal string, e.g. "500.00"). */
+  amount: string;
+}
+
+/** One line's build selection: a chosen break + optional Ships-On override + adjustments. */
+export interface FacilitateLineSelection {
+  quote_item_id: string;
+  quantity: number;
+  expedite_option_id?: string | null;
+  add_on_ids?: string[];
+  /** ISO date; absent → placement date + the break's lead time. */
+  ships_on?: string | null;
+  discounts?: FacilitateDiscount[];
+  additional_charges?: FacilitateCharge[];
+}
+
+export interface FacilitateOrderRequest {
+  selections: FacilitateLineSelection[];
+  po_number?: string | null;
+  company_name?: string | null;
+  billing_address?: string | null;
+  notes?: string | null;
+  buyer_ust_id_nr?: string | null;
+  /** null = "None" (a valid facilitated shipping option). */
+  shipping_method?: OrderShippingMethod | null;
+}
+
+export interface FacilitateOrderResult {
+  order_id: string;
+  order_number: string;
+  source: OrderSource;
+  currency: string;
+  net_minor: number;
+  vat_minor: number;
+  gross_minor: number;
+  reverse_charge: boolean;
+  kleinunternehmer: boolean;
+  po_number: string | null;
+  shipping_method: OrderShippingMethod | null;
+}
+
+/** A pre-ship order edit — only present fields change. */
+export interface OrderEditRequest {
+  po_number?: string | null;
+  company_name?: string | null;
+  billing_address?: string | null;
+  shipping_method?: OrderShippingMethod | null;
+  /** true clears the shipping method (distinct from "unchanged"). */
+  clear_shipping_method?: boolean;
+  notes?: string | null;
+  add_lines?: FacilitateLineSelection[];
+  remove_line_ids?: string[];
+  notify_buyer?: boolean;
+}
+
+export interface OrderEditResult {
+  order_id: string;
+  changes: Record<string, unknown>;
+  buyer_notified: boolean;
+  net_minor: number;
+  vat_minor: number;
+  gross_minor: number;
+}
+
+export type OrderHistoryKind = 'created' | 'edited';
+
+export interface OrderHistoryEvent {
+  id: string;
+  kind: OrderHistoryKind;
+  actor_user_id: string | null;
+  changes: Record<string, unknown>;
+  buyer_notified: boolean;
+  created_at: string;
+}
