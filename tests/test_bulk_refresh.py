@@ -144,16 +144,32 @@ def test_bulk_refresh_requires_quote_edit(app_client: TestClient, seeder: Seeder
 
 
 def test_bulk_refresh_org_scoped(app_client: TestClient, seeder: Seeder) -> None:
-    """A quote from another org is invisible → skipped, never cross-org repriced."""
+    """A quote from another org is invisible → skipped, and its pricing is provably
+    left untouched (not just an unchanged skip counter)."""
     org_a, admin_a = _org_admin(seeder, "org-a")
     org_b, admin_b = _org_admin(seeder, "org-b")
     with authed(app_client, user_id=admin_a, org_id=org_a, roles=ADMIN):
-        q_a, _ = _quote_with_factory_markup(app_client, "100.0000")
+        # Org A: a factory markup at 10%, then bump the def to 30% so a refresh WOULD
+        # move the total (100 → 130). Capture the current (frozen) total = 110.
+        res = app_client.post(
+            "/api/pricing-item-defs",
+            json={"name": "General Markup", "calc_type": "markup", "default_pct": "10"},
+        )
+        def_id = res.json()["id"]
+        q_a, c_a = _quote_with_factory_markup(app_client, "100.0000")
+        app_client.patch(f"/api/pricing-item-defs/{def_id}", json={"default_pct": "30"})
+        before = Decimal(_total(_pricing(app_client, c_a), 1)["total_price"])
+        assert before == Decimal("110.00")  # frozen — def edit alone never reprices
+
     with authed(app_client, user_id=admin_b, org_id=org_b, roles=ADMIN):
         res = _bulk(app_client, [q_a])
     body = res.json()
     assert body["refreshed_quotes"] == 0
     assert body["skipped"] == 1
+
+    with authed(app_client, user_id=admin_a, org_id=org_a, roles=ADMIN):
+        after = Decimal(_total(_pricing(app_client, c_a), 1)["total_price"])
+    assert after == before  # org B's bulk refresh never touched org A's quote
 
 
 def test_bulk_refresh_broker_down_is_503(

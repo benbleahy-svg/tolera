@@ -179,6 +179,23 @@ describe('QuotesPage', () => {
     expect(await screen.findByText('2 Angebote aktualisiert')).toBeInTheDocument();
   });
 
+  it('reports the queued message when bulk refresh runs async', async () => {
+    searchQuotes.mockResolvedValue({
+      rows: [quote('Q-1', 'draft', { priority: null })],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+    bulkRefreshPricing.mockResolvedValue({ mode: 'async', task_id: 't1', quote_count: 25 });
+    await renderWithProviders(<QuotesPage />, { route: '/quotes' });
+    await screen.findByText('Q-1');
+    await userEvent.click(screen.getByLabelText('Alle auswählen'));
+    await userEvent.click(screen.getByRole('button', { name: /Preise aktualisieren \(1\)/ }));
+    expect(
+      await screen.findByText('25 Angebote werden im Hintergrund aktualisiert'),
+    ).toBeInTheDocument();
+  });
+
   it('does not show the bulk-refresh action to a view-only user', async () => {
     searchQuotes.mockResolvedValue({
       rows: [quote('Q-1', 'draft', { priority: null })],

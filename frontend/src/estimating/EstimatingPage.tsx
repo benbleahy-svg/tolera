@@ -68,7 +68,6 @@ export function EstimatingPage() {
   const canEdit = useHasPermission('quote_edit');
 
   const [quote, setQuote] = useState<QuoteSummary | null>(null);
-  const [itemIndex, setItemIndex] = useState(0);
   const [costing, setCosting] = useState<ComponentCosting | null>(null);
   const [pricing, setPricing] = useState<PricingSummary | null>(null);
   const [totals, setTotals] = useState<QuoteTotals | null>(null);
@@ -88,23 +87,31 @@ export function EstimatingPage() {
   const [bomPublishedToast, setBomPublishedToast] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The active line item is derived SYNCHRONOUSLY from the URL (M5.0) — never a
+  // state+effect, so a deep link to a non-first item never briefly loads item 0's
+  // costing (the CodeRabbit race). Falls back to 0 while the quote loads / before
+  // the forward-to-first effect below fires.
+  const resolvedIndex = quote ? quote.items.findIndex((i) => i.id === lineItemId) : -1;
+  const itemIndex = resolvedIndex >= 0 ? resolvedIndex : 0;
+
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
   const partId = quote?.items[itemIndex]?.part_id ?? null;
   const quoteItemId = quote?.items[itemIndex]?.id ?? null;
 
-  // Resolve the active line item from the URL (M5.0). If the URL lacks a valid
-  // lineItemId but the quote has items, forward to the first — so `/quotes/edit/:id`
-  // and the old-route redirect both land on a real item.
+  // If the URL lacks a valid lineItemId but the quote has items, forward to the
+  // first — so `/quotes/edit/:id` and the old-route redirect both land on a real item.
   useEffect(() => {
     if (!quote || !quoteId || quote.items.length === 0) return;
-    const idx = quote.items.findIndex((i) => i.id === lineItemId);
-    if (idx === -1) {
+    if (quote.items.findIndex((i) => i.id === lineItemId) === -1) {
       navigate(`/quotes/edit/${quoteId}/${quote.items[0].id}`, { replace: true });
-    } else if (idx !== itemIndex) {
-      setItemIndex(idx);
-      setDrawerOpId(null);
     }
-  }, [quote, quoteId, lineItemId, itemIndex, navigate]);
+  }, [quote, quoteId, lineItemId, navigate]);
+
+  // Switching line items closes any open operation drawer (it belongs to the
+  // previous component).
+  useEffect(() => {
+    setDrawerOpId(null);
+  }, [lineItemId]);
 
   const fail = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : String(e));

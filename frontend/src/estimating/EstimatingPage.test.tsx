@@ -513,6 +513,39 @@ describe('EstimatingPage', () => {
     expect(active).toHaveTextContent('1');
   });
 
+  it('deep-links to a non-first line item and loads only its costing', async () => {
+    // A two-item quote opened directly at item-2 must resolve the active item from
+    // the URL synchronously — item-2's component costing loads, item-1's does not.
+    getQuote.mockResolvedValue({
+      ...QUOTE,
+      items: [
+        QUOTE.items[0],
+        {
+          id: 'item-2',
+          position: 2,
+          root_component_id: 'c2',
+          part_id: 'p2',
+          workflow_status: 'not_started',
+          priority: null,
+          quantities: [{ quantity: 1, make_quantity: 1, deliver_quantity: 1 }],
+        },
+      ],
+    });
+    getCosting.mockImplementation((cid: string) =>
+      Promise.resolve(costing([op(cid === 'c2' ? 'Fräsen' : 'Drehen', [cell(1, '25.0000')])])),
+    );
+    await renderWithProviders(
+      <Routes>
+        <Route path="/quotes/edit/:id/:lineItemId" element={<EstimatingPage />} />
+      </Routes>,
+      { route: '/quotes/edit/q1/item-2' },
+    );
+    expect(await screen.findByText('Fräsen')).toBeInTheDocument();
+    expect(getCosting).toHaveBeenCalledWith('c2');
+    expect(getCosting).not.toHaveBeenCalledWith('c1');
+    expect(screen.getByRole('button', { current: true })).toHaveTextContent('2');
+  });
+
   it('attaches a requested finish from the finish library', async () => {
     getCosting.mockResolvedValue(costing([]));
     listFinishDefs.mockResolvedValue([

@@ -186,6 +186,9 @@ export function QuotesPage() {
   const runBulkRefresh = () => {
     const ids = [...selected];
     if (ids.length === 0) return;
+    // Capture the current search generation: if the user changes view/filter/page
+    // while the refresh runs, don't let our reflect-search clobber their newer view.
+    const searchSeqAtStart = requestSeq.current;
     setBulkBusy(true);
     setBulkMsg(null);
     setError(null);
@@ -198,7 +201,10 @@ export function QuotesPage() {
             : t('quotes.bulk_refresh_done', { count: r.refreshed_quotes ?? 0 }),
         );
         setSelected(new Set());
-        runSearch(requestFor(active, filters, sort, page)); // reflect any repriced rows
+        // Only re-search if the user hasn't navigated to a different view meanwhile.
+        if (requestSeq.current === searchSeqAtStart) {
+          runSearch(requestFor(active, filters, sort, page)); // reflect any repriced rows
+        }
       })
       .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)))
       .finally(() => setBulkBusy(false));
@@ -225,7 +231,11 @@ export function QuotesPage() {
         id: 'priority',
         header: () => t('quotes.col.priority'),
         // M5.0 — the derived MAX(line-item priority); blank quotes render "—".
-        cell: ({ row }) => row.original.priority ?? '—',
+        // German locale per the number-formatting guideline.
+        cell: ({ row }) =>
+          row.original.priority == null
+            ? '—'
+            : row.original.priority.toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-IE'),
       }),
       columnHelper.accessor('account_id', {
         header: () => t('quotes.col.account'),

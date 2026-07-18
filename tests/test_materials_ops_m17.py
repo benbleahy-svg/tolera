@@ -342,8 +342,13 @@ def test_operation_defs_filter_by_is_finish(app_client: TestClient, seeder: Seed
         finishes = app_client.get("/api/operation-defs", params={"is_finish": "true"}).json()
         non_finishes = app_client.get("/api/operation-defs", params={"is_finish": "false"}).json()
     finish_names = {d["name"] for d in finishes}
+    non_finish_names = {d["name"] for d in non_finishes}
     assert "Eloxieren" in finish_names
     assert "CNC Fräsen" not in finish_names
+    # ...and the non-finish query returns the non-finish def (not an empty list,
+    # which would let an always-empty implementation pass).
+    assert "CNC Fräsen" in non_finish_names
+    assert "Eloxieren" not in non_finish_names
     assert all(d["is_finish"] for d in finishes)
     assert all(not d["is_finish"] for d in non_finishes)
 

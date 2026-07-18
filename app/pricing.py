@@ -2054,7 +2054,10 @@ async def refresh_quote_pricing(
     single-quote endpoint and M5.0 Bulk Refresh — one engine, no divergence."""
     from .costing import recalculate_component
 
-    quote = await session.get(Quote, quote_id)
+    # Lock the quote row so two concurrent refreshes of the same quote serialise —
+    # otherwise both could see an unattached def and each insert its snapshot,
+    # duplicating rows (same TOCTOU guard as add-item/change-quantities).
+    quote = await session.scalar(select(Quote).where(Quote.id == quote_id).with_for_update())
     if quote is None or quote.deleted_at is not None:
         return None
 
