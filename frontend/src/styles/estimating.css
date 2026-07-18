@@ -688,6 +688,22 @@
   margin: 0.25rem 0;
 }
 
+/* M4.14 def-editor Variables table: the eye toggle. Off-state is dimmed AND
+   struck through — never colour-only. */
+.est-eye {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.1rem 0.3rem;
+}
+
+.est-eye-off {
+  opacity: 0.35;
+  filter: grayscale(1);
+  text-decoration: line-through;
+}
+
 /* M4.3 — Nesting module (spec #nesting) */
 .nesting-page .nesting-tabs {
   display: flex;

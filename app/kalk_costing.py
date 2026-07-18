@@ -75,6 +75,7 @@ from .services.kalk import (
     TableSnapshot,
     evaluate,
 )
+from .services.kalk.synthetic import apply_visibility_overlay, unnested_nest_object
 
 _CENT4 = Decimal("0.0001")
 _MIN4 = Decimal("0.0001")
@@ -201,20 +202,7 @@ def kalk_nest_object(env: KalkEnv, break_qty: int) -> KalkObject:
     on ``nested`` / zero defaults so the drawer stays evaluable."""
     data = env.nest_values.get(break_qty)
     if data is None:
-        return KalkObject(
-            "nest",
-            {
-                "nested": False,
-                "sheet_cost": 0.0,
-                "number_of_sheets": 0.0,
-                "net_sheet_used": 0.0,
-                "parts_per_sheet": 0.0,
-                "cost_share_pct": 0.0,
-                "allocated_cost": 0.0,
-                "sheet_length_mm": 0.0,
-                "sheet_width_mm": 0.0,
-            },
-        )
+        return unnested_nest_object()
     return KalkObject("nest", {"nested": True, **data})
 
 
@@ -515,7 +503,10 @@ async def operation_kalk_report(
             {
                 "quantity": brk.quantity,
                 "output": result.output,
-                "declared_variables": result.declared_variables,
+                # M4.14: the attach-time eye snapshot overlays default_visible
+                "declared_variables": apply_visibility_overlay(
+                    result.declared_variables, operation.variable_visibility
+                ),
                 "variable_groups": result.variable_groups,
                 "applied_overrides": result.applied_overrides,
                 "notes": result.notes,

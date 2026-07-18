@@ -172,6 +172,18 @@ export interface OperationDefOut {
   is_pre_installed: boolean;
   sort_order: number;
   cost_formula: string | null;
+  /** M4.14 Variables-table eye toggles — overlay over the formula defaults. */
+  variable_visibility: Record<string, boolean>;
+}
+
+/** M4.14: the def-level Variables-table report (synthetic-context eval).
+ * `variable_visibility` is the def's stored eye map — the base for the next
+ * full-replace PUT (never a cached defs-list row). */
+export interface OpDefKalkReport {
+  declared_variables: KalkDeclaredVariable[];
+  variable_groups: KalkVariableGroup[];
+  errors: KalkError[];
+  variable_visibility: Record<string, boolean>;
 }
 
 /** The subset of the quote-detail response the estimating page reads (M1.4/M1.6). */

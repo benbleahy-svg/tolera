@@ -12,32 +12,182 @@ import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
 import { KalkEditor } from '../estimating/KalkEditor';
-import type { KalkCheckResult, OperationDefOut } from '../estimating/types';
+import type {
+  KalkCheckResult,
+  KalkDeclaredVariable,
+  OpDefKalkReport,
+  OperationDefOut,
+} from '../estimating/types';
 import { useConfigureApi, type OperationDefUpdateBody } from './api';
 
 /**
+ * M4.14 — the def editor's Variables table (spec op-def editor: columns
+ * VARIABLE | WERT | SICHTBARKEIT, variable search, "Show hidden variables"):
+ * the saved formula evaluated def-level against the synthetic context. The
+ * eye toggle PUTs the def's visibility map; attached quote operations keep
+ * their attach-time snapshot (E4-d). The runtime/setup_time specials stay
+ * out — they override via the manual-minutes pair (DECISIONS.md 2026-07-08).
+ * WERT shows the formula default read-only (default-value editing is not in
+ * this block); variable groups render flat here — the grouping chrome is a
+ * quote-side concern.
+ */
+function DefVariablesTable({
+  report,
+  pending,
+  onToggle,
+}: {
+  report: OpDefKalkReport;
+  pending: boolean;
+  onToggle: (next: Record<string, boolean>) => void;
+}) {
+  const { t } = useTranslation();
+  const [showHidden, setShowHidden] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const allVariables = report.declared_variables.filter(
+    (v) => v.name !== 'runtime' && v.name !== 'setup_time',
+  );
+  const hiddenCount = allVariables.filter((v) => v.default_visible === false).length;
+  const query = search.trim().toLowerCase();
+  const variables = allVariables
+    .filter((v) => showHidden || v.default_visible !== false)
+    .filter((v) => query === '' || v.name.toLowerCase().includes(query));
+
+  // the PUT base is the server's stored map from the report — a cached
+  // defs-list row could be stale and would wipe earlier toggles
+  const toggle = (variable: KalkDeclaredVariable) => {
+    onToggle({ ...report.variable_visibility, [variable.name]: !variable.default_visible });
+  };
+
+  return (
+    <section className="est-def-variables">
+      <h4>{t('kalk.variables')}</h4>
+      {report.errors.length > 0 && (
+        <p className="est-kalk-errors" role="alert">
+          {report.errors
+            .map((err) =>
+              err.line !== null
+                ? t('kalk.error_at_line', { line: err.line, message: err.message })
+                : err.message,
+            )
+            .join('\n')}
+        </p>
+      )}
+      {allVariables.length > 0 && (
+        <>
+          <input
+            value={search}
+            placeholder={t('configure.search_variables')}
+            aria-label={t('configure.search_variables')}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {hiddenCount > 0 && (
+            <label className="est-show-hidden">
+              <input
+                type="checkbox"
+                checked={showHidden}
+                aria-label={t('kalk.show_hidden_variables', { count: hiddenCount })}
+                onChange={(e) => setShowHidden(e.target.checked)}
+              />
+              {t('kalk.show_hidden_variables', { count: hiddenCount })}
+            </label>
+          )}
+          <table className="est-table">
+            <thead>
+              <tr>
+                <th>{t('configure.variables_variable')}</th>
+                <th className="est-num">{t('configure.variables_value')}</th>
+                <th>{t('configure.variables_visibility')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {variables.map((variable) => (
+                <tr key={variable.name}>
+                  <td title={variable.description}>{variable.name}</td>
+                  <td className="est-num">
+                    {variable.value === null
+                      ? '—'
+                      : typeof variable.value === 'number'
+                        ? new Intl.NumberFormat('de-DE').format(variable.value)
+                        : String(variable.value)}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={
+                        variable.default_visible === false ? 'est-eye est-eye-off' : 'est-eye'
+                      }
+                      disabled={pending}
+                      aria-pressed={variable.default_visible !== false}
+                      aria-label={t('configure.toggle_visibility', { name: variable.name })}
+                      onClick={() => toggle(variable)}
+                    >
+                      👁
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
  * The operation-definition editor (spec op-def editor, "Edit operation
- * formula"): name, rates and the def-level Kalk formula behind the library
- * operation. Existing quote operations keep their snapshot (E4-d
- * config-freeze); the def-level Variables table (visibility eyes) needs a
- * def-evaluation endpoint and is logged as OPEN in DECISIONS.md.
+ * formula"): name, rates, the def-level Kalk formula and its Variables
+ * table (M4.14). Existing quote operations keep their snapshot (E4-d
+ * config-freeze). The table reflects the last-saved formula — saving
+ * closes the drawer; reopening re-evaluates.
  */
 function OpDefDrawer({
   def,
   onSave,
   onClose,
   onKalkCheck,
+  onLoadReport,
+  onSetVisibility,
 }: {
   def: OperationDefOut;
   onSave: (body: OperationDefUpdateBody) => void;
   onClose: () => void;
   onKalkCheck: (formula: string) => Promise<KalkCheckResult>;
+  onLoadReport: (defId: string) => Promise<OpDefKalkReport>;
+  onSetVisibility: (
+    defId: string,
+    visibility: Record<string, boolean>,
+  ) => Promise<OpDefKalkReport>;
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState(def.name);
   const [runRate, setRunRate] = useState(def.run_rate ?? '');
   const [labourRate, setLabourRate] = useState(def.labour_rate ?? '');
   const [formula, setFormula] = useState(def.cost_formula ?? '');
+  const [report, setReport] = useState<OpDefKalkReport | null>(null);
+  const [togglePending, setTogglePending] = useState(false);
+  const [variablesError, setVariablesError] = useState<string | null>(null);
+
+  const hasSavedFormula = def.cost_formula != null;
+  useEffect(() => {
+    if (!hasSavedFormula) return;
+    let cancelled = false;
+    onLoadReport(def.id)
+      .then((data) => {
+        if (!cancelled) setReport(data);
+      })
+      .catch(() => {
+        // failed load: no table, no stale data — but say so
+        if (!cancelled) {
+          setReport(null);
+          setVariablesError(t('configure.variables_load_failed'));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSavedFormula, onLoadReport, def.id, t]);
 
   const blankToNull = (v: string): string | null => (v.trim() === '' ? null : v.trim());
 
@@ -71,6 +221,28 @@ function OpDefDrawer({
         name={name.trim() === '' ? undefined : name.trim()}
         onCheck={onKalkCheck}
       />
+      {variablesError && (
+        <p className="est-kalk-errors" role="alert">
+          {variablesError}
+        </p>
+      )}
+      {report && (
+        <DefVariablesTable
+          report={report}
+          pending={togglePending}
+          onToggle={(next) => {
+            setTogglePending(true);
+            setVariablesError(null);
+            void onSetVisibility(def.id, next)
+              .then(setReport)
+              .catch(() => {
+                // a failed toggle leaves the previous state untouched
+                setVariablesError(t('configure.visibility_save_failed'));
+              })
+              .finally(() => setTogglePending(false));
+          }}
+        />
+      )}
       <footer className="est-actions">
         <button type="button" onClick={onClose}>
           {t('common.cancel')}
@@ -254,6 +426,8 @@ export function OperationsPage() {
               key={def.id}
               def={def}
               onKalkCheck={api.kalkCheck}
+              onLoadReport={api.getOpDefKalkReport}
+              onSetVisibility={api.setOpDefVariableVisibility}
               onSave={(body) => {
                 setError(null);
                 // close only on success — a failed save keeps the drawer
