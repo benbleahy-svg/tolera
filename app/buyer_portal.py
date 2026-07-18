@@ -24,6 +24,7 @@ net; tax is M5.3, checkout/order money is M5.2.
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import uuid
 from dataclasses import dataclass
@@ -52,6 +53,7 @@ from .models import (
     QuoteTokenScope,
 )
 from .pricing import _pricing_summary
+from .quote_settings import QuoteSettings, load_quote_settings, offered_shipping_methods
 from .quote_tokens import InvalidToken, decode_jwt
 
 buyer_router = APIRouter(prefix="/api/public/quotes", tags=["buyer-portal"])
@@ -124,11 +126,30 @@ class DisplaySettings:
 
 DEFAULT_DISPLAY_SETTINGS = DisplaySettings()
 
+#: The DisplaySettings fields sourced 1:1 from the persisted QuoteSettings row.
+_DISPLAY_FIELDS = tuple(f.name for f in dataclasses.fields(DisplaySettings))
+
+
+def display_from_quote_settings(qs: QuoteSettings) -> DisplaySettings:
+    """Project the persisted Finalized-Quote-Settings snapshot onto the
+    ``DisplaySettings`` view the portal + PDF read. The three radios are stored
+    as strings and mapped back to their enums here (the buyer_portal boundary)."""
+    return DisplaySettings(
+        **{name: getattr(qs, name) for name in _DISPLAY_FIELDS if name not in _RADIO_FIELDS},
+        total_display=TotalDisplay(qs.total_display),
+        preparer=PreparerDisplay(qs.preparer),
+        notes_placement=NotesPlacement(qs.notes_placement),
+    )
+
+
+_RADIO_FIELDS = frozenset({"total_display", "preparer", "notes_placement"})
+
 
 async def load_display_settings(session: AsyncSession, org_id: uuid.UUID) -> DisplaySettings:
-    """The org's Display Settings. M5.1 returns defaults; M5.8 backs this with a
-    persisted row (the seam is here so callers never re-encode the toggle set)."""
-    return DEFAULT_DISPLAY_SETTINGS
+    """The org's Display Settings, backed by the persisted ``org_quote_settings``
+    row (M5.8) — an absent row resolves to the all-defaults snapshot. The seam is
+    here so every caller (portal, PDF, send) reads one consistent toggle set."""
+    return display_from_quote_settings(await load_quote_settings(session, org_id))
 
 
 def _money(value: Decimal | None) -> str | None:
@@ -302,9 +323,14 @@ async def build_buyer_payload(
     org: Organization,
     quote: Quote,
     settings: DisplaySettings,
+    quote_settings: QuoteSettings,
     now: datetime,
 ) -> dict[str, Any]:
-    """Assemble the full buyer-portal payload for ``quote`` (field-gated, net)."""
+    """Assemble the full buyer-portal payload for ``quote`` (field-gated, net).
+
+    ``settings`` gates the per-line-item card; ``quote_settings`` carries the
+    org-level Finalized-Quote toggles (Requotes, Checkout Settings) — both derive
+    from the same persisted ``org_quote_settings`` row (M5.8)."""
     item_rows = await _load_item_rows(session, quote)
     line_items = []
     for row in item_rows:
@@ -323,14 +349,23 @@ async def build_buyer_payload(
         # Soft expiry: the portal stays reachable and selectable; only checkout is
         # blocked (M5.2). Divergence from the reference is intentional (DECISIONS).
         "is_expired": is_expired,
-        # M5.8 wires the real Requotes toggle; default off (button hidden) until then.
-        "requotes_enabled": False,
+        # Requotes toggle (spec #digital-quote-settings): when off, the portal
+        # hides the request-requote button on an expired quote (M5.8).
+        "requotes_enabled": quote_settings.requotes_enabled,
         "shop": {
             "name": org.name,
             "slug": org.slug,
             "country": org.country.value,
             "currency": org.currency,
             "locale": org.locale,
+        },
+        # Checkout Settings the buyer sees (spec Checkout Settings): the offered
+        # fulfilment options + whether T&Cs must be accepted before checkout. The
+        # checkout endpoint re-enforces both server-side.
+        "checkout": {
+            "shipping_methods": offered_shipping_methods(quote_settings),
+            "allow_local_pickup": quote_settings.allow_local_pickup,
+            "require_terms_acceptance": quote_settings.require_terms_acceptance,
         },
         "price_range": _price_range(line_items),
         "line_items": line_items,
@@ -379,8 +414,9 @@ async def get_buyer_quote(token: str, request: Request) -> dict[str, Any]:
         if org is None:  # RLS breakage — never invent shop identity
             raise _rejected()
 
-        display = await load_display_settings(session, quote.org_id)
-        payload = await build_buyer_payload(session, org, quote, display, now)
+        quote_settings = await load_quote_settings(session, quote.org_id)
+        display = display_from_quote_settings(quote_settings)
+        payload = await build_buyer_payload(session, org, quote, display, quote_settings, now)
 
         session.add(
             QuoteTokenAccess(

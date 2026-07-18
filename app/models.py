@@ -2561,6 +2561,118 @@ class OrgAiSettings(Base):
     updated_at: Mapped[datetime] = _updated_ts()
 
 
+def _show_flag(default: bool = True) -> Mapped[bool]:
+    """A per-org quote Display-Settings toggle (see :class:`OrgQuoteSettings`)."""
+    return mapped_column(Boolean, nullable=False, server_default=text(str(default).lower()))
+
+
+class OrgQuoteSettings(Base):
+    """Per-org **Finalized Quote Settings** — the one row that backs the
+    customer-facing quote/PDF/checkout output (spec ``#digital-quote-settings``;
+    M5.8).
+
+    Like :class:`OrgAiSettings`, ``org_id`` is the PRIMARY KEY — exactly one row
+    per org — and an **absent row is treated as all-defaults** by the accessor
+    (:mod:`app.quote_settings`), so a missing row is never a silent behaviour
+    change. This single row backs *two* pre-existing read seams that earlier
+    blocks left returning hardcoded defaults for M5.8 to fill:
+
+    * the **Display Settings** (``show_*`` toggles + the total/preparer/notes
+      radios) that the M5.1 buyer portal and the M5.4 PDF read via
+      ``app.buyer_portal.load_display_settings`` — the field set mirrors the
+      ``DisplaySettings`` dataclass 1:1;
+    * the **quote merge content** (T&Cs / Manufacturer's Notes / Quote Notes)
+      the M5.4 PDF reads via ``app.pdf.load_quote_content``.
+
+    Plus the toggles M5.8 introduces: **Requotes** (gates the M5.1 expired-state
+    request button), **Checkout Settings** (local pickup / disabled shipping
+    methods / order-confirmation-email flag — the checkout enforces these
+    server-side), a Lead-Time business-vs-calendar-days preference, the
+    Email-Notification recipient matrix (consumed later by M5.5/M5.2), and an
+    **informational** default tax rate (the VAT engine stays authoritative —
+    §14-UStG resolution is legally determined, never a preference; this field is
+    an admin display over the region default and is NOT fed into costing)."""
+
+    __tablename__ = "org_quote_settings"
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    # --- Quote Display Settings (mirror app.buyer_portal.DisplaySettings) ---
+    show_part_number: Mapped[bool] = _show_flag()
+    show_revision: Mapped[bool] = _show_flag()
+    show_description: Mapped[bool] = _show_flag()
+    show_process: Mapped[bool] = _show_flag()
+    show_material: Mapped[bool] = _show_flag()
+    show_dimensions: Mapped[bool] = _show_flag(False)
+    show_dfm: Mapped[bool] = _show_flag(False)
+    show_3d: Mapped[bool] = _show_flag()
+    show_part_file_name: Mapped[bool] = _show_flag(False)
+    show_thumbnail: Mapped[bool] = _show_flag(False)
+    show_quote_number: Mapped[bool] = _show_flag()
+    show_rfq_number: Mapped[bool] = _show_flag()
+    show_facility_phone: Mapped[bool] = _show_flag()
+    show_facility_website: Mapped[bool] = _show_flag()
+    show_digital_quote_link: Mapped[bool] = _show_flag()
+    # Radios — stored as the enum *values* (validated app-side on write).
+    total_display: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'price_range'")
+    )
+    preparer: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'salesperson'")
+    )
+    notes_placement: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'above'")
+    )
+
+    # --- Quote merge content (mirror app.pdf.QuoteContent) ---
+    terms: Mapped[str | None] = mapped_column(Text)
+    manufacturers_notes: Mapped[str | None] = mapped_column(Text)
+    quote_notes: Mapped[str | None] = mapped_column(Text)
+    # "require customer acceptance of T&Cs before checkout" (spec build-note).
+    require_terms_acceptance: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+
+    # --- Requotes (gates the M5.1 expired-state request button) ---
+    requotes_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+
+    # --- Checkout Settings (enforced server-side by app.checkout) ---
+    allow_local_pickup: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    send_order_confirmation_emails: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    #: OrderShippingMethod values the shop has *disabled* at checkout (the
+    #: complement is offered). local_pickup is gated by ``allow_local_pickup``.
+    disabled_shipping_methods: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+
+    # --- Lead-Time Settings (preference only; v1 order math stays calendar) ---
+    lead_time_business_days: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+
+    # --- Email Notification recipient matrix (consumed by M5.5/M5.2) ---
+    #: {quote_send_bcc, order_confirmation, requote_request, smartrfq_received,
+    #: email_fwd_received} → email string | null. A blank map = notify nobody
+    #: extra (the estimator/salesperson in-app Notification is always sent).
+    notification_recipients: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+    # --- Accounting (informational admin surface; NOT fed into the VAT engine) ---
+    default_tax_rate_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
 class SuggestedActionKind(enum.StrEnum):
     """The kind of a :class:`SuggestedAction` (stored as text, mirroring
     ``Notification.kind``). M3.10 introduces ``rule_suggestion``; later AI
@@ -3393,11 +3505,14 @@ class OrderSource(enum.StrEnum):
 class OrderShippingMethod(enum.StrEnum):
     """The PO-compatible shipping options offered at checkout (spec
     ``#shipping-options``). "Charge Me for Shipping (CC)" is **hidden in v1**
-    (cards deferred), so it is deliberately absent from this enum."""
+    (cards deferred), so it is deliberately absent from this enum. Values are
+    append-only. ``local_pickup`` is the fulfilment option the M5.8 "Allow Local
+    Pickup" checkout setting gates (added by migration 0047, reversible)."""
 
     bill_at_shipment = "bill_at_shipment"
     use_my_shipping_account = "use_my_shipping_account"
     no_shipping_fees = "no_shipping_fees"
+    local_pickup = "local_pickup"
 
 
 _order_source_enum = Enum(OrderSource, name="order_source", create_type=False)

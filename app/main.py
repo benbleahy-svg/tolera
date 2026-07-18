@@ -52,6 +52,7 @@ from .pricing import pricing_router
 from .purchased_components import purchased_components_router
 from .quote_assembly import assembly_router
 from .quote_send import quote_send_router
+from .quote_settings_api import quote_settings_router
 from .quotes import quotes_router
 from .requote_diff import requote_router
 from .review_items import review_items_router
@@ -123,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(email_threads_router)
     app.include_router(email_templates_router)
     app.include_router(quote_send_router)
+    app.include_router(quote_settings_router)
     app.include_router(rules_router)
     app.include_router(review_items_router)
     app.include_router(rule_suggest_router)

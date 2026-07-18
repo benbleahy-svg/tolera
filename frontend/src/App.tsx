@@ -27,6 +27,7 @@ import { OrderDetailPage } from './orders/OrderDetailPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { EmailConnectionPage } from './settings/EmailConnectionPage';
 import { EmailTemplatesPage } from './settings/EmailTemplatesPage';
+import { QuoteSettingsPage } from './settings/QuoteSettingsPage';
 import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
@@ -86,6 +87,8 @@ export default function App() {
         <Route path="/settings/email" element={<EmailConnectionPage />} />
         {/* Settings → Email Templates (M5.5). */}
         <Route path="/settings/email-templates" element={<EmailTemplatesPage />} />
+        {/* Settings → Finalized Quote Settings (M5.8). */}
+        <Route path="/settings/quote" element={<QuoteSettingsPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />

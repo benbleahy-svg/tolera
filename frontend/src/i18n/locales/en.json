@@ -1611,5 +1611,75 @@
     "reverse_charge": "Reverse charge",
     "done": "Done",
     "error_generic": "The order could not be completed. Please try again."
+  },
+  "quoteSettings": {
+    "heading": "Finalized Quote Settings",
+    "display_heading": "Quote Display Settings",
+    "display_hint": "These toggles control which fields appear on the digital quote and the PDF.",
+    "flag": {
+      "show_part_number": "Part number",
+      "show_revision": "Revision",
+      "show_description": "Description",
+      "show_process": "Process",
+      "show_material": "Material",
+      "show_dimensions": "Dimensions",
+      "show_dfm": "DFM notes",
+      "show_3d": "3D preview",
+      "show_part_file_name": "File name",
+      "show_thumbnail": "Thumbnail",
+      "show_quote_number": "Quote number",
+      "show_rfq_number": "RFQ number",
+      "show_facility_phone": "Facility phone",
+      "show_facility_website": "Facility website",
+      "show_digital_quote_link": "Digital quote link"
+    },
+    "total_display": "Total display",
+    "total_display_opt": {
+      "price_range": "Price range",
+      "maximum_price": "Maximum price",
+      "none": "No total"
+    },
+    "preparer": "Preparer display",
+    "preparer_opt": {
+      "salesperson": "Salesperson",
+      "estimator": "Estimator",
+      "both": "Both"
+    },
+    "notes_placement": "Notes placement",
+    "notes_placement_opt": {
+      "above": "Above the line items",
+      "below": "Below the line items"
+    },
+    "content_heading": "Quote text",
+    "terms": "Terms & Conditions",
+    "require_terms_acceptance": "Require acceptance of the T&Cs before checkout",
+    "manufacturers_notes": "Manufacturer's Notes",
+    "quote_notes": "Quote Notes (default template)",
+    "requotes_heading": "Requotes",
+    "requotes_enabled": "Allow buyers to request a requote from the digital quote",
+    "checkout_heading": "Checkout Settings",
+    "allow_local_pickup": "Allow local pickup",
+    "send_order_confirmation_emails": "Send order confirmation emails",
+    "offered_methods": "Offered shipping methods",
+    "shipping_method": {
+      "bill_at_shipment": "Bill at shipment",
+      "use_my_shipping_account": "Use my shipping account",
+      "no_shipping_fees": "No shipping fees",
+      "local_pickup": "Local pickup"
+    },
+    "leadtime_heading": "Lead-Time Settings",
+    "lead_time_business_days": "Show lead time in business days (instead of calendar days)",
+    "notifications_heading": "Email notifications",
+    "notification": {
+      "quote_send_bcc": "Quote send (BCC)",
+      "order_confirmation": "Order confirmation",
+      "requote_request": "Requote request",
+      "smartrfq_received": "Smart RFQ received",
+      "email_fwd_received": "Forwarded RFQ received"
+    },
+    "accounting_heading": "Accounting",
+    "default_tax_rate": "Default tax rate (%)",
+    "default_tax_rate_hint": "Informational only — the applied rate is determined by law (§14 UStG).",
+    "saved": "Saved"
   }
 }
