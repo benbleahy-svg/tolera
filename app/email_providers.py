@@ -45,6 +45,8 @@ from .models import EmailConnectionType
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 GRAPH_API = "https://graph.microsoft.com/v1.0"
+#: Microsoft Graph inlines a draft attachment up to 3 MB; larger needs an upload session.
+_GRAPH_INLINE_LIMIT = 3 * 1024 * 1024
 
 
 class ProviderError(AppError):
@@ -59,15 +61,41 @@ class ProviderError(AppError):
 # The provider contract
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
+class OutboundAttachment:
+    """A file to attach to an outbound message (e.g. the quote PDF, M5.5)."""
+
+    filename: str
+    content_type: str
+    payload: bytes
+
+
+@dataclass(frozen=True)
 class OutboundEmail:
-    """One message to send from the user's own address."""
+    """One message to send from the user's own address.
+
+    ``cc``/``bcc``, an optional HTML alternative, and ``attachments`` are the M5.5
+    send-quote composer additions; the M3.5 timeline send leaves them empty."""
 
     to: list[str]
     subject: str
     body_text: str
+    cc: list[str] = field(default_factory=list)
+    bcc: list[str] = field(default_factory=list)
+    body_html: str | None = None
+    attachments: list[OutboundAttachment] = field(default_factory=list)
     #: RFC 2822 threading headers for follow-ups on an existing thread.
     in_reply_to: str | None = None
     references: list[str] = field(default_factory=list)
+
+    @property
+    def all_recipients(self) -> list[str]:
+        """Every envelope recipient (To + Cc + Bcc), de-duplicated in order — the
+        SMTP/Mailgun envelope must carry BCC even though it never appears in a
+        header."""
+        seen: dict[str, None] = {}
+        for addr in [*self.to, *self.cc, *self.bcc]:
+            seen.setdefault(addr, None)
+        return list(seen)
 
 
 @dataclass(frozen=True)
@@ -132,12 +160,26 @@ class EmailProvider(Protocol):
 # Shared MIME helpers
 # --------------------------------------------------------------------------- #
 def build_mime(
-    *, from_address: str, from_name: str | None, message: OutboundEmail
+    *,
+    from_address: str,
+    from_name: str | None,
+    message: OutboundEmail,
+    with_bcc_header: bool = False,
 ) -> tuple[MimeMessage, str]:
-    """The outbound RFC 5322 message + the Message-ID minted for it."""
+    """The outbound RFC 5322 message + the Message-ID minted for it.
+
+    ``Cc`` is written as a header (visible); ``Bcc`` is **not** — it is an envelope
+    concern (see :attr:`OutboundEmail.all_recipients`), except for the Gmail API,
+    which reads a ``Bcc`` header from the raw MIME and strips it on delivery
+    (``with_bcc_header=True``). An HTML body becomes a ``multipart/alternative``;
+    attachments are added last."""
     mime = MimeMessage()
     mime["From"] = f"{from_name} <{from_address}>" if from_name else from_address
     mime["To"] = ", ".join(message.to)
+    if message.cc:
+        mime["Cc"] = ", ".join(message.cc)
+    if with_bcc_header and message.bcc:
+        mime["Bcc"] = ", ".join(message.bcc)
     mime["Subject"] = message.subject
     message_id = make_msgid(domain=from_address.partition("@")[2] or None)
     mime["Message-ID"] = message_id
@@ -146,6 +188,16 @@ def build_mime(
     if message.references:
         mime["References"] = " ".join(message.references)
     mime.set_content(message.body_text)
+    if message.body_html:
+        mime.add_alternative(message.body_html, subtype="html")
+    for att in message.attachments:
+        maintype, _, subtype = att.content_type.partition("/")
+        mime.add_attachment(
+            att.payload,
+            maintype=maintype or "application",
+            subtype=subtype or "octet-stream",
+            filename=att.filename,
+        )
     return mime, message_id
 
 
@@ -240,8 +292,9 @@ class GmailProvider:
         from_name: str | None,
         message: OutboundEmail,
     ) -> SendResult:
+        # Gmail reads Bcc from the raw MIME and strips it before delivery.
         mime, message_id = build_mime(
-            from_address=from_address, from_name=from_name, message=message
+            from_address=from_address, from_name=from_name, message=message, with_bcc_header=True
         )
         token = await self._access_token(credentials)
         raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -348,16 +401,41 @@ class OutlookProvider:
     ) -> SendResult:
         token = await self._access_token(credentials)
         headers = {"Authorization": f"Bearer {token}"}
+        body = (
+            {"contentType": "HTML", "content": message.body_html}
+            if message.body_html
+            else {"contentType": "Text", "content": message.body_text}
+        )
         draft: dict[str, Any] = {
             "subject": message.subject,
-            "body": {"contentType": "Text", "content": message.body_text},
+            "body": body,
             "toRecipients": [{"emailAddress": {"address": to}} for to in message.to],
         }
+        if message.cc:
+            draft["ccRecipients"] = [{"emailAddress": {"address": a}} for a in message.cc]
+        if message.bcc:
+            draft["bccRecipients"] = [{"emailAddress": {"address": a}} for a in message.bcc]
+        # Graph inlines attachments up to 3 MB in the draft; anything larger must
+        # go through an upload session added to the draft before it is sent.
+        inline = [a for a in message.attachments if len(a.payload) <= _GRAPH_INLINE_LIMIT]
+        large = [a for a in message.attachments if len(a.payload) > _GRAPH_INLINE_LIMIT]
+        if inline:
+            draft["attachments"] = [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": att.filename,
+                    "contentType": att.content_type,
+                    "contentBytes": base64.b64encode(att.payload).decode(),
+                }
+                for att in inline
+            ]
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(f"{GRAPH_API}/me/messages", headers=headers, json=draft)
             if resp.status_code != 201:
                 raise ProviderError("outlook_send_failed", "Outlook-Versand fehlgeschlagen.")
             created = resp.json()
+            for att in large:
+                await self._upload_large_attachment(client, headers, created["id"], att)
             send_resp = await client.post(
                 f"{GRAPH_API}/me/messages/{created['id']}/send", headers=headers
             )
@@ -367,6 +445,47 @@ class OutlookProvider:
             message_id=str(created.get("internetMessageId", "")),
             provider_thread_id=created.get("conversationId"),
         )
+
+    async def _upload_large_attachment(
+        self,
+        client: httpx.AsyncClient,
+        headers: dict[str, str],
+        message_id: str,
+        att: OutboundAttachment,
+    ) -> None:
+        """Attach a >3 MB file to an existing draft via a Graph upload session
+        (createUploadSession → PUT with Content-Range)."""
+        size = len(att.payload)
+        session_resp = await client.post(
+            f"{GRAPH_API}/me/messages/{message_id}/attachments/createUploadSession",
+            headers=headers,
+            json={
+                "AttachmentItem": {
+                    "attachmentType": "file",
+                    "name": att.filename,
+                    "size": size,
+                    "contentType": att.content_type,
+                }
+            },
+        )
+        if session_resp.status_code not in (200, 201):
+            raise ProviderError("outlook_send_failed", "Outlook-Versand fehlgeschlagen.")
+        upload_url = session_resp.json().get("uploadUrl")
+        if not upload_url:
+            raise ProviderError("outlook_send_failed", "Outlook-Versand fehlgeschlagen.")
+        # A single ranged PUT covers the whole file (Graph accepts up to its chunk
+        # ceiling; the quote PDF is well within it). No auth header — the upload URL
+        # is pre-authorised.
+        put_resp = await client.put(
+            upload_url,
+            headers={
+                "Content-Length": str(size),
+                "Content-Range": f"bytes 0-{size - 1}/{size}",
+            },
+            content=att.payload,
+        )
+        if put_resp.status_code not in (200, 201, 202):
+            raise ProviderError("outlook_send_failed", "Outlook-Versand fehlgeschlagen.")
 
     async def baseline_cursor(self, credentials: dict[str, Any]) -> str | None:
         # Walk the delta to its end once; the returned deltaLink means
@@ -487,7 +606,8 @@ class SmtpImapProvider:
                 smtp.login(
                     str(credentials.get("username", "")), str(credentials.get("password", ""))
                 )
-                smtp.send_message(mime, from_addr=from_address, to_addrs=message.to)
+                # Envelope carries To+Cc+Bcc; the MIME has no Bcc header.
+                smtp.send_message(mime, from_addr=from_address, to_addrs=message.all_recipients)
 
         try:
             await asyncio.to_thread(_send)
@@ -530,6 +650,86 @@ class SmtpImapProvider:
         except (imaplib.IMAP4.error, OSError, ValueError, TypeError) as exc:
             raise ProviderError("imap_sync_failed", "IMAP-Abgleich fehlgeschlagen.") from exc
         return SyncResult([parse_inbound_mime(raw) for raw in raws], None)
+
+
+# --------------------------------------------------------------------------- #
+# Mailgun EU — the platform-address fallback (M5.5), send-only
+# --------------------------------------------------------------------------- #
+class MailgunProvider:
+    """Outbound-only sender via Mailgun EU (spec ``#email-connectivity`` fallback).
+
+    Used when an estimator has no connected mailbox: the quote goes out from the
+    platform address (``quotes@{sending_domain}``). We POST the raw MIME to the
+    ``messages.mime`` endpoint so **our** minted ``Message-ID`` is preserved (the
+    thread the M3.3 inbound webhook later matches replies against). Inbound never
+    flows here — it arrives via the M3.3 Mailgun webhook — so ``fetch_new`` /
+    ``baseline_cursor`` are inert."""
+
+    def __init__(self, api_key: str, sending_domain: str, base_url: str) -> None:
+        self._api_key = api_key
+        self._domain = sending_domain
+        self._base_url = base_url.rstrip("/")
+
+    async def send(
+        self,
+        credentials: dict[str, Any],
+        *,
+        from_address: str,
+        from_name: str | None,
+        message: OutboundEmail,
+    ) -> SendResult:
+        mime, message_id = build_mime(
+            from_address=from_address, from_name=from_name, message=message
+        )
+        # Envelope recipients (To+Cc+Bcc) go as explicit `to` form fields (httpx
+        # expands a list value into repeated fields); the MIME carries the visible
+        # To/Cc headers only.
+        data = {"to": message.all_recipients}
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{self._base_url}/v3/{self._domain}/messages.mime",
+                    auth=("api", self._api_key),
+                    data=data,
+                    files={"message": ("message.mime", mime.as_bytes(), "message/rfc822")},
+                )
+        except httpx.HTTPError as exc:
+            raise ProviderError("mailgun_send_failed", "Mailgun-Versand fehlgeschlagen.") from exc
+        if resp.status_code not in (200, 202):
+            raise ProviderError("mailgun_send_failed", "Mailgun-Versand fehlgeschlagen.")
+        return SendResult(message_id=message_id, provider_thread_id=None)
+
+    async def fetch_new(self, credentials: dict[str, Any], *, cursor: str | None) -> SyncResult:
+        return SyncResult([], None)  # inbound arrives via the M3.3 webhook, not here
+
+    async def baseline_cursor(self, credentials: dict[str, Any]) -> str | None:
+        return None
+
+
+@dataclass(frozen=True)
+class PlatformSender:
+    """A configured platform fallback: the provider + the address it sends from."""
+
+    provider: EmailProvider
+    from_address: str
+    from_name: str
+
+
+def get_platform_sender(settings: Any) -> PlatformSender | None:
+    """The Mailgun-EU platform sender, or ``None`` when it is not configured (so the
+    composer falls back to the "Connect your email" prompt rather than a silent
+    default)."""
+    if not settings.mailgun_api_key or not settings.mailgun_sending_domain:
+        return None
+    return PlatformSender(
+        provider=MailgunProvider(
+            settings.mailgun_api_key,
+            settings.mailgun_sending_domain,
+            settings.mailgun_api_base_url,
+        ),
+        from_address=f"quotes@{settings.mailgun_sending_domain}",
+        from_name=settings.brand.title(),
+    )
 
 
 # --------------------------------------------------------------------------- #

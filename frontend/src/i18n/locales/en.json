@@ -1012,6 +1012,81 @@
     "inbound": "Received",
     "connect_failed": "Connection failed or was cancelled."
   },
+  "emailTemplates": {
+    "title": "Email templates",
+    "subtitle": "Templates for sent quotes and order notifications. Set a default per type.",
+    "section": {
+      "quote_send": "Quote-send emails",
+      "order_shipment": "Order-shipment emails",
+      "order_refund": "Order-refund emails"
+    },
+    "col": {
+      "name": "Template name",
+      "last_edited_by": "Last edited by",
+      "last_edited": "Last edited",
+      "actions": "Actions"
+    },
+    "none": "No template yet.",
+    "default_badge": "DEFAULT",
+    "edit": "Edit",
+    "delete": "Delete",
+    "create": {
+      "quote_send": "Create new quote-send template",
+      "order_shipment": "Create new order-shipment template",
+      "order_refund": "Create new order-refund template"
+    },
+    "editor_title": "Email template",
+    "field_name": "Name",
+    "field_subject": "Subject",
+    "field_body": "Body",
+    "merge_fields": "Insert merge field",
+    "set_default": "Set as default",
+    "default_protected": "The default template cannot be deleted.",
+    "field": {
+      "quote_number": "Quote number",
+      "quote_link": "Quote link",
+      "rfq_number": "RFQ number",
+      "part_numbers": "Part numbers",
+      "customer_first_name": "Customer first name",
+      "customer_last_name": "Customer last name",
+      "estimator_first_name": "Estimator first name",
+      "estimator_last_name": "Estimator last name",
+      "estimator_email": "Estimator email",
+      "salesperson_first_name": "Salesperson first name",
+      "salesperson_last_name": "Salesperson last name",
+      "salesperson_email": "Salesperson email",
+      "facility_name": "Facility name",
+      "facility_phone": "Facility phone"
+    }
+  },
+  "sendComposer": {
+    "title": "Who will get this quote?",
+    "send_quote": "Send quote",
+    "type": {
+      "to": "To",
+      "cc": "CC",
+      "bcc": "BCC"
+    },
+    "remove_recipient": "Remove recipient",
+    "recipient_type": "Recipient type",
+    "recipient_email": "Recipient email address",
+    "recipient_placeholder": "user@company.com",
+    "select_template": "Select email template",
+    "no_template": "No template",
+    "subject": "Subject",
+    "formatting": "Formatting",
+    "bold": "Bold",
+    "italic": "Italic",
+    "underline": "Underline",
+    "bullet_list": "Bullet list",
+    "link": "Link",
+    "link_prompt": "Enter link URL:",
+    "body": "Body",
+    "attach_pdf": "Attach quote as PDF",
+    "preview": "Preview",
+    "preview_heading": "Preview",
+    "send": "Send quote"
+  },
   "rules": {
     "name": "Name",
     "combine": "Combine",

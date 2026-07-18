@@ -11,7 +11,14 @@ import { apiFetch, type TokenGetter } from '../api/client';
 import type {
   EmailConnection,
   EmailMessage,
+  EmailTemplate,
+  EmailTemplateCreateBody,
+  EmailTemplateType,
+  EmailTemplateUpdateBody,
   SendEmailBody,
+  SendQuoteBody,
+  SendQuotePreview,
+  SendQuoteResult,
   SmtpConnectionBody,
 } from './types';
 
@@ -24,6 +31,18 @@ export interface EmailApi {
   oauthStart: (provider: 'gmail' | 'outlook') => Promise<{ authorize_url: string }>;
   getQuoteEmails: (quoteId: string) => Promise<EmailMessage[]>;
   sendQuoteEmail: (quoteId: string, body: SendEmailBody) => Promise<EmailMessage>;
+  /** M5.5 — the full send-quote composer (templates + merge fields + PDF). */
+  sendQuote: (quoteId: string, body: SendQuoteBody) => Promise<SendQuoteResult>;
+  previewQuoteSend: (quoteId: string, body: SendQuoteBody) => Promise<SendQuotePreview>;
+}
+
+/** Email-template CRUD (M5.5, spec #email-templates). */
+export interface EmailTemplatesApi {
+  list: (type?: EmailTemplateType) => Promise<EmailTemplate[]>;
+  create: (body: EmailTemplateCreateBody) => Promise<EmailTemplate>;
+  get: (id: string) => Promise<EmailTemplate>;
+  update: (id: string, body: EmailTemplateUpdateBody) => Promise<EmailTemplate>;
+  remove: (id: string) => Promise<void>;
 }
 
 /** Build an email API client bound to the current Clerk session token. */
@@ -44,6 +63,30 @@ export function useEmailApi(): EmailApi {
       getQuoteEmails: (quoteId) => apiFetch(`/api/quotes/${quoteId}/emails`, token),
       sendQuoteEmail: (quoteId, body) =>
         apiFetch(`/api/quotes/${quoteId}/emails`, token, { method: 'POST', body }),
+      sendQuote: (quoteId, body) =>
+        apiFetch(`/api/quotes/${quoteId}/send`, token, { method: 'POST', body }),
+      previewQuoteSend: (quoteId, body) =>
+        apiFetch(`/api/quotes/${quoteId}/send/preview`, token, { method: 'POST', body }),
+    };
+  }, [getToken]);
+}
+
+/** Build an email-template CRUD client bound to the current Clerk session token. */
+export function useEmailTemplatesApi(): EmailTemplatesApi {
+  const { getToken } = useAuth();
+  return useMemo<EmailTemplatesApi>(() => {
+    const token: TokenGetter = () => getToken();
+    return {
+      list: (type) =>
+        apiFetch(
+          type ? `/api/email-templates?template_type=${type}` : '/api/email-templates',
+          token,
+        ),
+      create: (body) => apiFetch('/api/email-templates', token, { method: 'POST', body }),
+      get: (id) => apiFetch(`/api/email-templates/${id}`, token),
+      update: (id, body) =>
+        apiFetch(`/api/email-templates/${id}`, token, { method: 'PATCH', body }),
+      remove: (id) => apiFetch(`/api/email-templates/${id}`, token, { method: 'DELETE' }),
     };
   }, [getToken]);
 }
