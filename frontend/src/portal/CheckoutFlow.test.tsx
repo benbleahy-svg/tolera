@@ -113,6 +113,9 @@ describe('CheckoutFlow', () => {
     // Step 4 — Confirmation with the authoritative totals
     expect(await screen.findByText('Vielen Dank für Ihre Bestellung')).toBeInTheDocument();
     expect(screen.getByText('Bestellung #1')).toBeInTheDocument();
+    // the full authoritative breakdown — net, VAT and gross
+    expect(screen.getByText('280,00 €')).toBeInTheDocument(); // net
+    expect(screen.getByText('53,20 €')).toBeInTheDocument(); // MwSt.
     expect(screen.getByText('333,20 €')).toBeInTheDocument(); // gross
 
     // The request carried IDs + quantity + PO only (server re-derives prices).
@@ -146,6 +149,8 @@ describe('CheckoutFlow', () => {
     expect(
       await screen.findByText('Steuerschuldnerschaft des Leistungsempfängers'),
     ).toBeInTheDocument();
+    // no MwSt. VAT line is shown when reverse charge applies
+    expect(screen.queryByText(/MwSt\./)).not.toBeInTheDocument();
     // buyer VAT-ID forwarded to the server
     const [, req] = mockCheckout.mock.calls[0];
     expect(req.buyer_ust_id_nr).toBe('ATU12345678');

@@ -274,6 +274,8 @@ async def test_kleinunternehmer_suppresses_vat() -> None:
     assert tb.net_minor == 100000
     assert tb.gross_minor == 100000
     assert tb.note is not None and "§19" in tb.note
+    # §19 = no VAT line at all: no rate band a §14 PDF could render.
+    assert tb.rate_lines == []
 
 
 @pytest.mark.asyncio
@@ -315,6 +317,23 @@ async def test_vat_rounds_half_up_to_the_cent() -> None:
     assert tb.vat_minor == 4974
     assert tb.gross_minor == 31154
     assert tb.gross_minor == tb.net_minor + tb.vat_minor
+
+
+@pytest.mark.asyncio
+async def test_vat_rounds_half_up_on_an_exact_tie() -> None:
+    # An exact half-cent tie proves ROUND_HALF_UP (not half-even): 1,50 € · 19%
+    # = 0,285 → 0,29 € (half-up); half-even would give 0,28 €.
+    tb, _ = await resolve_order_tax(
+        net=Decimal("1.50"),
+        shop_country=OrgCountry.DE,
+        currency="EUR",
+        is_kleinunternehmer=False,
+        buyer_ust_id_nr=None,
+        supplier_ust_id_nr=None,
+        vies=_StubVies(),
+    )
+    assert tb.net_minor == 150
+    assert tb.vat_minor == 29  # 0,285 → 0,29 (half-up), not 28 (half-even)
 
 
 # --------------------------------------------------------------------------- #

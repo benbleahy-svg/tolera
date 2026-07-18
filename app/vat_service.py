@@ -206,7 +206,9 @@ def _kleinunternehmer_breakdown(
         note=KLEINUNTERNEHMER_NOTE,
         supplier_ust_id_nr=None,
         customer_ust_id_nr=customer_ust_id_nr,
-        rate_lines=[RateLine(Decimal("0"), net_minor, 0)],
+        # §19: no VAT line at all — an empty rate-line set so a consumer (the
+        # M5.4 §14 PDF) cannot render a 0% band that must be suppressed.
+        rate_lines=[],
     )
 
 
