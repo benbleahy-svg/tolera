@@ -450,3 +450,28 @@ def test_import_router_stamps_source_tags(
     assert len(ops) == 1
     assert ops[0]["source"] == "imported"
     assert str(ops[0]["source_quote_id"]) == str(ids["prior_quote"])
+
+
+def test_assembly_routes_are_org_scoped(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+    fake_undo_store: _FakeUndoStore,
+) -> None:
+    """RLS: another org's admin sees a 404, never the quote — and no rows move."""
+    org, admin = _org_with_admin(seeder, "org-qa8")
+    other_org, other_admin = _org_with_admin(seeder, "org-qa8-other")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _seed_requote_pair(seeder, app_client, org, volume_b=100_000.0)
+    seeder.operation(org, ids["component_a"], "Sägen")
+    assert _run_diff(tenancy_db, org, ids["part_b"])["ok"] is True
+
+    with authed(app_client, user_id=other_admin, org_id=other_org, roles=ADMIN):
+        for route in ("import", "undo"):
+            body: dict[str, Any] = {"part_id": str(ids["part_b"])}
+            if route == "import":
+                body["path"] = "accept_all"
+            res = app_client.post(f"/api/quotes/{ids['new_quote']}/assembly/{route}", json=body)
+            assert res.status_code == 404, res.text
+    assert _rows(tenancy_db, "operation", org, ids["component_b"]) == []

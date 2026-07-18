@@ -46,10 +46,20 @@ def upgrade() -> None:
                 nullable=True,
             ),
         )
+        # Postgres does not auto-index FK columns; the ON DELETE SET NULL
+        # fixup on quote deletion would otherwise seq-scan all four tables.
+        # Partial: the overwhelming majority of rows are manual (NULL).
+        op.create_index(
+            f"ix_{table}_source_quote",
+            table,
+            ["source_quote_id"],
+            postgresql_where=sa.text("source_quote_id IS NOT NULL"),
+        )
 
 
 def downgrade() -> None:
     for table in reversed(_TABLES):
+        op.execute(f"DROP INDEX IF EXISTS ix_{table}_source_quote")
         op.drop_column(table, "source_quote_id")
         op.drop_column(table, "source")
     op.execute("DROP TYPE value_source")

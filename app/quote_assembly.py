@@ -109,7 +109,12 @@ async def enrich_entries(
     """
     flags = await get_ai_flags(session, quote.org_id)
     offered = flags.master_enabled and flags.quote_assembly_enabled
-    for entry in payload["entries"]:
+    enriched: list[dict[str, Any]] = []
+    for stored in payload["entries"]:
+        # Annotate a COPY — `_entries_out` hands back the dicts stored in
+        # ``quote.requote_diff``, and a dirty quote row would otherwise
+        # serialize this read-time advisory state into the durable cache.
+        entry = dict(stored)
         blockers = accept_all_blockers(entry, target_currency=quote.currency)
         entry["assembly_state"] = {
             "offered": offered,
@@ -118,7 +123,8 @@ async def enrich_entries(
             "quote_count": int(entry.get("quote_count") or 0),
             "undo_ttl_seconds": UNDO_TTL_SECONDS,
         }
-    return payload
+        enriched.append(entry)
+    return {**payload, "entries": enriched}
 
 
 # --------------------------------------------------------------------------- #
@@ -440,7 +446,7 @@ async def assembly_undo(
             status_code=status.HTTP_404_NOT_FOUND,
         )
     target, item_id = await _target_and_item(session, quote, entry)
-    if record.get("undone_at") or await resolve_undo_store().take(undo_key(item_id)) is None:
+    if record.get("undone_at"):
         raise AppError(
             "undo_expired",
             "The undo window has closed — remove or edit the imported values directly.",
@@ -457,6 +463,17 @@ async def assembly_undo(
     record = {**record, "undone_at": datetime.now(UTC).isoformat()}
     entry["assembly"] = record
     _persist_entry(quote, entry)
+
+    # Consume the single-use key LAST: if any of the DB work above had failed,
+    # the key would survive for a retry inside the window. A missing/expired
+    # key here raises — and the whole transaction (the blanking) rolls back,
+    # so an expired undo leaves the import standing.
+    if await resolve_undo_store().take(undo_key(item_id)) is None:
+        raise AppError(
+            "undo_expired",
+            "The undo window has closed — remove or edit the imported values directly.",
+            status_code=status.HTTP_410_GONE,
+        )
     logger.info(
         "assembly_undo_applied",
         extra={"quote_id": str(quote.id), "line_item_id": str(item_id)},

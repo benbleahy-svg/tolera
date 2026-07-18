@@ -1392,6 +1392,11 @@ class Operation(Base):
             "yield_factor > 0 AND yield_factor <= 1", name="ck_operation_yield_factor_range"
         ),
         Index("ix_operation_org_component", "org_id", "component_id"),
+        Index(
+            "ix_operation_source_quote",
+            "source_quote_id",
+            postgresql_where=text("source_quote_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -1745,6 +1750,11 @@ class PricingItem(Base):
             name="ck_pricing_item_custom_named",
         ),
         Index("ix_pricing_item_org_component", "org_id", "component_id"),
+        Index(
+            "ix_pricing_item_source_quote",
+            "source_quote_id",
+            postgresql_where=text("source_quote_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -1841,6 +1851,11 @@ class Discount(Base):
             name="fk_discount_source_def_org",
         ),
         Index("ix_discount_org_component", "org_id", "component_id"),
+        Index(
+            "ix_discount_source_quote",
+            "source_quote_id",
+            postgresql_where=text("source_quote_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -1962,6 +1977,11 @@ class AddOn(Base):
             name="ck_add_on_price_positive",
         ),
         Index("ix_add_on_org_component", "org_id", "component_id"),
+        Index(
+            "ix_add_on_source_quote",
+            "source_quote_id",
+            postgresql_where=text("source_quote_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
