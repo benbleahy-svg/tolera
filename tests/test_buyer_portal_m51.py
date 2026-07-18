@@ -243,6 +243,13 @@ def test_toggled_off_field_is_absent_from_payload() -> None:
     assert card["part_number"] == "P-100"
 
 
+def test_show_3d_off_hides_the_model_flag() -> None:
+    on = build_line_item(_row(), _pricing(), DisplaySettings(show_3d=True))
+    off = build_line_item(_row(), _pricing(), DisplaySettings(show_3d=False))
+    assert on["has_model"] is True  # the fixture part carries a primary file
+    assert off["has_model"] is False  # gated: the buyer never learns a model exists
+
+
 def test_expedite_surcharge_is_the_per_unit_delta() -> None:
     pricing = _pricing(unit_price="100.0000", expedite_unit="160.0000")
     card = build_line_item(_row(), pricing, DEFAULT_DISPLAY_SETTINGS)

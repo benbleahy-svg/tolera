@@ -21,8 +21,8 @@ Two tables:
 
 Both are org-scoped + RLS like every tenant table.
 
-Revision ID: 0039_quote_token
-Revises: 0038_opdef_variable_visibility
+Revision ID: 0040_quote_token
+Revises: 0039_merge_priority_opdef_vars
 Create Date: 2026-07-18
 """
 
@@ -32,8 +32,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0039_quote_token"
-down_revision: str | None = "0038_opdef_variable_visibility"
+revision: str = "0040_quote_token"
+down_revision: str | None = "0039_merge_priority_opdef_vars"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

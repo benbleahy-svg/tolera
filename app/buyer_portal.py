@@ -116,7 +116,9 @@ def build_line_item(
         "quote_item_id": str(qi.id),
         "position": qi.position,
         "is_no_quote": is_no_quote,
-        "has_model": row.part.primary_file_id is not None,
+        # Gated by the Show-3D toggle like every other field: when off, the buyer
+        # never learns a model exists (drives the portal thumbnail).
+        "has_model": settings.show_3d and row.part.primary_file_id is not None,
     }
     if settings.show_part_number and row.part.part_number:
         card["part_number"] = row.part.part_number

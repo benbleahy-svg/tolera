@@ -67,6 +67,10 @@ export function BuyerPortalPage() {
     let active = true;
     setLoading(true);
     setFailed(false);
+    // Reset per-quote state when the token changes so a prior quote's selection
+    // can't bleed into the new one (overlapping line-item ids / stale subtotal).
+    setQuote(null);
+    setSelections(new Map());
     if (!token) {
       setFailed(true);
       setLoading(false);
