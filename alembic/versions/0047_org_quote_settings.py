@@ -27,6 +27,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0047_org_quote_settings"
@@ -118,8 +120,24 @@ def downgrade() -> None:
     op.execute(f"REVOKE ALL ON org_quote_settings FROM {APP_ROLE}")
     op.execute("DROP TABLE IF EXISTS org_quote_settings")
 
+    # Preflight: an order placed with local_pickup cannot be cast into the
+    # reduced enum. Rather than let the cast fail cryptically mid-DDL — or
+    # silently rewrite a real order's shipping method — refuse the downgrade with
+    # a clear, actionable error. On a same-release rollback (no such orders yet)
+    # this is a no-op and the rebuild proceeds.
+    in_use = (
+        op.get_bind()
+        .execute(sa.text("SELECT count(*) FROM order_ WHERE shipping_method = 'local_pickup'"))
+        .scalar()
+        or 0
+    )
+    if in_use:
+        raise RuntimeError(
+            f"Cannot downgrade 0047: {in_use} order(s) use shipping_method "
+            "'local_pickup'. Reassign or archive them before removing the enum value."
+        )
+
     # Rebuild order_shipping_method without local_pickup (mirrors migration 0003).
-    # Safe on a same-release downgrade: no order can carry the just-added value.
     members = ", ".join(f"'{v}'" for v in _SHIPPING_VALUES_PRE)
     op.execute("ALTER TYPE order_shipping_method RENAME TO order_shipping_method_old")
     op.execute(f"CREATE TYPE order_shipping_method AS ENUM ({members})")

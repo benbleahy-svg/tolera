@@ -48,8 +48,9 @@ export function QuoteSettingsPage() {
         setDraft(s);
         setDirty(new Set());
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  }, [api]);
+      // Show a translated message, never a raw (English) backend/network string.
+      .catch(() => setError(t('quoteSettings.load_error')));
+  }, [api, t]);
 
   useEffect(() => {
     load();
@@ -99,7 +100,7 @@ export function QuoteSettingsPage() {
         setDirty(new Set());
         setSaved(true);
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch(() => setError(t('quoteSettings.save_error')))
       .finally(() => setSaving(false));
   };
 
@@ -114,8 +115,15 @@ export function QuoteSettingsPage() {
     <div className="quote-settings">
       <h1>{t('quoteSettings.heading')}</h1>
 
-      {/* Controls are frozen while a save is in flight so an edit made mid-request
-          isn't silently overwritten when the server response lands. */}
+      {/* A real form so native email/min/max/step validation runs before save;
+          controls are frozen while a save is in flight so an edit made
+          mid-request isn't silently overwritten when the server response lands. */}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
       <fieldset className="qs-form" disabled={saving}>
       <section aria-labelledby="qs-display">
         <h2 id="qs-display">{t('quoteSettings.display_heading')}</h2>
@@ -302,12 +310,13 @@ export function QuoteSettingsPage() {
       </fieldset>
 
       <div className="qs-actions">
-        <button type="button" onClick={save} disabled={saving || dirty.size === 0}>
+        <button type="submit" disabled={saving || dirty.size === 0}>
           {t('common.save')}
         </button>
         {saved && <span role="status">{t('quoteSettings.saved')}</span>}
         {error && <span role="alert">{error}</span>}
       </div>
+      </form>
     </div>
   );
 }

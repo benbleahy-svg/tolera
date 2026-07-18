@@ -366,6 +366,10 @@ async def build_buyer_payload(
             "shipping_methods": offered_shipping_methods(quote_settings),
             "allow_local_pickup": quote_settings.allow_local_pickup,
             "require_terms_acceptance": quote_settings.require_terms_acceptance,
+            # The T&Cs text the buyer must be able to read before accepting it —
+            # exposed here (not only on the PDF) so the checkout checkbox has
+            # something to link to. None when the shop set no terms.
+            "terms": quote_settings.terms,
         },
         "price_range": _price_range(line_items),
         "line_items": line_items,

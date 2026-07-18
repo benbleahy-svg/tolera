@@ -1680,6 +1680,8 @@
     "accounting_heading": "Buchhaltung",
     "default_tax_rate": "Standard-Steuersatz (%)",
     "default_tax_rate_hint": "Nur informativ — der tatsächliche Steuersatz wird gesetzlich ermittelt (§ 12 UStG).",
-    "saved": "Gespeichert"
+    "saved": "Gespeichert",
+    "load_error": "Einstellungen konnten nicht geladen werden.",
+    "save_error": "Einstellungen konnten nicht gespeichert werden."
   }
 }
