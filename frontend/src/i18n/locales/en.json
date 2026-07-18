@@ -1331,7 +1331,7 @@
     "company": "Company",
     "billing_address": "Billing address",
     "ust_id": "VAT ID",
-    "ust_id_hint": "A valid EU VAT ID applies the reverse-charge procedure.",
+    "ust_id_hint": "A valid EU VAT ID may apply the reverse-charge procedure to eligible intra-EU supplies.",
     "notes": "Notes",
     "shipping": "Shipping",
     "shipping_bill_at_shipment": "Bill me at time of shipment",

@@ -1331,7 +1331,7 @@
     "company": "Firma",
     "billing_address": "Rechnungsadresse",
     "ust_id": "USt-IdNr.",
-    "ust_id_hint": "Bei gültiger EU-USt-IdNr. wird das Reverse-Charge-Verfahren angewendet.",
+    "ust_id_hint": "Bei einer gültigen EU-USt-IdNr. kann bei innergemeinschaftlichen Lieferungen das Reverse-Charge-Verfahren angewendet werden.",
     "notes": "Anmerkungen",
     "shipping": "Versand",
     "shipping_bill_at_shipment": "Versandkosten bei Versand berechnen",

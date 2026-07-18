@@ -164,6 +164,12 @@ export function BuyerPortalPage() {
           selections={selections}
           subtotalNet={subtotal}
           onClose={() => setCheckingOut(false)}
+          onComplete={() => {
+            // Order placed: clear the selection so the same lines can't start a
+            // second order, and return to the (now empty) portal.
+            setSelections(new Map());
+            setCheckingOut(false);
+          }}
         />
       </div>
     );

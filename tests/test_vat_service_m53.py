@@ -278,6 +278,35 @@ async def test_kleinunternehmer_suppresses_vat() -> None:
     assert tb.rate_lines == []
 
 
+@pytest.mark.parametrize(
+    ("country", "currency", "must_contain", "must_not_contain"),
+    [
+        (OrgCountry.DE, "EUR", "§19", None),
+        # AT/CH have their own small-business regimes — the DE §19 statute must
+        # NOT appear on their notes (exact legal wording OPEN, DECISIONS 2026-07-18).
+        (OrgCountry.AT, "EUR", "Kleinunternehmer", "§19"),
+        (OrgCountry.CH, "CHF", "Kleinunternehmen", "§19"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_kleinunternehmer_note_is_jurisdiction_specific(
+    country: OrgCountry, currency: str, must_contain: str, must_not_contain: str | None
+) -> None:
+    tb, _ = await resolve_order_tax(
+        net=Decimal("1000.00"),
+        shop_country=country,
+        currency=currency,
+        is_kleinunternehmer=True,
+        buyer_ust_id_nr=None,
+        supplier_ust_id_nr=None,
+        vies=_StubVies(),
+    )
+    assert tb.vat_minor == 0
+    assert tb.note is not None and must_contain in tb.note
+    if must_not_contain is not None:
+        assert must_not_contain not in tb.note
+
+
 @pytest.mark.asyncio
 async def test_kleinunternehmer_overrides_reverse_charge() -> None:
     # A Kleinunternehmer never charges VAT and never issues a reverse-charge

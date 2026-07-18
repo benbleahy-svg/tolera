@@ -36,10 +36,15 @@ from .tax import VAT_PROFILES, to_minor_units, vat_amount
 
 # §13b UStG note rendered on a reverse-charge invoice/quote (DACH-DELTA §3, verbatim).
 REVERSE_CHARGE_NOTE = "Steuerschuldnerschaft des Leistungsempfängers"
-# §19 UStG small-business suppression note (German; Fechner-reviewed before go-live).
-KLEINUNTERNEHMER_NOTE = (
-    "Gemäß §19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmerregelung)."
-)
+# Small-business VAT-suppression note per jurisdiction. Only DE carries a verified
+# statute citation (§19 UStG). AT/CH have their own small-business regimes whose
+# exact legal wording is OPEN (DECISIONS 2026-07-18) — v1 shows an accurate,
+# non-fabricated note rather than inventing a citation (CLAUDE.md §6.4).
+KLEINUNTERNEHMER_NOTES: dict[OrgCountry, str] = {
+    OrgCountry.DE: "Gemäß §19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmerregelung).",
+    OrgCountry.AT: "Kleinunternehmer - es wird keine Umsatzsteuer berechnet.",
+    OrgCountry.CH: "Kleinunternehmen - es wird keine Mehrwertsteuer berechnet.",
+}
 
 # The 27 EU member-state VAT country prefixes. Greece uses ``EL`` (not ``GR``);
 # CH/NO/GB and every other prefix are non-EU → no intra-EU acquisition.
@@ -190,9 +195,10 @@ def _reverse_charge_breakdown(
 
 
 def _kleinunternehmer_breakdown(
-    net: Decimal, currency: str, *, customer_ust_id_nr: str | None
+    net: Decimal, shop_country: OrgCountry, currency: str, *, customer_ust_id_nr: str | None
 ) -> TaxBreakdown:
-    """§19: no VAT line at all; the suppression note is shown instead."""
+    """Small-business regime: no VAT line at all; the jurisdiction's suppression
+    note is shown instead (DE = §19 UStG; AT/CH wording OPEN, DECISIONS 2026-07-18)."""
     net_minor = to_minor_units(net)
     return TaxBreakdown(
         currency=currency,
@@ -203,7 +209,7 @@ def _kleinunternehmer_breakdown(
         vat_label="",
         reverse_charge=False,
         kleinunternehmer=True,
-        note=KLEINUNTERNEHMER_NOTE,
+        note=KLEINUNTERNEHMER_NOTES[shop_country],
         supplier_ust_id_nr=None,
         customer_ust_id_nr=customer_ust_id_nr,
         # §19: no VAT line at all — an empty rate-line set so a consumer (the
@@ -243,7 +249,10 @@ async def resolve_order_tax(
     customer_id = buyer_ust_id_nr or None
 
     if is_kleinunternehmer:
-        return _kleinunternehmer_breakdown(net, currency, customer_ust_id_nr=customer_id), None
+        breakdown = _kleinunternehmer_breakdown(
+            net, shop_country, currency, customer_ust_id_nr=customer_id
+        )
+        return breakdown, None
 
     buyer_country = parse_vat_country(buyer_ust_id_nr)
     has_supplier_id = bool(supplier_ust_id_nr and supplier_ust_id_nr.strip())

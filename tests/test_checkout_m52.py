@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Notification, Order, OrderLine, Quote
+from app.models import Notification, Order, OrderLine, Organization, Quote
 from app.vat_service import VIESClient, ViesResult, get_vies_client
 from tests.conftest import Seeder
 from tests.test_buyer_portal_m51 import _as_admin, _mint, _org_admin, _priced_quote
@@ -63,6 +63,18 @@ def _first_line_ids(payload: dict[str, Any]) -> dict[str, Any]:
         "required_add_on": next(a["id"] for a in item["add_ons"] if a["is_required"]),
         "optional_add_on": next(a["id"] for a in item["add_ons"] if not a["is_required"]),
     }
+
+
+def _set_shop_ust_id(seeder: Seeder, org_id: Any, ust_id: str) -> None:
+    """Give the shop its own USt-IdNr (required before §13b reverse charge)."""
+
+    async def _run() -> None:
+        async with AsyncSession(seeder._engine) as session, session.begin():
+            shop = await session.get(Organization, org_id)
+            assert shop is not None
+            shop.ust_id_nr = ust_id
+
+    seeder._loop.run_until_complete(_run())
 
 
 def _count(seeder: Seeder, model: Any, **where: Any) -> int:
@@ -303,16 +315,7 @@ def test_checkout_fires_shop_notification(seeder: Seeder, app_client: TestClient
 # --------------------------------------------------------------------------- #
 def test_checkout_eu_reverse_charge(seeder: Seeder, app_client: TestClient) -> None:
     org, user = _org_admin(seeder, "checkout-rc")
-
-    async def _set_shop_vat_id() -> None:
-        from app.models import Organization
-
-        async with AsyncSession(seeder._engine) as session, session.begin():
-            shop = await session.get(Organization, org)
-            assert shop is not None
-            shop.ust_id_nr = "DE999999999"
-
-    seeder._loop.run_until_complete(_set_shop_vat_id())
+    _set_shop_ust_id(seeder, org, "DE999999999")
 
     with _as_admin(app_client, org, user) as client:
         qid, _ = _priced_quote(client)
@@ -357,12 +360,16 @@ def test_checkout_eu_reverse_charge(seeder: Seeder, app_client: TestClient) -> N
 
 def test_checkout_invalid_vies_falls_back_to_vat(seeder: Seeder, app_client: TestClient) -> None:
     org, user = _org_admin(seeder, "checkout-badvies")
+    # Shop must have its own USt-IdNr, else reverse charge is skipped before VIES
+    # is ever consulted — we want to exercise the invalid-VIES fail-safe path.
+    _set_shop_ust_id(seeder, org, "DE999999999")
     with _as_admin(app_client, org, user) as client:
         qid, _ = _priced_quote(client)
     _, token = _mint(seeder, app_client, org, qid)
     ids = _first_line_ids(_portal(app_client, token))
 
-    _override_vies(app_client, _StubVies(valid=False))
+    stub = _StubVies(valid=False)
+    _override_vies(app_client, stub)
     try:
         body = app_client.post(
             f"/api/public/quotes/{token}/checkout",
@@ -380,6 +387,62 @@ def test_checkout_invalid_vies_falls_back_to_vat(seeder: Seeder, app_client: Tes
 
     assert body["reverse_charge"] is False
     assert body["vat_minor"] == 4275  # 19% charged — fail-safe
+    assert stub.calls == ["ATU12345678"]  # VIES was actually consulted
+
+    async def _load_order() -> Order:
+        async with AsyncSession(seeder._engine) as session:
+            return (
+                await session.execute(select(Order).where(Order.quote_id == uuid.UUID(qid)))
+            ).scalar_one()
+
+    order = seeder._loop.run_until_complete(_load_order())
+    assert order.vies_valid is False
+    assert order.vies_checked_at is not None
+
+
+def test_checkout_de_kleinunternehmer_suppresses_vat(
+    seeder: Seeder, app_client: TestClient
+) -> None:
+    org, user = _org_admin(seeder, "checkout-klein")
+
+    async def _flag() -> None:
+        async with AsyncSession(seeder._engine) as session, session.begin():
+            shop = await session.get(Organization, org)
+            assert shop is not None
+            shop.is_kleinunternehmer = True
+
+    seeder._loop.run_until_complete(_flag())
+
+    with _as_admin(app_client, org, user) as client:
+        qid, _ = _priced_quote(client)
+    _, token = _mint(seeder, app_client, org, qid)
+    ids = _first_line_ids(_portal(app_client, token))
+
+    body = app_client.post(
+        f"/api/public/quotes/{token}/checkout",
+        json={
+            "selections": [{"quote_item_id": ids["quote_item_id"], "quantity": ids["quantity"]}],
+            "po_number": "PO-K19",
+            "shipping_method": "no_shipping_fees",
+        },
+    ).json()
+    # §19: no VAT — net == gross, and the §19 note is shown.
+    assert body["kleinunternehmer"] is True
+    assert body["vat_minor"] == 0
+    assert body["net_minor"] == 22500
+    assert body["gross_minor"] == 22500
+    assert body["tax_note"] is not None and "§19" in body["tax_note"]
+
+    async def _load_order() -> Order:
+        async with AsyncSession(seeder._engine) as session:
+            return (
+                await session.execute(select(Order).where(Order.quote_id == uuid.UUID(qid)))
+            ).scalar_one()
+
+    order = seeder._loop.run_until_complete(_load_order())
+    assert order.kleinunternehmer is True
+    assert order.vat_minor == 0
+    assert order.tax_rate_lines == []  # §19 = no rate band persisted
 
 
 def test_checkout_ch_charges_mwst_and_currency(seeder: Seeder, app_client: TestClient) -> None:

@@ -156,6 +156,25 @@ describe('CheckoutFlow', () => {
     expect(req.buyer_ust_id_nr).toBe('ATU12345678');
   });
 
+  it('clears the selection after completion so the same lines cannot re-order', async () => {
+    mockFetch.mockResolvedValue(makeQuote());
+    mockCheckout.mockResolvedValue(result());
+    renderPortal();
+
+    await selectAndProceed();
+    await userEvent.type(screen.getByLabelText(/Bestellnummer/), 'PO-4711');
+    await userEvent.click(screen.getByRole('button', { name: 'Weiter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Weiter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Bestellung aufgeben' }));
+    await screen.findByText('Vielen Dank für Ihre Bestellung');
+
+    // "Fertig" returns to the portal with the selection cleared → no active
+    // checkout CTA, so the same selection cannot start a second order.
+    await userEvent.click(screen.getByRole('button', { name: 'Fertig' }));
+    expect(await screen.findByText(/Wählen Sie eine Option/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Zur Bestellung' })).not.toBeInTheDocument();
+  });
+
   it('disables the checkout CTA on a soft-expired quote', async () => {
     mockFetch.mockResolvedValue(makeQuote({ is_expired: true }));
     renderPortal();

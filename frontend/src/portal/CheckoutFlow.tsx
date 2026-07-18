@@ -82,12 +82,16 @@ export function CheckoutFlow({
   selections,
   subtotalNet,
   onClose,
+  onComplete,
 }: {
   quote: BuyerQuote;
   token: string;
   selections: SelectionMap;
   subtotalNet: string;
   onClose: () => void;
+  /** Called from the confirmation's "Done" — distinct from a mid-flow cancel so
+   *  the parent can clear the selection and stop a second order for it. */
+  onComplete: () => void;
 }) {
   const { t } = useTranslation();
   const { currency } = quote;
@@ -144,7 +148,7 @@ export function CheckoutFlow({
           <dl className="portal-checkout-totals">
             <div>
               <dt>{t('checkout.net')}</dt>
-              <dd className="portal-num">{formatMinor(result.net_minor, currency)}</dd>
+              <dd className="portal-num">{formatMinor(result.net_minor, result.currency)}</dd>
             </div>
             {result.reverse_charge ? (
               <div>
@@ -161,15 +165,15 @@ export function CheckoutFlow({
                 <dt>
                   {result.vat_label ?? t('checkout.vat')} ({result.vat_rate_pct} %)
                 </dt>
-                <dd className="portal-num">{formatMinor(result.vat_minor, currency)}</dd>
+                <dd className="portal-num">{formatMinor(result.vat_minor, result.currency)}</dd>
               </div>
             )}
             <div className="portal-checkout-gross">
               <dt>{t('checkout.gross')}</dt>
-              <dd className="portal-num">{formatMinor(result.gross_minor, currency)}</dd>
+              <dd className="portal-num">{formatMinor(result.gross_minor, result.currency)}</dd>
             </div>
           </dl>
-          <button type="button" className="portal-checkout-close" onClick={onClose}>
+          <button type="button" className="portal-checkout-close" onClick={onComplete}>
             {t('checkout.done')}
           </button>
         </div>
