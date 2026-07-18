@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2044,17 +2044,19 @@ async def delete_discount_def(
 # --------------------------------------------------------------------------- #
 # API — Refresh Pricing (E4-d opt-in re-run; single quote)
 # --------------------------------------------------------------------------- #
-@pricing_router.post("/quotes/{quote_id}/refresh-pricing")
-async def refresh_pricing(
-    quote_id: uuid.UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
-) -> Any:
+async def refresh_quote_pricing(
+    session: AsyncSession, org_id: uuid.UUID, quote_id: uuid.UUID
+) -> int | None:
+    """Re-snapshot a quote's factory-attached pricing/discount/op rows from the live
+    org defs and re-run costing+pricing, **preserving every ``manual_*``** (E4-d
+    refresh contract). Returns the number of line items refreshed, or ``None`` when
+    the quote is missing/trashed (the caller decides 404 vs. skip). Shared by the
+    single-quote endpoint and M5.0 Bulk Refresh — one engine, no divergence."""
     from .costing import recalculate_component
 
     quote = await session.get(Quote, quote_id)
     if quote is None or quote.deleted_at is not None:
-        raise AppError("not_found", "Quote not found.", status_code=status.HTTP_404_NOT_FOUND)
+        return None
 
     items = (await session.scalars(select(QuoteItem).where(QuoteItem.quote_id == quote_id))).all()
     defs = {
@@ -2102,9 +2104,7 @@ async def refresh_pricing(
         position = max((i.position for i in existing), default=-1) + 1
         for def_id, item_def in defs.items():
             if def_id not in attached_def_ids:
-                session.add(
-                    _snapshot_item(item_def, principal.active_org_id, component_id, position)
-                )
+                session.add(_snapshot_item(item_def, org_id, component_id, position))
                 position += 1
 
         existing_discounts = (
@@ -2124,11 +2124,7 @@ async def refresh_pricing(
         position = max((d.position for d in existing_discounts), default=-1) + 1
         for def_id, discount_def in discount_defs.items():
             if def_id not in attached_discount_defs:
-                session.add(
-                    _snapshot_discount(
-                        discount_def, principal.active_org_id, component_id, position
-                    )
-                )
+                session.add(_snapshot_discount(discount_def, org_id, component_id, position))
                 position += 1
 
         # op formula snapshots re-copy too (DECISIONS.md 2026-07-08)
@@ -2141,7 +2137,75 @@ async def refresh_pricing(
 
         await session.flush()
         # full re-run: costs first (preserving manual_*), then pricing
-        await recalculate_component(session, principal.active_org_id, component_id)
+        await recalculate_component(session, org_id, component_id)
         refreshed += 1
 
+    return refreshed
+
+
+@pricing_router.post("/quotes/{quote_id}/refresh-pricing")
+async def refresh_pricing(
+    quote_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> Any:
+    """Refresh a single quote's pricing (E4-d; spec #kalk-rollup) — re-snapshot the
+    factory rows, preserve every ``manual_*``."""
+    refreshed = await refresh_quote_pricing(session, principal.active_org_id, quote_id)
+    if refreshed is None:
+        raise AppError("not_found", "Quote not found.", status_code=status.HTTP_404_NOT_FOUND)
     return {"refreshed_items": refreshed}
+
+
+class BulkRefreshRequest(BaseModel):
+    """The quotes-list multi-selection to re-price (M5.0)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quote_ids: Annotated[list[uuid.UUID], Field(min_length=1, max_length=500)]
+
+
+@pricing_router.post("/quotes/bulk-refresh-pricing")
+async def bulk_refresh_pricing(
+    payload: BulkRefreshRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> dict[str, Any]:
+    """Bulk Refresh Pricing over a quotes-list multi-select (DECISIONS 2026-07-09) —
+    a thin batch loop over the single-quote engine, preserving every ``manual_*``.
+    Small selections run inline; a large one is handed to Celery (202 + task id).
+    Missing/trashed quotes are skipped, never a hard error."""
+    from .bulk_refresh import BULK_REFRESH_SYNC_MAX, enqueue_bulk_refresh
+
+    # De-dupe while keeping the caller's order — a repeated id is one refresh.
+    ids = list(dict.fromkeys(payload.quote_ids))
+    if len(ids) > BULK_REFRESH_SYNC_MAX:
+        task_id = enqueue_bulk_refresh(principal.active_org_id, ids)
+        if task_id is None:
+            # Broker down — fail loudly rather than a false "queued" (the client
+            # would otherwise drop the selection and nothing would ever run).
+            raise AppError(
+                "bulk_refresh_unavailable",
+                "Bulk refresh could not be queued right now — please try again.",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        response.status_code = status.HTTP_202_ACCEPTED
+        return {"mode": "async", "task_id": task_id, "quote_count": len(ids)}
+
+    refreshed_quotes = 0
+    refreshed_items = 0
+    skipped = 0
+    for quote_id in ids:
+        n = await refresh_quote_pricing(session, principal.active_org_id, quote_id)
+        if n is None:
+            skipped += 1
+            continue
+        refreshed_quotes += 1
+        refreshed_items += n
+    return {
+        "mode": "sync",
+        "refreshed_quotes": refreshed_quotes,
+        "refreshed_items": refreshed_items,
+        "skipped": skipped,
+    }

@@ -180,6 +180,9 @@ export interface QuoteItemSummary {
   position: number;
   root_component_id: string;
   part_id: string;
+  workflow_status: string;
+  /** M5.0 #partview — per-line-item priority (higher = more urgent), or null. */
+  priority: number | null;
   quantities: { quantity: number; make_quantity: number; deliver_quantity: number }[];
 }
 

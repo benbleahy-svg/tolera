@@ -12,13 +12,15 @@ path"). This module is the authority for:
   * coercing the JSON scalar values to typed comparands (enum / uuid / datetime);
   * applying validated clauses to a SQLAlchemy ``Select`` over :class:`Quote`;
   * the **computed system views** (All Quotes, My Quotes, Drafts, Outstanding,
-    Overdue) — derived from status / ``due_date`` / the caller, **never stored**
-    (spec: "Outstanding/Overdue are derived, not stored").
+    Overdue, Highest Priority) — derived from status / ``due_date`` / the caller /
+    the line-item priority rollup, **never stored** (spec: derived, not stored).
 
-v1 scope (DECISIONS.md 2026-06-25): ``priority`` is intentionally **not** a field
-(its home — quote vs. line_item — is unresolved; adding it would commit contested
-schema). Filters use **absolute** values only; relative presets ("last 90 days") are
-surfaced as system views / client sugar, not a stored relative-date type.
+Filters use **absolute** values only; relative presets ("last 90 days") are surfaced
+as system views / client sugar, not a stored relative-date type.
+
+M5.0 (DECISIONS 2026-07-17 *Quote-level priority home*): ``priority`` is now a
+field — the derived **MAX(line-item priority)** per quote (:data:`QUOTE_MAX_PRIORITY`),
+resolving the 2026-06-25 open question (its home is ``quote_item``, not ``quote``).
 """
 
 from __future__ import annotations
@@ -29,10 +31,27 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
-from sqlalchemy import ColumnElement, Select, func, or_
+from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.orm import InstrumentedAttribute
 
-from .models import Quote, QuoteStatus
+from .models import Quote, QuoteItem, QuoteStatus
+
+#: A filterable/sortable target: either a mapped ``Quote`` column or a derived SQL
+#: expression (the priority subquery). Both support ``.is_`` / comparison / ``.desc``.
+_Col = InstrumentedAttribute[Any] | ColumnElement[Any]
+
+#: Derived per-quote priority = MAX over its line items' ``priority`` (M5.0
+#: #partview; DECISIONS 2026-07-17 *Quote-level priority home* — one source of
+#: truth on ``quote_item``, no quote-level column). A correlated scalar subquery
+#: so it drops into the same filter/sort machinery as a flat column; NULL when a
+#: quote has no prioritised line item. ``correlate(Quote)`` pins the reference to
+#: the outer quote row even inside the count subquery.
+QUOTE_MAX_PRIORITY: ColumnElement[Any] = (
+    select(func.max(QuoteItem.priority))
+    .where(QuoteItem.quote_id == Quote.id)
+    .correlate(Quote)
+    .scalar_subquery()
+)
 
 
 class FilterField(enum.StrEnum):
@@ -44,6 +63,8 @@ class FilterField(enum.StrEnum):
     estimator_id = "estimator_id"
     created_at = "created_at"
     due_date = "due_date"
+    #: Derived MAX(line-item priority) — M5.0 (see :data:`QUOTE_MAX_PRIORITY`).
+    priority = "priority"
 
 
 class SortField(enum.StrEnum):
@@ -53,6 +74,8 @@ class SortField(enum.StrEnum):
     due_date = "due_date"
     status = "status"
     number = "number"
+    #: Derived MAX(line-item priority) — M5.0 (see :data:`QUOTE_MAX_PRIORITY`).
+    priority = "priority"
 
 
 class FilterOp(enum.StrEnum):
@@ -70,7 +93,7 @@ class SortDir(enum.StrEnum):
     desc = "desc"
 
 
-_Kind = Literal["enum", "uuid", "datetime"]
+_Kind = Literal["enum", "uuid", "datetime", "int"]
 
 # field → (value kind, operators valid for it). The single allow-list: a clause whose
 # (field, op) pair is absent is rejected at parse time with a 422.
@@ -81,23 +104,30 @@ _FILTER_SPEC: dict[FilterField, tuple[_Kind, frozenset[FilterOp]]] = {
     FilterField.estimator_id: ("uuid", frozenset({FilterOp.eq, FilterOp.in_, FilterOp.is_null})),
     FilterField.created_at: ("datetime", frozenset({FilterOp.gte, FilterOp.lte})),
     FilterField.due_date: ("datetime", frozenset({FilterOp.gte, FilterOp.lte, FilterOp.is_null})),
+    FilterField.priority: (
+        "int",
+        frozenset({FilterOp.eq, FilterOp.in_, FilterOp.is_null, FilterOp.gte, FilterOp.lte}),
+    ),
 }
 
-# field → the mapped ORM column (kept beside _FILTER_SPEC; same keys).
-_FILTER_COLUMN: dict[FilterField, InstrumentedAttribute[Any]] = {
+# field → the SQL column/expression (kept beside _FILTER_SPEC; same keys). Most are
+# flat ``Quote`` columns; ``priority`` is the derived MAX subquery (M5.0).
+_FILTER_COLUMN: dict[FilterField, _Col] = {
     FilterField.status: Quote.status,
     FilterField.account_id: Quote.account_id,
     FilterField.salesperson_id: Quote.salesperson_id,
     FilterField.estimator_id: Quote.estimator_id,
     FilterField.created_at: Quote.created_at,
     FilterField.due_date: Quote.due_date,
+    FilterField.priority: QUOTE_MAX_PRIORITY,
 }
 
-_SORT_COLUMN: dict[SortField, InstrumentedAttribute[Any]] = {
+_SORT_COLUMN: dict[SortField, _Col] = {
     SortField.created_at: Quote.created_at,
     SortField.due_date: Quote.due_date,
     SortField.status: Quote.status,
     SortField.number: Quote.number,
+    SortField.priority: QUOTE_MAX_PRIORITY,
 }
 
 
@@ -113,6 +143,11 @@ def _coerce_scalar(kind: _Kind, value: Any) -> Any:
             if not isinstance(value, str):
                 raise ValueError("expected a UUID string")
             return uuid.UUID(value)
+        if kind == "int":
+            # bool is an int subclass — reject it so ``true`` isn't read as 1.
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError("expected an integer")
+            return value
         # datetime
         if not isinstance(value, str):
             raise ValueError("expected an ISO-8601 datetime string")
@@ -195,7 +230,12 @@ def apply_sort(stmt: Select[Any], sorts: list[SortClause]) -> Select[Any]:
     order = []
     for sort in sorts:
         column = _SORT_COLUMN[sort.field]
-        order.append(column.desc() if sort.dir == SortDir.desc else column.asc())
+        expr = column.desc() if sort.dir == SortDir.desc else column.asc()
+        # Derived priority is nullable (a quote with no prioritised line) — keep the
+        # blanks at the bottom whichever way it's sorted, so "highest first" is real.
+        if sort.field == SortField.priority:
+            expr = expr.nulls_last()
+        order.append(expr)
     if not order:
         order.append(Quote.created_at.desc())
     order.append(Quote.id.desc())  # deterministic tiebreaker
@@ -221,6 +261,7 @@ SYSTEM_QUOTE_VIEWS: tuple[SystemView, ...] = (
     SystemView(key="drafts", label_key="quotes.views.drafts"),
     SystemView(key="outstanding", label_key="quotes.views.outstanding"),
     SystemView(key="overdue", label_key="quotes.views.overdue"),
+    SystemView(key="highest-priority", label_key="quotes.views.highest_priority"),
 )
 
 _SYSTEM_VIEW_KEYS = frozenset(v.key for v in SYSTEM_QUOTE_VIEWS)
@@ -258,4 +299,8 @@ def apply_system_view(stmt: Select[Any], key: str, *, user_id: uuid.UUID) -> Sel
             Quote.due_date < func.now(),
             Quote.status.in_(_OPEN_STATUSES),
         ).order_by(Quote.due_date.asc(), Quote.id.desc())
+    if key == "highest-priority":
+        # Spec #partview "Highest Priority": the most urgent quotes first. Derived
+        # MAX(line-item priority) DESC; unprioritised quotes fall to the bottom.
+        return stmt.order_by(QUOTE_MAX_PRIORITY.desc().nulls_last(), Quote.id.desc())
     raise ValueError(f"unknown system view: {key!r}")

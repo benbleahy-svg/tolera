@@ -326,6 +326,28 @@ def test_inline_add_auto_saves_to_library(app_client: TestClient, seeder: Seeder
     assert row["operation_def_id"] == defs[0]["id"]
 
 
+def test_operation_defs_filter_by_is_finish(app_client: TestClient, seeder: Seeder) -> None:
+    """M5.0 #partview: the REQUESTED FINISHES multi-select lists ``is_finish`` defs
+    only — ``GET /api/operation-defs?is_finish=true`` narrows to finish operations."""
+    org, admin = _org_admin(seeder)
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        app_client.post(
+            "/api/operation-defs",
+            json={"name": "Eloxieren", "calculation_mode": "labour_only", "is_finish": True},
+        )
+        app_client.post(
+            "/api/operation-defs",
+            json={"name": "CNC Fräsen", "calculation_mode": "labour_only", "run_rate": "80"},
+        )
+        finishes = app_client.get("/api/operation-defs", params={"is_finish": "true"}).json()
+        non_finishes = app_client.get("/api/operation-defs", params={"is_finish": "false"}).json()
+    finish_names = {d["name"] for d in finishes}
+    assert "Eloxieren" in finish_names
+    assert "CNC Fräsen" not in finish_names
+    assert all(d["is_finish"] for d in finishes)
+    assert all(not d["is_finish"] for d in non_finishes)
+
+
 def test_attach_copies_def_config_config_freeze(app_client: TestClient, seeder: Seeder) -> None:
     # Library edits after attach must not reprice the quote: config is copied.
     org, admin = _org_admin(seeder)

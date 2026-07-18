@@ -118,6 +118,7 @@ module = [
     "app.triage",
     "app.rule_suggest",
     "app.requote_diff",
+    "app.bulk_refresh",
 ]
 disallow_untyped_decorators = false
 disallow_subclassing_any = false

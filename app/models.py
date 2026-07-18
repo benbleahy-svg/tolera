@@ -907,6 +907,12 @@ class QuoteItem(Base):
         # Composite-FK target (house pattern; DDL added in 0026) — review_item
         # and bom_draft pin to (org_id, id).
         UniqueConstraint("org_id", "id", name="uq_quote_item_org_id_id"),
+        # M5.0 #partview: priority is a numeric line-item field ("numeric
+        # priorities seen (6, 7) and blank"); higher = more urgent. Positive or
+        # NULL — the quote grid derives MAX over these (no quote-level column).
+        CheckConstraint(
+            "priority IS NULL OR priority >= 1", name="ck_quote_item_priority_positive"
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -914,6 +920,10 @@ class QuoteItem(Base):
     quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     root_component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     position: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: M5.0 #partview — per-line-item priority (nullable numeric; higher = more
+    #: urgent). The quotes grid/filter/"Highest Priority" view derive MAX(priority)
+    #: per quote (DECISIONS 2026-07-17 *Quote-level priority home*).
+    priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     workflow_status: Mapped[QiWorkflowStatus] = mapped_column(
         _qi_workflow_status_enum, nullable=False, server_default=QiWorkflowStatus.not_started.value
     )

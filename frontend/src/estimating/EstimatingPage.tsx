@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
@@ -32,7 +32,10 @@ import { BulkCreateDialog } from './BulkCreateDialog';
 import { useEstimatingApi } from './api';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { LeadTimesSection } from './LeadTimesSection';
+import { LineItemActionsMenu } from './LineItemActionsMenu';
+import { LineItemSidebar } from './LineItemSidebar';
 import { MaterialPicker } from './MaterialPicker';
+import { RequestedFinishes } from './RequestedFinishes';
 import { OperationDrawer } from './OperationDrawer';
 import { ReviewItemsPanel } from '../review/ReviewItemsPanel';
 import { OperationsSection } from './OperationsSection';
@@ -54,7 +57,10 @@ import type {
 } from './types';
 
 export function EstimatingPage() {
-  const { quoteId } = useParams<{ quoteId: string }>();
+  // M5.0 #partview — the spec route is /quotes/edit/:id/:lineItemId (a left sidebar
+  // picks the item). `/quotes/edit/:id` (no item) forwards to the first one below.
+  const { id: quoteId, lineItemId } = useParams<{ id: string; lineItemId?: string }>();
+  const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const api = useEstimatingApi();
   const suggestApi = useRuleSuggestApi();
@@ -85,6 +91,20 @@ export function EstimatingPage() {
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
   const partId = quote?.items[itemIndex]?.part_id ?? null;
   const quoteItemId = quote?.items[itemIndex]?.id ?? null;
+
+  // Resolve the active line item from the URL (M5.0). If the URL lacks a valid
+  // lineItemId but the quote has items, forward to the first — so `/quotes/edit/:id`
+  // and the old-route redirect both land on a real item.
+  useEffect(() => {
+    if (!quote || !quoteId || quote.items.length === 0) return;
+    const idx = quote.items.findIndex((i) => i.id === lineItemId);
+    if (idx === -1) {
+      navigate(`/quotes/edit/${quoteId}/${quote.items[0].id}`, { replace: true });
+    } else if (idx !== itemIndex) {
+      setItemIndex(idx);
+      setDrawerOpId(null);
+    }
+  }, [quote, quoteId, lineItemId, itemIndex, navigate]);
 
   const fail = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : String(e));
@@ -387,30 +407,61 @@ export function EstimatingPage() {
       .catch(fail);
   };
 
+  // M5.0 — sidebar navigation + line-item costing-inputs actions.
+  const selectItem = (itemId: string) => navigate(`/quotes/edit/${quoteId}/${itemId}`);
+
+  const addLineItem = () => {
+    setError(null);
+    api
+      .addLineItem(quoteId)
+      .then((next) => {
+        setQuote(next);
+        const added = next.items[next.items.length - 1];
+        if (added) navigate(`/quotes/edit/${quoteId}/${added.id}`);
+      })
+      .catch(fail);
+  };
+
+  const attachFinish = (defId: string) => {
+    if (componentId) apply(api.addOperation(componentId, { operation_def_id: defId }));
+  };
+
+  const removeFinish = (operationId: string) => {
+    setError(null);
+    api
+      .removeOperation(operationId)
+      .then(() => {
+        if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+        loadPricing();
+      })
+      .catch(fail);
+  };
+
+  const setPriority = (priority: number | null) => {
+    if (!quoteItemId) return;
+    setError(null);
+    api.setLineItemPriority(quoteId, quoteItemId, priority).then(setQuote).catch(fail);
+  };
+
+  const activeItem = quote.items[itemIndex] ?? null;
+
   return (
-    <main className="est-page">
+    <div className="est-layout">
+      <LineItemSidebar
+        quote={quote}
+        activeItemId={quoteItemId}
+        editable={editable}
+        onSelect={selectItem}
+        onAddItem={addLineItem}
+      />
+      <main className="est-page">
       <header className="est-header">
+        <Link className="est-return-link" to="/quotes">
+          {t('estimating.return_to_quotes')}
+        </Link>
         <h2>
           {t('estimating.title', { number: quote.number })}
         </h2>
-        {quote.items.length > 1 && (
-          <label>
-            {t('estimating.line_item')}
-            <select
-              value={itemIndex}
-              onChange={(e) => {
-                setItemIndex(Number(e.target.value));
-                setDrawerOpId(null);
-              }}
-            >
-              {quote.items.map((item, index) => (
-                <option key={item.id} value={index}>
-                  {t('estimating.item_option', { position: item.position })}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         {partId && (
           <PartMatchesChip
             key={partId}
@@ -471,6 +522,22 @@ export function EstimatingPage() {
             }}
             disabled={!editable}
           />
+          {componentId && (
+            <RequestedFinishes
+              operations={costing?.operations ?? []}
+              loadFinishDefs={api.listFinishDefs}
+              onAttach={attachFinish}
+              onRemove={removeFinish}
+              disabled={!editable}
+            />
+          )}
+          {activeItem && (
+            <LineItemActionsMenu
+              priority={activeItem.priority}
+              onSetPriority={setPriority}
+              disabled={!editable}
+            />
+          )}
         </div>
       </header>
 
@@ -845,6 +912,7 @@ export function EstimatingPage() {
           onClose={() => setChangingProcess(false)}
         />
       )}
-    </main>
+      </main>
+    </div>
   );
 }

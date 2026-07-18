@@ -11,6 +11,7 @@ const listSavedViews = vi.fn();
 const createSavedView = vi.fn();
 const updateSavedView = vi.fn();
 const deleteSavedView = vi.fn();
+const bulkRefreshPricing = vi.fn();
 
 // Mock the quotes API module so the page never touches Clerk/network.
 vi.mock('./api', () => ({
@@ -20,6 +21,7 @@ vi.mock('./api', () => ({
     createSavedView,
     updateSavedView,
     deleteSavedView,
+    bulkRefreshPricing,
   }),
 }));
 
@@ -63,6 +65,7 @@ describe('QuotesPage', () => {
     listSavedViews.mockReset();
     createSavedView.mockReset();
     deleteSavedView.mockReset();
+    bulkRefreshPricing.mockReset();
     listSavedViews.mockResolvedValue({ system: SYSTEM, custom: [] });
     searchQuotes.mockResolvedValue({ rows: [], total: 0, limit: 20, offset: 0 });
   });
@@ -127,5 +130,67 @@ describe('QuotesPage', () => {
     // A view-only user still sees the sidebar default, but not the create action.
     expect(await screen.findByRole('button', { name: 'Alle Angebote' })).toBeInTheDocument();
     expect(screen.queryByText('Angebot erstellen')).not.toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------- M5.0
+  it('renders the derived MAX priority in the grid ("—" when blank)', async () => {
+    searchQuotes.mockResolvedValue({
+      rows: [quote('Q-1', 'draft', { priority: 7 }), quote('Q-2', 'draft', { priority: null })],
+      total: 2,
+      limit: 20,
+      offset: 0,
+    });
+    await renderWithProviders(<QuotesPage />, { route: '/quotes' });
+    expect(await screen.findByText('Q-1')).toBeInTheDocument();
+    expect(screen.getByText('7')).toBeInTheDocument();
+  });
+
+  it('offers the Highest Priority system view when the server lists it', async () => {
+    listSavedViews.mockResolvedValue({
+      system: [...SYSTEM, { key: 'highest-priority', label_key: 'quotes.views.highest_priority', is_default: false }],
+      custom: [],
+    });
+    await renderWithProviders(<QuotesPage />, { route: '/quotes' });
+    const view = await screen.findByRole('button', { name: 'Höchste Priorität' });
+    await userEvent.click(view);
+    await waitFor(() =>
+      expect(searchQuotes).toHaveBeenLastCalledWith(
+        expect.objectContaining({ system_view: 'highest-priority' }),
+      ),
+    );
+  });
+
+  it('bulk-refreshes the selected quotes and reports the result', async () => {
+    searchQuotes.mockResolvedValue({
+      rows: [quote('Q-1', 'draft', { priority: null }), quote('Q-2', 'draft', { priority: null })],
+      total: 2,
+      limit: 20,
+      offset: 0,
+    });
+    bulkRefreshPricing.mockResolvedValue({ mode: 'sync', refreshed_quotes: 2, refreshed_items: 3, skipped: 0 });
+    await renderWithProviders(<QuotesPage />, { route: '/quotes' });
+    await screen.findByText('Q-1');
+
+    // Select both rows via the header "select all" checkbox, then Refresh Pricing.
+    await userEvent.click(screen.getByLabelText('Alle auswählen'));
+    await userEvent.click(screen.getByRole('button', { name: /Preise aktualisieren \(2\)/ }));
+
+    expect(bulkRefreshPricing).toHaveBeenCalledWith(['q-Q-1', 'q-Q-2']);
+    expect(await screen.findByText('2 Angebote aktualisiert')).toBeInTheDocument();
+  });
+
+  it('does not show the bulk-refresh action to a view-only user', async () => {
+    searchQuotes.mockResolvedValue({
+      rows: [quote('Q-1', 'draft', { priority: null })],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+    await renderWithProviders(<QuotesPage />, {
+      me: makeMe({ effective_permissions: ['view_all'], roles: ['viewer'] }),
+    });
+    await screen.findByText('Q-1');
+    expect(screen.queryByLabelText('Alle auswählen')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Preise aktualisieren/ })).not.toBeInTheDocument();
   });
 });
