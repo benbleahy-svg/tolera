@@ -220,7 +220,7 @@ interface BucketRowProps {
 
 function BucketRow({ bucket, expanded, onToggle, canImport, importing, onImport }: BucketRowProps) {
   const { t } = useTranslation();
-  const pending = bucket.status === 'pending_m4';
+  const processing = bucket.status === 'processing';
   return (
     <section className="match-bucket">
       <button
@@ -229,14 +229,14 @@ function BucketRow({ bucket, expanded, onToggle, canImport, importing, onImport 
         aria-expanded={expanded}
         data-testid={`bucket-${bucket.key}`}
         onClick={onToggle}
-        disabled={pending}
+        disabled={processing}
       >
         <span>
           {t(`parts.match.bucket.${bucket.key}`)} ({bucket.count})
         </span>
-        {pending && <span className="crm-chip">{t('parts.match.pending_m4')}</span>}
+        {processing && <span className="crm-chip">{t('parts.match.processing')}</span>}
       </button>
-      {expanded && !pending && bucket.matches.length > 0 && (
+      {expanded && !processing && bucket.matches.length > 0 && (
         <ul className="match-cards">
           {bucket.matches.map((card) => (
             <MatchCardView

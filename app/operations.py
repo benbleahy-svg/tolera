@@ -31,7 +31,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,7 +41,7 @@ from .config_completeness import material_missing_cost, operation_missing_rate
 from .costing import CostBucket, effective_cost, recalculate_component, rollup_inputs
 from .deps import get_session
 from .errors import AppError
-from .kalk_costing import operation_kalk_report
+from .kalk_costing import load_table_provider, operation_kalk_report
 from .models import (
     CalculationMode,
     Component,
@@ -56,8 +56,10 @@ from .models import (
     QuoteItem,
     QuoteStatus,
     SetupBasis,
+    ValueSource,
 )
 from .services import kalk
+from .services.kalk.synthetic import evaluate_def_formula
 
 operations_router = APIRouter(prefix="/api", tags=["operations"])
 
@@ -84,6 +86,9 @@ class OperationDefOut(BaseModel):
     is_pre_installed: bool
     sort_order: int
     cost_formula: str | None
+    # M4.14: the Variables-table eye toggles ({var_name: bool}); the client
+    # toggles one key against this map and PUTs the result back
+    variable_visibility: dict[str, bool]
 
 
 class OperationDefCreate(BaseModel):
@@ -158,6 +163,10 @@ class OperationOut(BaseModel):
     notes: str | None
     cost_formula: str | None
     variable_overrides: dict[str, Any]
+    # M4.13 provenance (spec #ai-quote-assembly): drives the "importiert aus
+    # Angebot #N" badge in the variable drawer.
+    source: ValueSource
+    source_quote_id: uuid.UUID | None
     # M1.14 #missing-rates-warning: this row's rate resolves to nothing — the
     # amber inline highlight (deterministic, computed from the same rule as
     # the Configure banner)
@@ -375,6 +384,7 @@ def _def_out(op_def: OperationDef) -> OperationDefOut:
         is_pre_installed=op_def.is_pre_installed,
         sort_order=op_def.sort_order,
         cost_formula=op_def.cost_formula,
+        variable_visibility={k: bool(v) for k, v in (op_def.variable_visibility or {}).items()},
     )
 
 
@@ -413,6 +423,8 @@ def _operation_out(op: Operation, cells: list[QuoteCell]) -> OperationOut:
         notes=op.notes,
         cost_formula=op.cost_formula,
         variable_overrides=op.variable_overrides,
+        source=op.source,
+        source_quote_id=op.source_quote_id,
         missing_rate=operation_missing_rate(op),
         origin=op.origin,
         cells=cell_out,
@@ -500,6 +512,7 @@ async def attach_operation_from_def(
         setup_basis=op_def.setup_basis,
         setup_cost=op_def.setup_cost,
         cost_formula=op_def.cost_formula,
+        variable_visibility=dict(op_def.variable_visibility or {}),
         calc_setup_mins=op_def.setup_time_mins,
         # Outside-process defs are outside services by construction.
         is_outside_service=(
@@ -535,11 +548,16 @@ async def list_operation_defs(
     session: Annotated[AsyncSession, Depends(get_session)],
     _: Annotated[Principal, Depends(require(Permission.view_all))],
     q: Annotated[str | None, Query(max_length=100)] = None,
+    is_finish: Annotated[bool | None, Query()] = None,
 ) -> list[OperationDefOut]:
-    """The picker's type-ahead: live defs, case-insensitive substring on name."""
+    """The picker's type-ahead: live defs, case-insensitive substring on name.
+    ``is_finish=true`` narrows to finish operations — the source for the estimating
+    band's REQUESTED FINISHES multi-select (M5.0 #partview)."""
     stmt = select(OperationDef).where(OperationDef.deleted_at.is_(None))
     if q:
         stmt = stmt.where(OperationDef.name.ilike(f"%{q}%"))
+    if is_finish is not None:
+        stmt = stmt.where(OperationDef.is_finish.is_(is_finish))
     defs = (
         await session.scalars(
             stmt.order_by(OperationDef.sort_order, OperationDef.name).limit(SEARCH_LIMIT)
@@ -916,6 +934,107 @@ async def get_operation_kalk_report(
     return await operation_kalk_report(
         session, component, operation, list(operations), list(breaks), list(cells)
     )
+
+
+# --------------------------------------------------------------------------- #
+# Op-def Variables table (M4.14)
+# --------------------------------------------------------------------------- #
+class OpDefKalkReport(BaseModel):
+    """The def editor's Variables-table report — the formula evaluated once
+    against the synthetic context (no quote operation involved).
+
+    ``variable_visibility`` is the def's **stored** eye map: the client must
+    build the next full-replace PUT from it (never from a cached defs-list
+    row) so a toggle can't silently wipe earlier toggles."""
+
+    declared_variables: list[dict[str, Any]]
+    variable_groups: list[dict[str, Any]]
+    errors: list[KalkErrorOut]
+    variable_visibility: dict[str, bool]
+
+
+class VariableVisibilityUpdate(BaseModel):
+    """Replace the def's eye toggles (``{var_name: bool}``). Full-replace,
+    same posture as the operation-level overrides PUT; keys that stop
+    matching a declared variable after a formula edit are inert. Bounded so
+    a config-edit client can't accumulate unbounded jsonb junk that would be
+    copied onto every attached operation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    visibility: dict[Annotated[str, Field(min_length=1, max_length=200)], StrictBool] = Field(
+        max_length=200
+    )
+
+
+async def _get_op_def_or_404(session: AsyncSession, def_id: uuid.UUID) -> OperationDef:
+    op_def = await session.get(OperationDef, def_id)
+    if op_def is None or op_def.deleted_at is not None:
+        raise AppError(
+            "not_found",
+            "Operation definition not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    return op_def
+
+
+async def _def_kalk_report(session: AsyncSession, op_def: OperationDef) -> OpDefKalkReport:
+    from functools import partial
+
+    from anyio import to_thread
+
+    stored = {k: bool(v) for k, v in (op_def.variable_visibility or {}).items()}
+    if op_def.cost_formula is None:
+        return OpDefKalkReport(
+            declared_variables=[], variable_groups=[], errors=[], variable_visibility=stored
+        )
+    provider = await load_table_provider(session)
+    # sandbox evaluation is CPU-bound (0.5 s deadline) — off the event loop,
+    # same posture as recalc (app.costing)
+    report = await to_thread.run_sync(
+        partial(
+            evaluate_def_formula,
+            op_def.cost_formula,
+            def_name=op_def.name,
+            visibility=stored,
+            table_provider=provider,
+        )
+    )
+    return OpDefKalkReport(
+        declared_variables=report["declared_variables"],
+        variable_groups=report["variable_groups"],
+        errors=[KalkErrorOut(**e) for e in report["errors"]],
+        variable_visibility=stored,
+    )
+
+
+@operations_router.get("/operation-defs/{def_id}/kalk")
+async def get_operation_def_kalk_report(
+    def_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.view_all))],
+) -> OpDefKalkReport:
+    """Declared variables + defaults + effective visibility for one def's
+    formula. Evaluation failures come back as report ``errors`` (the CHECK
+    chrome renders them) — never a 500; a def without a formula reports
+    empty."""
+    return await _def_kalk_report(session, await _get_op_def_or_404(session, def_id))
+
+
+@operations_router.put("/operation-defs/{def_id}/variable-visibility")
+async def set_def_variable_visibility(
+    def_id: uuid.UUID,
+    payload: VariableVisibilityUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.config_edit))],
+) -> OpDefKalkReport:
+    """The eye toggle: replace the def's visibility map and return the
+    refreshed report. Attached quote operations keep their attach-time
+    snapshot (E4-d config-freeze); Refresh Pricing re-copies deliberately."""
+    op_def = await _get_op_def_or_404(session, def_id)
+    op_def.variable_visibility = dict(payload.visibility)
+    await session.flush()
+    return await _def_kalk_report(session, op_def)
 
 
 # --------------------------------------------------------------------------- #

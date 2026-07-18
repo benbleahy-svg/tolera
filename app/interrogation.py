@@ -45,6 +45,7 @@ from .deps import get_session
 from .errors import AppError
 from .file_types import FileCategory
 from .geometry import RECOGNIZED_FAMILIES
+from .geometry.vector import build_geometry_vector
 from .models import (
     Component,
     CustomInterrogation,
@@ -243,6 +244,9 @@ async def clear_extracted_geometry(session: AsyncSession, part: Part) -> None:
     the human's, not the file's); a queued run for the new PRIMARY refills the
     raw side on success — and a non-CAD PRIMARY simply has no geometry."""
     part.geom_hash = None
+    # The similarity vector describes the old PRIMARY too — a stale one would
+    # keep serving this part as a "similar geometry" match (M4.11).
+    part.geometry_vector = None
     geom = await session.scalar(select(PartGeometry).where(PartGeometry.part_id == part.id))
     if geom is None:
         return
@@ -480,7 +484,14 @@ async def run_interrogation(
             if run is None:
                 return {"skipped": "run_gone", "run_id": str(run_id)}
             if run.status == InterrogationStatus.succeeded:
-                return {"skipped": "already_succeeded", "run_id": str(run_id)}
+                # part_id lets a redelivered task still chain the requote-diff
+                # job (M4.12) — the success may have committed without its
+                # post-task enqueue reaching the broker.
+                return {
+                    "skipped": "already_succeeded",
+                    "run_id": str(run_id),
+                    "part_id": str(run.part_id),
+                }
             pf = await session.get(PartFile, run.file_id)
             if pf is None:
                 return _fail(run, "file_gone", "The CAD file was deleted before the run.")
@@ -588,6 +599,9 @@ async def run_interrogation(
             run.status = InterrogationStatus.succeeded
             run.finished_at = datetime.now(UTC)
             part.geom_hash = geom_hash
+            # gv1 similarity vector (M4.11) — derived from the same result on
+            # both the fresh and cache-hit paths, so a re-run can't go stale.
+            part.geometry_vector = build_geometry_vector(result)
             await _apply_to_geometry(session, run, result)
             # M4.10 persistent geometry memory (spec #assembly): a signature
             # the org has converted before auto-tags this part's manufactured
@@ -599,6 +613,7 @@ async def run_interrogation(
             )
             return {
                 "run_id": str(run.id),
+                "part_id": str(part.id),
                 "status": "succeeded",
                 "cached": cached is not None,
             }
@@ -630,6 +645,17 @@ def interrogate_part_task(self: Any, org_id: str, run_id: str) -> dict[str, Any]
     out = cast("dict[str, Any]", result)
     # Structured completion log — ids only, never filenames or geometry values.
     logger.info("interrogation_finished", extra={"org_id": org_id, "run_id": run_id, **out})
+    chained = out.get("status") == "succeeded" or out.get("skipped") == "already_succeeded"
+    if chained and out.get("part_id"):
+        # M4.12: a fresh geometry signature may pair the part with a prior
+        # quote (exact file/geometric match) — chain the requote-diff job,
+        # which no-ops when there is no draft quote or no baseline. Also fired
+        # on the already-succeeded redelivery path so a broker hiccup after
+        # the original commit can't permanently drop the chained job (the
+        # requote task is idempotent — it just overwrites the entry).
+        from .requote_diff import enqueue_requote_diff
+
+        enqueue_requote_diff(uuid.UUID(org_id), uuid.UUID(out["part_id"]))
     return out
 
 

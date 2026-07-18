@@ -54,6 +54,7 @@ from .quantities import (
     set_quantity_breaks,
 )
 from .quote_filters import (
+    QUOTE_MAX_PRIORITY,
     FilterClause,
     SortClause,
     apply_filters,
@@ -85,6 +86,9 @@ class QuoteRow(BaseModel):
     rfq_number: str | None
     due_date: datetime | None
     created_at: datetime
+    #: M5.0 #partview — derived MAX(line-item priority); NULL when the quote has no
+    #: prioritised line (rendered "—" in the grid).
+    priority: int | None
 
 
 class QuoteSearchRequest(BaseModel):
@@ -113,7 +117,7 @@ class QuoteSearchResponse(BaseModel):
     offset: int
 
 
-def _quote_row(q: Quote) -> QuoteRow:
+def _quote_row(q: Quote, priority: int | None) -> QuoteRow:
     return QuoteRow(
         id=q.id,
         number=q.number,
@@ -124,6 +128,7 @@ def _quote_row(q: Quote) -> QuoteRow:
         rfq_number=q.rfq_number,
         due_date=q.due_date,
         created_at=q.created_at,
+        priority=priority,
     )
 
 
@@ -152,10 +157,15 @@ async def search_quotes(
     # Total over the filtered set, independent of ordering/pagination (the footer
     # "1-20 of N"). Strip ORDER BY for the count subquery.
     total = await session.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
-    page = stmt.limit(req.limit).offset(req.offset)
-    rows = (await session.execute(page)).scalars().all()
+    # Carry the derived MAX(line-item priority) alongside each row (M5.0). Added only
+    # to the page query — the filter/sort/count above already reference the same
+    # correlated subquery where needed.
+    page = (
+        stmt.add_columns(QUOTE_MAX_PRIORITY.label("priority")).limit(req.limit).offset(req.offset)
+    )
+    rows = (await session.execute(page)).all()
     return QuoteSearchResponse(
-        rows=[_quote_row(q) for q in rows],
+        rows=[_quote_row(q, priority) for q, priority in rows],
         total=total or 0,
         limit=req.limit,
         offset=req.offset,
@@ -216,7 +226,18 @@ class QuoteItemOut(BaseModel):
     workflow_status: QiWorkflowStatus
     was_won: bool
     export_controlled: bool
+    #: M5.0 #partview — line-item priority (nullable numeric, higher = more urgent).
+    priority: int | None
     quantities: list[QuantityCellOut]
+
+
+class QuoteItemUpdate(BaseModel):
+    """Editable line-item fields from the estimating sidebar (M5.0). ``priority`` is
+    nullable numeric (higher = more urgent); the quote grid derives MAX over it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    priority: int | None = Field(default=None, ge=1, le=10)
 
 
 class WorkflowTracker(BaseModel):
@@ -374,6 +395,7 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
             workflow_status=qi.workflow_status,
             was_won=qi.was_won,
             export_controlled=qi.export_controlled,
+            priority=qi.priority,
             quantities=grids.get(qi.root_component_id, []),
         )
         for qi, part_id in rows
@@ -606,6 +628,34 @@ async def add_quote_item(
     )
     if quote.started_at is None:
         quote.started_at = datetime.now(UTC)
+    await session.flush()
+    return await _load_detail(session, quote)
+
+
+@quotes_router.patch("/{quote_id}/items/{item_id}")
+async def update_quote_item(
+    quote_id: uuid.UUID,
+    item_id: uuid.UUID,
+    payload: QuoteItemUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> QuoteDetail:
+    """Edit a line item's estimating-sidebar fields (M5.0 #partview). v1 carries
+    ``priority`` — nullable numeric, higher = more urgent; the quotes grid derives
+    MAX(priority) per quote. Draft-only, like every other line-item mutation."""
+    quote = await _get_quote_or_404(session, quote_id)
+    if not _is_editable(quote):
+        raise AppError(
+            "quote_locked",
+            "Line items can only be edited while the quote is a draft.",
+            status_code=409,
+        )
+    item = await session.get(QuoteItem, item_id)
+    if item is None or item.quote_id != quote.id:
+        raise AppError("not_found", "Line item not found.", status_code=status.HTTP_404_NOT_FOUND)
+    changes = payload.model_dump(exclude_unset=True)
+    for field_name, value in changes.items():
+        setattr(item, field_name, value)
     await session.flush()
     return await _load_detail(session, quote)
 

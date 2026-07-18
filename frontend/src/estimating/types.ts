@@ -42,6 +42,9 @@ export interface OperationOut {
   notes: string | null;
   cost_formula: string | null;
   variable_overrides: Record<string, VariableOverrideValue>;
+  /** M4.13 provenance: 'imported' rows carry the source-quote stamp. */
+  source: 'manual' | 'imported' | 'ai_drafted';
+  source_quote_id: string | null;
   missing_rate: boolean;
   cells: QuoteCellOut[];
 }
@@ -169,6 +172,18 @@ export interface OperationDefOut {
   is_pre_installed: boolean;
   sort_order: number;
   cost_formula: string | null;
+  /** M4.14 Variables-table eye toggles — overlay over the formula defaults. */
+  variable_visibility: Record<string, boolean>;
+}
+
+/** M4.14: the def-level Variables-table report (synthetic-context eval).
+ * `variable_visibility` is the def's stored eye map — the base for the next
+ * full-replace PUT (never a cached defs-list row). */
+export interface OpDefKalkReport {
+  declared_variables: KalkDeclaredVariable[];
+  variable_groups: KalkVariableGroup[];
+  errors: KalkError[];
+  variable_visibility: Record<string, boolean>;
 }
 
 /** The subset of the quote-detail response the estimating page reads (M1.4/M1.6). */
@@ -177,6 +192,9 @@ export interface QuoteItemSummary {
   position: number;
   root_component_id: string;
   part_id: string;
+  workflow_status: string;
+  /** M5.0 #partview — per-line-item priority (higher = more urgent), or null. */
+  priority: number | null;
   quantities: { quantity: number; make_quantity: number; deliver_quantity: number }[];
 }
 
@@ -657,4 +675,91 @@ export interface PurchasedComponentCreateBody {
   piece_price?: string | null;
   description?: string | null;
   brand?: string | null;
+}
+
+// --- M4.12 — Requote Diff Assistant (spec #ai-requote-diff) ---
+
+/** One serialized ExtractionFinding inside the diff payload. */
+export interface RequoteFinding {
+  type: string;
+  category: string;
+  role: string | null;
+  value: string | null;
+  normalized_value: string | null;
+  units: string | null;
+  tolerance: Record<string, unknown> | null;
+  gdt: Record<string, unknown> | null;
+}
+
+export interface RequoteFindingChange {
+  key: { type: string; role: string | null };
+  a: RequoteFinding;
+  b: RequoteFinding;
+  changes: string[];
+}
+
+export interface RequoteGeometryDelta {
+  available: boolean;
+  significant: boolean;
+  volume?: { a: number; b: number; delta_pct: number };
+  bbox?: Record<string, { a: number; b: number; delta: number }>;
+  features?: Record<string, { a: number; b: number; delta: number }>;
+}
+
+export interface RequoteDiffEntry {
+  part_id: string;
+  match_type: 'exact_file' | 'exact_geometric';
+  matched: {
+    part_id: string;
+    part_number: string | null;
+    revision: string | null;
+    quote_id: string;
+    quote_number: string;
+    component_id: string;
+  };
+  target_component_id: string;
+  diff: {
+    geometry_delta: RequoteGeometryDelta;
+    finding_diff: {
+      added: RequoteFinding[];
+      removed: RequoteFinding[];
+      changed: RequoteFindingChange[];
+      material_changes: { kind: string; reason: string; finding: RequoteFinding }[];
+    };
+  };
+  ai: { enabled: boolean; reason: string } | null;
+  synthesis: string | null;
+  choice: { choice: RequoteChoice; at: string } | null;
+  generated_at: string;
+  // --- M4.13 — Agentic Quote Assembly (spec #ai-quote-assembly) ---
+  /** "Quoted N times" for the assembly banner (0 on pre-M4.13 entries). */
+  quote_count?: number;
+  /** The persisted import record (audit trail); null until a path is taken. */
+  assembly?: AssemblyRecord | null;
+  /** Read-time server state: the offer + the server-computed eligibility. */
+  assembly_state?: AssemblyState;
+}
+
+export interface AssemblyState {
+  offered: boolean;
+  accept_all_eligible: boolean;
+  blockers: string[];
+  quote_count: number;
+  undo_ttl_seconds: number;
+}
+
+export interface AssemblyRecord {
+  path: 'accept_all' | 'review';
+  at: string;
+  user_id: string;
+  source_quote_id: string;
+  source_quote_number: string | null;
+  undone_at: string | null;
+  undo_expires_at: string | null;
+}
+
+export type RequoteChoice = 'import_router' | 'review' | 'start_fresh';
+
+export interface RequoteDiffResponse {
+  entries: RequoteDiffEntry[];
 }

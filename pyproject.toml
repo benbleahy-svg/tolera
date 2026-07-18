@@ -31,6 +31,7 @@ dependencies = [
     # checks for interrupts, so no thread/signal timeout can stop a backtracking
     # match. `regex` enforces `timeout=` inside the engine. Do not swap back.
     "regex>=2024.11.6",
+    "pgvector>=0.5.0",
 ]
 
 [dependency-groups]
@@ -116,6 +117,8 @@ module = [
     "app.review_items",
     "app.triage",
     "app.rule_suggest",
+    "app.requote_diff",
+    "app.bulk_refresh",
 ]
 disallow_untyped_decorators = false
 disallow_subclassing_any = false

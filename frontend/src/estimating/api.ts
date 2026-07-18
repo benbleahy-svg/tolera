@@ -35,6 +35,8 @@ import type {
   NestCreateBody,
   NestOut,
   NestingOverview,
+  RequoteChoice,
+  RequoteDiffResponse,
   OperationCreateBody,
   OperationDefOut,
   OperationUpdateBody,
@@ -51,6 +53,16 @@ export interface EstimatingApi {
   updateMaterial: (materialId: string, body: MaterialUpdateBody) => Promise<MaterialOut>;
   listProcesses: () => Promise<ProcessOut[]>;
   listOperationDefs: (q: string) => Promise<OperationDefOut[]>;
+  /** M5.0 #partview — finish op-defs backing the REQUESTED FINISHES multi-select. */
+  listFinishDefs: () => Promise<OperationDefOut[]>;
+  /** M5.0 #partview — set/clear a line item's priority (drives the quotes grid). */
+  setLineItemPriority: (
+    quoteId: string,
+    itemId: string,
+    priority: number | null,
+  ) => Promise<QuoteSummary>;
+  /** M5.0 — add a root line item (the sidebar's "add line item"). */
+  addLineItem: (quoteId: string) => Promise<QuoteSummary>;
   setComponentMaterial: (
     componentId: string,
     materialId: string | null,
@@ -161,6 +173,21 @@ export interface EstimatingApi {
   getNestingOverview: (quoteId: string) => Promise<NestingOverview>;
   createNest: (quoteId: string, body: NestCreateBody) => Promise<{ nests: NestOut[] }>;
   deleteNest: (quoteId: string, nestId: string) => Promise<void>;
+  // M4.12 — Requote Diff Assistant (spec #ai-requote-diff)
+  getRequoteDiff: (quoteId: string) => Promise<RequoteDiffResponse>;
+  postRequoteChoice: (
+    quoteId: string,
+    partId: string,
+    choice: RequoteChoice,
+  ) => Promise<RequoteDiffResponse>;
+  importRouter: (componentId: string, sourceComponentId: string) => Promise<unknown>;
+  // M4.13 — Agentic Quote Assembly (spec #ai-quote-assembly)
+  assemblyImport: (
+    quoteId: string,
+    partId: string,
+    path: 'accept_all' | 'review',
+  ) => Promise<RequoteDiffResponse>;
+  assemblyUndo: (quoteId: string, partId: string) => Promise<RequoteDiffResponse>;
 }
 
 /** Build an estimating API client bound to the current Clerk session token. */
@@ -179,6 +206,14 @@ export function useEstimatingApi(): EstimatingApi {
       listProcesses: () => apiFetch('/api/processes', token),
       listOperationDefs: (q) =>
         apiFetch(`/api/operation-defs?q=${encodeURIComponent(q)}`, token),
+      listFinishDefs: () => apiFetch('/api/operation-defs?is_finish=true', token),
+      setLineItemPriority: (quoteId, itemId, priority) =>
+        apiFetch(`/api/quotes/${quoteId}/items/${itemId}`, token, {
+          method: 'PATCH',
+          body: { priority },
+        }),
+      addLineItem: (quoteId) =>
+        apiFetch(`/api/quotes/${quoteId}/items`, token, { method: 'POST' }),
       setComponentMaterial: (componentId, materialId) =>
         apiFetch(`/api/components/${componentId}/material`, token, {
           method: 'PATCH',
@@ -324,6 +359,27 @@ export function useEstimatingApi(): EstimatingApi {
       listPurchasedComponents: (q) =>
         apiFetch(`/api/purchased-components?q=${encodeURIComponent(q)}`, token),
       getNestingOverview: (quoteId) => apiFetch(`/api/quotes/${quoteId}/nesting`, token),
+      getRequoteDiff: (quoteId) => apiFetch(`/api/quotes/${quoteId}/requote-diff`, token),
+      postRequoteChoice: (quoteId, partId, choice) =>
+        apiFetch(`/api/quotes/${quoteId}/requote-diff/choice`, token, {
+          method: 'POST',
+          body: { part_id: partId, choice },
+        }),
+      importRouter: (componentId, sourceComponentId) =>
+        apiFetch(`/api/components/${componentId}/import-router`, token, {
+          method: 'POST',
+          body: { source_component_id: sourceComponentId },
+        }),
+      assemblyImport: (quoteId, partId, path) =>
+        apiFetch(`/api/quotes/${quoteId}/assembly/import`, token, {
+          method: 'POST',
+          body: { part_id: partId, path },
+        }),
+      assemblyUndo: (quoteId, partId) =>
+        apiFetch(`/api/quotes/${quoteId}/assembly/undo`, token, {
+          method: 'POST',
+          body: { part_id: partId },
+        }),
       createNest: (quoteId, body) =>
         apiFetch(`/api/quotes/${quoteId}/nests`, token, { method: 'POST', body }),
       deleteNest: (quoteId, nestId) =>

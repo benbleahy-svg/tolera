@@ -688,6 +688,22 @@
   margin: 0.25rem 0;
 }
 
+/* M4.14 def-editor Variables table: the eye toggle. Off-state is dimmed AND
+   struck through — never colour-only. */
+.est-eye {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.1rem 0.3rem;
+}
+
+.est-eye-off {
+  opacity: 0.35;
+  filter: grayscale(1);
+  text-decoration: line-through;
+}
+
 /* M4.3 — Nesting module (spec #nesting) */
 .nesting-page .nesting-tabs {
   display: flex;
@@ -823,4 +839,181 @@
   background: #1c7a3f;
   border-color: #1c7a3f;
   color: #fff;
+}
+
+/* --------------------------------------------------------------------------
+   M5.0 — estimating shell: line-item sidebar + costing-inputs band controls
+   -------------------------------------------------------------------------- */
+.est-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  min-height: 0;
+}
+
+.est-layout .est-page {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.est-line-item-sidebar {
+  flex: 0 0 15rem;
+  border-right: 1px solid var(--border, #e2e4e8);
+  padding: 1rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-self: stretch;
+}
+
+.est-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.est-sidebar-quote {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.est-line-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.est-line-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+.est-line-item:hover {
+  background: var(--surface-hover, #f2f4f7);
+}
+
+.est-line-item.active {
+  background: var(--surface-active, #e8f0fe);
+  border-color: var(--border, #cdd7ee);
+}
+
+.est-line-item-pos {
+  font-weight: 700;
+  min-width: 1.25rem;
+}
+
+.est-line-item-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.est-line-item-status {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.est-line-item-priority {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #b3541e;
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+}
+
+.est-sidebar-empty {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin: 0.25rem 0;
+}
+
+.est-add-line-item {
+  margin-top: auto;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border, #cdd7ee);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+.est-return-link {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}
+
+/* Requested Finishes multi-select on the costing-inputs band */
+.est-finishes {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.est-finishes-chips {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.est-finishes-none {
+  opacity: 0.6;
+  font-size: 0.85rem;
+}
+
+.est-finish-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--surface-active, #eef2fb);
+  border: 1px solid var(--border, #cdd7ee);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.est-finish-chip button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.est-finish-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.1rem;
+  white-space: nowrap;
+}
+
+.est-menu-empty {
+  opacity: 0.6;
+  font-size: 0.85rem;
+  padding: 0.2rem;
+}
+
+.est-action-priority {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem;
+  white-space: nowrap;
 }

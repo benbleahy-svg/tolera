@@ -17,6 +17,17 @@ import type {
   TriageBriefResponse,
 } from './types';
 
+/** Bulk Refresh Pricing result: sync returns the tallies inline; a large selection
+ *  hands off to Celery (mode "async" + a task id). */
+export interface BulkRefreshResult {
+  mode: 'sync' | 'async';
+  refreshed_quotes?: number;
+  refreshed_items?: number;
+  skipped?: number;
+  task_id?: string | null;
+  quote_count?: number;
+}
+
 export interface QuotesApi {
   searchQuotes: (req: QuoteSearchRequest) => Promise<QuoteSearchResponse>;
   listSavedViews: () => Promise<SavedViewList>;
@@ -24,6 +35,8 @@ export interface QuotesApi {
   updateSavedView: (id: string, body: Partial<SavedViewCreate>) => Promise<SavedView>;
   deleteSavedView: (id: string) => Promise<void>;
   getTriageBrief: (quoteId: string) => Promise<TriageBriefResponse>;
+  /** M5.0 — Bulk Refresh Pricing over a quotes-list multi-selection. */
+  bulkRefreshPricing: (quoteIds: string[]) => Promise<BulkRefreshResult>;
 }
 
 /** Build a quotes API client bound to the current Clerk session token. */
@@ -42,6 +55,11 @@ export function useQuotesApi(): QuotesApi {
         apiFetch(`/api/saved-views/${id}`, token, { method: 'DELETE' }),
       getTriageBrief: (quoteId) =>
         apiFetch(`/api/quotes/${quoteId}/triage-brief`, token),
+      bulkRefreshPricing: (quoteIds) =>
+        apiFetch('/api/quotes/bulk-refresh-pricing', token, {
+          method: 'POST',
+          body: { quote_ids: quoteIds },
+        }),
     };
   }, [getToken]);
 }

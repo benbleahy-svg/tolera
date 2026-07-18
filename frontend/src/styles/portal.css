@@ -1,0 +1,543 @@
+/* Public buyer portal (M5.1). White-label — NO Tolera branding; this is the
+   shop's page. Minimal, neutral, responsive; wide break grids scroll inside
+   their own container so the page body never scrolls sideways. */
+
+.portal-root {
+  --portal-fg: #1f2933;
+  --portal-muted: #52606d;
+  --portal-line: #e4e7eb;
+  --portal-panel: #ffffff;
+  --portal-bg: #f5f7fa;
+  --portal-accent: #2563eb;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+  color: var(--portal-fg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.portal-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 4rem 1.5rem;
+  text-align: center;
+  color: #52606d;
+}
+
+.portal-error p {
+  font-size: 1.05rem;
+}
+
+.portal-spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid #e4e7eb;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: portal-spin 0.8s linear infinite;
+}
+
+@keyframes portal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.portal-shop-header {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--portal-line);
+}
+
+.portal-shop-name {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.portal-quote-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+  color: var(--portal-muted);
+}
+
+.portal-quote-number {
+  font-weight: 600;
+  color: var(--portal-fg);
+}
+
+.portal-expired-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.portal-range-chip {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.portal-expired-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.portal-expired-note p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.portal-requote-btn {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--portal-accent);
+  border-radius: 6px;
+  background: var(--portal-accent);
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.portal-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (min-width: 800px) {
+  .portal-body {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+}
+
+.portal-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.portal-line-card {
+  border: 1px solid var(--portal-line);
+  border-radius: 10px;
+  background: var(--portal-panel);
+  padding: 1rem 1.1rem;
+}
+
+.portal-line-head {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.portal-thumb {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #cbd2d9;
+  border-radius: 8px;
+  color: #9aa5b1;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.portal-part-identity {
+  min-width: 0;
+}
+
+.portal-part-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.portal-part-number {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.portal-part-rev {
+  font-size: 0.8rem;
+  color: var(--portal-muted);
+}
+
+.portal-part-desc {
+  margin-top: 0.15rem;
+  color: var(--portal-muted);
+  font-size: 0.9rem;
+}
+
+.portal-part-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.6rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+.portal-part-meta dt {
+  color: var(--portal-muted);
+  font-weight: 600;
+}
+
+.portal-part-meta dd {
+  margin: 0;
+}
+
+.portal-part-dims {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--portal-muted);
+}
+
+.portal-dfm {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: #92400e;
+}
+
+.portal-no-quote {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: var(--portal-bg);
+  color: var(--portal-muted);
+  font-size: 0.9rem;
+}
+
+.portal-grid-scroll {
+  overflow-x: auto;
+  margin-top: 0.9rem;
+}
+
+.portal-break-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.portal-break-grid th,
+.portal-break-grid td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--portal-line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.portal-break-grid th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--portal-muted);
+}
+
+.portal-num {
+  text-align: right;
+}
+
+.portal-radio-col {
+  width: 1.5rem;
+  text-align: center;
+}
+
+.portal-row-selected {
+  background: #eff6ff;
+}
+
+.portal-row-expedite td {
+  color: var(--portal-muted);
+}
+
+.portal-expedite-label {
+  padding-left: 1.25rem !important;
+}
+
+.portal-surcharge {
+  margin-left: 0.4rem;
+  color: #92400e;
+  font-weight: 600;
+}
+
+.portal-add-ons {
+  margin: 0.9rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--portal-line);
+  border-radius: 8px;
+}
+
+.portal-add-ons legend {
+  padding: 0 0.35rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--portal-muted);
+}
+
+.portal-add-on {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  font-size: 0.88rem;
+}
+
+.portal-required {
+  color: var(--portal-muted);
+  font-style: italic;
+}
+
+.portal-summary {
+  position: sticky;
+  top: 1rem;
+  border: 1px solid var(--portal-line);
+  border-radius: 10px;
+  background: var(--portal-panel);
+  padding: 1rem 1.1rem;
+}
+
+.portal-summary h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.portal-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  font-weight: 600;
+}
+
+.portal-summary-row .portal-num {
+  font-size: 1.1rem;
+}
+
+.portal-vat-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--portal-muted);
+}
+
+.portal-no-selection {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--portal-muted);
+}
+
+.portal-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- Checkout flow (M5.2) --------------------------------------------------- */
+.portal-checkout-cta {
+  margin-top: 0.85rem;
+  width: 100%;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--portal-accent);
+  border-radius: 6px;
+  background: var(--portal-accent);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-checkout-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.portal-checkout {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1.5rem 0;
+}
+
+.portal-checkout-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.portal-checkout-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.portal-checkout-back,
+.portal-checkout-close {
+  background: none;
+  border: none;
+  color: var(--portal-accent);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.portal-checkout-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.portal-checkout-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.portal-checkout-form input,
+.portal-checkout-form textarea {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--portal-line);
+  border-radius: 6px;
+  background: var(--portal-panel);
+  color: var(--portal-fg);
+  font: inherit;
+  font-weight: 400;
+}
+
+.portal-checkout-hint {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--portal-muted);
+}
+
+.portal-checkout-shipping fieldset {
+  border: 1px solid var(--portal-line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.portal-checkout-shipping-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  font-size: 0.9rem;
+}
+
+.portal-checkout-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.portal-checkout-nav button,
+.portal-checkout-form button[type='submit'] {
+  padding: 0.55rem 1.1rem;
+  border: 1px solid var(--portal-accent);
+  border-radius: 6px;
+  background: var(--portal-accent);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-checkout-nav button:first-child {
+  background: none;
+  color: var(--portal-accent);
+}
+
+.portal-checkout-nav button:disabled,
+.portal-checkout-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.portal-checkout-lines {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.portal-checkout-lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--portal-line);
+  font-size: 0.9rem;
+}
+
+.portal-checkout-totals {
+  margin: 0;
+}
+
+.portal-checkout-totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0;
+}
+
+.portal-checkout-totals dt,
+.portal-checkout-totals dd {
+  margin: 0;
+}
+
+.portal-checkout-gross {
+  font-weight: 700;
+  font-size: 1.05rem;
+  border-top: 2px solid var(--portal-line);
+  margin-top: 0.4rem;
+  padding-top: 0.6rem !important;
+}
+
+.portal-checkout-confirmation {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.portal-checkout-ordernum {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--portal-accent);
+}
+
+.portal-checkout-error {
+  color: #b91c1c;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}

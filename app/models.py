@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID as PyUUID  # for classes whose own `uuid` column shadows the module
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -43,6 +44,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
+from .geometry.vector import GV_DIM
 
 
 class MembershipRole(enum.StrEnum):
@@ -201,6 +203,13 @@ class Organization(Base):
     default_expedite_tiers: Mapped[list[Any] | None] = mapped_column(JSONB)
     # Clerk Organizations mirror (DECISIONS.md 2026-06-24 "Org identity model").
     clerk_org_id: Mapped[str | None] = mapped_column(String, unique=True)
+    # DACH tax profile (M5.3). ``ust_id_nr`` = the shop's own USt-IdNr, carried
+    # onto reverse-charge invoices (§14 UStG). ``is_kleinunternehmer`` (§19) is
+    # the per-org flag that suppresses every VAT line (DECISIONS 2026-07-18).
+    ust_id_nr: Mapped[str | None] = mapped_column(String)
+    is_kleinunternehmer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -387,6 +396,14 @@ class Part(Base):
         Index("ix_part_org_deleted_at", "org_id", "deleted_at"),
         # Part-library historical match by geometry signature (populated at M4).
         Index("ix_part_org_geom_hash", "org_id", "geom_hash"),
+        # Similar-Geometries ANN (M4.11) — mirrors migration 0035 so
+        # autogenerate never proposes dropping it.
+        Index(
+            "ix_part_geometry_vector_hnsw",
+            "geometry_vector",
+            postgresql_using="hnsw",
+            postgresql_ops={"geometry_vector": "vector_l2_ops"},
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -407,6 +424,9 @@ class Part(Base):
     )
     # Interrogation signature for part-library match — NULL until M4.
     geom_hash: Mapped[str | None] = mapped_column(Text)
+    # gv1 similarity feature vector (M4.11) — pgvector L2 NN feeds the
+    # Similar-Geometries bucket; NULL until the part interrogates cleanly.
+    geometry_vector: Mapped[Any | None] = mapped_column(Vector(GV_DIM))
     # EU dual-use export flag (DACH delta; primary home is the Part — it travels across
     # quotes). Stored only in M1.5; runtime enforcement → M6 (DECISIONS.md 2026-06-26).
     export_controlled: Mapped[bool] = mapped_column(
@@ -800,6 +820,11 @@ class Quote(Base):
     # triage_brief JSONB to Quote"). Regenerable cache written by the
     # ``generate_triage_brief`` task after the email-parse job; NULL until then.
     triage_brief: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # M4.12 — the cached Requote Diff (spec #ai-requote-diff build-note: "Cache
+    # as requote_diff JSONB on the new Quote"): {"version", "entries":
+    # {part_id: entry}} — one entry per matched part on the quote. Regenerable
+    # cache written by the ``generate_requote_diff`` task; NULL until then.
+    requote_diff: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Workflow-tracker + lifecycle timestamps.
     rfq_received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -900,6 +925,12 @@ class QuoteItem(Base):
         # Composite-FK target (house pattern; DDL added in 0026) — review_item
         # and bom_draft pin to (org_id, id).
         UniqueConstraint("org_id", "id", name="uq_quote_item_org_id_id"),
+        # M5.0 #partview: priority is a numeric line-item field ("numeric
+        # priorities seen (6, 7) and blank"); higher = more urgent. Positive or
+        # NULL — the quote grid derives MAX over these (no quote-level column).
+        CheckConstraint(
+            "priority IS NULL OR priority >= 1", name="ck_quote_item_priority_positive"
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -907,6 +938,10 @@ class QuoteItem(Base):
     quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     root_component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     position: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: M5.0 #partview — per-line-item priority (nullable numeric; higher = more
+    #: urgent). The quotes grid/filter/"Highest Priority" view derive MAX(priority)
+    #: per quote (DECISIONS 2026-07-17 *Quote-level priority home*).
+    priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     workflow_status: Mapped[QiWorkflowStatus] = mapped_column(
         _qi_workflow_status_enum, nullable=False, server_default=QiWorkflowStatus.not_started.value
     )
@@ -1150,10 +1185,22 @@ class ProcessFamily(enum.StrEnum):
     GENERIC = "GENERIC"
 
 
+class ValueSource(enum.StrEnum):
+    """Provenance of a router/pricing row (spec ``#ai-quote-assembly`` build
+    note: ``source ENUM(manual | imported | ai_drafted)``). ``imported`` rows
+    were copied from a historical quote (``source_quote_id`` says which);
+    ``ai_drafted`` is reserved for Lens-drafted values (no writer yet)."""
+
+    manual = "manual"
+    imported = "imported"
+    ai_drafted = "ai_drafted"
+
+
 _op_category_enum = Enum(OpCategory, name="op_category", create_type=False)
 _calculation_mode_enum = Enum(CalculationMode, name="calculation_mode", create_type=False)
 _setup_basis_enum = Enum(SetupBasis, name="setup_basis", create_type=False)
 _process_family_enum = Enum(ProcessFamily, name="process_family", create_type=False)
+_value_source_enum = Enum(ValueSource, name="value_source", create_type=False)
 
 
 class MaterialClass(Base):
@@ -1332,6 +1379,11 @@ class OperationDef(Base):
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     cost_formula: Mapped[str | None] = mapped_column(Text)
+    # M4.14 Variables-table eye toggles: {var_name: bool} overlaid on the
+    # formula-declared default_visible at report time; stale keys are inert.
+    variable_visibility: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     deleted_at: Mapped[datetime | None] = _deleted_at()
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
@@ -1378,6 +1430,20 @@ class Operation(Base):
         ),
         CheckConstraint("origin IN ('manual', 'auto_routing')", name="ck_operation_origin"),
         Index("ix_operation_org_component", "org_id", "component_id"),
+        # M4.13 provenance is org-scoped belt-and-braces (§5): the composite FK
+        # makes a cross-org source_quote_id unrepresentable. PG15+ column-list
+        # SET NULL clears only the tag on quote deletion, never org_id.
+        ForeignKeyConstraint(
+            ["org_id", "source_quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_operation_source_quote",
+            ondelete="SET NULL (source_quote_id)",
+        ),
+        Index(
+            "ix_operation_source_quote",
+            "source_quote_id",
+            postgresql_where=text("source_quote_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -1442,6 +1508,17 @@ class Operation(Base):
     variable_overrides: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    # M4.14: the def's eye toggles, snapshotted at attach like cost_formula
+    # (E4-d freeze); Refresh Pricing re-copies both deliberately.
+    variable_visibility: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # M4.13 provenance (spec #ai-quote-assembly): set at the copy site, never
+    # blanket-copied — a re-import stamps the *immediate* source quote.
+    source: Mapped[ValueSource] = mapped_column(
+        _value_source_enum, nullable=False, server_default=ValueSource.manual.value
+    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1729,6 +1806,20 @@ class PricingItem(Base):
             name="ck_pricing_item_custom_named",
         ),
         Index("ix_pricing_item_org_component", "org_id", "component_id"),
+        # M4.13 provenance is org-scoped belt-and-braces (§5): the composite FK
+        # makes a cross-org source_quote_id unrepresentable. PG15+ column-list
+        # SET NULL clears only the tag on quote deletion, never org_id.
+        ForeignKeyConstraint(
+            ["org_id", "source_quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_pricing_item_source_quote",
+            ondelete="SET NULL (source_quote_id)",
+        ),
+        Index(
+            "ix_pricing_item_source_quote",
+            "source_quote_id",
+            postgresql_where=text("source_quote_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -1751,6 +1842,11 @@ class PricingItem(Base):
     is_from_factory: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # M4.13 provenance (spec #ai-quote-assembly) — see Operation.source.
+    source: Mapped[ValueSource] = mapped_column(
+        _value_source_enum, nullable=False, server_default=ValueSource.manual.value
+    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1818,6 +1914,20 @@ class Discount(Base):
             name="fk_discount_source_def_org",
         ),
         Index("ix_discount_org_component", "org_id", "component_id"),
+        # M4.13 provenance is org-scoped belt-and-braces (§5): the composite FK
+        # makes a cross-org source_quote_id unrepresentable. PG15+ column-list
+        # SET NULL clears only the tag on quote deletion, never org_id.
+        ForeignKeyConstraint(
+            ["org_id", "source_quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_discount_source_quote",
+            ondelete="SET NULL (source_quote_id)",
+        ),
+        Index(
+            "ix_discount_source_quote",
+            "source_quote_id",
+            postgresql_where=text("source_quote_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -1831,6 +1941,11 @@ class Discount(Base):
     is_from_factory: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # M4.13 provenance (spec #ai-quote-assembly) — see Operation.source.
+    source: Mapped[ValueSource] = mapped_column(
+        _value_source_enum, nullable=False, server_default=ValueSource.manual.value
+    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1932,6 +2047,20 @@ class AddOn(Base):
             name="ck_add_on_price_positive",
         ),
         Index("ix_add_on_org_component", "org_id", "component_id"),
+        # M4.13 provenance is org-scoped belt-and-braces (§5): the composite FK
+        # makes a cross-org source_quote_id unrepresentable. PG15+ column-list
+        # SET NULL clears only the tag on quote deletion, never org_id.
+        ForeignKeyConstraint(
+            ["org_id", "source_quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_add_on_source_quote",
+            ondelete="SET NULL (source_quote_id)",
+        ),
+        Index(
+            "ix_add_on_source_quote",
+            "source_quote_id",
+            postgresql_where=text("source_quote_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -1953,6 +2082,11 @@ class AddOn(Base):
     is_from_factory: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # M4.13 provenance (spec #ai-quote-assembly) — see Operation.source.
+    source: Mapped[ValueSource] = mapped_column(
+        _value_source_enum, nullable=False, server_default=ValueSource.manual.value
+    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -3080,6 +3214,267 @@ class CustomInterrogationOperationDef(Base):
     operation_def_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     org_id: Mapped[uuid.UUID] = _org_fk()
     created_at: Mapped[datetime] = _ts()
+
+
+# --------------------------------------------------------------------------- #
+# M5.1 — Digital Quote buyer portal (unauthenticated token access)
+# --------------------------------------------------------------------------- #
+class QuoteTokenScope(enum.StrEnum):
+    """What external surface a :class:`QuoteToken` unlocks (spec ``#digitalquote``
+    build-implications: "unified — covers all external access").
+
+    Only ``buyer_portal`` is honoured in M5.1 — the buyer opens the read-only
+    quote at ``/q/:token`` with no login. ``vendor_share`` (file-scoped sourcing
+    links) and ``vendor_rfq`` (outside-process RFQ) are **reserved for M6**; the
+    value exists here so the token table is minted once and never reshaped, but
+    the M5.1 service mints/accepts only ``buyer_portal``. Values are append-only."""
+
+    buyer_portal = "buyer_portal"
+    vendor_share = "vendor_share"
+    vendor_rfq = "vendor_rfq"
+
+
+_quote_token_scope_enum = Enum(QuoteTokenScope, name="quote_token_scope", create_type=False)
+
+
+class QuoteToken(Base):
+    """A per-recipient external-access credential for a quote (spec ``#digitalquote``).
+
+    The wire form is a **signed JWT** whose ``exp`` claim is deliberately omitted:
+    expiry is a *soft* application-layer property (a passed ``quote.expiration_date``
+    shows an EXPIRED badge but the portal stays reachable — DECISIONS quote-lifecycle
+    + spec ``#digital-quote-settings`` "Discrepancy to note"), so the token itself must
+    never hard-expire. The JWT carries ``org``/``quote``/``jti``/``scope``; the signed
+    ``org`` claim is what lets the public endpoint open the org-scoped RLS session
+    before any DB read. ``id`` is the JWT ``jti`` — the row is the authority for
+    revocation (``revoked_at``), which the signature alone cannot express.
+
+    ``quote_id`` is nullable at the DB (the unified entity also serves the file-only
+    vendor-share scope in M6) but the service enforces NOT NULL for ``buyer_portal``.
+    ``file_permissions`` is reserved for the vendor scopes (M6). The
+    ``external_share_id`` / ``vendor_rfq_recipient_id`` columns the spec's unified
+    sketch lists are **deferred** to M6 with their target tables (the M1.4 precedent:
+    no speculative column without a FK target)."""
+
+    __tablename__ = "quote_token"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_quote_token_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_quote_token_quote_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_quote_token_org_quote", "org_id", "quote_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    scope: Mapped[QuoteTokenScope] = mapped_column(_quote_token_scope_enum, nullable=False)
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    recipient_email: Mapped[str | None] = mapped_column(String)
+    #: The signed JWT string — stored so Settings can list/copy a recipient's link
+    #: (and so a leaked/rotated secret is auditable); the row stays authoritative.
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Reserved for vendor-share / vendor-RFQ file scoping (M6); NULL for buyer_portal.
+    file_permissions: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+
+class QuoteTokenAccess(Base):
+    """Append-only access log for :class:`QuoteToken` loads (spec ``#digitalquote``
+    "Access is logged (feeds the CUI audit log)").
+
+    One row per successful portal load — the minimal export-control audit trail M5.1
+    owns; full CUI/GDPR archival hardening is the M6 compliance pass. Org-scoped +
+    RLS like every tenant table; CASCADE with the token."""
+
+    __tablename__ = "quote_token_access"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "quote_token_id"],
+            ["quote_token.org_id", "quote_token.id"],
+            name="fk_quote_token_access_token_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_quote_token_access_org_token", "org_id", "quote_token_id", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_token_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: Truncated/hashed at the edge is a later concern — we store the observed
+    #: client IP + user-agent as the audit record (never customer print content).
+    ip_address: Mapped[str | None] = mapped_column(String)
+    user_agent: Mapped[str | None] = mapped_column(String)
+    occurred_at: Mapped[datetime] = _ts()
+
+
+# --------------------------------------------------------------------------- #
+# Orders (M5.2 — Quote Checkout → Order)
+# --------------------------------------------------------------------------- #
+class OrderSource(enum.StrEnum):
+    """How an :class:`Order` was created (spec ``#orderslist`` Source tag).
+
+    ``buyer_portal`` = the buyer completed the PO checkout at ``/q/:token``
+    (M5.2). ``facilitated`` = the shop built the order internally (M5.7). Values
+    are append-only; the same Order model serves both paths."""
+
+    buyer_portal = "buyer_portal"
+    facilitated = "facilitated"
+
+
+class OrderShippingMethod(enum.StrEnum):
+    """The PO-compatible shipping options offered at checkout (spec
+    ``#shipping-options``). "Charge Me for Shipping (CC)" is **hidden in v1**
+    (cards deferred), so it is deliberately absent from this enum."""
+
+    bill_at_shipment = "bill_at_shipment"
+    use_my_shipping_account = "use_my_shipping_account"
+    no_shipping_fees = "no_shipping_fees"
+
+
+_order_source_enum = Enum(OrderSource, name="order_source", create_type=False)
+_order_shipping_method_enum = Enum(
+    OrderShippingMethod, name="order_shipping_method", create_type=False
+)
+
+
+class Order(Base):
+    """A confirmed order — the quote spine's terminal entity (spec ``#order`` /
+    ``#orderslist``; ``DOMAIN-MODEL §6`` Order↔Quote).
+
+    Created from a won quote via buyer-portal checkout (M5.2) or internal
+    facilitation (M5.7). **No status lifecycle in v1** — status is ERP-owned;
+    Bid Factory stores the record plus a nullable ``shipped_at`` (spec
+    ``#orderslist``). Money is **integer minor units + explicit ``currency``**
+    (the total boundary; M5.2 AC). The §14-UStG tax breakdown is persisted from
+    :mod:`app.vat_service` so the M5.4 PDF renders stored figures, not a
+    recompute. Composite same-org FKs to quote / account / contact (§5 tenancy)."""
+
+    __tablename__ = "order_"
+    __table_args__ = (
+        CheckConstraint("currency IN ('EUR', 'CHF')", name="ck_order_currency_dach"),
+        UniqueConstraint("org_id", "number", name="uq_order_org_number"),
+        UniqueConstraint("org_id", "id", name="uq_order_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_order_quote_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "account_id"],
+            ["account.org_id", "account.id"],
+            name="fk_order_account_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "contact_id"],
+            ["contact.org_id", "contact.id"],
+            name="fk_order_contact_org",
+        ),
+        Index("ix_order_org_created", "org_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    #: Per-org sequential order number (``order_counter`` upsert; mirrors quote).
+    number: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[OrderSource] = mapped_column(_order_source_enum, nullable=False)
+    quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: Customer PO — required for buyer_portal (app layer), may be blank for facilitated.
+    po_number: Mapped[str | None] = mapped_column(String)
+    company_name: Mapped[str | None] = mapped_column(String)
+    #: Free-text billing address (multi-line). Structured §14 address is post-v1.
+    billing_address: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    shipping_method: Mapped[OrderShippingMethod | None] = mapped_column(_order_shipping_method_enum)
+    # --- Tax posture (persisted from app.vat_service; §14-UStG evidence) ---
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    net_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    vat_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    gross_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    vat_rate_pct: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
+    vat_label: Mapped[str | None] = mapped_column(String)
+    reverse_charge: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    kleinunternehmer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    #: §13b or §19 note rendered on the invoice; NULL for a plain domestic order.
+    tax_note: Mapped[str | None] = mapped_column(Text)
+    #: The shop's own USt-IdNr and the buyer's — both carried for a §13b invoice.
+    supplier_ust_id_nr: Mapped[str | None] = mapped_column(String)
+    buyer_ust_id_nr: Mapped[str | None] = mapped_column(String)
+    #: Per-rate §14 breakdown snapshot: [{"rate_pct","net_minor","vat_minor"}].
+    tax_rate_lines: Mapped[list[Any] | None] = mapped_column(JSONB)
+    #: VIES verdict + timestamp (audit trail; NULL when VIES was not consulted).
+    vies_valid: Mapped[bool | None] = mapped_column(Boolean)
+    vies_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Set when the shop ships (ERP-driven later); no status lifecycle in v1.
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: M5.4 — object-storage key of the rendered order-confirmation PDF (written
+    #: on first download; the order is terminal, so the artifact is safe to store).
+    pdf_object_key: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class OrderLine(Base):
+    """One ordered line — a quote LineItem at a chosen quantity break plus the
+    buyer's expedite / add-on choices (spec ``#order``; ``DOMAIN-MODEL §6``
+    OrderItem). Money is integer minor units; the break is referenced naturally
+    by ``(component_id, quantity)`` (``component_quantity`` is unique on that).
+    ``ships_on`` = order placement + the break's lead time (calendar days, v1)."""
+
+    __tablename__ = "order_line"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_order_line_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "order_id"],
+            ["order_.org_id", "order_.id"],
+            name="fk_order_line_order_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "quote_item_id"],
+            ["quote_item.org_id", "quote_item.id"],
+            name="fk_order_line_quote_item_org",
+        ),
+        Index("ix_order_line_org_order", "org_id", "order_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quote_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: The root component whose (component_id, quantity) resolves the chosen break.
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: Net line total = (expedited) break total + chosen add-ons, in minor units.
+    total_price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: The chosen ExpediteOption (provenance snapshot; NULL = standard lead time).
+    expedite_option_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    expedites_fee_minor: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    #: Filled by the shop at ship time for Bill-at-Shipment (NULL at creation).
+    shipping_price_minor: Mapped[int | None] = mapped_column(BigInteger)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
+    ships_on: Mapped[date | None] = mapped_column(Date)
+    #: Snapshot of the applied add-ons: [{"id","name","price_minor","required"}].
+    add_ons: Mapped[list[Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
 
 
 class PurchasedComponent(Base):

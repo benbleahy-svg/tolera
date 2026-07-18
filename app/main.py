@@ -14,9 +14,11 @@ from fastapi import FastAPI
 
 from .accounts import accounts_router, contacts_router
 from .addons import addons_router
-from .assembly import assembly_router
+from .assembly import assembly_router as assembly_components_router
 from .bom_builder import bom_router
 from .bulk_create import bulk_create_router
+from .buyer_portal import buyer_router
+from .checkout import checkout_router
 from .collab import collab_router
 from .config import Settings, get_settings
 from .config_completeness import config_completeness_router
@@ -44,7 +46,9 @@ from .part_library import library_router as part_library_router
 from .parts import parts_router
 from .pricing import pricing_router
 from .purchased_components import purchased_components_router
+from .quote_assembly import assembly_router
 from .quotes import quotes_router
+from .requote_diff import requote_router
 from .review_items import review_items_router
 from .rule_suggest_api import rule_suggest_router
 from .rules import rules_router
@@ -102,7 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(materials_router)
     app.include_router(operations_router)
     app.include_router(purchased_components_router)
-    app.include_router(assembly_router)
+    app.include_router(assembly_components_router)
     app.include_router(pricing_router)
     app.include_router(addons_router)
     app.include_router(custom_tables_router)
@@ -114,6 +118,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rules_router)
     app.include_router(review_items_router)
     app.include_router(rule_suggest_router)
+    app.include_router(requote_router)
+    app.include_router(assembly_router)
+    app.include_router(buyer_router)
+    app.include_router(checkout_router)
 
     return app
 

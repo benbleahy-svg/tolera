@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
@@ -33,12 +33,16 @@ import { BulkCreateDialog } from './BulkCreateDialog';
 import { useEstimatingApi } from './api';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { LeadTimesSection } from './LeadTimesSection';
+import { LineItemActionsMenu } from './LineItemActionsMenu';
+import { LineItemSidebar } from './LineItemSidebar';
 import { MaterialPicker } from './MaterialPicker';
+import { RequestedFinishes } from './RequestedFinishes';
 import { OperationDrawer } from './OperationDrawer';
 import { ReviewItemsPanel } from '../review/ReviewItemsPanel';
 import { OperationsSection } from './OperationsSection';
 import { PricingSection } from './PricingSection';
 import { QuoteTotalsPanel } from './QuoteTotalsPanel';
+import { RequoteDiffPanel } from './RequoteDiffPanel';
 import type {
   BulkCreatePrefill,
   ComponentCosting,
@@ -50,10 +54,14 @@ import type {
   ProcessOut,
   QuoteSummary,
   QuoteTotals,
+  RequoteDiffEntry,
 } from './types';
 
 export function EstimatingPage() {
-  const { quoteId } = useParams<{ quoteId: string }>();
+  // M5.0 #partview — the spec route is /quotes/edit/:id/:lineItemId (a left sidebar
+  // picks the item). `/quotes/edit/:id` (no item) forwards to the first one below.
+  const { id: quoteId, lineItemId } = useParams<{ id: string; lineItemId?: string }>();
+  const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const api = useEstimatingApi();
   const suggestApi = useRuleSuggestApi();
@@ -61,7 +69,6 @@ export function EstimatingPage() {
   const canEdit = useHasPermission('quote_edit');
 
   const [quote, setQuote] = useState<QuoteSummary | null>(null);
-  const [itemIndex, setItemIndex] = useState(0);
   const [costing, setCosting] = useState<ComponentCosting | null>(null);
   const [pricing, setPricing] = useState<PricingSummary | null>(null);
   const [totals, setTotals] = useState<QuoteTotals | null>(null);
@@ -74,15 +81,39 @@ export function EstimatingPage() {
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkPrefill, setBulkPrefill] = useState<BulkCreatePrefill | null>(null);
   const [nesting, setNesting] = useState<NestingOverview | null>(null);
+  const [requoteEntries, setRequoteEntries] = useState<RequoteDiffEntry[]>([]);
+  const [requoteBusy, setRequoteBusy] = useState(false);
   const [bomStatus, setBomStatus] = useState<BomStatus | null>(null);
   const [bomBuilderOpen, setBomBuilderOpen] = useState(false);
   const [bomPublishedToast, setBomPublishedToast] = useState(false);
   const [bomPublishCount, setBomPublishCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  // The active line item is derived SYNCHRONOUSLY from the URL (M5.0) — never a
+  // state+effect, so a deep link to a non-first item never briefly loads item 0's
+  // costing (the CodeRabbit race). Falls back to 0 while the quote loads / before
+  // the forward-to-first effect below fires.
+  const resolvedIndex = quote ? quote.items.findIndex((i) => i.id === lineItemId) : -1;
+  const itemIndex = resolvedIndex >= 0 ? resolvedIndex : 0;
+
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
   const partId = quote?.items[itemIndex]?.part_id ?? null;
   const quoteItemId = quote?.items[itemIndex]?.id ?? null;
+
+  // If the URL lacks a valid lineItemId but the quote has items, forward to the
+  // first — so `/quotes/edit/:id` and the old-route redirect both land on a real item.
+  useEffect(() => {
+    if (!quote || !quoteId || quote.items.length === 0) return;
+    if (quote.items.findIndex((i) => i.id === lineItemId) === -1) {
+      navigate(`/quotes/edit/${quoteId}/${quote.items[0].id}`, { replace: true });
+    }
+  }, [quote, quoteId, lineItemId, navigate]);
+
+  // Switching line items closes any open operation drawer (it belongs to the
+  // previous component).
+  useEffect(() => {
+    setDrawerOpId(null);
+  }, [lineItemId]);
 
   const fail = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : String(e));
@@ -126,26 +157,137 @@ export function EstimatingPage() {
       .getNestingOverview(quoteId)
       .then(setNesting)
       .catch(() => setNesting(null));
+    // M4.12 — requote diff entries for the "Previous quote found" banner;
+    // absence (no match / task not run yet) is not an error.
+    api
+      .getRequoteDiff(quoteId)
+      .then((r) => setRequoteEntries(r.entries))
+      .catch(() => setRequoteEntries([]));
   }, [api, quoteId, fail]);
+
+  // Guards every item-scoped async load against a line-item switch (M3.10/M5.0):
+  // a response for component A must never paint after the user moved to B.
+  const activeComponentRef = useRef<string | null>(null);
 
   const loadPricing = useCallback(() => {
     if (!componentId) return;
-    api.getPricing(componentId).then(setPricing).catch(fail);
+    const cid = componentId;
+    api
+      .getPricing(cid)
+      .then((p) => {
+        if (activeComponentRef.current === cid) setPricing(p);
+      })
+      .catch(fail);
     // quote-level VAT totals move with every price/add-on change
-    if (quoteId) api.getQuoteTotals(quoteId).then(setTotals).catch(fail);
+    if (quoteId)
+      api
+        .getQuoteTotals(quoteId)
+        .then((tot) => {
+          if (activeComponentRef.current === cid) setTotals(tot);
+        })
+        .catch(fail);
   }, [api, componentId, quoteId, fail]);
 
-  // Guards the async rule-suggestion probe against a line-item switch (M3.10):
-  // a probe fired for component A must not paint A's chip after the user moved
-  // to component B.
-  const activeComponentRef = useRef<string | null>(null);
+  // M4.12 — the explicit three-choice requote gate. Every choice is recorded
+  // for the audit trail; ONLY the import button touches the router.
+  const recordRequoteChoice = useCallback(
+    (entry: RequoteDiffEntry, choice: 'import_router' | 'review' | 'start_fresh') => {
+      if (!quoteId) return Promise.resolve();
+      setRequoteBusy(true);
+      return api
+        .postRequoteChoice(quoteId, entry.part_id, choice)
+        .then((r) => setRequoteEntries(r.entries))
+        .catch(fail)
+        .finally(() => setRequoteBusy(false));
+    },
+    [api, quoteId, fail],
+  );
+
+  const importRequoteRouter = useCallback(
+    (entry: RequoteDiffEntry) => {
+      if (!quoteId) return;
+      setRequoteBusy(true);
+      api
+        .importRouter(entry.target_component_id, entry.matched.component_id)
+        .then(() => {
+          // The import succeeded: reflect the copied router immediately and
+          // dismiss the panel optimistically — the audit POST below must not
+          // gate what already happened server-side.
+          if (componentId) {
+            api.getCosting(componentId).then(setCosting).catch(fail);
+            loadPricing();
+          }
+          setRequoteEntries((prev) =>
+            prev.map((e) =>
+              e.part_id === entry.part_id
+                ? { ...e, choice: { choice: 'import_router' as const, at: new Date().toISOString() } }
+                : e,
+            ),
+          );
+          return api.postRequoteChoice(quoteId, entry.part_id, 'import_router');
+        })
+        .then((r) => setRequoteEntries(r.entries))
+        .catch(fail)
+        .finally(() => setRequoteBusy(false));
+    },
+    [api, quoteId, componentId, fail, loadPricing],
+  );
+
+  // M4.13 — the two explicit-accept assembly paths (atomic router + pricing
+  // import server-side; Accept All re-checked and undo-armed there) and the
+  // 60-second undo. Costing + pricing reload after each, since both move.
+  const assemblyAct = useCallback(
+    (entry: RequoteDiffEntry, action: 'accept_all' | 'review' | 'undo') => {
+      if (!quoteId) return;
+      setRequoteBusy(true);
+      // The import mutates the entry's own component — refresh THAT one, and
+      // re-check it is still the active line item before every state write
+      // (the M3.10 pattern): a switch mid-request must not let component A's
+      // costing paint component B's view.
+      const target = entry.target_component_id;
+      const call =
+        action === 'undo'
+          ? api.assemblyUndo(quoteId, entry.part_id)
+          : api.assemblyImport(quoteId, entry.part_id, action);
+      call
+        .then((r) => {
+          setRequoteEntries(r.entries);
+          if (activeComponentRef.current !== target) return;
+          api
+            .getCosting(target)
+            .then((c) => {
+              if (activeComponentRef.current === target) setCosting(c);
+            })
+            .catch(fail);
+          loadPricing();
+        })
+        .catch(fail)
+        .finally(() => setRequoteBusy(false));
+    },
+    [api, quoteId, fail, loadPricing],
+  );
+
+  // Switching line items drops the previous component's item-scoped state so the
+  // old item's numbers never linger under the new one. Keyed on componentId ALONE
+  // (not the load deps) so it fires once per real switch — never on an unrelated
+  // re-render, which would blank a freshly-loaded costing.
+  useEffect(() => {
+    setCosting(null);
+    setPricing(null);
+    setTotals(null);
+    setRuleSuggestion(null);
+  }, [componentId]);
 
   useEffect(() => {
     if (!componentId) return;
-    // Switching line items: drop any chip from the previous component.
-    activeComponentRef.current = componentId;
-    setRuleSuggestion(null);
-    api.getCosting(componentId).then(setCosting).catch(fail);
+    const cid = componentId;
+    activeComponentRef.current = cid;
+    api
+      .getCosting(cid)
+      .then((c) => {
+        if (activeComponentRef.current === cid) setCosting(c);
+      })
+      .catch(fail);
     loadPricing();
   }, [api, componentId, fail, loadPricing]);
 
@@ -300,30 +442,61 @@ export function EstimatingPage() {
       .catch(fail);
   };
 
+  // M5.0 — sidebar navigation + line-item costing-inputs actions.
+  const selectItem = (itemId: string) => navigate(`/quotes/edit/${quoteId}/${itemId}`);
+
+  const addLineItem = () => {
+    setError(null);
+    api
+      .addLineItem(quoteId)
+      .then((next) => {
+        setQuote(next);
+        const added = next.items[next.items.length - 1];
+        if (added) navigate(`/quotes/edit/${quoteId}/${added.id}`);
+      })
+      .catch(fail);
+  };
+
+  const attachFinish = (defId: string) => {
+    if (componentId) apply(api.addOperation(componentId, { operation_def_id: defId }));
+  };
+
+  const removeFinish = (operationId: string) => {
+    setError(null);
+    api
+      .removeOperation(operationId)
+      .then(() => {
+        if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+        loadPricing();
+      })
+      .catch(fail);
+  };
+
+  const setPriority = (priority: number | null) => {
+    if (!quoteItemId) return;
+    setError(null);
+    api.setLineItemPriority(quoteId, quoteItemId, priority).then(setQuote).catch(fail);
+  };
+
+  const activeItem = quote.items[itemIndex] ?? null;
+
   return (
-    <main className="est-page">
+    <div className="est-layout">
+      <LineItemSidebar
+        quote={quote}
+        activeItemId={quoteItemId}
+        editable={editable}
+        onSelect={selectItem}
+        onAddItem={addLineItem}
+      />
+      <main className="est-page">
       <header className="est-header">
+        <Link className="est-return-link" to="/quotes">
+          {t('estimating.return_to_quotes')}
+        </Link>
         <h2>
           {t('estimating.title', { number: quote.number })}
         </h2>
-        {quote.items.length > 1 && (
-          <label>
-            {t('estimating.line_item')}
-            <select
-              value={itemIndex}
-              onChange={(e) => {
-                setItemIndex(Number(e.target.value));
-                setDrawerOpId(null);
-              }}
-            >
-              {quote.items.map((item, index) => (
-                <option key={item.id} value={index}>
-                  {t('estimating.item_option', { position: item.position })}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         {partId && (
           <PartMatchesChip
             key={partId}
@@ -384,6 +557,22 @@ export function EstimatingPage() {
             }}
             disabled={!editable}
           />
+          {componentId && (
+            <RequestedFinishes
+              operations={costing?.operations ?? []}
+              loadFinishDefs={api.listFinishDefs}
+              onAttach={attachFinish}
+              onRemove={removeFinish}
+              disabled={!editable}
+            />
+          )}
+          {activeItem && (
+            <LineItemActionsMenu
+              priority={activeItem.priority}
+              onSetPriority={setPriority}
+              disabled={!editable}
+            />
+          )}
         </div>
       </header>
 
@@ -499,6 +688,36 @@ export function EstimatingPage() {
           }}
         />
       )}
+
+      {/* M4.12 (spec #ai-requote-diff): "Previous quote found — see what
+          changed". Visible until an explicit choice dismisses it; a recorded
+          "review" keeps the panel available. */}
+      {(() => {
+        const entry = requoteEntries.find(
+          (e) =>
+            e.part_id === partId &&
+            (e.choice === null ||
+              e.choice.choice === 'review' ||
+              // M4.13: an active import record keeps the panel up — it carries
+              // the audit line and (for Accept All) the 60-second undo chip.
+              (e.assembly != null && e.assembly.undone_at === null)),
+        );
+        if (!entry) return null;
+        return (
+          <RequoteDiffPanel
+            entry={entry}
+            busy={requoteBusy || !canEdit}
+            onImport={() => importRequoteRouter(entry)}
+            onReview={() => {
+              if (entry.choice === null) void recordRequoteChoice(entry, 'review');
+            }}
+            onStartFresh={() => void recordRequoteChoice(entry, 'start_fresh')}
+            onAcceptAll={() => assemblyAct(entry, 'accept_all')}
+            onImportForReview={() => assemblyAct(entry, 'review')}
+            onUndo={() => assemblyAct(entry, 'undo')}
+          />
+        );
+      })()}
 
       {/* M4.3 (DemoA/12): the nest-eligibility banner on a sheet-metal part.
           Warnings detail stays M4.7 — this is the eligible/nested state only. */}
@@ -745,6 +964,7 @@ export function EstimatingPage() {
           onClose={() => setChangingProcess(false)}
         />
       )}
-    </main>
+      </main>
+    </div>
   );
 }

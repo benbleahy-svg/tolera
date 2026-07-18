@@ -6,7 +6,7 @@
  */
 
 import { useClerk } from '@clerk/clerk-react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 
 import { CustomTablesPage } from './configure/CustomTablesPage';
 import { OperationsPage } from './configure/OperationsPage';
@@ -30,6 +30,16 @@ import { NAV_ITEMS } from './shell/nav';
 /** Nav destinations that have a real screen; the rest render a placeholder. */
 const REAL_ROUTES = new Set(['/', '/contacts', '/parts', '/quotes', '/configure']);
 
+/**
+ * M5.0 — the estimating screen moved to the spec route `/quotes/edit/:id/:lineItemId`.
+ * The old `/quotes/:quoteId` links keep working: this forwards to the new shape, where
+ * `EstimatingPage` resolves the first line item (client "301" — no server in an SPA).
+ */
+function EstimatingRedirect() {
+  const { quoteId } = useParams<{ quoteId: string }>();
+  return <Navigate to={`/quotes/edit/${quoteId}`} replace />;
+}
+
 export default function App() {
   const { signOut } = useClerk();
 
@@ -48,8 +58,12 @@ export default function App() {
         <Route path="/parts" element={<PartsPage />} />
         <Route path="/parts/:partId/files/:fileId/view" element={<FileViewerPage />} />
         <Route path="/quotes" element={<QuotesPage />} />
-        {/* Line-item estimating view — the M1.7 Materials & Operations slice. */}
-        <Route path="/quotes/:quoteId" element={<EstimatingPage />} />
+        {/* Line-item estimating view at the spec route (M5.0, #partview): a left
+            line-item sidebar + the costing-inputs band. `/quotes/edit/:id` (no line
+            item) forwards to the first item; the old `/quotes/:quoteId` 301-redirects. */}
+        <Route path="/quotes/edit/:id/:lineItemId" element={<EstimatingPage />} />
+        <Route path="/quotes/edit/:id" element={<EstimatingPage />} />
+        <Route path="/quotes/:quoteId" element={<EstimatingRedirect />} />
         {/* Multi-component sheet-metal nesting (M4.3, spec #nesting). */}
         <Route path="/quotes/:quoteId/nesting" element={<NestingPage />} />
         {/* Configure lands on Custom Tables (M1.9); the full Configure section
