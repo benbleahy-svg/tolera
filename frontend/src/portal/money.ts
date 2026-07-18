@@ -40,6 +40,15 @@ export function formatMoney(value: string | null, currency: string): string {
   }).format(num);
 }
 
+/** Format integer minor units (cents/Rappen) as a locale currency string. The
+ *  checkout/order endpoints emit money as minor units, not 4-dp strings. */
+export function formatMinor(minor: number, currency: string): string {
+  return new Intl.NumberFormat(localeForCurrency(currency), {
+    style: 'currency',
+    currency,
+  }).format(minor / 100);
+}
+
 /** Exact 4-dp sum of decimal strings; nulls/malformed entries are skipped. */
 export function sumMoney(values: (string | null | undefined)[]): string {
   let total = 0n;

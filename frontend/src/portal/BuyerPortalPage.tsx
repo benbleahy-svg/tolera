@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
 import { fetchBuyerQuote } from './api';
+import { CheckoutFlow } from './CheckoutFlow';
 import { LineItemCard } from './LineItemCard';
 import { sumMoney } from './money';
 import { OrderSummary } from './OrderSummary';
@@ -62,6 +63,7 @@ export function BuyerPortalPage() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [selections, setSelections] = useState<SelectionMap>(new Map());
+  const [checkingOut, setCheckingOut] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +73,7 @@ export function BuyerPortalPage() {
     // can't bleed into the new one (overlapping line-item ids / stale subtotal).
     setQuote(null);
     setSelections(new Map());
+    setCheckingOut(false);
     if (!token) {
       setFailed(true);
       setLoading(false);
@@ -149,6 +152,23 @@ export function BuyerPortalPage() {
 
   const locale = quote.currency === 'CHF' ? 'de-CH' : 'de-DE';
 
+  if (checkingOut && token) {
+    return (
+      <div className="portal-root">
+        <header className="portal-shop-header">
+          <h1 className="portal-shop-name">{quote.shop.name}</h1>
+        </header>
+        <CheckoutFlow
+          quote={quote}
+          token={token}
+          selections={selections}
+          subtotalNet={subtotal}
+          onClose={() => setCheckingOut(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="portal-root">
       <header className="portal-shop-header">
@@ -205,7 +225,13 @@ export function BuyerPortalPage() {
             />
           ))}
         </div>
-        <OrderSummary subtotal={subtotal} currency={quote.currency} hasSelection={hasSelection} />
+        <OrderSummary
+          subtotal={subtotal}
+          currency={quote.currency}
+          hasSelection={hasSelection}
+          isExpired={quote.is_expired}
+          onCheckout={() => setCheckingOut(true)}
+        />
       </main>
     </div>
   );

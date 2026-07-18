@@ -64,3 +64,53 @@ export interface LineSelection {
   expediteId: string | null;
   addOnIds: Set<string>;
 }
+
+// --- M5.2 checkout → Order (PO only) --------------------------------------- //
+/** The PO-compatible shipping methods (spec #shipping-options; CC hidden v1). */
+export type ShippingMethod = 'bill_at_shipment' | 'use_my_shipping_account' | 'no_shipping_fees';
+
+/** One line's selection, as the checkout endpoint consumes it (IDs only — the
+ *  server re-derives every price; the client never sends money). */
+export interface CheckoutLineSelection {
+  quote_item_id: string;
+  quantity: number;
+  expedite_option_id?: string | null;
+  add_on_ids?: string[];
+}
+
+export interface CheckoutRequest {
+  selections: CheckoutLineSelection[];
+  po_number: string;
+  company_name?: string | null;
+  billing_address?: string | null;
+  notes?: string | null;
+  buyer_ust_id_nr?: string | null;
+  shipping_method: ShippingMethod;
+}
+
+/** The confirmation payload — money as integer minor units + currency. */
+export interface CheckoutResult {
+  order_id: string;
+  order_number: string;
+  currency: 'EUR' | 'CHF';
+  net_minor: number;
+  vat_minor: number;
+  gross_minor: number;
+  vat_rate_pct: string;
+  vat_label: string | null;
+  reverse_charge: boolean;
+  kleinunternehmer: boolean;
+  tax_note: string | null;
+  po_number: string;
+  shipping_method: ShippingMethod | null;
+  lines: {
+    quote_item_id: string;
+    quantity: number;
+    unit_price_minor: number;
+    total_price_minor: number;
+    expedites_fee_minor: number;
+    lead_time_days: number | null;
+    ships_on: string | null;
+    add_ons: { id: string; name: string; price_minor: number; required: boolean }[];
+  }[];
+}

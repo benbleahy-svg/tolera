@@ -19,6 +19,24 @@
 
 ---
 
+## [2026-07-18] M5.2 + M5.3 combined build — checkout→Order, VAT/reverse-charge/VIES
+
+**Status:** RESOLVED (Benjamin chose "Combine M5.2 + M5.3" when `/block M5.2` halted on the unbuilt M5.3 dependency; design choices classified per CLAUDE.md §6.3 and either verified or flagged ASSUMED inline in the PR table)
+
+**Context.** `/block M5.2` (Quote Checkout → Order) `Depends on: M5.1, M5.3`. M5.1 merged (PR #70); **M5.3 (VAT & Tax computation) was never built** — only M1.11's domestic-VAT groundwork exists (`app/tax.py` + `GET /api/quotes/{id}/totals`, standard-rate only). Rather than build M5.2's checkout against an invented tax interface (forbidden; tier-1 money/tax), the two blocks are delivered **together in one PR**.
+
+**Decisions:**
+1. **VAT standard rates applied to manufacturing parts: DE 19% · AT 20% · CH 8.1%** — **verified 2026-07-18** against published 2026 rates (Tax Foundation / VATupdate). Manufacturing supplies are standard-rated, so the reduced rates (DE 7%, AT 13%/10%, CH 2.6%/3.8%) are **seeded in `VAT_PROFILES` but not applied** in v1. This closes the `DACH-DELTA-LAYER §3` "(verify)" flag on the standard rates (reduced rates confirmed to match published values but remain unused → no per-line tax-category picker in v1). Rates stay configurable per the sub-spec.
+2. **Reverse charge §13b UStG** applies when: **shop country ∈ EU (DE/AT)** ∧ **buyer country ∈ EU** ∧ **buyer country ≠ shop country** ∧ **valid VIES-checked USt-IdNr**. Buyer country is taken from the **USt-IdNr country prefix** (VIES-authoritative; `EL` = Greece). Result: net only, no VAT, the note **"Steuerschuldnerschaft des Leistungsempfängers"** + both VAT-IDs (`DACH-DELTA-LAYER §3`, verbatim). **CH shop → always domestic MWST** (Switzerland is non-EU; §13b/VIES do not apply — resolves the digest's CH-cross-border gap; CH cross-border export handling is out of v1).
+3. **VIES validation** via an **injectable client** (`VIESClient` protocol: live EU REST impl + a test double); the result + timestamp are **stored on the Order** (and reusable at account level later). **Fail-safe:** an invalid, absent, or VIES-unreachable USt-IdNr **falls back to net+VAT+gross** (charging VAT is never under-collection; wrongly granting reverse-charge would be) — matches the spec AC "an invalid/absent USt-IdNr falls back to net+VAT+gross".
+4. **Kleinunternehmer §19 UStG** = a **per-org boolean** (`organization.is_kleinunternehmer`, default false) that suppresses all VAT lines and renders the standard §19 note (German copy, Fechner-reviewed before go-live per the *German strings* decision).
+5. **Order / OrderLine money = integer minor units (`BIGINT`) + explicit `currency`** — the Order is the spine's terminal entity (the total boundary), so money crosses to minor units here (M5.2 AC "money stored as integer minor units + explicit currency"; CLAUDE.md §5). The §14-UStG tax breakdown (net-per-rate, vat rate+amount OR reverse-charge note, both VAT-IDs) is **persisted on the Order** so the M5.4 PDF renders from stored data, not a recompute.
+6. **Checkout = one atomic token-authenticated POST** (no server-side selection entity — M5.1's selection is client-side). The payload carries **only IDs + quantities** (per line: `quote_item_id`, `quantity`, optional `expedite_option_id`, optional `add_on_ids[]`) + company/PO/billing/notes/USt-IdNr + shipping method; **the server re-derives every price from the DB** via M1.10/M1.11's `_pricing_summary` (client money is never trusted — money invariant). ≥1 selected line required.
+7. **`order.source = buyer_portal`** (enum `order_source(buyer_portal|facilitated)`; facilitated path is M5.7). **`order.number` = per-org sequential** (mirrors `quote.number`). **`order_line.ships_on` = order placement date + the break's `lead_time_days`** (calendar days in v1; business-day calendars are M5.8 Lead-Time Settings). `order.shipped_at` nullable, carried from day one (no status lifecycle — ERP-owned).
+8. **Shop notification** on order placement = an in-DB `Notification` row (`kind="order_placed"`, deep-link payload) to the quote's estimator + salesperson (the collab.py pattern). The **Order Confirmation *email*** is M5.5 (templates) / M5.8 (the "Send Order Confirmation Emails" toggle).
+
+**Affects:** M5.2, M5.3 (this PR); M5.4 (renders the persisted §14 tax block), M5.5/M5.8 (order-confirmation email + checkout settings), M5.6 (orders list reads these), M5.7 (facilitated source reuses the Order model).
+
 ## [2026-07-18] M5.0 estimating-shell implementation assumptions (recorded)
 
 **Context.** M5.0 (estimating shell, PR pending) ships four grill-time `ASSUMED:` choices the sources under-specify. All were classified **cheap to reverse** per CLAUDE.md §6.3 (no money/tax math, no tenancy/authz change, no external contract), so they were applied with inline notes rather than a halt; recorded here for the audit trail.

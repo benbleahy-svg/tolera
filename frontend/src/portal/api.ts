@@ -7,11 +7,20 @@
  */
 
 import { apiFetch } from '../api/client';
-import type { BuyerQuote } from './types';
+import type { BuyerQuote, CheckoutRequest, CheckoutResult } from './types';
+
+const NO_TOKEN = () => Promise.resolve(null);
 
 export function fetchBuyerQuote(token: string): Promise<BuyerQuote> {
-  return apiFetch<BuyerQuote>(
-    `/api/public/quotes/${encodeURIComponent(token)}`,
-    () => Promise.resolve(null),
+  return apiFetch<BuyerQuote>(`/api/public/quotes/${encodeURIComponent(token)}`, NO_TOKEN);
+}
+
+/** Submit the PO checkout (M5.2). Public + unauthenticated (token in the path);
+ *  the server re-derives all prices and creates the Order. */
+export function submitCheckout(token: string, request: CheckoutRequest): Promise<CheckoutResult> {
+  return apiFetch<CheckoutResult>(
+    `/api/public/quotes/${encodeURIComponent(token)}/checkout`,
+    NO_TOKEN,
+    { method: 'POST', body: request },
   );
 }

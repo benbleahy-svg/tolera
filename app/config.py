@@ -195,6 +195,12 @@ class Settings(BaseSettings):
             "tokens are signed with it and must never use a blank/default key."
         )
 
+    # --- VIES (EU VAT-ID validation — M5.3 reverse-charge gate) ---
+    # The EU VIES REST endpoint. Validation fails safe: any error / timeout is
+    # treated as "not validated" → VAT is charged (never silently reverse-charge).
+    vies_base_url: str = "https://ec.europa.eu/taxation_customs/vies/rest-api"
+    vies_timeout_seconds: float = 8.0
+
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"
     default_locale: str = "de-DE"
