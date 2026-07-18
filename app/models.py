@@ -203,6 +203,13 @@ class Organization(Base):
     default_expedite_tiers: Mapped[list[Any] | None] = mapped_column(JSONB)
     # Clerk Organizations mirror (DECISIONS.md 2026-06-24 "Org identity model").
     clerk_org_id: Mapped[str | None] = mapped_column(String, unique=True)
+    # DACH tax profile (M5.3). ``ust_id_nr`` = the shop's own USt-IdNr, carried
+    # onto reverse-charge invoices (§14 UStG). ``is_kleinunternehmer`` (§19) is
+    # the per-org flag that suppresses every VAT line (DECISIONS 2026-07-18).
+    ust_id_nr: Mapped[str | None] = mapped_column(String)
+    is_kleinunternehmer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -3285,3 +3292,161 @@ class QuoteTokenAccess(Base):
     ip_address: Mapped[str | None] = mapped_column(String)
     user_agent: Mapped[str | None] = mapped_column(String)
     occurred_at: Mapped[datetime] = _ts()
+
+
+# --------------------------------------------------------------------------- #
+# Orders (M5.2 — Quote Checkout → Order)
+# --------------------------------------------------------------------------- #
+class OrderSource(enum.StrEnum):
+    """How an :class:`Order` was created (spec ``#orderslist`` Source tag).
+
+    ``buyer_portal`` = the buyer completed the PO checkout at ``/q/:token``
+    (M5.2). ``facilitated`` = the shop built the order internally (M5.7). Values
+    are append-only; the same Order model serves both paths."""
+
+    buyer_portal = "buyer_portal"
+    facilitated = "facilitated"
+
+
+class OrderShippingMethod(enum.StrEnum):
+    """The PO-compatible shipping options offered at checkout (spec
+    ``#shipping-options``). "Charge Me for Shipping (CC)" is **hidden in v1**
+    (cards deferred), so it is deliberately absent from this enum."""
+
+    bill_at_shipment = "bill_at_shipment"
+    use_my_shipping_account = "use_my_shipping_account"
+    no_shipping_fees = "no_shipping_fees"
+
+
+_order_source_enum = Enum(OrderSource, name="order_source", create_type=False)
+_order_shipping_method_enum = Enum(
+    OrderShippingMethod, name="order_shipping_method", create_type=False
+)
+
+
+class Order(Base):
+    """A confirmed order — the quote spine's terminal entity (spec ``#order`` /
+    ``#orderslist``; ``DOMAIN-MODEL §6`` Order↔Quote).
+
+    Created from a won quote via buyer-portal checkout (M5.2) or internal
+    facilitation (M5.7). **No status lifecycle in v1** — status is ERP-owned;
+    Bid Factory stores the record plus a nullable ``shipped_at`` (spec
+    ``#orderslist``). Money is **integer minor units + explicit ``currency``**
+    (the total boundary; M5.2 AC). The §14-UStG tax breakdown is persisted from
+    :mod:`app.vat_service` so the M5.4 PDF renders stored figures, not a
+    recompute. Composite same-org FKs to quote / account / contact (§5 tenancy)."""
+
+    __tablename__ = "order_"
+    __table_args__ = (
+        CheckConstraint("currency IN ('EUR', 'CHF')", name="ck_order_currency_dach"),
+        UniqueConstraint("org_id", "number", name="uq_order_org_number"),
+        UniqueConstraint("org_id", "id", name="uq_order_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_order_quote_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "account_id"],
+            ["account.org_id", "account.id"],
+            name="fk_order_account_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "contact_id"],
+            ["contact.org_id", "contact.id"],
+            name="fk_order_contact_org",
+        ),
+        Index("ix_order_org_created", "org_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    #: Per-org sequential order number (``order_counter`` upsert; mirrors quote).
+    number: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[OrderSource] = mapped_column(_order_source_enum, nullable=False)
+    quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: Customer PO — required for buyer_portal (app layer), may be blank for facilitated.
+    po_number: Mapped[str | None] = mapped_column(String)
+    company_name: Mapped[str | None] = mapped_column(String)
+    #: Free-text billing address (multi-line). Structured §14 address is post-v1.
+    billing_address: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    shipping_method: Mapped[OrderShippingMethod | None] = mapped_column(_order_shipping_method_enum)
+    # --- Tax posture (persisted from app.vat_service; §14-UStG evidence) ---
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    net_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    vat_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    gross_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    vat_rate_pct: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
+    vat_label: Mapped[str | None] = mapped_column(String)
+    reverse_charge: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    kleinunternehmer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    #: §13b or §19 note rendered on the invoice; NULL for a plain domestic order.
+    tax_note: Mapped[str | None] = mapped_column(Text)
+    #: The shop's own USt-IdNr and the buyer's — both carried for a §13b invoice.
+    supplier_ust_id_nr: Mapped[str | None] = mapped_column(String)
+    buyer_ust_id_nr: Mapped[str | None] = mapped_column(String)
+    #: Per-rate §14 breakdown snapshot: [{"rate_pct","net_minor","vat_minor"}].
+    tax_rate_lines: Mapped[list[Any] | None] = mapped_column(JSONB)
+    #: VIES verdict + timestamp (audit trail; NULL when VIES was not consulted).
+    vies_valid: Mapped[bool | None] = mapped_column(Boolean)
+    vies_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Set when the shop ships (ERP-driven later); no status lifecycle in v1.
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class OrderLine(Base):
+    """One ordered line — a quote LineItem at a chosen quantity break plus the
+    buyer's expedite / add-on choices (spec ``#order``; ``DOMAIN-MODEL §6``
+    OrderItem). Money is integer minor units; the break is referenced naturally
+    by ``(component_id, quantity)`` (``component_quantity`` is unique on that).
+    ``ships_on`` = order placement + the break's lead time (calendar days, v1)."""
+
+    __tablename__ = "order_line"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_order_line_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "order_id"],
+            ["order_.org_id", "order_.id"],
+            name="fk_order_line_order_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "quote_item_id"],
+            ["quote_item.org_id", "quote_item.id"],
+            name="fk_order_line_quote_item_org",
+        ),
+        Index("ix_order_line_org_order", "org_id", "order_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quote_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: The root component whose (component_id, quantity) resolves the chosen break.
+    component_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: Net line total = (expedited) break total + chosen add-ons, in minor units.
+    total_price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: The chosen ExpediteOption (provenance snapshot; NULL = standard lead time).
+    expedite_option_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    expedites_fee_minor: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    #: Filled by the shop at ship time for Bill-at-Shipment (NULL at creation).
+    shipping_price_minor: Mapped[int | None] = mapped_column(BigInteger)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
+    ships_on: Mapped[date | None] = mapped_column(Date)
+    #: Snapshot of the applied add-ons: [{"id","name","price_minor","required"}].
+    add_ons: Mapped[list[Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
