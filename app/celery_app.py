@@ -30,6 +30,7 @@ celery_app = Celery(
         "app.review_items",
         "app.triage",
         "app.rule_suggest",
+        "app.requote_diff",
     ],
 )
 

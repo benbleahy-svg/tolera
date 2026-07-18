@@ -1223,5 +1223,25 @@
     "issue_missing_primary_file": "No drawing or model is assigned to this part yet.",
     "issue_purchased_unassigned": "Purchased parts are not linked to a component library record yet (arrives with M4.10).",
     "action_failed": "Action failed: {{detail}}"
+  },
+  "requote": {
+    "badge": "AI",
+    "banner": "Previous quote found ({{number}})",
+    "see_changes": "See what changed ▾",
+    "hide_changes": "Hide changes ▴",
+    "ai_off": "AI synthesis disabled — the comparison below is computed deterministically.",
+    "geometry": "Geometry",
+    "geometry_delta": "Volume: {{pct}} %",
+    "geometry_unavailable": "No geometry comparison available (identical file or no 3D analysis).",
+    "significant": "Significant change",
+    "drawing_changes": "Drawing changes",
+    "no_drawing_changes": "No changes to the extracted callouts.",
+    "drawing_summary": "{{added}} added · {{removed}} removed · {{changed}} changed",
+    "added": "ADDED",
+    "removed": "REMOVED",
+    "changed": "CHANGED",
+    "import_router": "Import router from {{number}}",
+    "review_fields": "Review diff field-by-field",
+    "start_fresh": "Start fresh"
   }
 }

@@ -31,6 +31,8 @@ import type {
   NestCreateBody,
   NestOut,
   NestingOverview,
+  RequoteChoice,
+  RequoteDiffResponse,
   OperationCreateBody,
   OperationDefOut,
   OperationUpdateBody,
@@ -128,6 +130,14 @@ export interface EstimatingApi {
   getNestingOverview: (quoteId: string) => Promise<NestingOverview>;
   createNest: (quoteId: string, body: NestCreateBody) => Promise<{ nests: NestOut[] }>;
   deleteNest: (quoteId: string, nestId: string) => Promise<void>;
+  // M4.12 — Requote Diff Assistant (spec #ai-requote-diff)
+  getRequoteDiff: (quoteId: string) => Promise<RequoteDiffResponse>;
+  postRequoteChoice: (
+    quoteId: string,
+    partId: string,
+    choice: RequoteChoice,
+  ) => Promise<RequoteDiffResponse>;
+  importRouter: (componentId: string, sourceComponentId: string) => Promise<unknown>;
 }
 
 /** Build an estimating API client bound to the current Clerk session token. */
@@ -254,6 +264,17 @@ export function useEstimatingApi(): EstimatingApi {
         }),
       getQuoteTotals: (quoteId) => apiFetch(`/api/quotes/${quoteId}/totals`, token),
       getNestingOverview: (quoteId) => apiFetch(`/api/quotes/${quoteId}/nesting`, token),
+      getRequoteDiff: (quoteId) => apiFetch(`/api/quotes/${quoteId}/requote-diff`, token),
+      postRequoteChoice: (quoteId, partId, choice) =>
+        apiFetch(`/api/quotes/${quoteId}/requote-diff/choice`, token, {
+          method: 'POST',
+          body: { part_id: partId, choice },
+        }),
+      importRouter: (componentId, sourceComponentId) =>
+        apiFetch(`/api/components/${componentId}/import-router`, token, {
+          method: 'POST',
+          body: { source_component_id: sourceComponentId },
+        }),
       createNest: (quoteId, body) =>
         apiFetch(`/api/quotes/${quoteId}/nests`, token, { method: 'POST', body }),
       deleteNest: (quoteId, nestId) =>

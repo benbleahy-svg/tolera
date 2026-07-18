@@ -1223,5 +1223,25 @@
     "issue_missing_primary_file": "Diesem Teil ist noch keine Zeichnung oder kein Modell zugeordnet.",
     "issue_purchased_unassigned": "Kaufteile sind noch nicht mit der Komponentenbibliothek verknüpft (kommt mit M4.10).",
     "action_failed": "Aktion fehlgeschlagen: {{detail}}"
+  },
+  "requote": {
+    "badge": "KI",
+    "banner": "Früheres Angebot gefunden ({{number}})",
+    "see_changes": "Änderungen ansehen ▾",
+    "hide_changes": "Änderungen ausblenden ▴",
+    "ai_off": "KI-Zusammenfassung deaktiviert — der Vergleich unten ist deterministisch berechnet.",
+    "geometry": "Geometrie",
+    "geometry_delta": "Volumen: {{pct}} %",
+    "geometry_unavailable": "Kein Geometrie-Vergleich verfügbar (identische Datei oder keine 3D-Analyse).",
+    "significant": "Wesentliche Änderung",
+    "drawing_changes": "Zeichnungsänderungen",
+    "no_drawing_changes": "Keine Änderungen an den extrahierten Angaben.",
+    "drawing_summary": "{{added}} neu · {{removed}} entfernt · {{changed}} geändert",
+    "added": "NEU",
+    "removed": "ENTFERNT",
+    "changed": "GEÄNDERT",
+    "import_router": "Router aus {{number}} übernehmen",
+    "review_fields": "Diff im Detail prüfen",
+    "start_fresh": "Neu beginnen"
   }
 }

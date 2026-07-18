@@ -578,3 +578,65 @@ export interface NestCreateBody {
   };
   component_settings: { component_id: string; cost_distribution_pct?: string | null }[];
 }
+
+// --- M4.12 — Requote Diff Assistant (spec #ai-requote-diff) ---
+
+/** One serialized ExtractionFinding inside the diff payload. */
+export interface RequoteFinding {
+  type: string;
+  category: string;
+  role: string | null;
+  value: string | null;
+  normalized_value: string | null;
+  units: string | null;
+  tolerance: Record<string, unknown> | null;
+  gdt: Record<string, unknown> | null;
+}
+
+export interface RequoteFindingChange {
+  key: { type: string; role: string | null };
+  a: RequoteFinding;
+  b: RequoteFinding;
+  changes: string[];
+}
+
+export interface RequoteGeometryDelta {
+  available: boolean;
+  significant: boolean;
+  volume?: { a: number; b: number; delta_pct: number };
+  bbox?: Record<string, { a: number; b: number; delta: number }>;
+  features?: Record<string, { a: number; b: number; delta: number }>;
+}
+
+export interface RequoteDiffEntry {
+  part_id: string;
+  match_type: 'exact_file' | 'exact_geometric';
+  matched: {
+    part_id: string;
+    part_number: string | null;
+    revision: string | null;
+    quote_id: string;
+    quote_number: string;
+    component_id: string;
+  };
+  target_component_id: string;
+  diff: {
+    geometry_delta: RequoteGeometryDelta;
+    finding_diff: {
+      added: RequoteFinding[];
+      removed: RequoteFinding[];
+      changed: RequoteFindingChange[];
+      material_changes: { kind: string; reason: string; finding: RequoteFinding }[];
+    };
+  };
+  ai: { enabled: boolean; reason: string } | null;
+  synthesis: string | null;
+  choice: { choice: RequoteChoice; at: string } | null;
+  generated_at: string;
+}
+
+export type RequoteChoice = 'import_router' | 'review' | 'start_fresh';
+
+export interface RequoteDiffResponse {
+  entries: RequoteDiffEntry[];
+}

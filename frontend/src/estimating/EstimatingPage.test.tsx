@@ -49,6 +49,9 @@ const bulkCreateLineItems = vi.fn();
 const getNestingOverview = vi.fn(() =>
   Promise.resolve({ sheet_metal: [], linear_metal: [], nests: [] }),
 );
+const getRequoteDiff = vi.fn(() => Promise.resolve({ entries: [] }));
+const postRequoteChoice = vi.fn(() => Promise.resolve({ entries: [] }));
+const importRouter = vi.fn(() => Promise.resolve({}));
 const getQuoteTotals = vi.fn(() =>
   Promise.resolve({
     currency: 'EUR',
@@ -142,6 +145,9 @@ vi.mock('./api', () => ({
     getBulkCreatePrefill,
     bulkCreateLineItems,
     getNestingOverview,
+    getRequoteDiff,
+    postRequoteChoice,
+    importRouter,
   }),
 }));
 
