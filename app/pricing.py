@@ -2069,11 +2069,16 @@ async def refresh_pricing(
             await session.scalars(select(DiscountDef).where(DiscountDef.deleted_at.is_(None)))
         ).all()
     }
+    # live defs only (matches the pricing/discount def queries above) — a
+    # soft-deleted def must never push its formula/visibility back onto an
+    # attached operation; those ops keep their frozen snapshot
     op_def_formulas = {
         row[0]: (row[1], row[2])
         for row in (
             await session.execute(
-                select(OperationDef.id, OperationDef.cost_formula, OperationDef.variable_visibility)
+                select(
+                    OperationDef.id, OperationDef.cost_formula, OperationDef.variable_visibility
+                ).where(OperationDef.deleted_at.is_(None))
             )
         ).all()
     }

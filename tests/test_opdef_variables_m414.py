@@ -238,3 +238,33 @@ class TestQuoteSideHonoursSnapshot:
             report = app_client.get(f"/api/operations/{op['id']}/kalk").json()
         by_name = {d["name"]: d for d in report[0]["declared_variables"]}
         assert by_name["Stundensatz"]["default_visible"] is False
+
+    def test_refresh_pricing_ignores_soft_deleted_defs(
+        self, app_client: TestClient, seeder: Seeder
+    ) -> None:
+        # a hidden (deleted_at) def must never push its formula/visibility
+        # back onto an attached operation — the frozen snapshot stays
+        org, user = _org_admin(seeder)
+        with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+            op_def = _create_def(app_client, "Fräsen")
+            qid = app_client.post("/api/quotes", json={}).json()["id"]
+            item = app_client.post(f"/api/quotes/{qid}/items").json()["items"][0]
+            component_id = str(item["root_component_id"])
+            op = app_client.post(
+                f"/api/components/{component_id}/operations",
+                json={"operation_def_id": op_def["id"]},
+            ).json()["operations"][0]
+            app_client.put(
+                f"/api/operation-defs/{op_def['id']}/variable-visibility",
+                json={"visibility": {"Stundensatz": False}},
+            )
+            seeder.sql(
+                "UPDATE operation_def SET deleted_at = now() WHERE id = :id",
+                {"id": str(op_def["id"])},
+            )
+            refreshed = app_client.post(f"/api/quotes/{qid}/refresh-pricing")
+            assert refreshed.status_code == 200, refreshed.text
+            report = app_client.get(f"/api/operations/{op['id']}/kalk").json()
+        by_name = {d["name"]: d for d in report[0]["declared_variables"]}
+        # the deleted def's toggle did NOT reach the frozen op
+        assert by_name["Stundensatz"]["default_visible"] is True

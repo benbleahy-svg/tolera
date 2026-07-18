@@ -76,6 +76,9 @@ describe('InterrogationPanel', () => {
     await waitFor(() => {
       expect(screen.getByText('Abmessungen (Analyse)')).toBeInTheDocument();
     });
+    // let any in-flight poll land before sampling the count — on a slow
+    // runner the request issued just before the stop can resolve late
+    await new Promise((r) => setTimeout(r, 30));
     const settled = getInterrogation.mock.calls.length;
     await new Promise((r) => setTimeout(r, 30));
     expect(getInterrogation.mock.calls.length).toBe(settled); // polling stopped
