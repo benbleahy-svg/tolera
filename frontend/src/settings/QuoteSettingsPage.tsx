@@ -189,16 +189,31 @@ export function QuoteSettingsPage() {
           {t('quoteSettings.terms')}
           <textarea
             value={draft.terms ?? ''}
-            onChange={(e) => patch({ terms: e.target.value === '' ? null : e.target.value })}
+            onChange={(e) => {
+              const next = e.target.value === '' ? null : e.target.value;
+              // Clearing the terms can't leave "require acceptance" stranded on.
+              patch(
+                next?.trim()
+                  ? { terms: next }
+                  : { terms: next, require_terms_acceptance: false },
+              );
+            }}
           />
         </label>
+        {/* Can only require acceptance once there are T&Cs to accept — matches the
+            server guard (422 terms_required) so buyers are never trapped on a
+            checkbox with nothing to read. */}
         <label className="qs-toggle">
           <input
             type="checkbox"
             checked={draft.require_terms_acceptance}
+            disabled={!draft.terms?.trim()}
             onChange={(e) => patch({ require_terms_acceptance: e.target.checked })}
           />
           {t('quoteSettings.require_terms_acceptance')}
+          {!draft.terms?.trim() && (
+            <span className="qs-hint">{t('quoteSettings.require_terms_needs_text')}</span>
+          )}
         </label>
         <label className="qs-field">
           {t('quoteSettings.manufacturers_notes')}

@@ -1159,3 +1159,18 @@ Spec `#partview` routes per line item with a left sidebar; the built page is `/q
 **Skipped (with reason):** a full **HTML-allowlist sanitizer** on the rich-text body (fresh-eyes 🔴-adjacent). The tier-1 XSS vector — *customer-supplied merge values* into HTML — is already closed by HTML-escaping values (`render_merge(escape_html=True)`). The residual is an estimator injecting markup into *their own* email body, rendered in *their own* same-origin authenticated preview and their customer's mail client (which sanitizes) — self-XSS, not cross-tenant/privilege. No sanitizer library exists in the repo to "reuse"; adding one (DOMPurify + a backend sanitizer) is a dependency + design decision beyond this fix-pass. **Revisit** if the body ever renders in another user's session (e.g. a shared thread view) or an untrusted author can set it.
 
 **Revisit trigger:** a facility-phone field landing in M5.8 (wire `%%FACILITY_PHONE%%`); the M6 webhook dispatcher consuming `domain_event`; the durable email-send outbox (closes the send-before-commit window); an HTML sanitizer if the body renders cross-user; Fechner feedback on per-recipient link behaviour or the fallback sender.
+
+## [2026-07-18] M5.8 `default_tax_rate_pct` contract — informational, bounded, not jurisdiction-enumerated
+
+**Context.** Review flagged the new `org_quote_settings.default_tax_rate_pct` (`numeric(5,2)`) as an unresolved tax contract that "permits unsupported or silently rounded values," asking to either constrain it to legally-supported DACH jurisdiction rates or defer the field. Precedence check: this field is **not tax math** — it is decidedly informational (an admin display over the region default) and **never enters `resolve_order_tax`** (verified: zero consumers outside its own declaration/serialisation; the VAT engine in `app.vat_service` stays the sole authority, rate = §12 UStG, reverse charge = §13b). Because it does not feed any irreversible tax computation, this is a cheap-to-reverse config field, not a §6 block-and-log item — resolved here rather than as an `OPEN:` halt.
+
+**Decision (applied).**
+- **Keep the field**, informational only. It is **not** enumerated to a fixed DACH rate set: rates change, CH carries several reduced rates, and an over-tight enum on a display-only field is brittle for no correctness gain (it can never produce a wrong *charge* — the engine computes the real tax).
+- **No silent rounding.** The API (`QuoteSettingsUpdate._reject_sub_cent_precision`) **rejects** a value with more than two decimal places (422) instead of letting `numeric(5,2)` truncate it — what the admin types is what is stored. Range stays `0 ≤ rate ≤ 100`.
+- The UI shows it as a bounded number input (`min=0 max=100 step=0.01`) with a hint that the applied rate is legally determined (§12 UStG) — reinforcing that this value is informational.
+
+**Also (same review pass, applied):**
+- **T&Cs acceptance requires T&Cs text.** The settings write validates the *merged* state and 422s (`terms_required`) if `require_terms_acceptance` is on while `terms` is null/blank — so a shop can't trap buyers at a checkbox with nothing to read (checkout already enforces `terms_accepted`, and the buyer payload now carries the terms text).
+- **Notification recipients are shape-checked.** A non-null value in `notification_recipients` must match the repo's contact-email pattern (`app.accounts._EMAIL_RE`); the repo has no `email-validator`/`EmailStr`, so that lightweight regex is the house convention.
+
+**Revisit trigger:** if `default_tax_rate_pct` ever becomes an input to costing/invoicing (it must not — that path is the VAT engine's), or Fechner asks for a jurisdiction picker.

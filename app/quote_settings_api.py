@@ -15,21 +15,28 @@ for the rate, §13b for reverse charge — not a preference; CLAUDE.md §5)."""
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
 from .authz import Permission, require
 from .buyer_portal import NotesPlacement, PreparerDisplay, TotalDisplay
 from .deps import get_session
+from .errors import AppError
 from .models import OrderShippingMethod
 from .quote_settings import get_or_create_row, load_quote_settings
 
 quote_settings_router = APIRouter(prefix="/api/settings/quote", tags=["settings"])
+
+#: Email shape check for notification recipients — the same lightweight pattern
+#: the project already uses for contact addresses (``app.accounts._EMAIL_RE``);
+#: the repo has no ``email-validator``/``EmailStr``, so this is the house type.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 #: The recipient keys the Email-Notification matrix accepts (spec Email
 #: Notification Settings). Unknown keys are rejected; a key may be null (unset).
@@ -162,12 +169,33 @@ class QuoteSettingsUpdate(BaseModel):
                 raise ValueError(f"Fields may not be null: {', '.join(sorted(nulled))}")
         return data
 
+    @field_validator("default_tax_rate_pct")
+    @classmethod
+    def _reject_sub_cent_precision(cls, value: Decimal | None) -> Decimal | None:
+        # numeric(5,2) would *silently* round a 3-dp input — reject it instead so
+        # what the admin typed is what is stored (no invisible rounding). A NaN/inf
+        # exponent is a non-int sentinel; the ge/le bound already rejects those.
+        if value is not None:
+            exponent = value.as_tuple().exponent
+            if isinstance(exponent, int) and exponent < -2:
+                raise ValueError("default_tax_rate_pct supports at most two decimal places")
+        return value
+
     @model_validator(mode="after")
-    def _validate_notification_keys(self) -> QuoteSettingsUpdate:
+    def _validate_notification_recipients(self) -> QuoteSettingsUpdate:
         if self.notification_recipients is not None:
             unknown = set(self.notification_recipients) - _NOTIFICATION_KEYS
             if unknown:
                 raise ValueError(f"Unknown notification keys: {', '.join(sorted(unknown))}")
+            # A recipient may be null (unset) but a present value must look like an
+            # email — the same shape check contacts use (no EmailStr in this repo).
+            bad = sorted(
+                k
+                for k, v in self.notification_recipients.items()
+                if v is not None and not _EMAIL_RE.match(v)
+            )
+            if bad:
+                raise ValueError(f"Invalid recipient email(s): {', '.join(bad)}")
         return self
 
 
@@ -206,5 +234,14 @@ async def update_quote_settings(
             # Persist the enum values (JSONB list of strings), de-duplicated.
             value = sorted({OrderShippingMethod(v).value for v in value})
         setattr(row, name, value)
+    # Validate the *merged* state: "require acceptance" is meaningless — and traps
+    # the buyer at checkout — if there is no T&Cs text to accept. Catches both
+    # enabling the flag without terms and clearing terms while the flag is on.
+    if row.require_terms_acceptance and not (row.terms and row.terms.strip()):
+        raise AppError(
+            "terms_required",
+            "Set Terms & Conditions text before requiring buyers to accept it.",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
     await session.flush()
     return _serialise(await load_quote_settings(session, principal.active_org_id))

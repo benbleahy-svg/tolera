@@ -1682,6 +1682,7 @@
     "default_tax_rate_hint": "Nur informativ — der tatsächliche Steuersatz wird gesetzlich ermittelt (§ 12 UStG).",
     "saved": "Gespeichert",
     "load_error": "Einstellungen konnten nicht geladen werden.",
-    "save_error": "Einstellungen konnten nicht gespeichert werden."
+    "save_error": "Einstellungen konnten nicht gespeichert werden.",
+    "require_terms_needs_text": "Zuerst AGB-Text eingeben."
   }
 }

@@ -248,7 +248,11 @@ def test_checkout_requires_terms_acceptance_when_enabled(
     org, user = _org_admin(seeder, "qs-terms")
     with _as_admin(app_client, org, user) as client:
         qid, _ = _priced_quote(client)
-        client.put(SETTINGS_URL, json={"require_terms_acceptance": True})
+        # Terms text is required alongside the "require acceptance" flag.
+        client.put(
+            SETTINGS_URL,
+            json={"require_terms_acceptance": True, "terms": "Es gelten unsere AGB."},
+        )
     _, token = _mint(seeder, app_client, org, qid)
     portal = app_client.get(f"/api/public/quotes/{token}").json()
     item = portal["line_items"][0]
@@ -274,6 +278,44 @@ def test_checkout_requires_terms_acceptance_when_enabled(
         },
     )
     assert ok.status_code == 201, ok.text
+
+
+def test_require_terms_acceptance_needs_terms_text(seeder: Seeder, app_client: TestClient) -> None:
+    org, user = _org_admin(seeder, "qs-terms-guard")
+    with _as_admin(app_client, org, user):
+        # Enabling the flag with no terms text is rejected (merged-state check).
+        blank = app_client.put(SETTINGS_URL, json={"require_terms_acceptance": True})
+        assert blank.status_code == 422, blank.text
+        assert blank.json()["code"] == "terms_required"
+        # With terms it succeeds; clearing the terms afterwards is then rejected.
+        ok = app_client.put(
+            SETTINGS_URL,
+            json={"require_terms_acceptance": True, "terms": "AGB."},
+        )
+        assert ok.status_code == 200, ok.text
+        cleared = app_client.put(SETTINGS_URL, json={"terms": None})
+    assert cleared.status_code == 422, cleared.text
+    assert cleared.json()["code"] == "terms_required"
+
+
+def test_put_rejects_malformed_notification_email(seeder: Seeder, app_client: TestClient) -> None:
+    org, user = _org_admin(seeder, "qs-notif-email")
+    with _as_admin(app_client, org, user):
+        bad = app_client.put(
+            SETTINGS_URL, json={"notification_recipients": {"order_confirmation": "not-an-email"}}
+        )
+    assert bad.status_code == 422, bad.text
+
+
+def test_put_rejects_sub_cent_tax_rate(seeder: Seeder, app_client: TestClient) -> None:
+    org, user = _org_admin(seeder, "qs-tax-precision")
+    with _as_admin(app_client, org, user):
+        # numeric(5,2) would silently round 19.005 → reject it instead.
+        bad = app_client.put(SETTINGS_URL, json={"default_tax_rate_pct": "19.005"})
+        assert bad.status_code == 422, bad.text
+        # Two decimals is fine.
+        ok = app_client.put(SETTINGS_URL, json={"default_tax_rate_pct": "8.10"})
+    assert ok.status_code == 200, ok.text
 
 
 def test_put_rejects_explicit_null_on_non_nullable(seeder: Seeder, app_client: TestClient) -> None:

@@ -1682,6 +1682,7 @@
     "default_tax_rate_hint": "Informational only — the applied rate is determined by law (§12 UStG).",
     "saved": "Saved",
     "load_error": "Could not load the settings.",
-    "save_error": "Could not save the settings."
+    "save_error": "Could not save the settings.",
+    "require_terms_needs_text": "Enter Terms & Conditions text first."
   }
 }
