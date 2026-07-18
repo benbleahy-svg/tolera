@@ -92,10 +92,9 @@ async def download_quote_pdf(
         session, org, quote, settings, content, storage, datetime.now(UTC)
     )
     pdf = html_to_pdf(render_document_html(ctx))
-
-    key = f"org/{org.id}/quote/{quote.id}/quote.pdf"
-    await storage.put(key, io.BytesIO(pdf), content_type="application/pdf")
-    quote.pdf_object_key = key
+    # A live preview only — it must NOT persist ``quote.pdf_object_key``. That key
+    # is the send-time *snapshot* (M5.5): a preview download before send must not
+    # point it at a non-snapshot render (fresh-eyes review, M5.4).
     return _pdf_response(pdf, f"Angebot-{quote.number}.pdf")
 
 

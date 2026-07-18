@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import mimetypes
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,7 +35,12 @@ from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .buyer_portal import DisplaySettings, TotalDisplay, build_buyer_payload
+from .buyer_portal import (
+    DisplaySettings,
+    PreparerDisplay,
+    TotalDisplay,
+    build_buyer_payload,
+)
 from .tax import to_minor_units
 from .vat_service import format_money
 
@@ -47,6 +53,19 @@ if TYPE_CHECKING:  # avoid heavy/ORM imports at module load
 # Neutral fallback accent when the org has set no brand colour — deliberately
 # NOT a Tolera colour (white-label; the document must carry no platform identity).
 DEFAULT_ACCENT = "#1f2937"
+
+# The accent colour is interpolated into a CSS ``<style>`` context, where Jinja's
+# HTML autoescaping does NOT protect (it escapes ``<>&'"`` but not ``{ } ; :``).
+# So it is validated to a strict hex literal here rather than trusted — anything
+# else (incl. a CSS-injection payload) falls back to the neutral default. The
+# M5.8 write path will validate on save too; this is defence at render time.
+_HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _safe_accent(value: str | None) -> str:
+    """A `#rgb`/`#rrggbb` accent, or the neutral default for anything else."""
+    return value if value is not None and _HEX_COLOR.match(value) else DEFAULT_ACCENT
+
 
 # Angebot ≠ Rechnung: a quote is a net, pre-checkout offer. The buyer's tax
 # posture (reverse-charge / VIES) is unknown until checkout, so no §14 block is
@@ -142,7 +161,7 @@ def _shop_block(
         "phone": org.facility_phone if settings.show_facility_phone else None,
         "website": org.facility_website if settings.show_facility_website else None,
         "ust_id_nr": org.ust_id_nr,
-        "accent_color": org.brand_accent_color or DEFAULT_ACCENT,
+        "accent_color": _safe_accent(org.brand_accent_color),
         "logo_data_uri": logo_data_uri,
     }
 
@@ -247,7 +266,7 @@ def build_quote_context(
     document_date: str,
     logo_data_uri: str | None,
     file_names: dict[str, str],
-    preparer: dict[str, Any] | None,
+    preparers: list[dict[str, Any]] | None,
     digital_quote_link: str | None,
 ) -> dict[str, Any]:
     """Assemble the render context for a **quote** (Angebot) from a buyer payload."""
@@ -269,7 +288,7 @@ def build_quote_context(
         "customer": None,
         "line_items": line_items,
         "total": _quote_total(payload.get("price_range"), settings.total_display, currency, locale),
-        "preparer": preparer,
+        "preparers": preparers or [],
         "notes_placement": settings.notes_placement.value,
         "content": _content_block(content),
         "net_note": NET_NOTE,
@@ -350,7 +369,7 @@ def build_order_context(
     content: QuoteContent,
     document_date: str,
     logo_data_uri: str | None,
-    preparer: dict[str, Any] | None = None,
+    preparers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Assemble the render context for an **order confirmation** (Auftragsbestätigung)
     — the §14-UStG document, rendered from the Order's persisted tax breakdown."""
@@ -368,7 +387,7 @@ def build_order_context(
         "customer": _order_customer(order),
         "line_items": [_order_line(line, currency, locale, settings) for line in lines],
         "total": {"mode": "none"},
-        "preparer": preparer,
+        "preparers": preparers or [],
         "notes_placement": settings.notes_placement.value,
         "content": _content_block(content),
         "net_note": None,
@@ -423,7 +442,9 @@ async def _quote_file_names(session: AsyncSession, quote: Quote) -> dict[str, st
                 PartFile,
                 (PartFile.id == Part.primary_file_id) & (PartFile.org_id == Part.org_id),
             )
-            .where(QuoteItem.quote_id == quote.id)
+            # RLS already scopes the session; the explicit org predicate is
+            # defence-in-depth (the codebase's double-scoping convention).
+            .where(QuoteItem.quote_id == quote.id, QuoteItem.org_id == quote.org_id)
         )
     ).all()
     return {str(qi_id): filename for qi_id, filename in rows}
@@ -462,7 +483,8 @@ async def _order_lines(session: AsyncSession, order: Order) -> list[dict[str, An
                 Material,
                 (Material.id == Component.material_id) & (Material.org_id == Component.org_id),
             )
-            .where(OrderLine.order_id == order.id)
+            # Explicit org predicate = defence-in-depth alongside RLS.
+            .where(OrderLine.order_id == order.id, OrderLine.org_id == order.org_id)
             .order_by(QuoteItem.position)
         )
     ).all()
@@ -488,6 +510,36 @@ async def _order_lines(session: AsyncSession, order: Order) -> list[dict[str, An
     return lines
 
 
+async def _resolve_preparers(
+    session: AsyncSession, quote: Quote, settings: DisplaySettings
+) -> list[dict[str, Any]]:
+    """The quote's preparer contact block(s) per the Preparer & Contact radio
+    (Salesperson / Estimator / Both). Reads the quote's assigned users; a person
+    who is both salesperson and estimator is shown once."""
+    from .models import AppUser
+
+    wants_sales = settings.preparer in (PreparerDisplay.salesperson, PreparerDisplay.both)
+    wants_est = settings.preparer in (PreparerDisplay.estimator, PreparerDisplay.both)
+    entries: list[tuple[str, uuid.UUID]] = []
+    if wants_sales and quote.salesperson_id is not None:
+        entries.append(("Vertrieb", quote.salesperson_id))
+    if wants_est and quote.estimator_id is not None:
+        entries.append(("Kalkulation", quote.estimator_id))
+
+    out: list[dict[str, Any]] = []
+    seen: set[uuid.UUID] = set()
+    for label, user_id in entries:
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+        user = await session.get(AppUser, user_id)
+        if user is None:
+            continue
+        name = f"{user.first_name or ''} {user.last_name or ''}".strip() or None
+        out.append({"label": label, "name": name, "email": user.email, "phone": None})
+    return out
+
+
 async def assemble_quote_context(
     session: AsyncSession,
     org: Organization,
@@ -498,13 +550,13 @@ async def assemble_quote_context(
     now: datetime,
     *,
     digital_quote_link: str | None = None,
-    preparer: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the quote render context straight from the DB (buyer projection +
-    branding + optional file names)."""
+    branding + optional file names + resolved preparer)."""
     payload = await build_buyer_payload(session, org, quote, settings, now)
     file_names = await _quote_file_names(session, quote) if settings.show_part_file_name else {}
     logo = await logo_data_uri(storage, org.logo_object_key)
+    preparers = await _resolve_preparers(session, quote, settings)
     return build_quote_context(
         org=org,
         payload=payload,
@@ -513,7 +565,7 @@ async def assemble_quote_context(
         document_date=_format_date(now),
         logo_data_uri=logo,
         file_names=file_names,
-        preparer=preparer,
+        preparers=preparers,
         digital_quote_link=digital_quote_link,
     )
 
@@ -525,12 +577,15 @@ async def assemble_order_context(
     settings: DisplaySettings,
     content: QuoteContent,
     storage: ObjectStorage,
-    *,
-    preparer: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the order-confirmation render context from the persisted Order."""
+    """Build the order-confirmation render context from the persisted Order (the
+    preparer contact is resolved from the order's originating quote)."""
+    from .models import Quote as QuoteModel
+
     lines = await _order_lines(session, order)
     logo = await logo_data_uri(storage, org.logo_object_key)
+    quote = await session.get(QuoteModel, order.quote_id)
+    preparers = await _resolve_preparers(session, quote, settings) if quote is not None else []
     return build_order_context(
         org=org,
         order=order,
@@ -539,5 +594,5 @@ async def assemble_order_context(
         content=content,
         document_date=_format_date(order.created_at),
         logo_data_uri=logo,
-        preparer=preparer,
+        preparers=preparers,
     )

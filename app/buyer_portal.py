@@ -105,7 +105,10 @@ class DisplaySettings:
     show_dimensions: bool = False
     show_dfm: bool = False
     show_3d: bool = True  # "3D Part Preview (digital only)" — portal thumbnail
-    show_part_file_name: bool = False  # PDF/portal: print the part's file name
+    # Consumed by the M5.4 PDF (_quote_line). The digital-quote *portal* does not
+    # yet render the file name — that wiring lands with M5.1/M5.8; the toggle is
+    # PDF-only until then.
+    show_part_file_name: bool = False
     show_thumbnail: bool = False  # PDF: embed a static part thumbnail image
     # --- Quote header/footer fields (PDF-facing; spec :4186) ---
     show_quote_number: bool = True

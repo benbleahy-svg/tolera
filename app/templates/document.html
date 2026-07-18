@@ -160,8 +160,10 @@
 <table class="totals">
   {% if tax.rate_lines %}
     {% for rl in tax.rate_lines %}
+    {% if tax.reverse_charge or tax.kleinunternehmer %}
+    <tr><td>Nettobetrag</td><td class="num">{{ rl.net }}</td></tr>
+    {% else %}
     <tr><td>Nettobetrag ({{ rl.rate_pct }} %)</td><td class="num">{{ rl.net }}</td></tr>
-    {% if not tax.reverse_charge and not tax.kleinunternehmer %}
     <tr><td>{{ tax.vat_label }} {{ rl.rate_pct }} %</td><td class="num">{{ rl.vat }}</td></tr>
     {% endif %}
     {% endfor %}
@@ -192,14 +194,14 @@
 
 {% if content.manufacturers_notes %}<div class="mfg-notes">{{ content.manufacturers_notes }}</div>{% endif %}
 
-{% if preparer %}
+{% for preparer in preparers %}
 <div class="preparer">
   <div class="label">{{ preparer.label }}</div>
   {% if preparer.name %}<div>{{ preparer.name }}</div>{% endif %}
   {% if preparer.email %}<div>{{ preparer.email }}</div>{% endif %}
   {% if preparer.phone %}<div>Tel.: {{ preparer.phone }}</div>{% endif %}
 </div>
-{% endif %}
+{% endfor %}
 
 {% if digital_quote_link %}
 <div class="digital-link">Digitales Angebot ansehen: {{ digital_quote_link }}</div>

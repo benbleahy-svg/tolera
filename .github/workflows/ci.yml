@@ -37,7 +37,7 @@ jobs:
       # import time; without them the PDF-render tests would skip and the gate
       # would be blind. libpango pulls cairo/harfbuzz/gdk-pixbuf transitively.
       - name: Install WeasyPrint native libs
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:

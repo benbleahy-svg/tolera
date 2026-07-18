@@ -124,7 +124,7 @@ def _quote_ctx(
         document_date="18.07.2026",
         logo_data_uri=None,
         file_names=file_names or {},
-        preparer=None,
+        preparers=None,
         # A neutral host: the digital-quote-link is caller-supplied data, not
         # renderer branding. The renderer itself must emit zero platform strings
         # (the white-label check below); the portal URL host is orthogonal
@@ -146,6 +146,63 @@ def test_quote_pdf_shows_org_identity() -> None:
     html = render_document_html(_quote_ctx())
     assert "Fechner Zerspanung GmbH" in html
     assert "Angebot" in html  # German doc title
+
+
+def test_accent_color_injection_falls_back_to_default() -> None:
+    # The accent flows into a <style> context where autoescape does not protect.
+    # A CSS-injection payload must be rejected → the neutral default is used.
+    org = _Org(brand_accent_color="red;}body{display:none}.x{color:red")
+    ctx = build_quote_context(
+        org=cast("Organization", org),
+        payload=_buyer_payload(),
+        settings=DisplaySettings(),
+        content=QuoteContent(),
+        document_date="18.07.2026",
+        logo_data_uri=None,
+        file_names={},
+        preparers=None,
+        digital_quote_link=None,
+    )
+    assert ctx["shop"]["accent_color"] == "#1f2937"  # DEFAULT_ACCENT
+    html = render_document_html(ctx)
+    assert "display:none" not in html
+
+
+def test_valid_hex_accent_is_used() -> None:
+    org = _Org(brand_accent_color="#a1b2c3")
+    ctx = build_quote_context(
+        org=cast("Organization", org),
+        payload=_buyer_payload(),
+        settings=DisplaySettings(),
+        content=QuoteContent(),
+        document_date="18.07.2026",
+        logo_data_uri=None,
+        file_names={},
+        preparers=None,
+        digital_quote_link=None,
+    )
+    assert ctx["shop"]["accent_color"] == "#a1b2c3"
+
+
+def test_preparers_render_with_labels() -> None:
+    preparers = [
+        {"label": "Vertrieb", "name": "Anna Fechner", "email": "a@f.example", "phone": None},
+        {"label": "Kalkulation", "name": "Ben Muster", "email": "b@f.example", "phone": None},
+    ]
+    ctx = build_quote_context(
+        org=cast("Organization", _Org()),
+        payload=_buyer_payload(),
+        settings=DisplaySettings(),
+        content=QuoteContent(),
+        document_date="18.07.2026",
+        logo_data_uri=None,
+        file_names={},
+        preparers=preparers,
+        digital_quote_link=None,
+    )
+    html = render_document_html(ctx)
+    assert "Vertrieb" in html and "Anna Fechner" in html
+    assert "Kalkulation" in html and "Ben Muster" in html
 
 
 # --------------------------------------------------------------------------- #
@@ -176,8 +233,10 @@ def test_process_toggle_off_removes_it() -> None:
 
 
 def test_digital_quote_link_toggle_off_removes_it() -> None:
+    on = render_document_html(_quote_ctx(settings=DisplaySettings(show_digital_quote_link=True)))
     off = render_document_html(_quote_ctx(settings=DisplaySettings(show_digital_quote_link=False)))
-    assert "q.tolera.eu/q/abc" not in off
+    assert "https://q.example.com/q/abc" in on
+    assert "https://q.example.com/q/abc" not in off
 
 
 def test_part_file_name_toggle_on_shows_it() -> None:
@@ -359,6 +418,7 @@ def test_order_kleinunternehmer_suppresses_vat() -> None:
     )
     html = render_document_html(_order_ctx(order=order))
     assert "§19 UStG" in html
+    assert "MwSt." not in html  # §19 suppresses the VAT block entirely
 
 
 def test_order_has_no_platform_branding() -> None:

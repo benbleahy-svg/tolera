@@ -50,11 +50,17 @@ class _StubVies:
         return ViesResult(valid=True, checked_at=datetime.now(UTC), name="ACME")
 
 
-def _pdf_object_key(seeder: Seeder, model: Any, row_id: str) -> str | None:
+def _pdf_object_key(seeder: Seeder, model: Any, row_id: str, org_id: uuid.UUID) -> str | None:
+    """Read a row's ``pdf_object_key``, asserting it belongs to ``org_id`` (the
+    seeder session bypasses RLS, so the lookup is org-scoped by hand)."""
+
     async def _run() -> str | None:
         async with AsyncSession(seeder._engine) as session:
             row = await session.get(model, uuid.UUID(row_id))
-            return None if row is None else cast(str | None, row.pdf_object_key)
+            if row is None:
+                return None
+            assert row.org_id == org_id
+            return cast(str | None, row.pdf_object_key)
 
     return seeder._loop.run_until_complete(_run())
 
@@ -62,7 +68,7 @@ def _pdf_object_key(seeder: Seeder, model: Any, row_id: str) -> str | None:
 # --------------------------------------------------------------------------- #
 # Quote PDF
 # --------------------------------------------------------------------------- #
-def test_quote_pdf_downloads_and_is_stored(seeder: Seeder, app_client: TestClient) -> None:
+def test_quote_pdf_preview_downloads(seeder: Seeder, app_client: TestClient) -> None:
     org, user = _org_admin(seeder, "pdf-quote")
     _set_branding(seeder, org)
     with _as_admin(app_client, org, user) as client:
@@ -74,16 +80,9 @@ def test_quote_pdf_downloads_and_is_stored(seeder: Seeder, app_client: TestClien
     assert res.content[:5] == b"%PDF-"
     assert "Angebot" in res.headers["content-disposition"]
 
-    # Stored + re-fetchable: the key is persisted and the blob streams back.
-    key = _pdf_object_key(seeder, Quote, qid)
-    assert key is not None
-    storage = cast(FastAPI, app_client.app).state.storage
-
-    async def _fetch() -> bytes:
-        return b"".join([chunk async for chunk in storage.stream(key)])
-
-    stored = seeder._loop.run_until_complete(_fetch())
-    assert stored[:5] == b"%PDF-"
+    # The quote endpoint is a LIVE PREVIEW — it must not persist pdf_object_key
+    # (that key is the M5.5 send-time snapshot).
+    assert _pdf_object_key(seeder, Quote, qid, org) is None
 
 
 def test_quote_pdf_missing_is_404(seeder: Seeder, app_client: TestClient) -> None:
@@ -150,12 +149,31 @@ def test_order_pdf_downloads_confirmation_variant(seeder: Seeder, app_client: Te
     assert res.content[:5] == b"%PDF-"
     assert "Auftragsbestaetigung" in res.headers["content-disposition"]
 
-    key = _pdf_object_key(seeder, Order, order_id)
+    # Stored + re-fetchable: the order artifact is persisted and streams back.
+    key = _pdf_object_key(seeder, Order, order_id, org)
     assert key is not None
+    storage = cast(FastAPI, app_client.app).state.storage
+
+    async def _fetch() -> bytes:
+        return b"".join([chunk async for chunk in storage.stream(key)])
+
+    stored = seeder._loop.run_until_complete(_fetch())
+    assert stored[:5] == b"%PDF-"
 
 
 def test_order_pdf_missing_is_404(seeder: Seeder, app_client: TestClient) -> None:
     org, user = _org_admin(seeder, "pdf-order-404")
     with _as_admin(app_client, org, user) as client:
         res = client.get(f"/api/orders/{uuid.uuid4()}/pdf")
+    assert res.status_code == 404
+
+
+def test_order_pdf_cross_org_is_404(seeder: Seeder, app_client: TestClient) -> None:
+    org_a, user_a = _org_admin(seeder, "pdf-order-a")
+    _set_branding(seeder, org_a)
+    order_id = _checkout_to_order(seeder, app_client, org_a, user_a)
+    org_b, user_b = _org_admin(seeder, "pdf-order-b")
+    # Org B cannot fetch Org A's order PDF (RLS).
+    with _as_admin(app_client, org_b, user_b) as client:
+        res = client.get(f"/api/orders/{order_id}/pdf")
     assert res.status_code == 404
