@@ -42,6 +42,7 @@ from .buyer_portal import (
     TotalDisplay,
     build_buyer_payload,
 )
+from .impressum import impressum_lines
 from .quote_settings import load_quote_settings
 from .tax import to_minor_units
 from .vat_service import format_money
@@ -174,6 +175,12 @@ def _shop_block(
     }
 
 
+def _impressum_block(org: Organization) -> list[dict[str, Any]]:
+    """The legal Impressum footer lines (M5.9) as template dicts — empty when the
+    org carries neither a commercial register nor a USt-IdNr (no empty footer)."""
+    return [{"label": line.label, "value": line.value} for line in impressum_lines(org)]
+
+
 def _content_block(content: QuoteContent) -> dict[str, Any]:
     return {
         "terms": content.terms,
@@ -303,6 +310,7 @@ def build_quote_context(
         "tax": None,
         "digital_quote_link": (digital_quote_link if settings.show_digital_quote_link else None),
         "currency": currency,
+        "impressum": _impressum_block(org),
     }
 
 
@@ -402,6 +410,7 @@ def build_order_context(
         "tax": _order_tax(order, currency, locale),
         "digital_quote_link": None,
         "currency": currency,
+        "impressum": _impressum_block(org),
     }
 
 

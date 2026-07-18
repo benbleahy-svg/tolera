@@ -65,6 +65,9 @@
   .preparer .label { font-weight: 700; color: {{ shop.accent_color }}; }
   .digital-link { margin-top: 10px; font-size: 9pt; }
   footer.terms { margin-top: 18px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 8pt; color: #555; white-space: pre-line; }
+  footer.impressum { margin-top: 14px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 8pt; color: #555; }
+  footer.impressum .heading { font-weight: 700; }
+  footer.impressum .value { white-space: pre-line; }
 </style>
 
 <header class="doc">
@@ -81,7 +84,7 @@
     {% if shop.address %}<div style="white-space: pre-line;">{{ shop.address }}</div>{% endif %}
     {% if shop.phone %}<div>Tel.: {{ shop.phone }}</div>{% endif %}
     {% if shop.website %}<div>{{ shop.website }}</div>{% endif %}
-    {% if shop.ust_id_nr %}<div>USt-IdNr.: {{ shop.ust_id_nr }}</div>{% endif %}
+    {# USt-IdNr is rendered once, in the legal Impressum footer (M5.9), not here. #}
   </div>
 </header>
 
@@ -208,3 +211,12 @@
 {% endif %}
 
 {% if content.terms %}<footer class="terms">{{ content.terms }}</footer>{% endif %}
+
+{% if impressum %}
+<footer class="impressum">
+  <div class="heading">Impressum</div>
+  {% for line in impressum %}
+  <div>{% if line.label %}{{ line.label }}: {% endif %}<span class="value">{{ line.value }}</span></div>
+  {% endfor %}
+</footer>
+{% endif %}

@@ -94,6 +94,13 @@ class OrgSpec(BaseModel):
     country: OrgCountry = OrgCountry.DE
     currency: str = "EUR"
     locale: str = "de-DE"
+    # Optional legal identity for the Impressum footer on customer-facing PDFs +
+    # quote emails (M5.9; DACH-DELTA §Email/§37). Seed-provided; omitted fields are
+    # never written (a re-seed does not clobber). ``ust_id_nr`` is also the shop's
+    # supplier VAT-ID carried onto reverse-charge invoices (§14 UStG).
+    ust_id_nr: str | None = None
+    facility_address: str | None = None
+    commercial_register: str | None = None
     users: list[UserSpec] = Field(min_length=1)
 
     @field_validator("currency")
@@ -197,12 +204,18 @@ class OrgService:
         existing = await self._session.scalar(
             select(Organization.id).where(Organization.slug == spec.slug)
         )
-        values = {
+        values: dict[str, Any] = {
             "name": spec.name,
             "country": spec.country,
             "currency": spec.currency,
             "locale": spec.locale,
         }
+        # Legal identity is optional; only write provided fields so a re-seed of an
+        # org that later sets these (or a future editor) is never clobbered by NULL.
+        for legal_field in ("ust_id_nr", "facility_address", "commercial_register"):
+            provided = getattr(spec, legal_field)
+            if provided is not None:
+                values[legal_field] = provided
         stmt = (
             pg_insert(Organization)
             .values(slug=spec.slug, **values)
