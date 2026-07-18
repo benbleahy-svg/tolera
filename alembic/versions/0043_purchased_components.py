@@ -25,8 +25,8 @@ Forward ALTERs (stub-then-extend precedent):
 - ``process.generation_formula`` — process-level Kalk for custom processes;
   NULL = generic template instantiation from ``process_operation`` rows.
 
-Revision ID: 0042_purchased_components
-Revises: 0041_order_checkout
+Revision ID: 0043_purchased_components
+Revises: 0042_pdf_branding
 Create Date: 2026-07-17
 """
 
@@ -36,8 +36,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0042_purchased_components"
-down_revision: str | None = "0041_order_checkout"
+revision: str = "0043_purchased_components"
+down_revision: str | None = "0042_pdf_branding"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
