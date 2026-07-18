@@ -1243,5 +1243,15 @@
     "import_router": "Import router from {{number}}",
     "review_fields": "Review diff field-by-field",
     "start_fresh": "Start fresh"
+  },
+  "assembly": {
+    "banner": "This part was quoted {{count}} times — want me to draft from the most recent quote?",
+    "accept_all": "Accept All",
+    "review_import": "Import & review",
+    "suppressed": "Accept All is not available — the diff shows a material change; review the values individually.",
+    "imported_note": "Imported from Quote {{number}} — {{date}}",
+    "review_note": "AI-drafted — review before sending",
+    "undo": "Undo ({{seconds}} s)",
+    "imported_badge": "Imported from quote"
   }
 }

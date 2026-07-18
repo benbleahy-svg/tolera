@@ -2,6 +2,11 @@
  * M4.12 — Requote Diff banner + explicit three-choice gate. The acceptance
  * angle covered here: the panel renders the deterministic diff + synthesis,
  * and NO callback fires without an explicit click (nothing auto-imports).
+ *
+ * M4.13 — the shared-panel assembly offer: banner only when the server offers
+ * it, Accept All only when the server says eligible (suppressed note
+ * otherwise), the 60-second undo chip after an Accept-All import — and again,
+ * no callback without an explicit click.
  */
 
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -10,7 +15,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import i18n from '../i18n';
 import { RequoteDiffPanel } from './RequoteDiffPanel';
-import type { RequoteDiffEntry, RequoteFinding } from './types';
+import type { AssemblyState, RequoteDiffEntry, RequoteFinding } from './types';
 
 const finding = (over: Partial<RequoteFinding>): RequoteFinding => ({
   type: 'note',
@@ -76,26 +81,40 @@ const entry: RequoteDiffEntry = {
   generated_at: '2026-07-17T09:00:00Z',
 };
 
+const offeredState: AssemblyState = {
+  offered: true,
+  accept_all_eligible: true,
+  blockers: [],
+  quote_count: 3,
+  undo_ttl_seconds: 60,
+};
+
 beforeAll(async () => {
   await i18n.changeLanguage('de');
 });
 
-function renderPanel() {
+function renderPanel(over: Partial<RequoteDiffEntry> = {}) {
   const onImport = vi.fn();
   const onReview = vi.fn();
   const onStartFresh = vi.fn();
+  const onAcceptAll = vi.fn();
+  const onImportForReview = vi.fn();
+  const onUndo = vi.fn();
   render(
     <I18nextProvider i18n={i18n}>
       <RequoteDiffPanel
-        entry={entry}
+        entry={{ ...entry, ...over }}
         busy={false}
         onImport={onImport}
         onReview={onReview}
         onStartFresh={onStartFresh}
+        onAcceptAll={onAcceptAll}
+        onImportForReview={onImportForReview}
+        onUndo={onUndo}
       />
     </I18nextProvider>,
   );
-  return { onImport, onReview, onStartFresh };
+  return { onImport, onReview, onStartFresh, onAcceptAll, onImportForReview, onUndo };
 }
 
 describe('RequoteDiffPanel', () => {
@@ -133,5 +152,77 @@ describe('RequoteDiffPanel', () => {
     expect(findings).toHaveTextContent('+0.01 / -0.01 → +0.005 / -0.005');
     fireEvent.click(screen.getByText('Neu beginnen'));
     expect(onStartFresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('RequoteDiffPanel — assembly offer (M4.13)', () => {
+  it('renders no assembly banner unless the server offers it', () => {
+    renderPanel();
+    expect(screen.queryByTestId('assembly-banner')).not.toBeInTheDocument();
+    renderPanel({ assembly_state: { ...offeredState, offered: false } });
+    expect(screen.queryByTestId('assembly-banner')).not.toBeInTheDocument();
+  });
+
+  it('offers Accept All only while eligible, and only a click imports', () => {
+    const { onAcceptAll, onImportForReview } = renderPanel({
+      assembly_state: offeredState,
+    });
+    expect(screen.getByTestId('assembly-banner')).toHaveTextContent('3-mal angeboten');
+    expect(onAcceptAll).not.toHaveBeenCalled();
+    expect(onImportForReview).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('assembly-accept-all'));
+    expect(onAcceptAll).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId('assembly-review-import'));
+    expect(onImportForReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses Accept All on a material change — only Review is offered', () => {
+    renderPanel({
+      assembly_state: {
+        ...offeredState,
+        accept_all_eligible: false,
+        blockers: ['material_changes'],
+      },
+    });
+    expect(screen.queryByTestId('assembly-accept-all')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assembly-suppressed')).toBeInTheDocument();
+    expect(screen.getByTestId('assembly-review-import')).toBeInTheDocument();
+  });
+
+  it('shows the undo chip inside the 60-second window and routes the click', () => {
+    const { onUndo } = renderPanel({
+      assembly_state: offeredState,
+      assembly: {
+        path: 'accept_all',
+        at: new Date().toISOString(),
+        user_id: 'u1',
+        source_quote_id: 'q-old',
+        source_quote_number: 'Q-2026-1000',
+        undone_at: null,
+        undo_expires_at: new Date(Date.now() + 55_000).toISOString(),
+      },
+    });
+    // The offer banner is replaced by the audit line once imported.
+    expect(screen.queryByTestId('assembly-banner')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assembly-imported')).toHaveTextContent('Q-2026-1000');
+    fireEvent.click(screen.getByTestId('assembly-undo'));
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the AI-drafted marker (no undo chip) on the Review path', () => {
+    renderPanel({
+      assembly_state: offeredState,
+      assembly: {
+        path: 'review',
+        at: new Date().toISOString(),
+        user_id: 'u1',
+        source_quote_id: 'q-old',
+        source_quote_number: 'Q-2026-1000',
+        undone_at: null,
+        undo_expires_at: null,
+      },
+    });
+    expect(screen.getByText('KI-Entwurf — vor dem Versand prüfen')).toBeInTheDocument();
+    expect(screen.queryByTestId('assembly-undo')).not.toBeInTheDocument();
   });
 });

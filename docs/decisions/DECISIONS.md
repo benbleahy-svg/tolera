@@ -1053,3 +1053,15 @@ Spec `#partview` routes per line item with a left sidebar; the built page is `/q
 - **Baseline choice:** exact-file match preferred over exact-geometric; within a bucket, the matched part's most recent non-trashed quote **created at or before the target quote** (a later quote is a later revision, never a requote baseline), with a deterministic total-order tie-break (`created_at DESC, quote id DESC, item position, item id`) so re-resolution always picks the same baseline.
 
 **Revisit trigger:** M4.13 (Accept-All gate) review; Fechner feedback that a real requote was mis-labelled cosmetic/material.
+
+## [2026-07-18] M4.13 Agentic Quote Assembly — import/undo assumptions recorded
+
+**Context.** M4.13 implements the spec `#ai-quote-assembly` build notes verbatim (source ENUM + `source_quote_id`, atomic Accept-All endpoint, `undo:quote_assembly:{line_item_id}` Redis key TTL 60 s, server-side suppression on `geometry_delta.significant OR material_changes ≠ []`). Four points the spec is silent on were resolved conservatively per §6.3 — all cheap to reverse (guards and copy-scope choices; no schema or contract surface beyond what the spec mandates), applied with inline notes, recorded here for the audit trail.
+
+**Assumed (applied, `app/quote_assembly.py` / `app/part_library.py`):**
+- **Quantity breaks are never copied.** The import copies the router (`operation` rows) and the pricing stack (`pricing_item`/`discount`/`add_on`/`expedite_option` rows) but not `component_quantity` breaks or per-break cells — the new RFQ's quantities are the customer's ask; overwriting them with the old quote's breaks would silently discard it. Mirrors the existing `import-router` posture ("per-quantity manual cell costs stay behind — the target's breaks are its own"); recalculation mints fresh calc cells.
+- **Currency guard on Accept All.** When the baseline quote's `currency` ≠ the target quote's (CHF vs EUR), Accept All is suppressed (`currency_mismatch` blocker) — rates copied across currencies are silently-wrong money. Review import stays available (each value is individually flagged for checking). Pre-M4.13 cached entries without the currency stamp fail closed (`entry_stale`) until the diff refreshes.
+- **Undo degrades gracefully on Redis outage.** Arming the undo key follows the `email_ingest` pattern (1 s timeouts, warn-log): an outage costs the undo chip, never the import — the copy is committed, tagged `source = imported`, and reviewable/deletable by hand. Undo with a missing/expired key is `410 GONE`; the import stands.
+- **`source = imported` on every import path.** The spec's "in both paths, all imported values carry source = imported" is read to cover the M4.12 "Import router from Rev A" path too — `import-router` now stamps the same provenance. `ai_drafted` is minted in the enum per the spec but has no writer yet (reserved for Lens-drafted values); the Review path's "AI-drafted" chips are UI state driven by the recorded path in the `requote_diff` entry.
+
+**Revisit trigger:** Fechner feedback that a requote should carry the old quantity breaks; a real cross-currency requote need; the first `ai_drafted` writer (Lens).

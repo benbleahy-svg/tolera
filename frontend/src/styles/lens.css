@@ -237,3 +237,22 @@
   opacity: 0.55;
   cursor: default;
 }
+
+/* --- M4.13 — Agentic Quote Assembly (same AI-Governor purple family) --- */
+.assembly-offer,
+.assembly-imported {
+  border-top: 1px solid color-mix(in srgb, var(--color-ai-signal) 30%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.assembly-suppressed {
+  color: #b45309;
+  font-size: 0.85rem;
+}
+.assembly-undo {
+  border-color: #b45309;
+  color: #b45309;
+  font-variant-numeric: tabular-nums;
+}

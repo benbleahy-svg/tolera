@@ -188,6 +188,31 @@ export function EstimatingPage() {
     [api, quoteId, componentId, fail, loadPricing],
   );
 
+  // M4.13 — the two explicit-accept assembly paths (atomic router + pricing
+  // import server-side; Accept All re-checked and undo-armed there) and the
+  // 60-second undo. Costing + pricing reload after each, since both move.
+  const assemblyAct = useCallback(
+    (entry: RequoteDiffEntry, action: 'accept_all' | 'review' | 'undo') => {
+      if (!quoteId) return;
+      setRequoteBusy(true);
+      const call =
+        action === 'undo'
+          ? api.assemblyUndo(quoteId, entry.part_id)
+          : api.assemblyImport(quoteId, entry.part_id, action);
+      call
+        .then((r) => {
+          setRequoteEntries(r.entries);
+          if (componentId) {
+            api.getCosting(componentId).then(setCosting).catch(fail);
+            loadPricing();
+          }
+        })
+        .catch(fail)
+        .finally(() => setRequoteBusy(false));
+    },
+    [api, quoteId, componentId, fail, loadPricing],
+  );
+
   // Guards the async rule-suggestion probe against a line-item switch (M3.10):
   // a probe fired for component A must not paint A's chip after the user moved
   // to component B.
@@ -543,7 +568,11 @@ export function EstimatingPage() {
         const entry = requoteEntries.find(
           (e) =>
             e.part_id === partId &&
-            (e.choice === null || e.choice.choice === 'review'),
+            (e.choice === null ||
+              e.choice.choice === 'review' ||
+              // M4.13: an active import record keeps the panel up — it carries
+              // the audit line and (for Accept All) the 60-second undo chip.
+              (e.assembly != null && e.assembly.undone_at === null)),
         );
         if (!entry) return null;
         return (
@@ -555,6 +584,9 @@ export function EstimatingPage() {
               if (entry.choice === null) void recordRequoteChoice(entry, 'review');
             }}
             onStartFresh={() => void recordRequoteChoice(entry, 'start_fresh')}
+            onAcceptAll={() => assemblyAct(entry, 'accept_all')}
+            onImportForReview={() => assemblyAct(entry, 'review')}
+            onUndo={() => assemblyAct(entry, 'undo')}
           />
         );
       })()}

@@ -42,6 +42,9 @@ export interface OperationOut {
   notes: string | null;
   cost_formula: string | null;
   variable_overrides: Record<string, VariableOverrideValue>;
+  /** M4.13 provenance: 'imported' rows carry the source-quote stamp. */
+  source: 'manual' | 'imported' | 'ai_drafted';
+  source_quote_id: string | null;
   missing_rate: boolean;
   cells: QuoteCellOut[];
 }
@@ -633,6 +636,31 @@ export interface RequoteDiffEntry {
   synthesis: string | null;
   choice: { choice: RequoteChoice; at: string } | null;
   generated_at: string;
+  // --- M4.13 — Agentic Quote Assembly (spec #ai-quote-assembly) ---
+  /** "Quoted N times" for the assembly banner (0 on pre-M4.13 entries). */
+  quote_count?: number;
+  /** The persisted import record (audit trail); null until a path is taken. */
+  assembly?: AssemblyRecord | null;
+  /** Read-time server state: the offer + the server-computed eligibility. */
+  assembly_state?: AssemblyState;
+}
+
+export interface AssemblyState {
+  offered: boolean;
+  accept_all_eligible: boolean;
+  blockers: string[];
+  quote_count: number;
+  undo_ttl_seconds: number;
+}
+
+export interface AssemblyRecord {
+  path: 'accept_all' | 'review';
+  at: string;
+  user_id: string;
+  source_quote_id: string;
+  source_quote_number: string | null;
+  undone_at: string | null;
+  undo_expires_at: string | null;
 }
 
 export type RequoteChoice = 'import_router' | 'review' | 'start_fresh';

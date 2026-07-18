@@ -1157,10 +1157,22 @@ class ProcessFamily(enum.StrEnum):
     GENERIC = "GENERIC"
 
 
+class ValueSource(enum.StrEnum):
+    """Provenance of a router/pricing row (spec ``#ai-quote-assembly`` build
+    note: ``source ENUM(manual | imported | ai_drafted)``). ``imported`` rows
+    were copied from a historical quote (``source_quote_id`` says which);
+    ``ai_drafted`` is reserved for Lens-drafted values (no writer yet)."""
+
+    manual = "manual"
+    imported = "imported"
+    ai_drafted = "ai_drafted"
+
+
 _op_category_enum = Enum(OpCategory, name="op_category", create_type=False)
 _calculation_mode_enum = Enum(CalculationMode, name="calculation_mode", create_type=False)
 _setup_basis_enum = Enum(SetupBasis, name="setup_basis", create_type=False)
 _process_family_enum = Enum(ProcessFamily, name="process_family", create_type=False)
+_value_source_enum = Enum(ValueSource, name="value_source", create_type=False)
 
 
 class MaterialClass(Base):
@@ -1437,6 +1449,14 @@ class Operation(Base):
     cost_formula: Mapped[str | None] = mapped_column(Text)
     variable_overrides: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # M4.13 provenance (spec #ai-quote-assembly): set at the copy site, never
+    # blanket-copied — a re-import stamps the *immediate* source quote.
+    source: Mapped[ValueSource] = mapped_column(
+        _value_source_enum, nullable=False, server_default=ValueSource.manual.value
+    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
@@ -1747,6 +1767,13 @@ class PricingItem(Base):
     is_from_factory: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # M4.13 provenance (spec #ai-quote-assembly) — see Operation.source.
+    source: Mapped[ValueSource] = mapped_column(
+        _value_source_enum, nullable=False, server_default=ValueSource.manual.value
+    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1826,6 +1853,13 @@ class Discount(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     is_from_factory: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    # M4.13 provenance (spec #ai-quote-assembly) — see Operation.source.
+    source: Mapped[ValueSource] = mapped_column(
+        _value_source_enum, nullable=False, server_default=ValueSource.manual.value
+    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
@@ -1948,6 +1982,13 @@ class AddOn(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     is_from_factory: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    # M4.13 provenance (spec #ai-quote-assembly) — see Operation.source.
+    source: Mapped[ValueSource] = mapped_column(
+        _value_source_enum, nullable=False, server_default=ValueSource.manual.value
+    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()

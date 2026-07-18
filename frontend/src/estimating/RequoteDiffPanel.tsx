@@ -5,9 +5,15 @@
  * purple, behind the explicit three-choice gate: Import router / Review
  * field-by-field / Start fresh. Nothing is copied without a click — the import
  * button is the only path that touches the router.
+ *
+ * M4.13 (spec #ai-quote-assembly) shares this panel location: the assembly
+ * offer ("quoted N times — draft from the most recent quote?") with the two
+ * explicit-accept paths — Review (values chipped "AI-drafted") and Accept All
+ * (atomic import + 60-second undo chip). Accept All only renders when the
+ * server says `accept_all_eligible` — and the server re-checks on POST.
  */
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { RequoteDiffEntry, RequoteFinding } from './types';
@@ -18,6 +24,15 @@ interface Props {
   onImport: () => void;
   onReview: () => void;
   onStartFresh: () => void;
+  onAcceptAll: () => void;
+  onImportForReview: () => void;
+  onUndo: () => void;
+}
+
+/** Seconds until `iso`, floored at 0 — the undo chip countdown. */
+function secondsLeft(iso: string | null): number {
+  if (!iso) return 0;
+  return Math.max(0, Math.floor((Date.parse(iso) - Date.now()) / 1000));
 }
 
 function findingLabel(finding: RequoteFinding): string {
@@ -38,8 +53,11 @@ export function RequoteDiffPanel({
   onImport,
   onReview,
   onStartFresh,
+  onAcceptAll,
+  onImportForReview,
+  onUndo,
 }: Props): React.ReactElement {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const bodyId = useId();
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState(false);
@@ -48,6 +66,24 @@ export function RequoteDiffPanel({
   const findings = entry.diff.finding_diff;
   const changeCount =
     findings.added.length + findings.removed.length + findings.changed.length;
+
+  const assemblyState = entry.assembly_state;
+  const record = entry.assembly && !entry.assembly.undone_at ? entry.assembly : null;
+  // Tick the undo countdown once a second while the window is open.
+  const [undoLeft, setUndoLeft] = useState(() =>
+    secondsLeft(record?.path === 'accept_all' ? record.undo_expires_at : null),
+  );
+  useEffect(() => {
+    const expires = record?.path === 'accept_all' ? record.undo_expires_at : null;
+    setUndoLeft(secondsLeft(expires));
+    if (!expires) return;
+    const timer = window.setInterval(() => {
+      const left = secondsLeft(expires);
+      setUndoLeft(left);
+      if (left <= 0) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [record]);
 
   return (
     <section className="requote-panel" data-testid="requote-panel" role="status">
@@ -64,6 +100,65 @@ export function RequoteDiffPanel({
           {open ? t('requote.hide_changes') : t('requote.see_changes')}
         </button>
       </div>
+
+      {/* M4.13 — the assembly offer (only when the org's AI flags allow it) */}
+      {assemblyState?.offered && !record && (
+        <div className="requote-banner assembly-offer" data-testid="assembly-banner">
+          {t('assembly.banner', { count: assemblyState.quote_count })}{' '}
+          {assemblyState.accept_all_eligible ? (
+            <button
+              type="button"
+              className="requote-action primary"
+              data-testid="assembly-accept-all"
+              disabled={busy}
+              onClick={onAcceptAll}
+            >
+              {t('assembly.accept_all')}
+            </button>
+          ) : (
+            <span className="assembly-suppressed" data-testid="assembly-suppressed">
+              {t('assembly.suppressed')}
+            </span>
+          )}{' '}
+          <button
+            type="button"
+            className="requote-action"
+            data-testid="assembly-review-import"
+            disabled={busy}
+            onClick={onImportForReview}
+          >
+            {t('assembly.review_import')}
+          </button>
+        </div>
+      )}
+
+      {/* After an import: the audit line + the 60-second undo chip */}
+      {record && (
+        <div className="requote-banner assembly-imported" data-testid="assembly-imported">
+          {t('assembly.imported_note', {
+            number: record.source_quote_number ?? '—',
+            date: new Date(record.at).toLocaleDateString(
+              i18n.language === 'de' ? 'de-DE' : 'en-IE',
+            ),
+          })}
+          {record.path === 'review' && (
+            <span className="lens-chip" data-status="suggested">
+              {t('assembly.review_note')}
+            </span>
+          )}{' '}
+          {record.path === 'accept_all' && undoLeft > 0 && (
+            <button
+              type="button"
+              className="requote-action assembly-undo"
+              data-testid="assembly-undo"
+              disabled={busy}
+              onClick={onUndo}
+            >
+              {t('assembly.undo', { seconds: undoLeft })}
+            </button>
+          )}
+        </div>
+      )}
 
       {open && (
         <div className="requote-body" id={bodyId}>

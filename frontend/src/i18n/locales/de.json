@@ -1243,5 +1243,15 @@
     "import_router": "Router aus {{number}} übernehmen",
     "review_fields": "Diff im Detail prüfen",
     "start_fresh": "Neu beginnen"
+  },
+  "assembly": {
+    "banner": "Dieses Teil wurde {{count}}-mal angeboten — Entwurf aus dem letzten Angebot erstellen?",
+    "accept_all": "Alle übernehmen",
+    "review_import": "Übernehmen & prüfen",
+    "suppressed": "Komplettübernahme nicht verfügbar — der Vergleich zeigt eine wesentliche Änderung; bitte Werte einzeln prüfen.",
+    "imported_note": "Importiert aus Angebot {{number}} — {{date}}",
+    "review_note": "KI-Entwurf — vor dem Versand prüfen",
+    "undo": "Rückgängig ({{seconds}} s)",
+    "imported_badge": "Importiert aus Angebot"
   }
 }

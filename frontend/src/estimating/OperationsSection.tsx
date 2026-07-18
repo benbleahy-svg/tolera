@@ -172,6 +172,13 @@ export function OperationsSection({
                     {t('estimating.missing_rate')}
                   </span>
                 )}
+                {/* M4.13: imported rows carry a purple provenance chip; on the
+                    Review path this is the "AI-drafted, check me" marker */}
+                {op.source === 'imported' && (
+                  <span className="lens-chip" data-status="suggested">
+                    {t('assembly.imported_badge')}
+                  </span>
+                )}
               </td>
               <td className="est-num">
                 {/* flat setup has no time — '---' like the frames; the € cost

@@ -138,6 +138,13 @@ export interface EstimatingApi {
     choice: RequoteChoice,
   ) => Promise<RequoteDiffResponse>;
   importRouter: (componentId: string, sourceComponentId: string) => Promise<unknown>;
+  // M4.13 — Agentic Quote Assembly (spec #ai-quote-assembly)
+  assemblyImport: (
+    quoteId: string,
+    partId: string,
+    path: 'accept_all' | 'review',
+  ) => Promise<RequoteDiffResponse>;
+  assemblyUndo: (quoteId: string, partId: string) => Promise<RequoteDiffResponse>;
 }
 
 /** Build an estimating API client bound to the current Clerk session token. */
@@ -274,6 +281,16 @@ export function useEstimatingApi(): EstimatingApi {
         apiFetch(`/api/components/${componentId}/import-router`, token, {
           method: 'POST',
           body: { source_component_id: sourceComponentId },
+        }),
+      assemblyImport: (quoteId, partId, path) =>
+        apiFetch(`/api/quotes/${quoteId}/assembly/import`, token, {
+          method: 'POST',
+          body: { part_id: partId, path },
+        }),
+      assemblyUndo: (quoteId, partId) =>
+        apiFetch(`/api/quotes/${quoteId}/assembly/undo`, token, {
+          method: 'POST',
+          body: { part_id: partId },
         }),
       createNest: (quoteId, body) =>
         apiFetch(`/api/quotes/${quoteId}/nests`, token, { method: 'POST', body }),
