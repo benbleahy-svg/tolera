@@ -19,6 +19,23 @@
 
 ---
 
+## [2026-07-18] M5.6 Orders list + detail — implementation assumptions (recorded)
+
+**Status:** RESOLVED (choices classified per CLAUDE.md §6.3; all cheap-to-reverse — recorded, not blocking. A schema column is added, so logged for traceability.)
+
+**Context.** `/block M5.6` — the Orders tab (list + detail), spec `#orderslist`. The spec fixes the columns (Order Total = **net**, Source chip, earliest-ship Expected Ship Date), the toolbar (search / Date-Placed range / Account filter), the per-row actions, the Edit-order precondition, **no create affordance**, and **no status lifecycle** (nullable `shipped_at` only). Reversible choices made where the sources were silent:
+
+1. **New org column `facilitate_order_updates` (boolean NOT NULL, default `false`).** The spec gates the Edit-order action on "Facilitate Order Updates enabled + no shipments", but the settings **UI** that flips this toggle is **M5.8** and the flag did not exist. M5.6 needs it to compute the affordance, so it is added here (migration `0044`, reversible). Default **off** — order editing is the 2025 **opt-in** (M5.7 scope). "No shipments" = `shipped_at IS NULL` (no shipment model in v1). M5.8 will surface the toggle; M5.7 builds the editing drawer. *Reversible: a settings default.*
+2. **Order system views (All / Buyer Portal / Facilitated / Awaiting Shipment)** reuse the M1.3 grid engine as **computed, never-stored** views (mirrors `SYSTEM_QUOTE_VIEWS`). Custom saved views are **not** wired for orders (not in the `#orderslist` scope; avoids a `SavedViewScope` enum change). The toolbar's Date-Placed/Account filters are ad-hoc `filters` (mutually exclusive with a system view, matching the quotes engine); free-text `search` composes with either. *Reversible: view set + endpoint shape.*
+3. **ERP push is a stub** (`POST /api/orders/{id}/push-to-erp` → `not_configured`). No adapter is wired in v1 (real adapter → M6), so the frontend does not surface the action (spec availability = "If ERP adapter configured"). The endpoint exists as the M6 seam and 404s a bad/cross-org id. *Reversible: a stub.*
+4. **Order detail lines carry `position` + a derived `part_label`** (part number + rev / name / description, via `order_line→quote_item→component→part`, all org-scoped joins) so multiple lines are distinguishable; the frontend falls back to the position when the part carries no label. Tax figures on the detail are a **read of the persisted Order** (never a recompute — tier-1 money). *Reversible: a display column.*
+
+**Review disposition (recorded):** CodeRabbit's "scope the `_set_shipped` test helper by `org_id`" (Security) is **declined** — the `Seeder`/owner-engine bypasses RLS **by design** (the repo-wide test setup/inspection pattern) and targets a globally-unique UUID PK; tenancy is validated at the **API layer** (`org_scoped_session`), which the cross-org test drives (asserts `total==0` + 404). This mirrors the identical disposition recorded under the 2026-07-18 M5.2 entry.
+
+**Affects:** M5.6 (this PR); M5.7 (facilitated order creation + the Edit-order drawer this gates); M5.8 (surfaces the `facilitate_order_updates` toggle + Checkout/Lead-time settings); M6 (real ERP adapter behind the push stub).
+
+---
+
 ## [2026-07-18] M5.4 quote/order PDF — implementation assumptions (recorded)
 
 **Status:** RESOLVED (design choices classified per CLAUDE.md §6.3; all cheap-to-reverse — recorded, not blocking. Money/schema touched, so logged for traceability.)

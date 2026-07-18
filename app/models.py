@@ -222,6 +222,15 @@ class Organization(Base):
     facility_phone: Mapped[str | None] = mapped_column(String)
     facility_website: Mapped[str | None] = mapped_column(String)
     facility_address: Mapped[str | None] = mapped_column(Text)
+    # "Facilitate Order Updates" — the 2025 opt-in that lets an estimator edit an
+    # order **before shipment** (change PO / shipping / add-remove lines) with a
+    # history trail (spec #orderslist "Edit order … only if Facilitate Order
+    # Updates is enabled"; the editing drawer is M5.7). Default **off** (opt-in);
+    # M5.6 only reads it to gate the Edit-order affordance, M5.8 surfaces the
+    # toggle. Combined with ``Order.shipped_at IS NULL`` ("no shipments yet").
+    facilitate_order_updates: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
