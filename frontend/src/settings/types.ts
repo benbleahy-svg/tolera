@@ -49,3 +49,57 @@ export interface SendEmailBody {
   subject: string;
   body_text: string;
 }
+
+/* ---- Email templates + send-quote composer (M5.5, spec #email-templates) ---- */
+
+export type EmailTemplateType = 'quote_send' | 'order_shipment' | 'order_refund';
+
+export interface EmailTemplate {
+  id: string;
+  template_type: EmailTemplateType;
+  name: string;
+  subject: string;
+  body: string;
+  is_default: boolean;
+  locale: string;
+  last_edited_by: string | null;
+  updated_at: string;
+}
+
+export interface EmailTemplateCreateBody {
+  template_type: EmailTemplateType;
+  name: string;
+  subject: string;
+  body: string;
+  is_default?: boolean;
+  locale?: string;
+}
+
+export interface EmailTemplateUpdateBody {
+  name?: string;
+  subject?: string;
+  body?: string;
+  is_default?: boolean;
+}
+
+export interface SendQuoteBody {
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  template_id?: string | null;
+  subject: string;
+  body_html: string;
+  include_pdf: boolean;
+}
+
+export interface SendQuoteResult {
+  quote_id: string;
+  status: string;
+  recipients: string[];
+  pdf_attached: boolean;
+}
+
+export interface SendQuotePreview {
+  subject: string;
+  body_html: string;
+}

@@ -15,8 +15,8 @@ Adds the two entities the internal Build-Order flow needs on top of the M5.2
 
 Both are org-scoped + RLS like every tenant table. Fully reversible.
 
-Revision ID: 0045_facilitate_order
-Revises: 0044_facilitate_order_updates
+Revision ID: 0046_facilitate_order
+Revises: 0045_email_composer
 Create Date: 2026-07-18
 """
 
@@ -26,8 +26,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0045_facilitate_order"
-down_revision: str | None = "0044_facilitate_order_updates"
+revision: str = "0046_facilitate_order"
+down_revision: str | None = "0045_email_composer"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

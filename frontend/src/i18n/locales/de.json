@@ -1075,6 +1075,81 @@
     "inbound": "Empfangen",
     "connect_failed": "Verbindung fehlgeschlagen oder abgebrochen."
   },
+  "emailTemplates": {
+    "title": "E-Mail-Vorlagen",
+    "subtitle": "Vorlagen für versendete Angebote und Auftragsbenachrichtigungen. Legen Sie pro Typ eine Standardvorlage fest.",
+    "section": {
+      "quote_send": "Angebots-E-Mails",
+      "order_shipment": "Versand-E-Mails",
+      "order_refund": "Erstattungs-E-Mails"
+    },
+    "col": {
+      "name": "Vorlagenname",
+      "last_edited_by": "Zuletzt bearbeitet von",
+      "last_edited": "Zuletzt bearbeitet",
+      "actions": "Aktionen"
+    },
+    "none": "Noch keine Vorlage angelegt.",
+    "default_badge": "STANDARD",
+    "edit": "Bearbeiten",
+    "delete": "Löschen",
+    "create": {
+      "quote_send": "Neue Angebotsvorlage erstellen",
+      "order_shipment": "Neue Versandvorlage erstellen",
+      "order_refund": "Neue Erstattungsvorlage erstellen"
+    },
+    "editor_title": "E-Mail-Vorlage",
+    "field_name": "Name",
+    "field_subject": "Betreff",
+    "field_body": "Nachricht",
+    "merge_fields": "Platzhalter einfügen",
+    "set_default": "Als Standard festlegen",
+    "default_protected": "Die Standardvorlage kann nicht gelöscht werden.",
+    "field": {
+      "quote_number": "Angebotsnummer",
+      "quote_link": "Angebots-Link",
+      "rfq_number": "Anfragenummer",
+      "part_numbers": "Teilenummern",
+      "customer_first_name": "Kunde Vorname",
+      "customer_last_name": "Kunde Nachname",
+      "estimator_first_name": "Kalkulator Vorname",
+      "estimator_last_name": "Kalkulator Nachname",
+      "estimator_email": "Kalkulator E-Mail",
+      "salesperson_first_name": "Vertrieb Vorname",
+      "salesperson_last_name": "Vertrieb Nachname",
+      "salesperson_email": "Vertrieb E-Mail",
+      "facility_name": "Standortname",
+      "facility_phone": "Standort Telefon"
+    }
+  },
+  "sendComposer": {
+    "title": "Wer erhält dieses Angebot?",
+    "send_quote": "Angebot senden",
+    "type": {
+      "to": "An",
+      "cc": "CC",
+      "bcc": "BCC"
+    },
+    "remove_recipient": "Empfänger entfernen",
+    "recipient_type": "Empfängertyp",
+    "recipient_email": "E-Mail-Adresse des Empfängers",
+    "recipient_placeholder": "user@firma.de",
+    "select_template": "E-Mail-Vorlage auswählen",
+    "no_template": "Keine Vorlage",
+    "subject": "Betreff",
+    "formatting": "Formatierung",
+    "bold": "Fett",
+    "italic": "Kursiv",
+    "underline": "Unterstrichen",
+    "bullet_list": "Aufzählung",
+    "link": "Link",
+    "link_prompt": "Link-URL eingeben:",
+    "body": "Nachricht",
+    "attach_pdf": "Angebot als PDF anhängen",
+    "preview": "Vorschau",
+    "preview_heading": "Vorschau",
+    "send": "Angebot senden"
+  },
   "rules": {
     "name": "Name",
     "combine": "Verknüpfung",

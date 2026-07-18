@@ -154,6 +154,15 @@ class Settings(BaseSettings):
     # ingest endpoint must never accept unsigned posts (the validate_storage /
     # clerk_authorized_party_set fail-closed precedent).
     mailgun_webhook_signing_key: str = ""
+    # Outbound platform-address fallback (M5.5 — spec #email-connectivity "Fallback"):
+    # when an estimator has NOT connected their own mailbox, the send-quote composer
+    # may still send from the platform address (quotes@{sending_domain}) via Mailgun
+    # EU. Both empty = the fallback is UNAVAILABLE (the composer returns
+    # ``no_email_connection`` so the "Connect your email" prompt shows) — the fallback
+    # is opt-in config, never a silent default.
+    mailgun_api_key: str = ""
+    mailgun_sending_domain: str = ""
+    mailgun_api_base_url: str = "https://api.eu.mailgun.net"  # EU region (GDPR)
 
     # --- Email connectivity / two-way threading (M3.5 — spec #email-connectivity) ---
     # AES-256-GCM key for credentials at rest: 64 hex chars (32 bytes).
