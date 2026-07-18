@@ -2589,9 +2589,9 @@ class OrgQuoteSettings(Base):
     methods / order-confirmation-email flag — the checkout enforces these
     server-side), a Lead-Time business-vs-calendar-days preference, the
     Email-Notification recipient matrix (consumed later by M5.5/M5.2), and an
-    **informational** default tax rate (the VAT engine stays authoritative —
-    §14-UStG resolution is legally determined, never a preference; this field is
-    an admin display over the region default and is NOT fed into costing)."""
+    **informational** default tax rate (the VAT engine stays authoritative — the
+    rate is legally determined, §12 UStG, never a preference; this field is an
+    admin display over the region default and is NOT fed into costing)."""
 
     __tablename__ = "org_quote_settings"
 

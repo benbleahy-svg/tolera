@@ -22,6 +22,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import OrderShippingMethod, OrgQuoteSettings
@@ -95,7 +96,10 @@ class QuoteSettings:
     default_tax_rate_pct: Decimal | None = None
 
 
-#: Returned when an org has no ``org_quote_settings`` row.
+#: Reference all-defaults snapshot. NOTE: ``load_quote_settings`` returns a
+#: *fresh* instance for a missing row, never this shared object — ``frozen=True``
+#: does not freeze the nested ``notification_recipients`` dict, so sharing one
+#: instance across orgs would let a mutation leak between tenants.
 DEFAULT_QUOTE_SETTINGS = QuoteSettings()
 
 #: Scalar fields copied straight from the ORM row (JSONB handled separately).
@@ -134,7 +138,9 @@ async def load_quote_settings(session: AsyncSession, org_id: uuid.UUID) -> Quote
         await session.scalars(select(OrgQuoteSettings).where(OrgQuoteSettings.org_id == org_id))
     ).one_or_none()
     if row is None:
-        return DEFAULT_QUOTE_SETTINGS
+        # A *fresh* snapshot — never the shared singleton, whose nested
+        # notification_recipients dict is mutable (see DEFAULT_QUOTE_SETTINGS).
+        return QuoteSettings()
     return _from_row(row)
 
 
@@ -142,14 +148,20 @@ async def get_or_create_row(session: AsyncSession, org_id: uuid.UUID) -> OrgQuot
     """The org's ``org_quote_settings`` row, inserting an all-default one if absent.
 
     Used by the settings write endpoint (M5.8) — the accessor above still treats a
-    never-written org as defaults, so this is only materialised on first save."""
+    never-written org as defaults, so this is only materialised on first save.
+
+    The insert is an atomic ``ON CONFLICT DO NOTHING`` so two concurrent first
+    saves for the same org cannot race on the primary key (one would otherwise
+    raise on flush); the row is then loaded whether we or the other txn wrote it.
+    RLS's ``WITH CHECK`` still pins ``org_id`` to the caller."""
+    await session.execute(
+        pg_insert(OrgQuoteSettings)
+        .values(org_id=org_id)
+        .on_conflict_do_nothing(index_elements=[OrgQuoteSettings.org_id])
+    )
     row = (
         await session.scalars(select(OrgQuoteSettings).where(OrgQuoteSettings.org_id == org_id))
-    ).one_or_none()
-    if row is None:
-        row = OrgQuoteSettings(org_id=org_id)
-        session.add(row)
-        await session.flush()
+    ).one()
     return row
 
 

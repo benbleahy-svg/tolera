@@ -21,6 +21,7 @@ import {
   useQuoteSettingsApi,
   type NotificationKey,
   type QuoteSettings,
+  type QuoteSettingsUpdate,
   type ShippingMethod,
 } from './quoteSettings';
 
@@ -32,6 +33,10 @@ export function QuoteSettingsPage() {
   const { t } = useTranslation();
   const api = useQuoteSettingsApi();
   const [draft, setDraft] = useState<QuoteSettings | null>(null);
+  // Only the fields the admin actually touched are sent — the endpoint is a
+  // partial update, so two admins editing different settings don't clobber each
+  // other with stale values.
+  const [dirty, setDirty] = useState<Set<keyof QuoteSettings>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -39,7 +44,10 @@ export function QuoteSettingsPage() {
   const load = useCallback(() => {
     api
       .get()
-      .then(setDraft)
+      .then((s) => {
+        setDraft(s);
+        setDirty(new Set());
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [api]);
 
@@ -50,6 +58,11 @@ export function QuoteSettingsPage() {
   const patch = (change: Partial<QuoteSettings>) => {
     setSaved(false);
     setDraft((prev) => (prev ? { ...prev, ...change } : prev));
+    setDirty((prev) => {
+      const next = new Set(prev);
+      for (const key of Object.keys(change)) next.add(key as keyof QuoteSettings);
+      return next;
+    });
   };
 
   const toggleDisabledMethod = (method: ShippingMethod, offered: boolean) => {
@@ -72,13 +85,18 @@ export function QuoteSettingsPage() {
   };
 
   const save = () => {
-    if (!draft) return;
+    if (!draft || dirty.size === 0) return;
+    const body: QuoteSettingsUpdate = {};
+    for (const key of dirty) {
+      (body as Record<string, unknown>)[key] = draft[key];
+    }
     setSaving(true);
     setError(null);
     api
-      .update(draft)
+      .update(body)
       .then((next) => {
         setDraft(next);
+        setDirty(new Set());
         setSaved(true);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
@@ -96,6 +114,9 @@ export function QuoteSettingsPage() {
     <div className="quote-settings">
       <h1>{t('quoteSettings.heading')}</h1>
 
+      {/* Controls are frozen while a save is in flight so an edit made mid-request
+          isn't silently overwritten when the server response lands. */}
+      <fieldset className="qs-form" disabled={saving}>
       <section aria-labelledby="qs-display">
         <h2 id="qs-display">{t('quoteSettings.display_heading')}</h2>
         <p>{t('quoteSettings.display_hint')}</p>
@@ -278,8 +299,10 @@ export function QuoteSettingsPage() {
         </label>
       </section>
 
+      </fieldset>
+
       <div className="qs-actions">
-        <button type="button" onClick={save} disabled={saving}>
+        <button type="button" onClick={save} disabled={saving || dirty.size === 0}>
           {t('common.save')}
         </button>
         {saved && <span role="status">{t('quoteSettings.saved')}</span>}

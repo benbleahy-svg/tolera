@@ -10,8 +10,8 @@ on first write, so a never-configured org reads all-defaults without a row.
 The write is a **partial** update (only supplied fields change). The three
 display radios and the shipping-method list are validated against their enums by
 Pydantic; ``default_tax_rate_pct`` is bounded and is **informational only** — it
-never enters the VAT engine (§14-UStG resolution is legally computed, not a
-preference; CLAUDE.md §5)."""
+never enters the VAT engine (the applied rate is legally determined — §12 UStG
+for the rate, §13b for reverse charge — not a preference; CLAUDE.md §5)."""
 
 from __future__ import annotations
 

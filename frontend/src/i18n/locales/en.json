@@ -1679,7 +1679,7 @@
     },
     "accounting_heading": "Accounting",
     "default_tax_rate": "Default tax rate (%)",
-    "default_tax_rate_hint": "Informational only — the applied rate is determined by law (§14 UStG).",
+    "default_tax_rate_hint": "Informational only — the applied rate is determined by law (§12 UStG).",
     "saved": "Saved"
   }
 }

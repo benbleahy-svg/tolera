@@ -151,12 +151,20 @@ def test_settings_are_org_scoped(seeder: Seeder, app_client: TestClient) -> None
     org_a, user_a = _org_admin(seeder, "qs-org-a")
     org_b, user_b = _org_admin(seeder, "qs-org-b")
     with _as_admin(app_client, org_a, user_a):
-        app_client.put(SETTINGS_URL, json={"show_material": False, "requotes_enabled": False})
+        written = app_client.put(
+            SETTINGS_URL, json={"show_material": False, "requotes_enabled": False}
+        )
+        assert written.status_code == 200, written.text
+        # Confirm org A actually persisted the change (else the isolation
+        # assertion below would pass trivially on a failed write).
+        body_a = app_client.get(SETTINGS_URL).json()
+    assert body_a["show_material"] is False
+    assert body_a["requotes_enabled"] is False
     # Org B never wrote a row → still sees defaults; org A's change did not leak.
     with _as_admin(app_client, org_b, user_b):
-        body = app_client.get(SETTINGS_URL).json()
-    assert body["show_material"] is True
-    assert body["requotes_enabled"] is True
+        body_b = app_client.get(SETTINGS_URL).json()
+    assert body_b["show_material"] is True
+    assert body_b["requotes_enabled"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -232,6 +240,40 @@ def test_local_pickup_gated_by_setting_at_checkout(seeder: Seeder, app_client: T
         json={"selections": [ids], "po_number": "PO-3", "shipping_method": "local_pickup"},
     )
     assert rejected.status_code == 422, rejected.text
+
+
+def test_checkout_requires_terms_acceptance_when_enabled(
+    seeder: Seeder, app_client: TestClient
+) -> None:
+    org, user = _org_admin(seeder, "qs-terms")
+    with _as_admin(app_client, org, user) as client:
+        qid, _ = _priced_quote(client)
+        client.put(SETTINGS_URL, json={"require_terms_acceptance": True})
+    _, token = _mint(seeder, app_client, org, qid)
+    portal = app_client.get(f"/api/public/quotes/{token}").json()
+    item = portal["line_items"][0]
+    ids = {"quote_item_id": item["quote_item_id"], "quantity": item["breaks"][0]["quantity"]}
+    assert portal["checkout"]["require_terms_acceptance"] is True
+
+    # Without accepting the T&Cs the checkout is rejected (server-enforced).
+    rejected = app_client.post(
+        f"/api/public/quotes/{token}/checkout",
+        json={"selections": [ids], "po_number": "PO-T", "shipping_method": "bill_at_shipment"},
+    )
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "terms_not_accepted"
+
+    # Accepting them lets the order through.
+    ok = app_client.post(
+        f"/api/public/quotes/{token}/checkout",
+        json={
+            "selections": [ids],
+            "po_number": "PO-T",
+            "shipping_method": "bill_at_shipment",
+            "terms_accepted": True,
+        },
+    )
+    assert ok.status_code == 201, ok.text
 
 
 def test_put_rejects_explicit_null_on_non_nullable(seeder: Seeder, app_client: TestClient) -> None:

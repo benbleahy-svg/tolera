@@ -87,9 +87,12 @@ describe('QuoteSettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Speichern' }));
 
     await waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
-    const body = api.update.mock.calls[0][0] as QuoteSettings;
-    expect(body.show_material).toBe(false);
-    expect(body.disabled_shipping_methods).toContain('no_shipping_fees');
+    // Partial-update contract: ONLY the two touched fields are sent, not the
+    // whole draft — so a concurrent admin's untouched settings aren't clobbered.
+    expect(api.update).toHaveBeenCalledWith({
+      show_material: false,
+      disabled_shipping_methods: ['no_shipping_fees'],
+    });
     expect(await screen.findByText('Gespeichert')).toBeInTheDocument();
   });
 
@@ -104,6 +107,6 @@ describe('QuoteSettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Speichern' }));
 
     await waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
-    expect((api.update.mock.calls[0][0] as QuoteSettings).requotes_enabled).toBe(false);
+    expect(api.update).toHaveBeenCalledWith({ requotes_enabled: false });
   });
 });
