@@ -186,6 +186,8 @@ function op(name: string, cells: QuoteCellOut[], extra: Partial<OperationOut> = 
     notes: null,
     cost_formula: null,
     variable_overrides: {},
+    source: 'manual',
+    source_quote_id: null,
     missing_rate: false,
     cells,
     ...extra,

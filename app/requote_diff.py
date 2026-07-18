@@ -36,7 +36,7 @@ from typing import Annotated, Any, Literal, Protocol, cast
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
@@ -65,7 +65,7 @@ from .tasks import BaseTask
 logger = logging.getLogger(__name__)
 
 REQUOTE_DIFF_VERSION = "rqd-1"
-REQUOTE_PROMPT_VERSION = "rqd-prompt-1"
+REQUOTE_PROMPT_VERSION = "rqd-prompt-2"
 
 #: Deterministic significance thresholds for ``geometry_delta.significant``
 #: (consumed by M4.13's server-side Accept-All gate). ASSUMED defaults — the
@@ -323,8 +323,12 @@ _SYNTH_PROMPT = (
     "neuen Revision (Geometrie-Delta + Zeichnungsänderungen). Schreibe EINEN kurzen "
     "Absatz auf DEUTSCH: welche Änderungen sind fertigungsrelevant (Router/Preis "
     "prüfen), welche nur kosmetisch, und ob der bisherige Router voraussichtlich "
-    "weiter gültig ist. Beziehe dich NUR auf Werte aus dem Diff — erfinde nichts. "
-    "Gib NUR JSON zurück: `synthesis` (der Absatz). Diff:\n"
+    "weiter gültig ist. Enthält der Diff ein Feld `assembly`, wird zusätzlich "
+    "angeboten, den Entwurf aus dem letzten Angebot zu übernehmen (das Teil wurde "
+    "bereits `quote_count`-mal angeboten): beurteile im SELBEN Absatz kurz, ob die "
+    "Komplettübernahme vertretbar ist (leere `accept_all_blockers`) oder was vor "
+    "einer Übernahme zu prüfen wäre. Beziehe dich NUR auf Werte aus dem Diff — "
+    "erfinde nichts. Gib NUR JSON zurück: `synthesis` (der Absatz). Diff:\n"
 )
 
 
@@ -421,7 +425,7 @@ async def _find_baseline(
             continue
         row = (
             await session.execute(
-                select(Component.part_id, Component.id, Quote.id, Quote.number)
+                select(Component.part_id, Component.id, Quote.id, Quote.number, Quote.currency)
                 .join(QuoteItem, QuoteItem.root_component_id == Component.id)
                 .join(Quote, Quote.id == QuoteItem.quote_id)
                 .where(
@@ -442,7 +446,7 @@ async def _find_baseline(
         ).first()
         if row is None:
             continue
-        matched_part_id, component_id, quote_id, number = row
+        matched_part_id, component_id, quote_id, number, currency = row
         matched = await session.get(Part, matched_part_id)
         if matched is None:
             continue
@@ -452,6 +456,7 @@ async def _find_baseline(
             "component_id": component_id,
             "quote_id": quote_id,
             "quote_number": number,
+            "currency": currency,
         }
     return None
 
@@ -495,6 +500,23 @@ async def build_requote_snapshot(
     if baseline is None:
         return {"skipped": "no_baseline"}
     matched = baseline["part"]
+
+    # "This part was quoted N times" (the M4.13 banner) — live quotes carrying
+    # the matched library part, the target itself excluded.
+    quote_count = (
+        await session.scalar(
+            select(func.count(func.distinct(Quote.id)))
+            .select_from(QuoteItem)
+            .join(Quote, Quote.id == QuoteItem.quote_id)
+            .join(Component, Component.id == QuoteItem.root_component_id)
+            .where(
+                Component.part_id == matched.id,
+                Quote.deleted_at.is_(None),
+                Quote.id != quote.id,
+            )
+        )
+        or 0
+    )
 
     raw_a = await session.scalar(
         select(PartGeometry.raw).where(PartGeometry.part_id == baseline["part"].id)
@@ -541,29 +563,46 @@ async def build_requote_snapshot(
     else:
         ai_reason = "ok"
 
+    entry: dict[str, Any] = {
+        "version": REQUOTE_DIFF_VERSION,
+        "prompt_version": REQUOTE_PROMPT_VERSION,
+        "generated_at": now.isoformat(),
+        "part_id": str(part_id),
+        "match_type": baseline["match_type"],
+        "matched": {
+            "part_id": str(matched.id),
+            "part_number": matched.part_number,
+            "revision": matched.revision,
+            "quote_id": str(baseline["quote_id"]),
+            "quote_number": baseline["quote_number"],
+            "component_id": str(baseline["component_id"]),
+            "currency": baseline["currency"],
+        },
+        "target_component_id": str(target_component_id),
+        "quote_count": int(quote_count),
+        "diff": diff,
+        "ai": None,
+        "synthesis": None,
+        "choice": None,
+    }
+
+    # M4.13 combined brief: when the assembly offer is active too, the ONE
+    # synthesis paragraph also covers the draft-from-last-quote proposal. The
+    # context is deterministic (count + the same gate the server enforces).
+    assembly_context: dict[str, Any] | None = None
+    if flags.quote_assembly_enabled:
+        from .quote_assembly import accept_all_blockers
+
+        assembly_context = {
+            "quote_count": int(quote_count),
+            "accept_all_blockers": accept_all_blockers(entry, target_currency=quote.currency),
+        }
+
     return {
         "quote_id": quote.id,
         "ai_reason": ai_reason,
-        "entry": {
-            "version": REQUOTE_DIFF_VERSION,
-            "prompt_version": REQUOTE_PROMPT_VERSION,
-            "generated_at": now.isoformat(),
-            "part_id": str(part_id),
-            "match_type": baseline["match_type"],
-            "matched": {
-                "part_id": str(matched.id),
-                "part_number": matched.part_number,
-                "revision": matched.revision,
-                "quote_id": str(baseline["quote_id"]),
-                "quote_number": baseline["quote_number"],
-                "component_id": str(baseline["component_id"]),
-            },
-            "target_component_id": str(target_component_id),
-            "diff": diff,
-            "ai": None,
-            "synthesis": None,
-            "choice": None,
-        },
+        "assembly_context": assembly_context,
+        "entry": entry,
     }
 
 
@@ -596,8 +635,14 @@ async def run_generate_requote_diff(
         ai_reason = snap["ai_reason"]
         synthesis: str | None = None
         if ai_reason == "ok":
+            # One combined brief (spec #ai-quote-assembly): the assembly
+            # context rides along in the same structured payload — still one
+            # call, still no raw files.
+            synth_payload: dict[str, Any] = dict(entry["diff"])
+            if snap.get("assembly_context") is not None:
+                synth_payload["assembly"] = snap["assembly_context"]
             try:
-                out = await resolve().synthesize(entry["diff"])
+                out = await resolve().synthesize(synth_payload)
             except (LensProviderError, RuntimeError, AttributeError) as exc:
                 code = exc.code if isinstance(exc, LensProviderError) else "provider_unavailable"
                 logger.info(
@@ -625,6 +670,16 @@ async def run_generate_requote_diff(
             prior = entries.get(entry["part_id"])
             if isinstance(prior, dict) and prior.get("choice"):
                 entry["choice"] = prior["choice"]
+            # The M4.13 import record is audit trail — a recompute never drops
+            # it — but only while the baseline is the same quote: a re-resolved
+            # baseline (e.g. the old one was trashed) must not inherit another
+            # quote's provenance record.
+            if (
+                isinstance(prior, dict)
+                and prior.get("assembly")
+                and (prior.get("matched") or {}).get("quote_id") == entry["matched"]["quote_id"]
+            ):
+                entry["assembly"] = prior["assembly"]
             entries[entry["part_id"]] = entry
             quote.requote_diff = {"version": REQUOTE_DIFF_VERSION, "entries": entries}
         return {
@@ -716,9 +771,13 @@ async def get_requote_diff(
     _: Annotated[Principal, Depends(require(Permission.view_all))],
 ) -> dict[str, Any]:
     """The cached requote diff for the estimating banner/panel — empty list
-    until the task has run (never a silent 404 for a real quote)."""
+    until the task has run (never a silent 404 for a real quote). Entries are
+    enriched with the read-time M4.13 ``assembly_state`` (offer + the
+    server-computed Accept-All eligibility)."""
+    from .quote_assembly import enrich_entries
+
     quote = await _get_quote_or_404(session, quote_id)
-    return _entries_out(quote)
+    return await enrich_entries(session, quote, _entries_out(quote))
 
 
 @requote_router.post("/{quote_id}/requote-diff/choice")
@@ -755,7 +814,9 @@ async def record_requote_choice(
     }
     entries[str(payload.part_id)] = entry
     quote.requote_diff = {**cache, "entries": entries}
-    return _entries_out(quote)
+    from .quote_assembly import enrich_entries
+
+    return await enrich_entries(session, quote, _entries_out(quote))
 
 
 @requote_router.post("/{quote_id}/requote-diff/refresh", status_code=status.HTTP_202_ACCEPTED)

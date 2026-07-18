@@ -56,6 +56,7 @@ from .models import (
     QuoteItem,
     QuoteStatus,
     SetupBasis,
+    ValueSource,
 )
 from .services import kalk
 
@@ -158,6 +159,10 @@ class OperationOut(BaseModel):
     notes: str | None
     cost_formula: str | None
     variable_overrides: dict[str, Any]
+    # M4.13 provenance (spec #ai-quote-assembly): drives the "importiert aus
+    # Angebot #N" badge in the variable drawer.
+    source: ValueSource
+    source_quote_id: uuid.UUID | None
     # M1.14 #missing-rates-warning: this row's rate resolves to nothing — the
     # amber inline highlight (deterministic, computed from the same rule as
     # the Configure banner)
@@ -396,6 +401,8 @@ def _operation_out(op: Operation, cells: list[QuoteCell]) -> OperationOut:
         notes=op.notes,
         cost_formula=op.cost_formula,
         variable_overrides=op.variable_overrides,
+        source=op.source,
+        source_quote_id=op.source_quote_id,
         missing_rate=operation_missing_rate(op),
         cells=cell_out,
     )
