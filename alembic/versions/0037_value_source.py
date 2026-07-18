@@ -4,8 +4,11 @@
 Spec ``#ai-quote-assembly`` build note: "Add source ENUM(manual | imported |
 ai_drafted) and source_quote_id to OperationInstance and pricing variable
 overrides." Existing rows are all estimator-made → backfilled ``manual`` via
-the server default. ``source_quote_id`` is a plain FK to ``quote`` with
-ON DELETE SET NULL (the tag is provenance, never a hard dependency).
+the server default. Provenance is org-scoped belt-and-braces (§5): a
+composite ``(org_id, source_quote_id) → quote (org_id, id)`` FK makes a
+cross-org tag unrepresentable even if RLS were bypassed. ``ON DELETE SET
+NULL (source_quote_id)`` (PG15+ column list) clears only the tag — the tag
+is provenance, never a hard dependency.
 
 Revision ID: 0037_value_source
 Revises: 0036_requote_diff
@@ -39,12 +42,15 @@ def upgrade() -> None:
         )
         op.add_column(
             table,
-            sa.Column(
-                "source_quote_id",
-                postgresql.UUID(as_uuid=True),
-                sa.ForeignKey("quote.id", ondelete="SET NULL", name=f"fk_{table}_source_quote"),
-                nullable=True,
-            ),
+            sa.Column("source_quote_id", postgresql.UUID(as_uuid=True), nullable=True),
+        )
+        op.create_foreign_key(
+            f"fk_{table}_source_quote",
+            table,
+            "quote",
+            ["org_id", "source_quote_id"],
+            ["org_id", "id"],
+            ondelete="SET NULL (source_quote_id)",
         )
         # Postgres does not auto-index FK columns; the ON DELETE SET NULL
         # fixup on quote deletion would otherwise seq-scan all four tables.
@@ -59,6 +65,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     for table in reversed(_TABLES):
+        op.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS fk_{table}_source_quote")
         op.execute(f"DROP INDEX IF EXISTS ix_{table}_source_quote")
         op.drop_column(table, "source_quote_id")
         op.drop_column(table, "source")

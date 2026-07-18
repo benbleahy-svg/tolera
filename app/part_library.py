@@ -33,6 +33,7 @@ file must never surface (cross-org test-plan case).
 
 from __future__ import annotations
 
+import copy
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -440,7 +441,10 @@ async def source_quote_id_of(session: AsyncSession, component: Component) -> uui
     provenance stamp (M4.13). ``None`` for a component without a line item
     (e.g. a BOM child); the copy still happens, just untagged."""
     quote_id: uuid.UUID | None = await session.scalar(
-        select(QuoteItem.quote_id).where(QuoteItem.root_component_id == component.id)
+        select(QuoteItem.quote_id).where(
+            QuoteItem.root_component_id == component.id,
+            QuoteItem.org_id == component.org_id,
+        )
     )
     return quote_id
 
@@ -456,16 +460,25 @@ async def copy_component_router(
     source's (importing a router means reusing it, not merging two). Every
     copied row is stamped ``source = imported`` + the *immediate* source
     quote (spec ``#ai-quote-assembly``: "all imported values carry
-    source = imported"). The source rows are never touched."""
+    source = imported"). The source rows are never touched.
+
+    RLS already pins the session to one org; the explicit org guard and
+    org-scoped predicates are §5 belt-and-braces."""
+    if source.org_id != target.org_id:
+        raise AppError("not_found", "Source component not found.", status_code=404)
     source_ops = (
         await session.scalars(
             select(Operation)
-            .where(Operation.component_id == source.id)
+            .where(Operation.component_id == source.id, Operation.org_id == source.org_id)
             .order_by(Operation.position, Operation.created_at, Operation.id)
         )
     ).all()
     # Replace, not merge: the old router's rows go (their cells cascade).
-    await session.execute(delete(Operation).where(Operation.component_id == target.id))
+    await session.execute(
+        delete(Operation).where(
+            Operation.component_id == target.id, Operation.org_id == target.org_id
+        )
+    )
     for src in source_ops:
         copied = Operation(
             org_id=target.org_id,
@@ -476,8 +489,9 @@ async def copy_component_router(
             added_manually=False,
             source=ValueSource.imported,
             source_quote_id=source_quote_id,
-            # JSONB dict is copied, never shared, so later edits don't alias.
-            variable_overrides=dict(src.variable_overrides),
+            # Deep copy: overrides may nest per-quantity dicts — the imported
+            # row must never alias (and later mutate) the historical source.
+            variable_overrides=copy.deepcopy(src.variable_overrides),
             **{field: getattr(src, field) for field in _OPERATION_COPY_FIELDS},
         )
         session.add(copied)
@@ -590,14 +604,34 @@ async def import_router(
     found via the historical bucket — is never touched; its quote may be in
     any status. Manual overrides ride along on the copied rows; per-quantity
     manual cell costs stay behind (the target's breaks are its own).
+
+    Cross-currency imports are rejected (M4.13 / DECISIONS 2026-07-18): the
+    copied rates/setup costs are currency-bearing, and CHF numbers landing in
+    a EUR quote are silently-wrong money. A source without a quote (no
+    currency context, e.g. a BOM child) imports untagged as before.
     """
     if payload.source_component_id == component_id:
         raise AppError("invalid_source", "A component cannot import from itself.", status_code=422)
     target = await _get_component_or_404(session, component_id)
-    await _lock_editable_quote_of(session, target)
+    target_quote = await _lock_editable_quote_of(session, target)
     source = await session.get(Component, payload.source_component_id)
     if source is None:
         raise AppError("not_found", "Source component not found.", status_code=404)
+    source_currency = await session.scalar(
+        select(Quote.currency)
+        .join(QuoteItem, QuoteItem.quote_id == Quote.id)
+        .where(
+            QuoteItem.root_component_id == source.id,
+            QuoteItem.org_id == source.org_id,
+        )
+    )
+    if source_currency is not None and source_currency != target_quote.currency:
+        raise AppError(
+            "currency_mismatch",
+            "The historical quote uses a different currency — its rates cannot "
+            "be imported into this quote.",
+            status_code=409,
+        )
 
     await copy_component_router(
         session,

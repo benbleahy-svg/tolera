@@ -1392,6 +1392,15 @@ class Operation(Base):
             "yield_factor > 0 AND yield_factor <= 1", name="ck_operation_yield_factor_range"
         ),
         Index("ix_operation_org_component", "org_id", "component_id"),
+        # M4.13 provenance is org-scoped belt-and-braces (§5): the composite FK
+        # makes a cross-org source_quote_id unrepresentable. PG15+ column-list
+        # SET NULL clears only the tag on quote deletion, never org_id.
+        ForeignKeyConstraint(
+            ["org_id", "source_quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_operation_source_quote",
+            ondelete="SET NULL (source_quote_id)",
+        ),
         Index(
             "ix_operation_source_quote",
             "source_quote_id",
@@ -1460,9 +1469,7 @@ class Operation(Base):
     source: Mapped[ValueSource] = mapped_column(
         _value_source_enum, nullable=False, server_default=ValueSource.manual.value
     )
-    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="SET NULL")
-    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1750,6 +1757,15 @@ class PricingItem(Base):
             name="ck_pricing_item_custom_named",
         ),
         Index("ix_pricing_item_org_component", "org_id", "component_id"),
+        # M4.13 provenance is org-scoped belt-and-braces (§5): the composite FK
+        # makes a cross-org source_quote_id unrepresentable. PG15+ column-list
+        # SET NULL clears only the tag on quote deletion, never org_id.
+        ForeignKeyConstraint(
+            ["org_id", "source_quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_pricing_item_source_quote",
+            ondelete="SET NULL (source_quote_id)",
+        ),
         Index(
             "ix_pricing_item_source_quote",
             "source_quote_id",
@@ -1781,9 +1797,7 @@ class PricingItem(Base):
     source: Mapped[ValueSource] = mapped_column(
         _value_source_enum, nullable=False, server_default=ValueSource.manual.value
     )
-    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="SET NULL")
-    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1851,6 +1865,15 @@ class Discount(Base):
             name="fk_discount_source_def_org",
         ),
         Index("ix_discount_org_component", "org_id", "component_id"),
+        # M4.13 provenance is org-scoped belt-and-braces (§5): the composite FK
+        # makes a cross-org source_quote_id unrepresentable. PG15+ column-list
+        # SET NULL clears only the tag on quote deletion, never org_id.
+        ForeignKeyConstraint(
+            ["org_id", "source_quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_discount_source_quote",
+            ondelete="SET NULL (source_quote_id)",
+        ),
         Index(
             "ix_discount_source_quote",
             "source_quote_id",
@@ -1873,9 +1896,7 @@ class Discount(Base):
     source: Mapped[ValueSource] = mapped_column(
         _value_source_enum, nullable=False, server_default=ValueSource.manual.value
     )
-    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="SET NULL")
-    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -1977,6 +1998,15 @@ class AddOn(Base):
             name="ck_add_on_price_positive",
         ),
         Index("ix_add_on_org_component", "org_id", "component_id"),
+        # M4.13 provenance is org-scoped belt-and-braces (§5): the composite FK
+        # makes a cross-org source_quote_id unrepresentable. PG15+ column-list
+        # SET NULL clears only the tag on quote deletion, never org_id.
+        ForeignKeyConstraint(
+            ["org_id", "source_quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_add_on_source_quote",
+            ondelete="SET NULL (source_quote_id)",
+        ),
         Index(
             "ix_add_on_source_quote",
             "source_quote_id",
@@ -2007,9 +2037,7 @@ class AddOn(Base):
     source: Mapped[ValueSource] = mapped_column(
         _value_source_enum, nullable=False, server_default=ValueSource.manual.value
     )
-    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("quote.id", ondelete="SET NULL")
-    )
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 

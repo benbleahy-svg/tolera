@@ -1252,6 +1252,8 @@
     "imported_note": "Imported from Quote {{number}} — {{date}}",
     "review_note": "AI-drafted — review before sending",
     "undo": "Undo ({{seconds}} s)",
-    "imported_badge": "Imported from quote"
+    "imported_badge": "Imported from quote",
+    "ai_drafted_badge": "AI-drafted",
+    "import_blocked": "Import unavailable — the previous quote uses a different currency (or the comparison is stale; refresh the diff)."
   }
 }

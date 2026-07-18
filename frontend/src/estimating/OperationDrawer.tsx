@@ -115,10 +115,15 @@ export function OperationDrawer({
       <header>
         <h3>{operation.name}</h3>
         {/* M4.13: row provenance — "source = imported visible in the
-            operation variable drawer" (spec #ai-quote-assembly) */}
-        {operation.source === 'imported' && (
+            operation variable drawer" (spec #ai-quote-assembly); ai_drafted
+            is the reserved Lens-drafted state */}
+        {operation.source !== 'manual' && (
           <span className="lens-chip" data-status="suggested" data-testid="op-imported-chip">
-            {t('assembly.imported_badge')}
+            {t(
+              operation.source === 'imported'
+                ? 'assembly.imported_badge'
+                : 'assembly.ai_drafted_badge',
+            )}
           </span>
         )}
         <button type="button" onClick={onClose} aria-label={t('common.close')}>

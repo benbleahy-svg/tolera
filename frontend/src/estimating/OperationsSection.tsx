@@ -172,11 +172,15 @@ export function OperationsSection({
                     {t('estimating.missing_rate')}
                   </span>
                 )}
-                {/* M4.13: imported rows carry a purple provenance chip; on the
-                    Review path this is the "AI-drafted, check me" marker */}
-                {op.source === 'imported' && (
+                {/* M4.13: non-manual rows carry a purple provenance chip —
+                    "imported from quote" or the reserved "AI-drafted" state */}
+                {op.source !== 'manual' && (
                   <span className="lens-chip" data-status="suggested">
-                    {t('assembly.imported_badge')}
+                    {t(
+                      op.source === 'imported'
+                        ? 'assembly.imported_badge'
+                        : 'assembly.ai_drafted_badge',
+                    )}
                   </span>
                 )}
               </td>

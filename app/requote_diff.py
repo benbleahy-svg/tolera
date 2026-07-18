@@ -670,8 +670,15 @@ async def run_generate_requote_diff(
             prior = entries.get(entry["part_id"])
             if isinstance(prior, dict) and prior.get("choice"):
                 entry["choice"] = prior["choice"]
-            # The M4.13 import record is audit trail — a recompute never drops it.
-            if isinstance(prior, dict) and prior.get("assembly"):
+            # The M4.13 import record is audit trail — a recompute never drops
+            # it — but only while the baseline is the same quote: a re-resolved
+            # baseline (e.g. the old one was trashed) must not inherit another
+            # quote's provenance record.
+            if (
+                isinstance(prior, dict)
+                and prior.get("assembly")
+                and (prior.get("matched") or {}).get("quote_id") == entry["matched"]["quote_id"]
+            ):
                 entry["assembly"] = prior["assembly"]
             entries[entry["part_id"]] = entry
             quote.requote_diff = {"version": REQUOTE_DIFF_VERSION, "entries": entries}

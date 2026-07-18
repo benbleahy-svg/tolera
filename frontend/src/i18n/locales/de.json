@@ -1252,6 +1252,8 @@
     "imported_note": "Importiert aus Angebot {{number}} — {{date}}",
     "review_note": "KI-Entwurf — vor dem Versand prüfen",
     "undo": "Rückgängig ({{seconds}} s)",
-    "imported_badge": "Importiert aus Angebot"
+    "imported_badge": "Importiert aus Angebot",
+    "ai_drafted_badge": "KI-Entwurf",
+    "import_blocked": "Import nicht verfügbar — das frühere Angebot verwendet eine andere Währung (oder der Vergleich ist veraltet; Diff aktualisieren)."
   }
 }

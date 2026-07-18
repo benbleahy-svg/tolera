@@ -133,7 +133,7 @@ class _FakeUndoStore:
         if item is None:
             return None
         value, expires = item
-        if self.now > expires:
+        if self.now >= expires:
             return None
         return value
 
@@ -238,6 +238,7 @@ def test_banner_state_and_accept_all_atomic_import(
     addons = _rows(tenancy_db, "add_on", org, ids["component_b"])
     assert [a["name"] for a in addons] == ["Erstmusterprüfbericht"]
     assert addons[0]["source"] == "imported"
+    assert str(addons[0]["source_quote_id"]) == str(ids["prior_quote"])
 
     # The source is never touched.
     src_ops = _rows(tenancy_db, "operation", org, ids["component_a"])
@@ -284,6 +285,7 @@ def test_undo_reverts_to_blank_line_item(
     pricing = _rows(tenancy_db, "pricing_item", org, ids["component_b"])
     assert len(pricing) == blank_pricing
     assert all(p["source"] == "manual" for p in pricing)
+    assert _rows(tenancy_db, "add_on", org, ids["component_b"]) == []
 
     with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
         entries = _get_entries(app_client, ids["new_quote"])
@@ -391,11 +393,23 @@ def test_currency_mismatch_blocks_accept_all(
         state = entries[0]["assembly_state"]
         assert state["accept_all_eligible"] is False
         assert state["blockers"] == ["currency_mismatch"]
+        # BOTH paths are rejected (DECISIONS 2026-07-18, tightened in review):
+        # CHF rates in a EUR quote are wrong money with or without review chips.
+        for path in ("accept_all", "review"):
+            res = app_client.post(
+                f"/api/quotes/{ids['new_quote']}/assembly/import",
+                json={"part_id": str(ids["part_b"]), "path": path},
+            )
+            assert res.status_code == 409
+            assert res.json()["code"] == "currency_mismatch"
+        # ... and so is the M4.12 import-router path (rates are currency-bearing).
         res = app_client.post(
-            f"/api/quotes/{ids['new_quote']}/assembly/import",
-            json={"part_id": str(ids["part_b"]), "path": "accept_all"},
+            f"/api/components/{ids['component_b']}/import-router",
+            json={"source_component_id": str(ids["component_a"])},
         )
         assert res.status_code == 409
+        assert res.json()["code"] == "currency_mismatch"
+    assert _rows(tenancy_db, "operation", org, ids["component_b"]) == []
 
 
 def test_assembly_flag_off_hides_offer_and_blocks_import(
@@ -475,3 +489,89 @@ def test_assembly_routes_are_org_scoped(
             res = app_client.post(f"/api/quotes/{ids['new_quote']}/assembly/{route}", json=body)
             assert res.status_code == 404, res.text
     assert _rows(tenancy_db, "operation", org, ids["component_b"]) == []
+
+
+def test_accept_all_is_atomic_on_late_failure(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+    fake_undo_store: _FakeUndoStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One transaction (spec: "a single atomic endpoint"): a failure AFTER the
+    router and pricing copies rolls everything back — no rows, no assembly
+    record, no undo key."""
+    org, admin = _org_with_admin(seeder, "org-qa9")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _seed_requote_pair(seeder, app_client, org, volume_b=100_000.0)
+    _seed_source_router_and_pricing(seeder, org, ids["component_a"])
+    assert _run_diff(tenancy_db, org, ids["part_b"])["ok"] is True
+
+    blank_pricing = len(_rows(tenancy_db, "pricing_item", org, ids["component_b"]))
+
+    async def _boom(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("recalc exploded")
+
+    monkeypatch.setattr(quote_assembly, "recalculate_component", _boom)
+    with (
+        authed(app_client, user_id=admin, org_id=org, roles=ADMIN),
+        pytest.raises(RuntimeError, match="recalc exploded"),
+    ):
+        app_client.post(
+            f"/api/quotes/{ids['new_quote']}/assembly/import",
+            json={"part_id": str(ids["part_b"]), "path": "accept_all"},
+        )
+
+    assert _rows(tenancy_db, "operation", org, ids["component_b"]) == []
+    assert len(_rows(tenancy_db, "pricing_item", org, ids["component_b"])) == blank_pricing
+    assert _rows(tenancy_db, "add_on", org, ids["component_b"]) == []
+    assert fake_undo_store.data == {}
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        entries = _get_entries(app_client, ids["new_quote"])
+        assert entries[0].get("assembly") is None
+
+
+class _OutageStore:
+    """Arms fine; the outage hits on take — the undo verdict is unknown."""
+
+    async def arm(self, key: str, value: dict[str, Any], ttl_seconds: int) -> bool:
+        return True
+
+    async def take(self, key: str) -> dict[str, Any] | None:
+        raise quote_assembly.UndoStoreUnavailableError("redis down")
+
+
+def test_undo_store_outage_returns_503_and_leaves_import(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+) -> None:
+    """A Redis outage is not an expired window: 503 (retryable), the blanking
+    rolls back, and the import stands untouched."""
+    quote_assembly.register_undo_store(_OutageStore())
+    try:
+        org, admin = _org_with_admin(seeder, "org-qa10")
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            ids = _seed_requote_pair(seeder, app_client, org, volume_b=100_000.0)
+        seeder.operation(org, ids["component_a"], "Sägen")
+        assert _run_diff(tenancy_db, org, ids["part_b"])["ok"] is True
+
+        with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+            res = app_client.post(
+                f"/api/quotes/{ids['new_quote']}/assembly/import",
+                json={"part_id": str(ids["part_b"]), "path": "accept_all"},
+            )
+            assert res.status_code == 200, res.text
+            res = app_client.post(
+                f"/api/quotes/{ids['new_quote']}/assembly/undo",
+                json={"part_id": str(ids["part_b"])},
+            )
+            assert res.status_code == 503
+            assert res.json()["code"] == "undo_store_unavailable"
+    finally:
+        quote_assembly.register_undo_store(None)
+
+    ops = _rows(tenancy_db, "operation", org, ids["component_b"])
+    assert len(ops) == 1  # the 503 rolled the blanking back; the import stands

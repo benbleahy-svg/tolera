@@ -101,40 +101,58 @@ export function RequoteDiffPanel({
         </button>
       </div>
 
-      {/* M4.13 — the assembly offer (only when the org's AI flags allow it) */}
-      {assemblyState?.offered && !record && (
-        <div className="requote-banner assembly-offer" data-testid="assembly-banner">
-          {t('assembly.banner', { count: assemblyState.quote_count })}{' '}
-          {assemblyState.accept_all_eligible ? (
+      {/* M4.13 — the assembly offer (only when the org's AI flags allow it).
+          A currency mismatch (or a stale pre-M4.13 entry) blocks BOTH import
+          paths server-side, so neither button is offered. */}
+      {assemblyState?.offered &&
+        !record &&
+        (assemblyState.blockers.includes('currency_mismatch') ||
+        assemblyState.blockers.includes('entry_stale') ? (
+          <div className="requote-banner assembly-offer" data-testid="assembly-banner">
+            {t('assembly.banner', { count: assemblyState.quote_count })}{' '}
+            <span className="assembly-suppressed" data-testid="assembly-import-blocked">
+              {t('assembly.import_blocked')}
+            </span>
+          </div>
+        ) : (
+          <div className="requote-banner assembly-offer" data-testid="assembly-banner">
+            {t('assembly.banner', { count: assemblyState.quote_count })}{' '}
+            {assemblyState.accept_all_eligible ? (
+              <button
+                type="button"
+                className="requote-action primary"
+                data-testid="assembly-accept-all"
+                disabled={busy}
+                onClick={onAcceptAll}
+              >
+                {t('assembly.accept_all')}
+              </button>
+            ) : (
+              <span className="assembly-suppressed" data-testid="assembly-suppressed">
+                {t('assembly.suppressed')}
+              </span>
+            )}{' '}
             <button
               type="button"
-              className="requote-action primary"
-              data-testid="assembly-accept-all"
+              className="requote-action"
+              data-testid="assembly-review-import"
               disabled={busy}
-              onClick={onAcceptAll}
+              onClick={onImportForReview}
             >
-              {t('assembly.accept_all')}
+              {t('assembly.review_import')}
             </button>
-          ) : (
-            <span className="assembly-suppressed" data-testid="assembly-suppressed">
-              {t('assembly.suppressed')}
-            </span>
-          )}{' '}
-          <button
-            type="button"
-            className="requote-action"
-            data-testid="assembly-review-import"
-            disabled={busy}
-            onClick={onImportForReview}
-          >
-            {t('assembly.review_import')}
-          </button>
-        </div>
-      )}
+          </div>
+        ))}
 
       {/* After an import: the audit line + the 60-second undo chip */}
+      {/* aria-live="off": the per-second countdown must not be re-announced
+          by the enclosing role="status" live region every tick */}
       {record && (
-        <div className="requote-banner assembly-imported" data-testid="assembly-imported">
+        <div
+          className="requote-banner assembly-imported"
+          data-testid="assembly-imported"
+          aria-live="off"
+        >
           {t('assembly.imported_note', {
             number: record.source_quote_number ?? '—',
             date: new Date(record.at).toLocaleDateString(

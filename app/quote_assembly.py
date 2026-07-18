@@ -132,9 +132,15 @@ async def enrich_entries(
 # --------------------------------------------------------------------------- #
 
 
+class UndoStoreUnavailableError(RuntimeError):
+    """The undo store is unreachable — the key's fate is UNKNOWN. Callers map
+    this to a retryable 503, never to the definitive 410 of an expired key."""
+
+
 class UndoStore(Protocol):
     """The 60-second undo window: ``arm`` on Accept All, ``take`` (single-use
-    get-and-delete) on undo. A missing/expired key means the window closed."""
+    get-and-delete) on undo. A missing/expired key means the window closed;
+    ``take`` raises :class:`UndoStoreUnavailableError` when it cannot tell."""
 
     async def arm(self, key: str, value: dict[str, Any], ttl_seconds: int) -> bool: ...
 
@@ -172,9 +178,11 @@ class RedisUndoStore:
                 raw = await client.getdel(key)
             finally:
                 await client.aclose()
-        except Exception:
+        except Exception as exc:
+            # An outage is NOT an expired key: the caller must answer 503
+            # (retry within the window), never a definitive 410.
             logger.warning("assembly_undo_take_failed", extra={"key": key})
-            return None
+            raise UndoStoreUnavailableError(str(exc)) from exc
         if raw is None:
             return None
         try:
@@ -253,7 +261,14 @@ async def copy_component_pricing(
     """REPLACE the target's pricing stack (items, discounts, add-ons,
     expedites) with copies of the source's, stamped ``source = imported`` +
     ``source_quote_id``. Cells cascade away with the deleted rows and are
-    reminted by recalculation for the target's own quantity breaks."""
+    reminted by recalculation for the target's own quantity breaks.
+
+    RLS already pins the session to one org; the explicit org guard and
+    org-scoped predicates are §5 belt-and-braces."""
+    if source.org_id != target.org_id:
+        raise AppError(
+            "not_found", "Source component not found.", status_code=status.HTTP_404_NOT_FOUND
+        )
     for model, fields, tagged in (
         (PricingItem, _PRICING_ITEM_COPY_FIELDS, True),
         (Discount, _DISCOUNT_COPY_FIELDS, True),
@@ -264,11 +279,13 @@ async def copy_component_pricing(
         rows = (
             await session.scalars(
                 select(model)
-                .where(model.component_id == source.id)
+                .where(model.component_id == source.id, model.org_id == source.org_id)
                 .order_by(model.position, model.created_at, model.id)
             )
         ).all()
-        await session.execute(delete(model).where(model.component_id == target.id))
+        await session.execute(
+            delete(model).where(model.component_id == target.id, model.org_id == target.org_id)
+        )
         for src in rows:
             values: dict[str, Any] = {field: getattr(src, field) for field in fields}
             if tagged:
@@ -372,19 +389,30 @@ async def assembly_import(
             status_code=status.HTTP_409_CONFLICT,
         )
     entry = _entry_of(quote, payload.part_id)
-    if payload.path == "accept_all":
-        blockers = accept_all_blockers(entry, target_currency=quote.currency)
-        if blockers:
-            raise AppError(
-                "accept_all_suppressed",
-                "Accept All is not available — the diff shows a material change; "
-                "review the import field by field instead.",
-                status_code=status.HTTP_409_CONFLICT,
-                details={"blockers": blockers},
-            )
+    blockers = accept_all_blockers(entry, target_currency=quote.currency)
+    # Cross-currency (or currency-unknown/stale) copies are rejected on EVERY
+    # path — CHF rates in a EUR quote are wrong money whether or not each
+    # value gets an individual review chip (DECISIONS 2026-07-18, tightened in
+    # PR #67 review: reject outright until a conversion policy exists).
+    if "currency_mismatch" in blockers or "entry_stale" in blockers:
+        raise AppError(
+            "currency_mismatch",
+            "The historical quote uses a different currency (or the cached diff "
+            "predates the currency stamp) — no values were imported.",
+            status_code=status.HTTP_409_CONFLICT,
+            details={"blockers": blockers},
+        )
+    if payload.path == "accept_all" and blockers:
+        raise AppError(
+            "accept_all_suppressed",
+            "Accept All is not available — the diff shows a material change; "
+            "review the import field by field instead.",
+            status_code=status.HTTP_409_CONFLICT,
+            details={"blockers": blockers},
+        )
     target, item_id = await _target_and_item(session, quote, entry)
     source = await session.get(Component, uuid.UUID(entry["matched"]["component_id"]))
-    if source is None:
+    if source is None or source.org_id != quote.org_id:
         raise AppError(
             "source_gone",
             "The matched historical component no longer exists — refresh the diff.",
@@ -453,9 +481,15 @@ async def assembly_undo(
             status_code=status.HTTP_410_GONE,
         )
 
-    await session.execute(delete(Operation).where(Operation.component_id == target.id))
+    await session.execute(
+        delete(Operation).where(
+            Operation.component_id == target.id, Operation.org_id == quote.org_id
+        )
+    )
     for model in (PricingItem, Discount, AddOn, ExpediteOption):
-        await session.execute(delete(model).where(model.component_id == target.id))
+        await session.execute(
+            delete(model).where(model.component_id == target.id, model.org_id == quote.org_id)
+        )
     await session.flush()
     await attach_default_pricing(session, quote.org_id, target.id)
     await recalculate_component(session, quote.org_id, target.id)
@@ -467,8 +501,18 @@ async def assembly_undo(
     # Consume the single-use key LAST: if any of the DB work above had failed,
     # the key would survive for a retry inside the window. A missing/expired
     # key here raises — and the whole transaction (the blanking) rolls back,
-    # so an expired undo leaves the import standing.
-    if await resolve_undo_store().take(undo_key(item_id)) is None:
+    # so an expired undo leaves the import standing. A store OUTAGE is a
+    # different answer: 503 (retryable, transaction also rolls back), never
+    # the definitive 410.
+    try:
+        taken = await resolve_undo_store().take(undo_key(item_id))
+    except UndoStoreUnavailableError as exc:
+        raise AppError(
+            "undo_store_unavailable",
+            "The undo service is temporarily unreachable — try again in a moment.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from exc
+    if taken is None:
         raise AppError(
             "undo_expired",
             "The undo window has closed — remove or edit the imported values directly.",

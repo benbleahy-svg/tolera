@@ -195,6 +195,11 @@ export function EstimatingPage() {
     (entry: RequoteDiffEntry, action: 'accept_all' | 'review' | 'undo') => {
       if (!quoteId) return;
       setRequoteBusy(true);
+      // The import mutates the entry's own component — refresh THAT one, and
+      // re-check it is still the active line item before every state write
+      // (the M3.10 pattern): a switch mid-request must not let component A's
+      // costing paint component B's view.
+      const target = entry.target_component_id;
       const call =
         action === 'undo'
           ? api.assemblyUndo(quoteId, entry.part_id)
@@ -202,15 +207,19 @@ export function EstimatingPage() {
       call
         .then((r) => {
           setRequoteEntries(r.entries);
-          if (componentId) {
-            api.getCosting(componentId).then(setCosting).catch(fail);
-            loadPricing();
-          }
+          if (activeComponentRef.current !== target) return;
+          api
+            .getCosting(target)
+            .then((c) => {
+              if (activeComponentRef.current === target) setCosting(c);
+            })
+            .catch(fail);
+          loadPricing();
         })
         .catch(fail)
         .finally(() => setRequoteBusy(false));
     },
-    [api, quoteId, componentId, fail, loadPricing],
+    [api, quoteId, fail, loadPricing],
   );
 
   // Guards the async rule-suggestion probe against a line-item switch (M3.10):

@@ -176,6 +176,19 @@ describe('RequoteDiffPanel — assembly offer (M4.13)', () => {
     expect(onImportForReview).toHaveBeenCalledTimes(1);
   });
 
+  it('offers neither import path on a currency mismatch (server rejects both)', () => {
+    renderPanel({
+      assembly_state: {
+        ...offeredState,
+        accept_all_eligible: false,
+        blockers: ['currency_mismatch'],
+      },
+    });
+    expect(screen.queryByTestId('assembly-accept-all')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assembly-review-import')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assembly-import-blocked')).toBeInTheDocument();
+  });
+
   it('suppresses Accept All on a material change — only Review is offered', () => {
     renderPanel({
       assembly_state: {
