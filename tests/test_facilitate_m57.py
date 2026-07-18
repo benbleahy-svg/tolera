@@ -42,6 +42,38 @@ def _quote_with_item(client: TestClient) -> tuple[str, str, int]:
     return qid, str(item["id"]), int(item["quantities"][0]["quantity"])
 
 
+def _price_component(client: TestClient, component_id: str) -> None:
+    """Price a bare component to the same 200,00 €/ea, 10-day core as ``_priced_quote``
+    (op cost 100 + 100% markup) so a second line item has an orderable break."""
+    op = client.post(f"/api/components/{component_id}/operations", json={"name": "Fräsen"})
+    op_id = next(o for o in op.json()["operations"] if o["name"] == "Fräsen")["id"]
+    client.patch(f"/api/operations/{op_id}/cells/1", json={"manual_cost": "100.0000"})
+    client.post(
+        f"/api/components/{component_id}/pricing-items",
+        json={
+            "name": "Aufschlag",
+            "calc_type": "markup",
+            "category": "general",
+            "default_pct": "100",
+        },
+    )
+    client.patch(f"/api/components/{component_id}/lead-time/1", json={"manual_lead_time_days": 10})
+    # Match _priced_quote's required add-on so two items net identically (200 + 25).
+    client.post(
+        f"/api/components/{component_id}/add-ons",
+        json={"name": "Zertifikat", "default_price": "25", "is_required": True},
+    )
+
+
+def _quote_with_two_items(client: TestClient) -> tuple[str, str, str, int]:
+    """A quote with two identically-priced line items → (quote_id, item0, item1, qty)."""
+    qid, item0, qty = _quote_with_item(client)
+    second = client.post(f"/api/quotes/{qid}/items").json()["items"]
+    item1 = next(i for i in second if str(i["id"]) != item0)
+    _price_component(client, str(item1["root_component_id"]))
+    return qid, item0, str(item1["id"]), qty
+
+
 def _facilitate(
     client: TestClient, qid: str, selections: list[dict[str, Any]], **order: Any
 ) -> Any:
@@ -284,19 +316,37 @@ def test_edit_changes_po_and_writes_history(seeder: Seeder, app_client: TestClie
 
 
 def test_edit_add_line_recomputes_net(seeder: Seeder, app_client: TestClient) -> None:
-    org, user, order_id, _qid, item_id = _built_order(seeder, app_client, "edit-add")
+    org, user = _org_admin(seeder, "edit-add")
+    _enable_facilitate(seeder, org)
     with _as_admin(app_client, org, user) as client:
+        # A two-item quote; facilitate only the first, then add the second on edit.
+        qid, item0, item1, qty = _quote_with_two_items(client)
+        order_id = _facilitate(client, qid, [{"quote_item_id": item0, "quantity": qty}]).json()[
+            "order_id"
+        ]
         before = _order_detail(client, order_id)
-        qty = before["lines"][0]["quantity"]
         res = client.patch(
             f"/api/orders/{order_id}",
-            json={"add_lines": [{"quote_item_id": item_id, "quantity": qty}]},
+            json={"add_lines": [{"quote_item_id": item1, "quantity": qty}]},
         )
         assert res.status_code == 200, res.text
         assert res.json()["changes"]["lines_added"] == 1
         after = _order_detail(client, order_id)
         assert len(after["lines"]) == len(before["lines"]) + 1
+        # The two items are priced identically → net doubles.
         assert after["net_minor"] == before["net_minor"] * 2
+
+
+def test_edit_add_duplicate_line_item_is_rejected(seeder: Seeder, app_client: TestClient) -> None:
+    # Adding a quote item already on the order must 422 (mirrors the create path's
+    # one-line-per-item rule) so an edit can't bill the same item twice.
+    org, user, order_id, _qid, item_id = _built_order(seeder, app_client, "edit-dup")
+    with _as_admin(app_client, org, user) as client:
+        res = client.patch(
+            f"/api/orders/{order_id}",
+            json={"add_lines": [{"quote_item_id": item_id, "quantity": 1}]},
+        )
+        assert res.status_code == 422, res.text
 
 
 def test_edit_remove_last_line_is_rejected(seeder: Seeder, app_client: TestClient) -> None:

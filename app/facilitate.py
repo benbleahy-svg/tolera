@@ -452,21 +452,33 @@ async def edit_order(
         order.shipping_method = payload.shipping_method
 
     # Remove requested lines (only lines actually on this order; cascades adjustments).
-    if payload.remove_line_ids:
+    # De-dupe the request first so repeating an id is a no-op, not a spurious 422.
+    remove_ids = set(payload.remove_line_ids)
+    if remove_ids:
         existing = set(
             (
                 await session.execute(select(OrderLine.id).where(OrderLine.order_id == order.id))
             ).scalars()
         )
-        to_remove = [lid for lid in payload.remove_line_ids if lid in existing]
-        if len(to_remove) != len(set(payload.remove_line_ids)):
+        if not remove_ids <= existing:
             raise _invalid("A line to remove does not belong to this order.")
-        if to_remove:
-            await session.execute(delete(OrderLine).where(OrderLine.id.in_(to_remove)))
-            changes["lines_removed"] = len(to_remove)
+        await session.execute(delete(OrderLine).where(OrderLine.id.in_(remove_ids)))
+        changes["lines_removed"] = len(remove_ids)
 
-    # Add new lines.
+    # Add new lines. Reject a quote item already ordered on this order (mirrors the
+    # create path's one-line-per-item rule) so an edit can't bill an item twice.
     if payload.add_lines:
+        if len({s.quote_item_id for s in payload.add_lines}) != len(payload.add_lines):
+            raise _invalid("Each line item may be added only once.")
+        remaining_items = set(
+            (
+                await session.execute(
+                    select(OrderLine.quote_item_id).where(OrderLine.order_id == order.id)
+                )
+            ).scalars()
+        )
+        if any(s.quote_item_id in remaining_items for s in payload.add_lines):
+            raise _invalid("That line item is already on this order.")
         placed_on = order.created_at.date()
         for sel in payload.add_lines:
             await _build_line(
