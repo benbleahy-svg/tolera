@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from .accounts import accounts_router, contacts_router
 from .addons import addons_router
+from .assembly import assembly_router as assembly_components_router
 from .bom_builder import bom_router
 from .bulk_create import bulk_create_router
 from .buyer_portal import buyer_router
@@ -42,10 +43,12 @@ from .middleware import MaxBodySizeMiddleware, RequestContextMiddleware
 from .nesting import nesting_router
 from .notes import router as notes_router
 from .operations import operations_router
+from .orders import orders_router
 from .part_library import library_router as part_library_router
 from .parts import parts_router
 from .pdf_api import pdf_router
 from .pricing import pricing_router
+from .purchased_components import purchased_components_router
 from .quote_assembly import assembly_router
 from .quote_send import quote_send_router
 from .quotes import quotes_router
@@ -101,11 +104,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(extract_router)
     app.include_router(findings_router)
     app.include_router(quotes_router)
+    app.include_router(orders_router)
     app.include_router(bom_router)
     app.include_router(bulk_create_router)
     app.include_router(saved_views_router)
     app.include_router(materials_router)
     app.include_router(operations_router)
+    app.include_router(purchased_components_router)
+    app.include_router(assembly_components_router)
     app.include_router(pricing_router)
     app.include_router(addons_router)
     app.include_router(custom_tables_router)

@@ -597,6 +597,86 @@ export interface NestCreateBody {
   component_settings: { component_id: string; cost_distribution_pct?: string | null }[];
 }
 
+// ---- Assembly Components (M4.10 — spec #assembly) ---- //
+
+export interface AssemblyNodeOut {
+  node_id: string;
+  part_id: string;
+  component_id: string | null;
+  part_number: string | null;
+  revision: string | null;
+  description: string | null;
+  filename: string | null;
+  group: 'subassembly' | 'manufactured' | 'purchased';
+  obtain_method: string;
+  is_assembly: boolean;
+  node_qty: number;
+  flat_qty: number;
+  position: number;
+  process_id: string | null;
+  material_id: string | null;
+  piece_price: string | null;
+  purchased_component_id: string | null;
+  brand: string | null;
+  self_costs: string[];
+  rollup_costs: string[];
+  children: AssemblyNodeOut[];
+}
+
+export interface AssemblyComponentsOut {
+  quantities: number[];
+  root_node_id: string | null;
+  tree: AssemblyNodeOut[];
+  summary: { flat_qty_total: number; totals: string[] };
+}
+
+export interface PurchasedComponentOut {
+  id: string;
+  oem_part_number: string;
+  internal_part_number: string | null;
+  piece_price: string | null;
+  currency: string;
+  description: string | null;
+  brand: string | null;
+  custom_fields: Record<string, unknown>;
+  oem_product_id: string | null;
+}
+
+export interface PurchaseMatchCard {
+  purchased_component: PurchasedComponentOut;
+  oem_part_number_match: boolean;
+  oem_geometric_match: boolean;
+  historical_geometric_matches: number;
+}
+
+export interface PurchaseMatchesOut {
+  component: {
+    id: string;
+    part_number: string | null;
+    revision: string | null;
+    filename: string | null;
+    obtain_method: string;
+    piece_price: string | null;
+    purchased_component_id: string | null;
+  };
+  smart: PurchaseMatchCard[];
+  unlinked_oem: {
+    id: string;
+    brand: string;
+    oem_part_number: string;
+    specs: Record<string, unknown>;
+  }[];
+  all: PurchasedComponentOut[];
+}
+
+export interface PurchasedComponentCreateBody {
+  oem_part_number: string;
+  internal_part_number?: string | null;
+  piece_price?: string | null;
+  description?: string | null;
+  brand?: string | null;
+}
+
 // --- M4.12 — Requote Diff Assistant (spec #ai-requote-diff) ---
 
 /** One serialized ExtractionFinding inside the diff payload. */

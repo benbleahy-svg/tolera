@@ -57,6 +57,8 @@ from app.models import (
     ObtainMethod,
     OpCategory,
     Operation,
+    Order,
+    OrderSource,
     Organization,
     OrgCountry,
     Part,
@@ -357,6 +359,51 @@ class Seeder:
                 filters=filters or [],
                 sort=sort or [],
                 visibility=visibility,
+            )
+        )
+
+    def order(
+        self,
+        org_id: uuid.UUID,
+        quote_id: uuid.UUID,
+        number: str,
+        *,
+        source: OrderSource = OrderSource.buyer_portal,
+        account_id: uuid.UUID | None = None,
+        contact_id: uuid.UUID | None = None,
+        po_number: str | None = None,
+        company_name: str | None = None,
+        currency: str = "EUR",
+        net_minor: int = 100_000,
+        vat_minor: int = 19_000,
+        gross_minor: int = 119_000,
+        vat_rate_pct: Decimal = Decimal("19.0000"),
+        created_at: datetime | None = None,
+        shipped_at: datetime | None = None,
+    ) -> uuid.UUID:
+        """Plant a bare Order directly — the buyer-portal checkout only makes
+        ``buyer_portal`` orders, so tests seed varied source / account / Date-Placed
+        / shipped_at fixtures here (M5.6, reused by M5.7). No OrderLines (they need a
+        real QuoteItem→Component chain); the Parts count + Expected-Ship columns are
+        exercised via a real checkout order instead. Money defaults = a plain
+        domestic 19% order (integer minor units + currency)."""
+        return self._loop.run_until_complete(
+            self._order(
+                org_id,
+                quote_id,
+                number,
+                source=source,
+                account_id=account_id,
+                contact_id=contact_id,
+                po_number=po_number,
+                company_name=company_name,
+                currency=currency,
+                net_minor=net_minor,
+                vat_minor=vat_minor,
+                gross_minor=gross_minor,
+                vat_rate_pct=vat_rate_pct,
+                created_at=created_at,
+                shipped_at=shipped_at,
             )
         )
 
@@ -679,6 +726,48 @@ class Seeder:
                 sort=sort,
                 visibility=visibility,
             )
+            session.add(row)
+            await session.flush()
+            return row.id
+
+    async def _order(
+        self,
+        org_id: uuid.UUID,
+        quote_id: uuid.UUID,
+        number: str,
+        *,
+        source: OrderSource,
+        account_id: uuid.UUID | None,
+        contact_id: uuid.UUID | None,
+        po_number: str | None,
+        company_name: str | None,
+        currency: str,
+        net_minor: int,
+        vat_minor: int,
+        gross_minor: int,
+        vat_rate_pct: Decimal,
+        created_at: datetime | None,
+        shipped_at: datetime | None,
+    ) -> uuid.UUID:
+        async with AsyncSession(self._engine) as session, session.begin():
+            row = Order(
+                org_id=org_id,
+                quote_id=quote_id,
+                number=number,
+                source=source,
+                account_id=account_id,
+                contact_id=contact_id,
+                po_number=po_number,
+                company_name=company_name,
+                currency=currency,
+                net_minor=net_minor,
+                vat_minor=vat_minor,
+                gross_minor=gross_minor,
+                vat_rate_pct=vat_rate_pct,
+                shipped_at=shipped_at,
+            )
+            if created_at is not None:
+                row.created_at = created_at
             session.add(row)
             await session.flush()
             return row.id

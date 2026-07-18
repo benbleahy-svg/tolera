@@ -111,6 +111,7 @@ class Runtime:
         quantity: int = 1,
         table_provider: TableProvider | None = None,
         context_data: ContextData | None = None,
+        allowed_operations: Iterable[str] | None = None,
     ) -> None:
         self.limits = limits
         self.overrides: dict[str, object] = dict(overrides or {})
@@ -139,6 +140,9 @@ class Runtime:
         # add-on-context state (KALK-REFERENCE §11.4; M1.11)
         self.add_on_name: str | None = None
         self.add_on_is_required: bool | None = None
+        # operation-generation-context state (M4.10; KB custom-operation-generation)
+        self.allowed_operations: list[str] = list(allowed_operations or [])
+        self.generated_operations: list[dict[str, Any]] = []
 
     # -- caps ---------------------------------------------------------------
 
@@ -772,6 +776,69 @@ class Runtime:
             raise _abort("runtime_error", "get_custom_attribute() key must be a string")
         return self.custom_attributes.get(key, self.unwrap(default))
 
+    # -- operation-generation context (M4.10; KB custom-operation-generation) --
+
+    def get_allowed_operations(self) -> P3LList:
+        self.tick()
+        result = P3LList()
+        for name in self.allowed_operations:
+            result.append(name)
+        return result
+
+    def generate_operation(
+        self,
+        requested_op_def_name: object,
+        custom_name: object = None,
+        operation_properties: object = None,
+    ) -> None:
+        self.tick()
+        name = self.unwrap(requested_op_def_name)
+        if not isinstance(name, str) or not name:
+            raise _abort(
+                "runtime_error",
+                "generate_operation() takes an operation definition name (string)",
+            )
+        if name not in self.allowed_operations:
+            raise _abort(
+                "runtime_error",
+                f"operation {name!r} is not in the process's allowed operations",
+            )
+        if len(self.generated_operations) >= 20:
+            raise _abort(
+                "resource_limit",
+                "operation generation limit (20 operations per part) exceeded",
+            )
+        custom = self.unwrap(custom_name)
+        if custom is not None and not isinstance(custom, str):
+            raise _abort("runtime_error", "generate_operation() custom_name must be a string")
+        props: dict[str, Any] | None = None
+        if operation_properties is not None:
+            if not isinstance(operation_properties, Mapping):
+                raise _abort(
+                    "runtime_error",
+                    "generate_operation() operation_properties must be a dict",
+                )
+            props = {}
+            for key, raw in operation_properties.items():
+                value = self.unwrap(raw)
+                if not isinstance(key, str):
+                    raise _abort("runtime_error", "operation_properties keys must be strings")
+                if value is not None and not isinstance(value, int | float | str | bool):
+                    raise _abort(
+                        "runtime_error",
+                        f"operation_properties[{key!r}] must be a number, string, or boolean",
+                    )
+                props[key] = value
+        self.generated_operations.append(
+            {"op_def_name": name, "custom_name": custom, "operation_properties": props}
+        )
+
+    def get_operation_property(self, name: object, default: object = 0) -> object:
+        self.tick()
+        if not isinstance(name, str):
+            raise _abort("runtime_error", "get_operation_property() name must be a string")
+        return self.context_data.operation_properties.get(name, self.unwrap(default))
+
     def get_children(
         self,
         obtain_method: object = None,
@@ -1047,6 +1114,8 @@ class Runtime:
                     "set_custom_attribute": self.set_custom_attribute,
                     "get_custom_attribute": self.get_custom_attribute,
                     "get_children": self.get_children,
+                    # M4.10: reads the generate_operation() payload back
+                    "get_operation_property": self.get_operation_property,
                     "units_mm": self.units_mm,
                     "units_in": self.units_in,
                     # domain objects — the wiring supplies real ones via eval_context
@@ -1128,6 +1197,42 @@ class Runtime:
                     "line_item": None,
                 }
             )
+        elif context_type == "operation_generation":
+            # KB custom-operation-generation: process-level Kalk mutates a
+            # routing instead of outputting COST/DAYS. The KB-listed
+            # operation-UI functions do not exist here — remove the var family
+            # from the shared base (the rest of the ban list is simply never
+            # added). Analyzers + custom attrs stay (the KB lathe example).
+            for ui_only in _PROCESS_KALK_BANNED_BUILTINS:
+                namespace.pop(ui_only, None)
+            namespace.update(
+                {
+                    "get_allowed_operations": self.get_allowed_operations,
+                    "generate_operation": self.generate_operation,
+                    "is_close": self.is_close,
+                    "is_a_in_b": self.is_a_in_b,
+                    "quantity": self.quantity,
+                    "get_quantities": self.get_quantities,
+                    "get_make_quantities": self.get_make_quantities,
+                    "get_bom_quantities": self.get_bom_quantities,
+                    "set_custom_attribute": self.set_custom_attribute,
+                    "get_custom_attribute": self.get_custom_attribute,
+                    "get_children": self.get_children,
+                    "units_mm": self.units_mm,
+                    "units_in": self.units_in,
+                    # ``part.component_type`` comparison constants (KB examples)
+                    "MANUFACTURED": "MANUFACTURED",
+                    "PURCHASED": "PURCHASED",
+                    "ASSEMBLED": "ASSEMBLED",
+                    # domain objects — the wiring supplies real ones via eval_context
+                    "part": None,
+                    "quote": None,
+                    "line_item": None,
+                }
+            )
+            # geometry analyzers — the wiring supplies real ones (M4.1+)
+            for analyzer in ANALYZER_NAMES:
+                namespace[analyzer] = self._m4_stub(analyzer)
         elif context_type == "discount":
             # KALK-REFERENCE §11.5: PERCENTAGE (positive) output; contact +
             # REQUESTED_QUANTITY + the variable/list/table/workpiece suite;
@@ -1209,6 +1314,7 @@ OPERATION_COST_NAMES = frozenset(
         "set_custom_attribute",
         "get_custom_attribute",
         "get_children",
+        "get_operation_property",
         "units_mm",
         "units_in",
         "part",
@@ -1216,6 +1322,38 @@ OPERATION_COST_NAMES = frozenset(
         "op_def",
         "line_item",
         "INDEX",
+        *ANALYZER_NAMES,
+    }
+)
+
+# KB custom-operation-generation's ban list: the operation-UI functions that
+# "do not really have a place in process-level P3L". The var family sits in the
+# shared builtins, so the generation context removes it from both the
+# namespace and the known-name set; the rest are op-context names that are
+# simply never added.
+_PROCESS_KALK_BANNED_BUILTINS = frozenset({"var", "drop_down_var", "variable_group"})
+
+OPERATION_GENERATION_NAMES = frozenset(
+    {
+        "get_allowed_operations",
+        "generate_operation",
+        "is_close",
+        "is_a_in_b",
+        "quantity",
+        "get_quantities",
+        "get_make_quantities",
+        "get_bom_quantities",
+        "set_custom_attribute",
+        "get_custom_attribute",
+        "get_children",
+        "units_mm",
+        "units_in",
+        "MANUFACTURED",
+        "PURCHASED",
+        "ASSEMBLED",
+        "part",
+        "quote",
+        "line_item",
         *ANALYZER_NAMES,
     }
 )

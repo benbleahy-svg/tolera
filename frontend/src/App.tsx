@@ -22,6 +22,8 @@ import { NestingPage } from './estimating/NestingPage';
 import { PartsPage } from './parts/PartsPage';
 import { FileViewerPage } from './viewer/FileViewerPage';
 import { QuotesPage } from './quotes/QuotesPage';
+import { OrdersPage } from './orders/OrdersPage';
+import { OrderDetailPage } from './orders/OrderDetailPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { EmailConnectionPage } from './settings/EmailConnectionPage';
 import { EmailTemplatesPage } from './settings/EmailTemplatesPage';
@@ -29,7 +31,7 @@ import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
 /** Nav destinations that have a real screen; the rest render a placeholder. */
-const REAL_ROUTES = new Set(['/', '/contacts', '/parts', '/quotes', '/configure']);
+const REAL_ROUTES = new Set(['/', '/contacts', '/parts', '/quotes', '/orders', '/configure']);
 
 /**
  * M5.0 — the estimating screen moved to the spec route `/quotes/edit/:id/:lineItemId`.
@@ -67,6 +69,10 @@ export default function App() {
         <Route path="/quotes/:quoteId" element={<EstimatingRedirect />} />
         {/* Multi-component sheet-metal nesting (M4.3, spec #nesting). */}
         <Route path="/quotes/:quoteId/nesting" element={<NestingPage />} />
+        {/* Orders tab — list + detail (M5.6, #orderslist). No create route: orders
+            come only from checkout (M5.2) or Build Order (M5.7). */}
+        <Route path="/orders" element={<OrdersPage />} />
+        <Route path="/orders/:orderId" element={<OrderDetailPage />} />
         {/* Configure lands on Custom Tables (M1.9); the full Configure section
             (operation library pages, …) grows a sub-nav with M1.12. */}
         <Route path="/configure" element={<CustomTablesPage />} />

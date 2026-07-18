@@ -11,8 +11,8 @@ Adds ``domain_event`` — the org-scoped outbox the send-quote composer writes
 ``quote.sent`` onto in the same transaction as the Sent transition (the durable
 seam M3.5 deferred to M5). Webhook delivery off it is M6.
 
-Revision ID: 0043_email_composer
-Revises: 0042_pdf_branding
+Revision ID: 0045_email_composer
+Revises: 0044_facilitate_order_updates
 Create Date: 2026-07-18
 """
 
@@ -22,8 +22,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0043_email_composer"
-down_revision: str | None = "0042_pdf_branding"
+revision: str = "0045_email_composer"
+down_revision: str | None = "0044_facilitate_order_updates"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

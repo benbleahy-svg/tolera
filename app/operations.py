@@ -171,6 +171,8 @@ class OperationOut(BaseModel):
     # amber inline highlight (deterministic, computed from the same rule as
     # the Configure banner)
     missing_rate: bool
+    # M4.10: 'manual' | 'auto_routing' — generated rows carry their source
+    origin: str
     cells: list[QuoteCellOut]
 
 
@@ -312,6 +314,21 @@ async def _lock_editable_quote(session: AsyncSession, component: Component) -> Q
         select(QuoteItem.quote_id).where(QuoteItem.root_component_id == component.id)
     )
     if quote_id is None:
+        # Child component (M4.9 published BOM): walk part → node → root part →
+        # root component → quote item.
+        from .models import Node
+
+        root_part_id = await session.scalar(
+            select(Node.root_part_id).where(Node.part_id == component.part_id).limit(1)
+        )
+        if root_part_id is not None:
+            quote_id = await session.scalar(
+                select(QuoteItem.quote_id)
+                .join(Component, Component.id == QuoteItem.root_component_id)
+                .where(Component.part_id == root_part_id, Component.is_root_component)
+                .limit(1)
+            )
+    if quote_id is None:
         raise AppError(
             "not_found",
             "Component is not attached to a quote line item.",
@@ -409,6 +426,7 @@ def _operation_out(op: Operation, cells: list[QuoteCell]) -> OperationOut:
         source=op.source,
         source_quote_id=op.source_quote_id,
         missing_rate=operation_missing_rate(op),
+        origin=op.origin,
         cells=cell_out,
     )
 
@@ -1076,7 +1094,6 @@ async def set_component_process(
             raise AppError("not_found", "Process not found.", status_code=status.HTTP_404_NOT_FOUND)
     if not payload.keep_operations:
         # The modal's UPDATE: "This action will delete all existing operations."
-        # Router regeneration from the new process is a no-op until M4.
         operations = (
             await session.scalars(select(Operation).where(Operation.component_id == component.id))
         ).all()
@@ -1084,6 +1101,13 @@ async def set_component_process(
             await session.delete(operation)
     component.process_id = payload.process_id
     await session.flush()
+    if not payload.keep_operations:
+        # M4.10 auto-routing: the new process generates its default router
+        # (template rows or process-level Kalk). UPDATE AND KEEP EXISTING OPS
+        # deliberately skips this — the current router is preserved as-is.
+        from .routing import generate_router
+
+        await generate_router(session, component.org_id, component)
     # M4.2 (spec #sheetmetal): a recognizer-family process queues a family
     # interrogation of the part's PRIMARY CAD — the viewer's results block.
     from .interrogation import maybe_enqueue_for_process

@@ -53,6 +53,8 @@ def parse_and_validate(
     source: str,
     known_names: Iterable[str],
     limits: Limits,
+    *,
+    allow_dict_literals: bool = False,
 ) -> tuple[ast.Module | None, list[KalkError]]:
     """Parse ``source`` and validate it against the Kalk grammar.
 
@@ -98,16 +100,24 @@ def parse_and_validate(
             ]
         stack.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
 
-    validator = _Validator(known_names=set(known_names), limits=limits)
+    validator = _Validator(
+        known_names=set(known_names), limits=limits, allow_dict_literals=allow_dict_literals
+    )
     validator.run(tree)
     return tree, validator.errors
 
 
 class _Validator:
-    def __init__(self, known_names: set[str], limits: Limits) -> None:
+    def __init__(
+        self, known_names: set[str], limits: Limits, *, allow_dict_literals: bool = False
+    ) -> None:
         self.limits = limits
         self.errors: list[KalkError] = []
         self.known = known_names
+        # operation_generation only (M4.10): the KB contract passes
+        # ``operation_properties`` as a dict literal — every other context
+        # keeps the ban.
+        self.allow_dict_literals = allow_dict_literals
 
     def run(self, tree: ast.Module) -> None:
         # Pass 1: module-level exec scope — any name assigned anywhere in the
@@ -203,6 +213,14 @@ class _Validator:
                     self._expr(elt, in_block, local)
         elif isinstance(node, ast.Lambda):
             self._lambda(node, local)
+        elif isinstance(node, ast.Dict) and self.allow_dict_literals:
+            for key in node.keys:
+                if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                    self._forbidden(key or node, "dict key other than a string constant")
+                else:
+                    self._constant(key)
+            for value in node.values:
+                self._expr(value, in_block, local)
         else:
             self._forbidden(node, _EXPR_LABELS.get(type(node), type(node).__name__))
 
