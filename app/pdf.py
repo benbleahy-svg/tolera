@@ -42,6 +42,7 @@ from .buyer_portal import (
     TotalDisplay,
     build_buyer_payload,
 )
+from .quote_settings import load_quote_settings
 from .tax import to_minor_units
 from .vat_service import format_money
 
@@ -86,9 +87,15 @@ class QuoteContent:
 
 
 async def load_quote_content(session: AsyncSession, org_id: uuid.UUID) -> QuoteContent:
-    """The org's quote merge content. M5.4 returns empty defaults; M5.8 backs this
-    with a persisted settings row (the seam mirrors ``load_display_settings``)."""
-    return QuoteContent()
+    """The org's quote merge content (T&Cs / Manufacturer's Notes / Quote Notes),
+    backed by the persisted ``org_quote_settings`` row (M5.8) — an absent row
+    resolves to empty defaults (nothing invented). Mirrors ``load_display_settings``."""
+    qs = await load_quote_settings(session, org_id)
+    return QuoteContent(
+        terms=qs.terms,
+        manufacturers_notes=qs.manufacturers_notes,
+        quote_notes=qs.quote_notes,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -562,7 +569,8 @@ async def assemble_quote_context(
 ) -> dict[str, Any]:
     """Build the quote render context straight from the DB (buyer projection +
     branding + optional file names + resolved preparer)."""
-    payload = await build_buyer_payload(session, org, quote, settings, now)
+    quote_settings = await load_quote_settings(session, org.id)
+    payload = await build_buyer_payload(session, org, quote, settings, quote_settings, now)
     file_names = await _quote_file_names(session, quote) if settings.show_part_file_name else {}
     logo = await logo_data_uri(storage, org.logo_object_key)
     preparers = await _resolve_preparers(session, quote, settings)

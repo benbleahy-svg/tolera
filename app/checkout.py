@@ -49,6 +49,7 @@ from .models import (
     UserOrgMembership,
 )
 from .pricing import _pricing_summary
+from .quote_settings import load_quote_settings, offered_shipping_methods
 from .quote_tokens import InvalidToken, decode_jwt
 from .tax import round_money, to_minor_units
 from .vat_service import VIESClient, get_vies_client, resolve_order_tax
@@ -83,6 +84,9 @@ class CheckoutRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
     buyer_ust_id_nr: str | None = Field(default=None, max_length=32)
     shipping_method: OrderShippingMethod
+    # The buyer confirms the shop's T&Cs. Only *required* when the org's
+    # "require acceptance before checkout" setting is on (M5.8); otherwise ignored.
+    terms_accepted: bool = False
 
 
 def _invalid(msg: str) -> AppError:
@@ -301,6 +305,21 @@ async def checkout(
         org = await session.get(Organization, quote.org_id)
         if org is None:  # RLS breakage — never invent shop identity
             raise _rejected()
+
+        # Checkout Settings (M5.8): the shop can disable shipping options / local
+        # pickup. Re-enforce server-side — the buyer portal only *renders* the
+        # offered list; a tampered client cannot submit a disabled option.
+        quote_settings = await load_quote_settings(session, quote.org_id)
+        if payload.shipping_method.value not in offered_shipping_methods(quote_settings):
+            raise _invalid("The selected shipping option is not available for this quote.")
+        # T&Cs gate (spec #digital-quote-settings "require acceptance before
+        # checkout"): enforced server-side so the setting is not merely cosmetic.
+        if quote_settings.require_terms_acceptance and not payload.terms_accepted:
+            raise AppError(
+                "terms_not_accepted",
+                "You must accept the terms and conditions before checkout.",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
 
         resolved = [await _resolve_line(session, quote.id, sel) for sel in payload.selections]
         order_net = round_money(sum((line.line_net for line in resolved), Decimal("0")))

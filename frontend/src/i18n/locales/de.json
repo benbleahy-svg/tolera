@@ -1611,5 +1611,78 @@
     "reverse_charge": "Steuerschuldnerschaft",
     "done": "Fertig",
     "error_generic": "Die Bestellung konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut."
+  },
+  "quoteSettings": {
+    "heading": "Einstellungen für finalisierte Angebote",
+    "display_heading": "Anzeigeeinstellungen für Angebote",
+    "display_hint": "Diese Schalter steuern, welche Felder auf dem digitalen Angebot und im PDF erscheinen.",
+    "flag": {
+      "show_part_number": "Teilenummer",
+      "show_revision": "Revision",
+      "show_description": "Beschreibung",
+      "show_process": "Fertigungsverfahren",
+      "show_material": "Werkstoff",
+      "show_dimensions": "Abmessungen",
+      "show_dfm": "DFM-Hinweise",
+      "show_3d": "3D-Vorschau",
+      "show_part_file_name": "Dateiname",
+      "show_thumbnail": "Miniaturansicht",
+      "show_quote_number": "Angebotsnummer",
+      "show_rfq_number": "Anfragenummer",
+      "show_facility_phone": "Telefon des Standorts",
+      "show_facility_website": "Website des Standorts",
+      "show_digital_quote_link": "Link zum digitalen Angebot"
+    },
+    "total_display": "Gesamtpreis-Anzeige",
+    "total_display_opt": {
+      "price_range": "Preisspanne",
+      "maximum_price": "Höchstpreis",
+      "none": "Keine Anzeige"
+    },
+    "preparer": "Bearbeiter-Anzeige",
+    "preparer_opt": {
+      "salesperson": "Vertrieb",
+      "estimator": "Kalkulator",
+      "both": "Beide"
+    },
+    "notes_placement": "Platzierung der Notizen",
+    "notes_placement_opt": {
+      "above": "Über den Positionen",
+      "below": "Unter den Positionen"
+    },
+    "content_heading": "Angebotstexte",
+    "terms": "Allgemeine Geschäftsbedingungen",
+    "require_terms_acceptance": "Zustimmung zu den AGB vor dem Checkout verlangen",
+    "manufacturers_notes": "Herstellerhinweise",
+    "quote_notes": "Angebotsnotizen (Vorlage)",
+    "requotes_heading": "Angebotsaktualisierungen",
+    "requotes_enabled": "Käufern erlauben, aus dem digitalen Angebot eine Aktualisierung anzufordern",
+    "checkout_heading": "Checkout-Einstellungen",
+    "allow_local_pickup": "Selbstabholung erlauben",
+    "send_order_confirmation_emails": "Auftragsbestätigungs-E-Mails senden",
+    "offered_methods": "Angebotene Versandarten",
+    "shipping_method": {
+      "bill_at_shipment": "Abrechnung bei Versand",
+      "use_my_shipping_account": "Eigenes Versandkonto verwenden",
+      "no_shipping_fees": "Keine Versandkosten",
+      "local_pickup": "Selbstabholung"
+    },
+    "leadtime_heading": "Lieferzeit-Einstellungen",
+    "lead_time_business_days": "Lieferzeit in Arbeitstagen (statt Kalendertagen) angeben",
+    "notifications_heading": "E-Mail-Benachrichtigungen",
+    "notification": {
+      "quote_send_bcc": "Angebotsversand (BCC)",
+      "order_confirmation": "Auftragsbestätigung",
+      "requote_request": "Angebotsaktualisierung angefragt",
+      "smartrfq_received": "Smart-RFQ eingegangen",
+      "email_fwd_received": "Weitergeleitete Anfrage eingegangen"
+    },
+    "accounting_heading": "Buchhaltung",
+    "default_tax_rate": "Standard-Steuersatz (%)",
+    "default_tax_rate_hint": "Nur informativ — der tatsächliche Steuersatz wird gesetzlich ermittelt (§ 12 UStG).",
+    "saved": "Gespeichert",
+    "load_error": "Einstellungen konnten nicht geladen werden.",
+    "save_error": "Einstellungen konnten nicht gespeichert werden.",
+    "require_terms_needs_text": "Zuerst AGB-Text eingeben."
   }
 }
