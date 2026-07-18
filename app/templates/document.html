@@ -1,0 +1,208 @@
+{#
+  M5.4 — white-label quote / order-confirmation document (WeasyPrint → A4 PDF).
+
+  This template is a DUMB renderer: every field-gating decision has already been
+  made in app.pdf.build_quote_context / build_order_context, so a value that is
+  present here is meant to print. There is ZERO platform branding (white-label,
+  DECISIONS.md 2026-06-14) and every label is German (Fechner reviews before
+  go-live). Autoescaping is ON (customer/quote text is untrusted) — no `|safe`.
+
+  `kind` is "quote" (Angebot, net) or "order" (Auftragsbestätigung, §14-UStG).
+#}
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 16mm 20mm 16mm;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.4;
+    color: #1a1a1a;
+  }
+  .accent { color: {{ shop.accent_color }}; }
+  header.doc {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 3px solid {{ shop.accent_color }};
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+  header.doc .logo { max-height: 64px; max-width: 220px; }
+  header.doc .shop { text-align: right; font-size: 8.5pt; color: #444; }
+  header.doc .shop .shop-name { font-size: 11pt; font-weight: 700; color: #1a1a1a; }
+  h1.doc-title { font-size: 18pt; margin: 4px 0 10px; }
+  .meta, .customer { margin-bottom: 12px; font-size: 9pt; }
+  .customer { padding: 8px 10px; background: #f5f6f8; border-radius: 3px; white-space: pre-line; }
+  .meta div { margin-bottom: 1px; }
+  table.items { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  table.items th {
+    text-align: left;
+    border-bottom: 2px solid {{ shop.accent_color }};
+    padding: 5px 6px;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: #555;
+  }
+  table.items td { padding: 4px 6px; vertical-align: top; }
+  table.items .num { text-align: right; white-space: nowrap; }
+  tr.item-head td { border-top: 1px solid #ddd; padding-top: 8px; }
+  .part-title { font-weight: 700; font-size: 10pt; }
+  .muted { color: #666; font-size: 8.5pt; }
+  ul.dfm { margin: 3px 0 0 14px; padding: 0; color: #8a5a00; }
+  table.totals { width: 46%; margin-left: 54%; border-collapse: collapse; margin-top: 10px; }
+  table.totals td { padding: 3px 6px; }
+  table.totals td.num { text-align: right; white-space: nowrap; }
+  table.totals tr.grand td { border-top: 2px solid {{ shop.accent_color }}; font-weight: 700; font-size: 11pt; }
+  .tax-note, .net-note { margin-top: 8px; font-size: 8.5pt; color: #444; }
+  .quote-total { margin-top: 12px; font-size: 12pt; font-weight: 600; }
+  .quote-total .label { color: {{ shop.accent_color }}; }
+  .notes, .mfg-notes { margin: 12px 0; padding: 8px 10px; background: #f5f6f8; border-radius: 3px; white-space: pre-line; }
+  .preparer { margin-top: 16px; font-size: 9pt; }
+  .preparer .label { font-weight: 700; color: {{ shop.accent_color }}; }
+  .digital-link { margin-top: 10px; font-size: 9pt; }
+  footer.terms { margin-top: 18px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 8pt; color: #555; white-space: pre-line; }
+</style>
+
+<header class="doc">
+  {# Identity appears exactly once: the logo (if any) on the left, else the shop
+     name big on the left. The right block repeats the name only when a logo is
+     shown (so it is not lost), otherwise just the address/contact lines. #}
+  {% if shop.logo_data_uri %}
+    <img class="logo" src="{{ shop.logo_data_uri }}" alt="{{ shop.name }}">
+  {% else %}
+    <div class="shop-name" style="font-size:13pt;font-weight:700;">{{ shop.name }}</div>
+  {% endif %}
+  <div class="shop">
+    {% if shop.logo_data_uri %}<div class="shop-name">{{ shop.name }}</div>{% endif %}
+    {% if shop.address %}<div style="white-space: pre-line;">{{ shop.address }}</div>{% endif %}
+    {% if shop.phone %}<div>Tel.: {{ shop.phone }}</div>{% endif %}
+    {% if shop.website %}<div>{{ shop.website }}</div>{% endif %}
+    {% if shop.ust_id_nr %}<div>USt-IdNr.: {{ shop.ust_id_nr }}</div>{% endif %}
+  </div>
+</header>
+
+<h1 class="doc-title accent">{{ doc_title }}</h1>
+
+<div class="meta">
+  {% if document_number %}<div><strong>{{ number_label }}:</strong> {{ document_number }}</div>{% endif %}
+  {% if rfq_number %}<div><strong>RFQ-Nr.:</strong> {{ rfq_number }}</div>{% endif %}
+  <div><strong>Datum:</strong> {{ document_date }}</div>
+  {% if po_number %}<div><strong>Bestellnummer (PO):</strong> {{ po_number }}</div>{% endif %}
+</div>
+
+{% if customer and (customer.name or customer.address) %}
+<div class="customer">{% if customer.name %}{{ customer.name }}
+{% endif %}{% if customer.address %}{{ customer.address }}{% endif %}</div>
+{% endif %}
+
+{% macro notes_block() %}
+  {% if content.quote_notes %}<div class="notes">{{ content.quote_notes }}</div>{% endif %}
+{% endmacro %}
+
+{% if notes_placement == 'above' %}{{ notes_block() }}{% endif %}
+
+<table class="items">
+  <thead>
+    <tr>
+      <th style="width:6%;">Pos.</th>
+      <th>Beschreibung</th>
+      <th style="width:10%;" class="num">Menge</th>
+      <th style="width:16%;" class="num">Einzelpreis</th>
+      <th style="width:16%;" class="num">Gesamtpreis</th>
+      <th style="width:14%;">Lieferzeit</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item in line_items %}
+    <tr class="item-head">
+      <td>{{ item.position }}</td>
+      <td colspan="5">
+        <span class="part-title">{% if item.part_number %}{{ item.part_number }}{% else %}Position {{ item.position }}{% endif %}</span>{% if item.revision %} (Rev. {{ item.revision }}){% endif %}
+        {% if item.description %}<div>{{ item.description }}</div>{% endif %}
+        {% if item.file_name %}<div class="muted">Datei: {{ item.file_name }}</div>{% endif %}
+        {% if item.process %}<div class="muted">Verfahren: {{ item.process }}</div>{% endif %}
+        {% if item.material %}<div class="muted">Werkstoff: {{ item.material }}{% if item.werkstoffnummer %} ({{ item.werkstoffnummer }}){% endif %}</div>{% endif %}
+        {% if item.dimensions %}<div class="muted">Maße: {{ item.dimensions.x }} x {{ item.dimensions.y }} x {{ item.dimensions.z }} mm</div>{% endif %}
+        {% if item.dfm_warnings %}<ul class="dfm">{% for w in item.dfm_warnings %}<li>{{ w }}</li>{% endfor %}</ul>{% endif %}
+      </td>
+    </tr>
+    {% if item.is_no_quote %}
+      <tr><td></td><td colspan="5" class="muted">Kein Angebot – auf Anfrage</td></tr>
+    {% else %}
+      {% for b in item.breaks %}
+      <tr>
+        <td></td>
+        <td class="muted">{% if item.breaks|length > 1 %}ab {{ b.quantity }} Stk.{% endif %}</td>
+        <td class="num">{{ b.quantity }}</td>
+        <td class="num">{{ b.unit_price }}</td>
+        <td class="num">{{ b.total_price }}</td>
+        <td>{% if b.lead_time_days is not none %}{{ b.lead_time_days }} Tage{% endif %}</td>
+      </tr>
+      {% endfor %}
+      {% for a in item.add_ons %}
+      <tr>
+        <td></td>
+        <td colspan="3" class="muted">+ {{ a.display_name }}{% if a.is_required %} (inkl.){% endif %}</td>
+        <td class="num muted">{% if a.price %}{{ a.price }}{% endif %}</td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if kind == 'order' and tax %}
+<table class="totals">
+  {% if tax.rate_lines %}
+    {% for rl in tax.rate_lines %}
+    <tr><td>Nettobetrag ({{ rl.rate_pct }} %)</td><td class="num">{{ rl.net }}</td></tr>
+    {% if not tax.reverse_charge and not tax.kleinunternehmer %}
+    <tr><td>{{ tax.vat_label }} {{ rl.rate_pct }} %</td><td class="num">{{ rl.vat }}</td></tr>
+    {% endif %}
+    {% endfor %}
+  {% else %}
+    <tr><td>Nettobetrag</td><td class="num">{{ tax.net }}</td></tr>
+  {% endif %}
+  <tr class="grand"><td>Gesamtbetrag</td><td class="num">{{ tax.gross }}</td></tr>
+</table>
+{% if tax.reverse_charge %}
+  <div class="tax-note"><strong>{{ tax.note }}</strong></div>
+  {% if tax.supplier_ust_id_nr %}<div class="tax-note">USt-IdNr. Leistungserbringer: {{ tax.supplier_ust_id_nr }}</div>{% endif %}
+  {% if tax.buyer_ust_id_nr %}<div class="tax-note">USt-IdNr. Leistungsempfänger: {{ tax.buyer_ust_id_nr }}</div>{% endif %}
+{% elif tax.kleinunternehmer and tax.note %}
+  <div class="tax-note">{{ tax.note }}</div>
+{% endif %}
+{% endif %}
+
+{% if kind == 'quote' %}
+  {% if total.mode == 'price_range' and total.min and total.max %}
+    <div class="quote-total"><span class="label">Preisspanne</span>: {{ total.min }} – {{ total.max }}</div>
+  {% elif total.mode == 'maximum_price' and total.value %}
+    <div class="quote-total"><span class="label">Maximalpreis</span>: {{ total.value }}</div>
+  {% endif %}
+  {% if net_note %}<div class="net-note">{{ net_note }}</div>{% endif %}
+{% endif %}
+
+{% if notes_placement == 'below' %}{{ notes_block() }}{% endif %}
+
+{% if content.manufacturers_notes %}<div class="mfg-notes">{{ content.manufacturers_notes }}</div>{% endif %}
+
+{% if preparer %}
+<div class="preparer">
+  <div class="label">{{ preparer.label }}</div>
+  {% if preparer.name %}<div>{{ preparer.name }}</div>{% endif %}
+  {% if preparer.email %}<div>{{ preparer.email }}</div>{% endif %}
+  {% if preparer.phone %}<div>Tel.: {{ preparer.phone }}</div>{% endif %}
+</div>
+{% endif %}
+
+{% if digital_quote_link %}
+<div class="digital-link">Digitales Angebot ansehen: {{ digital_quote_link }}</div>
+{% endif %}
+
+{% if content.terms %}<footer class="terms">{{ content.terms }}</footer>{% endif %}

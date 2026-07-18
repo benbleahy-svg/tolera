@@ -20,8 +20,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
 
 FROM base AS dev
-# libgl1 for the geometry group (default-groups) when the dev image runs on linux.
-RUN apt-get update && apt-get install -y --no-install-recommends libgl1 \
+# libgl1 for the geometry group (default-groups); libpango* for WeasyPrint (M5.4
+# quote/order PDF) — both needed when the dev image runs tests on linux.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libpango-1.0-0 libpangoft2-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN uv sync --frozen
 COPY . .
@@ -29,6 +31,10 @@ EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM base AS prod
+# libpango* — WeasyPrint renders the quote/order PDF in the API process (M5.4).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 libpangoft2-1.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 # --no-default-groups: dev AND geometry stay out of the API image.
 RUN uv sync --frozen --no-default-groups
 COPY app ./app
@@ -40,7 +46,10 @@ EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM base AS worker
-RUN apt-get update && apt-get install -y --no-install-recommends libgl1 \
+# libgl1 for OCP/VTK; libpango* so a worker task (e.g. M5.5 send) can render the
+# quote PDF to attach.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libpango-1.0-0 libpangoft2-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN uv sync --frozen --no-default-groups --group geometry
 COPY app ./app

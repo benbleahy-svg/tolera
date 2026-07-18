@@ -210,6 +210,18 @@ class Organization(Base):
     is_kleinunternehmer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # Facility Information for the white-label quote/order PDF (M5.4; spec
+    # #company-settings-detail "logo on PDFs"). ``logo_object_key`` points at the
+    # logo blob in object storage (embedded inline as a data-URI — no external
+    # asset); ``brand_accent_color`` is a hex accent for the PDF header rule;
+    # phone/website/address feed the Display-Settings toggles + §14 supplier
+    # block. Editing UI is M5.8; M5.4 renders them. All nullable → a bare org
+    # still renders a plain white-label document.
+    logo_object_key: Mapped[str | None] = mapped_column(String)
+    brand_accent_color: Mapped[str | None] = mapped_column(String)
+    facility_phone: Mapped[str | None] = mapped_column(String)
+    facility_website: Mapped[str | None] = mapped_column(String)
+    facility_address: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -836,6 +848,10 @@ class Quote(Base):
     salesperson_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Trash = recoverable soft-delete (any status), distinct from the ``cancelled`` status.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # M5.4 — object-storage key of the white-label quote PDF snapshot. NULL until
+    # the quote is sent (M5.5 writes the snapshot at send; the shop's own
+    # download endpoint renders live). Spec :603 "URL on the Quote model".
+    pdf_object_key: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -3399,6 +3415,9 @@ class Order(Base):
     vies_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     #: Set when the shop ships (ERP-driven later); no status lifecycle in v1.
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: M5.4 — object-storage key of the rendered order-confirmation PDF (written
+    #: on first download; the order is terminal, so the artifact is safe to store).
+    pdf_object_key: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 

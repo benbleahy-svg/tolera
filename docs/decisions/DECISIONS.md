@@ -19,6 +19,20 @@
 
 ---
 
+## [2026-07-18] M5.4 quote/order PDF — implementation assumptions (recorded)
+
+**Status:** RESOLVED (design choices classified per CLAUDE.md §6.3; all cheap-to-reverse — recorded, not blocking. Money/schema touched, so logged for traceability.)
+
+**Context.** `/block M5.4` — the white-label WeasyPrint quote/order PDF. Design was folded into this block (see the 2026-06-14 "Quote PDF visual design" entry below); the spec fixes the field toggles, §14 fields, A4, and locale money. The choices below were not pinned by the sources and are all reversible:
+
+1. **Quote PDF = Angebot (net), no §14 tax block; order PDF = Auftragsbestätigung with the full §14 block.** A quote is a pre-checkout offer; the buyer's tax posture (reverse-charge / VIES / Kleinunternehmer) is unknown until checkout, so inventing a VAT block on the quote would violate CLAUDE.md §6.4 (never invent). The quote instead carries a net notice (*"Alle Preise verstehen sich netto zzgl. gesetzlicher MwSt."*). The **§14-UStG block renders only on the order**, from the Order's **persisted** breakdown (never a recompute) — the tier-1 money invariant. *Reversible: copy/layout.*
+2. **Facility-Information columns added to `organization` (M5.4 is the consuming block).** `logo_object_key`, `brand_accent_color`, `facility_phone`, `facility_website`, `facility_address` — none existed (org kept lean, cf. 2026-06-24 M0.5 deferral). M5.4 renders them on the PDF (spec #company-settings-detail "logo on PDFs"); the **editing UI is M5.8**. Plus `pdf_object_key` on `quote` + `order_` for the stored artifact (spec :603 "URL on the Quote model"). All nullable; reversible migration 0042.
+3. **Display-Settings extended in place** on the single `DisplaySettings` entity (M5.1's `app.buyer_portal`) with the PDF header/total/preparer/notes-placement controls + radio enums — persistence still deferred to M5.8 via the existing `load_display_settings` seam (M5.4 adds a matching `load_quote_content` seam for T&Cs / Manufacturer's Notes / Quote Notes, defaults empty).
+4. **White-label = the renderer emits zero platform branding** (template carries no "Tolera"/"Bid Factory"/"Paperless" mark; verified by test). The digital-quote-link **URL host** is caller-supplied infrastructure, not a renderer mark — true custom-domain white-labeling of that host is post-v1.
+5. **Snapshot oracle = rendered HTML** (deterministic); the actual WeasyPrint→PDF is asserted valid + A4 via pypdf, and those render tests **skip when the pango/cairo native libs are absent** (mirrors the `db_client` skip). CI installs `libpango`; the Docker dev/prod/worker stages install it too (the PDF renders in the API process).
+
+**Affects:** M5.4 (this PR); M5.5 (attaches the quote PDF, writes the send-time snapshot to `pdf_object_key`); M5.6 ("Download order PDF" hits `GET /api/orders/{id}/pdf`); M5.8 (settings UI persists the Display Settings + merge content + Facility Information these render).
+
 ## [2026-07-18] M5.2 + M5.3 combined build — checkout→Order, VAT/reverse-charge/VIES
 
 **Status:** RESOLVED (Benjamin chose "Combine M5.2 + M5.3" when `/block M5.2` halted on the unbuilt M5.3 dependency; design choices classified per CLAUDE.md §6.3 and either verified or flagged ASSUMED inline in the PR table)
