@@ -56,7 +56,8 @@ def test_create_and_list(client: TestClient, seeder: Seeder) -> None:
         row = resp.json()
         assert row["template_type"] == "quote_send"
         assert row["is_default"] is True
-        assert row["last_edited_by"] == str(user)
+        # "Last edited by" is the editor's email (DemoH 08), resolved from the id.
+        assert row["last_edited_by"] == "admin@et-create.example"
 
         listed = client.get("/api/email-templates").json()
     assert any(t["id"] == row["id"] for t in listed)
@@ -115,6 +116,18 @@ def test_cannot_delete_default(client: TestClient, seeder: Seeder) -> None:
         resp = client.delete(f"/api/email-templates/{default['id']}")
     assert resp.status_code == 409
     assert resp.json()["code"] == "default_template_protected"
+
+
+def test_update_rejects_explicit_null(client: TestClient, seeder: Seeder) -> None:
+    org, user = _admin(seeder, "et-null")
+    with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        made = _create(client, name="X").json()
+        # An explicit null must 422 (never a NULL write to a NOT NULL column),
+        # while omission (partial update) still works.
+        bad = client.patch(f"/api/email-templates/{made['id']}", json={"name": None})
+        assert bad.status_code == 422
+        ok = client.patch(f"/api/email-templates/{made['id']}", json={"subject": "Neu"})
+    assert ok.status_code == 200
 
 
 def test_create_requires_settings_edit(client: TestClient, seeder: Seeder) -> None:

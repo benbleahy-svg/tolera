@@ -325,15 +325,23 @@ async def send_quote(
         credentials, from_address=from_address, from_name=from_name, message=message
     )
 
-    # Record the outbound on the quote's thread (first send creates the thread row).
-    thread = QuoteEmailThread(
-        org_id=org.id,
-        quote_id=quote.id,
-        sent_message_id=result.message_id,
-        provider_thread_id=result.provider_thread_id,
+    # Record the outbound on the quote's thread. A thread may already exist (an
+    # earlier M3.5 timeline message on the draft) — reuse it, else create it; the
+    # per-quote unique index forbids a second row.
+    thread = await session.scalar(
+        select(QuoteEmailThread).where(QuoteEmailThread.quote_id == quote.id)
     )
-    session.add(thread)
-    await session.flush()
+    if thread is None:
+        thread = QuoteEmailThread(
+            org_id=org.id,
+            quote_id=quote.id,
+            sent_message_id=result.message_id,
+            provider_thread_id=result.provider_thread_id,
+        )
+        session.add(thread)
+        await session.flush()
+    elif thread.provider_thread_id is None and result.provider_thread_id:
+        thread.provider_thread_id = result.provider_thread_id
     session.add(
         EmailMessage(
             org_id=org.id,

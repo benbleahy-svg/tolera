@@ -50,7 +50,10 @@ MERGE_FIELDS: frozenset[str] = frozenset(
     }
 )
 
-_TOKEN = re.compile(r"%%([A-Z_]+)%%")
+# Match ANY %%…%% token shape (upper/lower/digits/hyphen), not just the catalog's
+# UPPER_SNAKE — so a stray %%typo%% / %%quote-number%% is *blanked*, never leaked
+# verbatim to the customer. Catalog membership is checked in render_merge.
+_TOKEN = re.compile(r"%%([A-Za-z0-9_-]+)%%")
 
 
 def render_merge(template: str, values: Mapping[str, str], *, escape_html: bool = False) -> str:

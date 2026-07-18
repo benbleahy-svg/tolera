@@ -223,7 +223,13 @@ function TemplateEditor({ type, template, onClose, onSaved, onError }: EditorPro
 
   return (
     <div className="est-modal-backdrop" role="dialog" aria-label={t('emailTemplates.editor_title')}>
-      <div className="est-modal template-editor">
+      <form
+        className="est-modal template-editor"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
         <h3>{template ? t('emailTemplates.edit') : t(`emailTemplates.create.${type}`)}</h3>
         <label className="form-field">
           <span>{t('emailTemplates.field_name')}</span>
@@ -268,11 +274,11 @@ function TemplateEditor({ type, template, onClose, onSaved, onError }: EditorPro
           <button type="button" onClick={onClose}>
             {t('common.cancel')}
           </button>
-          <button type="button" onClick={save} disabled={saving}>
+          <button type="submit" disabled={saving}>
             {t('common.save')}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

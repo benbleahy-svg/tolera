@@ -156,6 +156,27 @@ def test_send_resolves_merge_and_link_and_flips_to_sent(
     assert any(e[0] == "quote.sent" for e in events)
 
 
+def test_send_reuses_existing_thread(
+    client: TestClient, seeder: Seeder, provider: MockProvider, tenancy_db: str
+) -> None:
+    # A draft may already have a QuoteEmailThread (an earlier M3.5 timeline message);
+    # the composer must reuse it, not violate the per-quote unique index.
+    org, user, quote = _setup(seeder, "send-thread")
+    seeder.sql(
+        "INSERT INTO quote_email_thread (org_id, quote_id, sent_message_id) "
+        "VALUES (:o, :q, '<pre-existing@acme.de>')",
+        {"o": org, "q": quote},
+    )
+    with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        client.post("/email-connections/smtp", json=SMTP_PAYLOAD)
+        resp = client.post(f"/api/quotes/{quote}/send", json=_send_body())
+    assert resp.status_code == 200, resp.text
+    rows = _fetch(
+        tenancy_db, "SELECT count(*) FROM quote_email_thread WHERE quote_id = :q", {"q": quote}
+    )
+    assert rows[0][0] == 1  # still exactly one thread
+
+
 def test_to_cc_bcc_all_receive(client: TestClient, seeder: Seeder, provider: MockProvider) -> None:
     org, user, quote = _setup(seeder, "send-ccbcc")
     with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):

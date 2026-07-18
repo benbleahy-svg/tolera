@@ -1005,6 +1005,7 @@
     "remove_recipient": "Empfänger entfernen",
     "recipient_type": "Empfängertyp",
     "recipient_email": "E-Mail-Adresse des Empfängers",
+    "recipient_placeholder": "user@firma.de",
     "select_template": "E-Mail-Vorlage auswählen",
     "no_template": "Keine Vorlage",
     "subject": "Betreff",

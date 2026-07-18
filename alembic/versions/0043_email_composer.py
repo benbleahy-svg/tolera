@@ -35,20 +35,24 @@ def upgrade() -> None:
     op.execute(
         "CREATE TYPE email_template_type AS ENUM ('quote_send', 'order_shipment', 'order_refund')"
     )
-    # Add nullable first so existing rows survive, then backfill + tighten.
-    op.execute("ALTER TABLE email_template ADD COLUMN template_type email_template_type")
+    # Add with a server default (matches the model's ``server_default``) so existing
+    # rows are non-null immediately and an insert omitting template_type still works;
+    # the explicit backfill below stays for clarity, then the column is tightened.
+    op.execute(
+        "ALTER TABLE email_template "
+        "ADD COLUMN template_type email_template_type NOT NULL DEFAULT 'quote_send'"
+    )
     op.execute("ALTER TABLE email_template ADD COLUMN name text NOT NULL DEFAULT ''")
     op.execute("ALTER TABLE email_template ADD COLUMN is_default boolean NOT NULL DEFAULT false")
     op.execute("ALTER TABLE email_template ADD COLUMN last_edited_by uuid")
 
-    # Backfill: every M1.12 row is a quote-send template; name from the legacy key;
-    # the canonical quote-send seed row becomes its type's default.
-    op.execute("UPDATE email_template SET template_type = 'quote_send' WHERE template_type IS NULL")
+    # Backfill: every M1.12 row is a quote-send template (the column's default
+    # already set that); name from the legacy key; the canonical quote-send seed row
+    # becomes its type's default.
     op.execute(
         "UPDATE email_template SET name = key WHERE (name = '' OR name IS NULL) AND key IS NOT NULL"
     )
     op.execute("UPDATE email_template SET is_default = true WHERE key = 'quote_sent'")
-    op.execute("ALTER TABLE email_template ALTER COLUMN template_type SET NOT NULL")
 
     # Relabel the M1.12 Jinja placeholder to the M5.5 %%…%% syntax the composer's
     # renderer understands — else a pre-existing default would send the literal
@@ -107,6 +111,12 @@ def downgrade() -> None:
     op.execute(f"REVOKE ALL ON domain_event FROM {APP_ROLE}")
     op.execute("DROP TABLE IF EXISTS domain_event")
 
+    # Reverse the %%…%% relabel so the prior app sees its Jinja placeholder again.
+    op.execute(
+        "UPDATE email_template SET "
+        "subject = replace(subject, '%%QUOTE_NUMBER%%', '{{quote_number}}'), "
+        "body = replace(body, '%%QUOTE_NUMBER%%', '{{quote_number}}')"
+    )
     op.execute("DROP INDEX IF EXISTS uq_email_template_default_per_type")
     # Restore a non-null, *unique* key before re-imposing the old (org,key,locale)
     # unique — the feature allows many templates per type, so a bare

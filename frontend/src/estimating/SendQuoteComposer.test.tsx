@@ -69,12 +69,17 @@ describe('SendQuoteComposer', () => {
     // Wait for the template list to load, then compose.
     await screen.findByRole('option', { name: 'Demo Follow-Up' });
 
+    const typeSelect = screen.getByLabelText('Empfängertyp');
+    const emailInput = screen.getByLabelText('E-Mail-Adresse des Empfängers');
+
+    // Add the primary To recipient.
+    await userEvent.selectOptions(typeSelect, 'to');
+    await userEvent.type(emailInput, 'chris@kunde.de');
+    await userEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }));
+
     // Add a CC recipient.
-    await userEvent.selectOptions(screen.getByLabelText('Empfängertyp'), 'cc');
-    await userEvent.type(
-      screen.getByLabelText('E-Mail-Adresse des Empfängers'),
-      'sarah@acme.de',
-    );
+    await userEvent.selectOptions(typeSelect, 'cc');
+    await userEvent.type(emailInput, 'sarah@acme.de');
     await userEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }));
 
     // Pick the template — fills subject + body.
@@ -91,7 +96,7 @@ describe('SendQuoteComposer', () => {
 
     await waitFor(() =>
       expect(emailApi.sendQuote).toHaveBeenCalledWith('q-1', {
-        to: [],
+        to: ['chris@kunde.de'],
         cc: ['sarah@acme.de'],
         bcc: [],
         template_id: 'qt-1',
@@ -103,6 +108,28 @@ describe('SendQuoteComposer', () => {
     await waitFor(() => expect(onSent).toHaveBeenCalled());
   });
 
+  it('disables preview + send until a To recipient is added', async () => {
+    await renderWithProviders(
+      <SendQuoteComposer quoteId="q-1" onClose={vi.fn()} onSent={vi.fn()} />,
+    );
+    // No recipients yet → both actions disabled.
+    expect(screen.getByRole('button', { name: 'Vorschau' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Angebot senden' })).toBeDisabled();
+
+    // A CC alone does not satisfy the To requirement.
+    await userEvent.selectOptions(screen.getByLabelText('Empfängertyp'), 'cc');
+    await userEvent.type(screen.getByLabelText('E-Mail-Adresse des Empfängers'), 'cc@kunde.de');
+    await userEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }));
+    expect(screen.getByRole('button', { name: 'Angebot senden' })).toBeDisabled();
+
+    // Adding a To recipient enables both.
+    await userEvent.selectOptions(screen.getByLabelText('Empfängertyp'), 'to');
+    await userEvent.type(screen.getByLabelText('E-Mail-Adresse des Empfängers'), 'chris@kunde.de');
+    await userEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }));
+    expect(screen.getByRole('button', { name: 'Angebot senden' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Vorschau' })).toBeEnabled();
+  });
+
   it('shows the connect-email banner on no_email_connection', async () => {
     emailApi.sendQuote.mockRejectedValue(
       new ApiError(409, 'no_email_connection', 'connect first'),
@@ -110,7 +137,11 @@ describe('SendQuoteComposer', () => {
     await renderWithProviders(
       <SendQuoteComposer quoteId="q-1" onClose={vi.fn()} onSent={vi.fn()} />,
     );
-    await userEvent.click(await screen.findByRole('button', { name: 'Angebot senden' }));
+    // A To recipient is required before send is enabled.
+    await userEvent.selectOptions(screen.getByLabelText('Empfängertyp'), 'to');
+    await userEvent.type(screen.getByLabelText('E-Mail-Adresse des Empfängers'), 'chris@kunde.de');
+    await userEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Angebot senden' }));
     expect(await screen.findByRole('link', { name: 'Jetzt verbinden' })).toBeInTheDocument();
   });
 });

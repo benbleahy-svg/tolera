@@ -746,16 +746,23 @@ async def _seed_custom_tables(session: AsyncSession, org_id: uuid.UUID) -> int:
 
 
 async def _seed_email_templates(session: AsyncSession, org_id: uuid.UUID) -> int:
-    """Seed one DEFAULT template per composer type (idempotent per type+locale)."""
+    """Seed one DEFAULT template per composer type (idempotent per type+locale).
+
+    Keyed on the *default* rows only: an org that already has a hand-made
+    non-default template of a type should still get its seeded default."""
     existing = {
-        row.template_type
+        (row.template_type, row.locale)
         for row in (
-            await session.scalars(select(EmailTemplate).where(EmailTemplate.org_id == org_id))
+            await session.scalars(
+                select(EmailTemplate).where(
+                    EmailTemplate.org_id == org_id, EmailTemplate.is_default.is_(True)
+                )
+            )
         ).all()
     }
     created = 0
     for template_type, name, subject, body in _EMAIL_TEMPLATES:
-        if template_type in existing:
+        if (template_type, "de-DE") in existing:
             continue
         session.add(
             EmailTemplate(

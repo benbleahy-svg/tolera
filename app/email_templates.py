@@ -13,13 +13,14 @@ isolation is enforced at the DB by RLS — a foreign-org id simply 404s.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, update
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
@@ -45,7 +46,11 @@ class EmailTemplateCreate(BaseModel):
 
 
 class EmailTemplateUpdate(BaseModel):
-    """Partial edit — only the fields present change."""
+    """Partial edit — only the fields present change.
+
+    Fields are ``| None`` to model *omission* (partial update), NOT to accept an
+    explicit ``null``: every target column is NOT NULL, so a supplied ``null`` must
+    be a 422, never a NULL write via ``exclude_unset``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,6 +58,16 @@ class EmailTemplateUpdate(BaseModel):
     subject: str | None = Field(default=None, min_length=1, max_length=500)
     body: str | None = Field(default=None, max_length=100_000)
     is_default: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_explicit_null(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            fields = ("name", "subject", "body", "is_default")
+            nulled = [k for k in fields if data.get(k, ...) is None]
+            if nulled:
+                raise ValueError(f"Fields may not be null: {', '.join(sorted(nulled))}")
+        return data
 
 
 class EmailTemplateOut(BaseModel):
@@ -63,11 +78,22 @@ class EmailTemplateOut(BaseModel):
     body: str
     is_default: bool
     locale: str
-    last_edited_by: uuid.UUID | None
+    #: The editor's email (DemoH 08 "Last edited by") — resolved from the id via
+    #: the org-scoped ``app_org_members()`` view; NULL for seeded rows or a user no
+    #: longer in the org.
+    last_edited_by: str | None
     updated_at: datetime
 
 
-def _out(row: EmailTemplate) -> EmailTemplateOut:
+async def _editor_emails(session: AsyncSession) -> dict[str, str]:
+    """user-id → email for the active org's members (the RLS-safe ``app_org_members()``
+    view — the restricted role cannot read ``app_user`` directly)."""
+    raw = (await session.execute(text("SELECT app_org_members()"))).scalar_one()
+    members = json.loads(raw) if isinstance(raw, str) else raw
+    return {str(m["id"]): m["email"] for m in (members or []) if m.get("email")}
+
+
+def _out(row: EmailTemplate, editor_emails: dict[str, str]) -> EmailTemplateOut:
     return EmailTemplateOut(
         id=row.id,
         template_type=row.template_type,
@@ -76,7 +102,9 @@ def _out(row: EmailTemplate) -> EmailTemplateOut:
         body=row.body,
         is_default=row.is_default,
         locale=row.locale,
-        last_edited_by=row.last_edited_by,
+        last_edited_by=(
+            editor_emails.get(str(row.last_edited_by)) if row.last_edited_by is not None else None
+        ),
         updated_at=row.updated_at,
     )
 
@@ -132,7 +160,9 @@ async def list_templates(
         EmailTemplate.is_default.desc(),
         EmailTemplate.name,
     )
-    return [_out(row) for row in (await session.execute(stmt)).scalars()]
+    rows = list((await session.execute(stmt)).scalars())
+    emails = await _editor_emails(session)
+    return [_out(row, emails) for row in rows]
 
 
 @email_templates_router.post("", status_code=status.HTTP_201_CREATED)
@@ -159,7 +189,7 @@ async def create_template(
     )
     session.add(row)
     await session.flush()
-    return _out(row)
+    return _out(row, await _editor_emails(session))
 
 
 @email_templates_router.get("/{template_id}")
@@ -168,7 +198,8 @@ async def get_template(
     session: Annotated[AsyncSession, Depends(get_session)],
     _: Annotated[Principal, Depends(require(Permission.view_all))],
 ) -> EmailTemplateOut:
-    return _out(await _get_or_404(session, template_id))
+    row = await _get_or_404(session, template_id)
+    return _out(row, await _editor_emails(session))
 
 
 @email_templates_router.patch("/{template_id}")
@@ -191,7 +222,7 @@ async def update_template(
     # The default-clearing bulk UPDATE expired the identity map; refresh so the
     # response reads server-set columns (updated_at) without a sync lazy-load.
     await session.refresh(row)
-    return _out(row)
+    return _out(row, await _editor_emails(session))
 
 
 @email_templates_router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)

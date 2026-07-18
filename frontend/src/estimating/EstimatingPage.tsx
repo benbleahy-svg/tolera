@@ -67,6 +67,7 @@ export function EstimatingPage() {
   const suggestApi = useRuleSuggestApi();
   const configureApi = useConfigureApi();
   const canEdit = useHasPermission('quote_edit');
+  const canFinalize = useHasPermission('quote_finalize');
 
   const [quote, setQuote] = useState<QuoteSummary | null>(null);
   const [costing, setCosting] = useState<ComponentCosting | null>(null);
@@ -497,7 +498,9 @@ export function EstimatingPage() {
         <h2>
           {t('estimating.title', { number: quote.number })}
         </h2>
-        {canEdit && (
+        {/* Send finalises the quote (Draft→Sent): needs quote_finalize, and only
+            while the quote is still a Draft. */}
+        {canFinalize && quote.status === 'draft' && (
           <button
             type="button"
             className="est-send-quote"

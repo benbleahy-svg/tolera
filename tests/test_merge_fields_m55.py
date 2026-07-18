@@ -32,6 +32,16 @@ def test_unknown_token_is_blanked_not_left_verbatim() -> None:
     assert out == "x  y"
 
 
+def test_lowercase_digit_and_hyphen_tokens_are_blanked_never_leaked() -> None:
+    # Any %%…%% shape must be consumed, not left verbatim for the customer to see.
+    out = render_merge(
+        "a %%quote_number%% b %%FIELD2%% c %%quote-number%% d",
+        {"QUOTE_NUMBER": "Q-1"},
+    )
+    assert out == "a  b  c  d"
+    assert "%%" not in out
+
+
 def test_link_token_substituted_verbatim() -> None:
     link = "http://localhost:5173/q/eyJhbGciOi.abc.def"
     out = render_merge("Öffnen: %%QUOTE_LINK%%", {"QUOTE_LINK": link})

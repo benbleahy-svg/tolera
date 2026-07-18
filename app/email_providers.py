@@ -45,6 +45,8 @@ from .models import EmailConnectionType
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 GRAPH_API = "https://graph.microsoft.com/v1.0"
+#: Microsoft Graph inlines a draft attachment up to 3 MB; larger needs an upload session.
+_GRAPH_INLINE_LIMIT = 3 * 1024 * 1024
 
 
 class ProviderError(AppError):
@@ -413,7 +415,11 @@ class OutlookProvider:
             draft["ccRecipients"] = [{"emailAddress": {"address": a}} for a in message.cc]
         if message.bcc:
             draft["bccRecipients"] = [{"emailAddress": {"address": a}} for a in message.bcc]
-        if message.attachments:
+        # Graph inlines attachments up to 3 MB in the draft; anything larger must
+        # go through an upload session added to the draft before it is sent.
+        inline = [a for a in message.attachments if len(a.payload) <= _GRAPH_INLINE_LIMIT]
+        large = [a for a in message.attachments if len(a.payload) > _GRAPH_INLINE_LIMIT]
+        if inline:
             draft["attachments"] = [
                 {
                     "@odata.type": "#microsoft.graph.fileAttachment",
@@ -421,13 +427,15 @@ class OutlookProvider:
                     "contentType": att.content_type,
                     "contentBytes": base64.b64encode(att.payload).decode(),
                 }
-                for att in message.attachments
+                for att in inline
             ]
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(f"{GRAPH_API}/me/messages", headers=headers, json=draft)
             if resp.status_code != 201:
                 raise ProviderError("outlook_send_failed", "Outlook-Versand fehlgeschlagen.")
             created = resp.json()
+            for att in large:
+                await self._upload_large_attachment(client, headers, created["id"], att)
             send_resp = await client.post(
                 f"{GRAPH_API}/me/messages/{created['id']}/send", headers=headers
             )
@@ -437,6 +445,47 @@ class OutlookProvider:
             message_id=str(created.get("internetMessageId", "")),
             provider_thread_id=created.get("conversationId"),
         )
+
+    async def _upload_large_attachment(
+        self,
+        client: httpx.AsyncClient,
+        headers: dict[str, str],
+        message_id: str,
+        att: OutboundAttachment,
+    ) -> None:
+        """Attach a >3 MB file to an existing draft via a Graph upload session
+        (createUploadSession → PUT with Content-Range)."""
+        size = len(att.payload)
+        session_resp = await client.post(
+            f"{GRAPH_API}/me/messages/{message_id}/attachments/createUploadSession",
+            headers=headers,
+            json={
+                "AttachmentItem": {
+                    "attachmentType": "file",
+                    "name": att.filename,
+                    "size": size,
+                    "contentType": att.content_type,
+                }
+            },
+        )
+        if session_resp.status_code not in (200, 201):
+            raise ProviderError("outlook_send_failed", "Outlook-Versand fehlgeschlagen.")
+        upload_url = session_resp.json().get("uploadUrl")
+        if not upload_url:
+            raise ProviderError("outlook_send_failed", "Outlook-Versand fehlgeschlagen.")
+        # A single ranged PUT covers the whole file (Graph accepts up to its chunk
+        # ceiling; the quote PDF is well within it). No auth header — the upload URL
+        # is pre-authorised.
+        put_resp = await client.put(
+            upload_url,
+            headers={
+                "Content-Length": str(size),
+                "Content-Range": f"bytes 0-{size - 1}/{size}",
+            },
+            content=att.payload,
+        )
+        if put_resp.status_code not in (200, 201, 202):
+            raise ProviderError("outlook_send_failed", "Outlook-Versand fehlgeschlagen.")
 
     async def baseline_cursor(self, credentials: dict[str, Any]) -> str | None:
         # Walk the delta to its end once; the returned deltaLink means
@@ -632,17 +681,16 @@ class MailgunProvider:
         mime, message_id = build_mime(
             from_address=from_address, from_name=from_name, message=message
         )
-        # Envelope recipients (To+Cc+Bcc) go as explicit `to` form fields; the MIME
-        # carries the visible To/Cc headers only. httpx accepts a list of (key,
-        # value) tuples for repeated form fields at runtime; its `data` stub is
-        # narrower (Mapping), hence the targeted ignore.
-        data = [("to", addr) for addr in message.all_recipients]
+        # Envelope recipients (To+Cc+Bcc) go as explicit `to` form fields (httpx
+        # expands a list value into repeated fields); the MIME carries the visible
+        # To/Cc headers only.
+        data = {"to": message.all_recipients}
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
                     f"{self._base_url}/v3/{self._domain}/messages.mime",
                     auth=("api", self._api_key),
-                    data=data,  # type: ignore[arg-type]
+                    data=data,
                     files={"message": ("message.mime", mime.as_bytes(), "message/rfc822")},
                 )
         except httpx.HTTPError as exc:

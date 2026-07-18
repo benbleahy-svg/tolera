@@ -1005,6 +1005,7 @@
     "remove_recipient": "Remove recipient",
     "recipient_type": "Recipient type",
     "recipient_email": "Recipient email address",
+    "recipient_placeholder": "user@company.com",
     "select_template": "Select email template",
     "no_template": "No template",
     "subject": "Subject",

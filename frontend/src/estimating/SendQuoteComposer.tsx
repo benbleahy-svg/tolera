@@ -94,6 +94,10 @@ export function SendQuoteComposer({ quoteId, onClose, onSent }: Props) {
     document.execCommand('createLink', false, url);
   };
 
+  // At least one To recipient is required before preview or send (a quote with no
+  // primary recipient has nobody to receive the portal link).
+  const hasTo = recipients.some((r) => r.type === 'to');
+
   const buildBody = (): SendQuoteBody => ({
     to: recipients.filter((r) => r.type === 'to').map((r) => r.email),
     cc: recipients.filter((r) => r.type === 'cc').map((r) => r.email),
@@ -113,12 +117,14 @@ export function SendQuoteComposer({ quoteId, onClose, onSent }: Props) {
   };
 
   const runPreview = () => {
+    if (!hasTo) return;
     setError(null);
     setNoConnection(false);
     emailApi.previewQuoteSend(quoteId, buildBody()).then(setPreview).catch(fail);
   };
 
   const send = () => {
+    if (!hasTo) return;
     setError(null);
     setNoConnection(false);
     setSending(true); // a double-click must not send two real emails
@@ -179,7 +185,7 @@ export function SendQuoteComposer({ quoteId, onClose, onSent }: Props) {
           </select>
           <input
             type="email"
-            placeholder="user@company.com"
+            placeholder={t('sendComposer.recipient_placeholder')}
             aria-label={t('sendComposer.recipient_email')}
             value={draftEmail}
             onChange={(e) => setDraftEmail(e.target.value)}
@@ -274,10 +280,15 @@ export function SendQuoteComposer({ quoteId, onClose, onSent }: Props) {
           <button type="button" onClick={onClose}>
             {t('common.cancel')}
           </button>
-          <button type="button" onClick={runPreview}>
+          <button type="button" onClick={runPreview} disabled={!hasTo}>
             {t('sendComposer.preview')}
           </button>
-          <button type="button" className="est-primary" onClick={send} disabled={sending}>
+          <button
+            type="button"
+            className="est-primary"
+            onClick={send}
+            disabled={sending || !hasTo}
+          >
             {t('sendComposer.send')}
           </button>
         </div>
