@@ -166,6 +166,11 @@ export interface ConfigureApi {
   listOperationDefs: (q: string) => Promise<import('../estimating/types').OperationDefOut[]>;
   updateOperationDef: (defId: string, body: OperationDefUpdateBody) => Promise<unknown>;
   kalkCheck: (formula: string) => Promise<import('../estimating/types').KalkCheckResult>;
+  getOpDefKalkReport: (defId: string) => Promise<import('../estimating/types').OpDefKalkReport>;
+  setOpDefVariableVisibility: (
+    defId: string,
+    visibility: Record<string, boolean>,
+  ) => Promise<import('../estimating/types').OpDefKalkReport>;
   getConfigCompleteness: () => Promise<ConfigCompleteness>;
   applyRateToAll: (runRate: string) => Promise<{ updated: number }>;
   listTables: () => Promise<CustomTableOut[]>;
@@ -211,6 +216,12 @@ export function useConfigureApi(): ConfigureApi {
         apiFetch(`/api/operation-defs/${defId}`, token, { method: 'PATCH', body }),
       kalkCheck: (formula) =>
         apiFetch('/api/kalk/check', token, { method: 'POST', body: { formula } }),
+      getOpDefKalkReport: (defId) => apiFetch(`/api/operation-defs/${defId}/kalk`, token),
+      setOpDefVariableVisibility: (defId, visibility) =>
+        apiFetch(`/api/operation-defs/${defId}/variable-visibility`, token, {
+          method: 'PUT',
+          body: { visibility },
+        }),
       getConfigCompleteness: () => apiFetch('/api/config-completeness', token),
       applyRateToAll: (runRate) =>
         apiFetch('/api/operation-defs/apply-rate', token, {

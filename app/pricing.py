@@ -2070,8 +2070,12 @@ async def refresh_pricing(
         ).all()
     }
     op_def_formulas = {
-        row[0]: row[1]
-        for row in (await session.execute(select(OperationDef.id, OperationDef.cost_formula))).all()
+        row[0]: (row[1], row[2])
+        for row in (
+            await session.execute(
+                select(OperationDef.id, OperationDef.cost_formula, OperationDef.variable_visibility)
+            )
+        ).all()
     }
 
     refreshed = 0
@@ -2131,13 +2135,16 @@ async def refresh_pricing(
                 )
                 position += 1
 
-        # op formula snapshots re-copy too (DECISIONS.md 2026-07-08)
+        # op formula + eye-toggle snapshots re-copy too (DECISIONS.md
+        # 2026-07-08; M4.14 keeps the two snapshots in lockstep)
         operations = (
             await session.scalars(select(Operation).where(Operation.component_id == component_id))
         ).all()
         for op in operations:
             if op.operation_def_id is not None and op.operation_def_id in op_def_formulas:
-                op.cost_formula = op_def_formulas[op.operation_def_id]
+                formula, visibility = op_def_formulas[op.operation_def_id]
+                op.cost_formula = formula
+                op.variable_visibility = dict(visibility or {})
 
         await session.flush()
         # full re-run: costs first (preserving manual_*), then pricing

@@ -1347,6 +1347,11 @@ class OperationDef(Base):
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     cost_formula: Mapped[str | None] = mapped_column(Text)
+    # M4.14 Variables-table eye toggles: {var_name: bool} overlaid on the
+    # formula-declared default_visible at report time; stale keys are inert.
+    variable_visibility: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     deleted_at: Mapped[datetime | None] = _deleted_at()
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
@@ -1462,6 +1467,11 @@ class Operation(Base):
     # runtime/setup_time specials keep using the manual_*_mins columns instead.
     cost_formula: Mapped[str | None] = mapped_column(Text)
     variable_overrides: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # M4.14: the def's eye toggles, snapshotted at attach like cost_formula
+    # (E4-d freeze); Refresh Pricing re-copies both deliberately.
+    variable_visibility: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     # M4.13 provenance (spec #ai-quote-assembly): set at the copy site, never
