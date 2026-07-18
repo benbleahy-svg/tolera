@@ -87,35 +87,47 @@ async def quote_values(
     buyer selects a quantity only at checkout). ASSUMED (advisory-only, never
     persisted, never feeds Kalk): value = Σ over the quote's line items of
     ``component_quantity.total_price`` at each line's **highest-quantity break**
-    (``DISTINCT ON (quote_item.id) … ORDER BY quantity DESC``). Every quote in an
-    account is measured identically, so the *comparison* (is this one unusually
-    large) is consistent even though the absolute figure is one of several
-    defensible totals. A quote with no priced line → ``None`` (excluded from the
-    range so the model never sees a fabricated zero)."""
+    (``DISTINCT ON (quote_item.id) … ORDER BY quantity DESC``). Every quote uses
+    the same rule, but the figure still depends on each quote's own break
+    structure (a [1,5,20] line is measured at qty-20, a [1]-only line at qty-1),
+    so the value band is a rough "order-size" signal, not an apples-to-apples
+    total — acceptable here because it is informational and the model is told to
+    weigh it editorially, never to assert it. A quote with no priced line →
+    ``None`` (excluded from the range so the model never sees a fabricated
+    zero)."""
     if not quote_ids:
         return {}
-    # One row per line item: the total_price of its largest-quantity break.
+    # One row per line item, carrying the total_price of its largest-quantity
+    # break — a LEFT JOIN so a line with NO break still yields a row (NULL price).
+    # This is deliberate: a quote's value is known only when EVERY line is priced;
+    # a partially-priced quote must read as "unknown" (None), never an understated
+    # total that would corrupt the value-range signal.
     per_item = (
         select(
             QuoteItem.quote_id.label("quote_id"),
             ComponentQuantity.total_price.label("total_price"),
         )
-        .join(ComponentQuantity, ComponentQuantity.component_id == QuoteItem.root_component_id)
+        .outerjoin(ComponentQuantity, ComponentQuantity.component_id == QuoteItem.root_component_id)
         .where(QuoteItem.quote_id.in_(quote_ids))
         .distinct(QuoteItem.id)
-        .order_by(QuoteItem.id, ComponentQuantity.quantity.desc())
-        .subquery()
+        .order_by(QuoteItem.id, ComponentQuantity.quantity.desc().nulls_last())
     )
-    rows = (
-        await session.execute(
-            select(per_item.c.quote_id, func.sum(per_item.c.total_price)).group_by(
-                per_item.c.quote_id
-            )
-        )
-    ).all()
-    summed: dict[uuid.UUID, Decimal | None] = {row[0]: row[1] for row in rows}
-    # Quotes with no line item at all never appear above — surface them as None.
-    return {qid: _to_minor(summed.get(qid)) for qid in quote_ids}
+    # Accumulate per quote: total (Decimal) while every line is priced, else None.
+    values: dict[uuid.UUID, Decimal | None] = dict.fromkeys(quote_ids, _ZERO)
+    seen: set[uuid.UUID] = set()
+    for quote_id, total_price in (await session.execute(per_item)).all():
+        seen.add(quote_id)
+        if total_price is None:
+            values[quote_id] = None  # an unpriced line makes the whole quote unknown
+        else:
+            running = values[quote_id]
+            if running is not None:
+                values[quote_id] = running + total_price
+    # A quote with no line item at all never appears above → value unknown (None).
+    for qid in quote_ids:
+        if qid not in seen:
+            values[qid] = None
+    return {qid: _to_minor(v) for qid, v in values.items()}
 
 
 async def _decision_dates(
@@ -148,6 +160,7 @@ class _PriorQuote:
     status: QuoteStatus
     revision: int
     created_at: datetime
+    currency: str
 
 
 async def build_account_aggregate(
@@ -171,7 +184,7 @@ async def build_account_aggregate(
 
     prior_rows = (
         await session.execute(
-            select(Quote.id, Quote.status, Quote.revision, Quote.created_at).where(
+            select(Quote.id, Quote.status, Quote.revision, Quote.created_at, Quote.currency).where(
                 Quote.account_id == account_id,
                 Quote.id != current_quote_id,
                 Quote.deleted_at.is_(None),
@@ -181,7 +194,8 @@ async def build_account_aggregate(
     if len(prior_rows) < MIN_PRIOR_QUOTES:
         return None
     prior = [
-        _PriorQuote(id=r[0], status=r[1], revision=int(r[2]), created_at=r[3]) for r in prior_rows
+        _PriorQuote(id=r[0], status=r[1], revision=int(r[2]), created_at=r[3], currency=r[4])
+        for r in prior_rows
     ]
 
     won = [q for q in prior if q.status == QuoteStatus.won]
@@ -205,7 +219,10 @@ async def build_account_aggregate(
     win_rate_recent_pct = round(100 * won_recent / decided_recent, 1) if decided_recent else None
 
     # Value range across the account's history vs this quote (see quote_values).
-    values = await quote_values(session, [current_quote_id, *prior_ids])
+    # Only compare like-for-like: a CHF quote's total must never be ranged against
+    # EUR ones (tier-1 money rule), so restrict the range to same-currency priors.
+    comparable_ids = [q.id for q in prior if q.currency == currency]
+    values = await quote_values(session, [current_quote_id, *comparable_ids])
     this_value = values.get(current_quote_id)
     prior_values = sorted(
         v for qid, v in values.items() if qid != current_quote_id and v is not None
@@ -425,7 +442,11 @@ async def generate_customer_brief(
 
     try:
         result = await resolve().synthesize(aggregate)
-    except (BriefSynthError, RuntimeError, AttributeError) as exc:
+    except Exception as exc:
+        # No-card degradation is the contract: ANY synthesis failure (deterministic
+        # BriefSynthError, or an SDK/network/timeout/auth error from the provider)
+        # must surface as an omitted card, never a 500 that blocks the composer. The
+        # try wraps only the synthesis boundary, so a broad catch is safe here.
         code = exc.code if isinstance(exc, BriefSynthError) else "provider_unavailable"
         logger.info("customer_brief_skipped", extra={"code": code, "quote_id": str(quote_id)})
         return _omit(f"error:{code}")

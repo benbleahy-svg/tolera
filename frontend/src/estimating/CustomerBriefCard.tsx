@@ -29,6 +29,16 @@ export function CustomerBriefCard({ quoteId }: Props): React.ReactElement | null
   const [dismissed, setDismissed] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
+  // Reset all quote-scoped state when the quote changes: if this card is reused
+  // for a different quote, the previous customer's brief must never linger while
+  // the new one loads (or if the new one is omitted/empty/fails). Keyed on
+  // quoteId alone so a user dismiss/collapse survives unrelated re-renders.
+  useEffect(() => {
+    setBrief(null);
+    setDismissed(false);
+    setCollapsed(false);
+  }, [quoteId]);
+
   useEffect(() => {
     let alive = true;
     void (async () => {

@@ -85,8 +85,8 @@ def _seed_priced_quote(
     if revision or created_at is not None:
         seeder.sql(
             "UPDATE quote SET revision = :rev, "
-            "created_at = COALESCE(:ca, created_at) WHERE id = :id",
-            {"rev": revision, "ca": created_at, "id": str(quote_id)},
+            "created_at = COALESCE(:ca, created_at) WHERE id = :id AND org_id = :org",
+            {"rev": revision, "ca": created_at, "id": str(quote_id), "org": str(org_id)},
         )
     for pos, total in enumerate(line_totals or []):
         part_id = seeder.part(org_id)
@@ -130,6 +130,21 @@ def _run_aggregate(
                     currency=currency,
                     now=now,
                 )
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+def _run_quote_values(
+    tenancy_db: str, org_id: uuid.UUID, quote_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int | None]:
+    async def _run() -> dict[uuid.UUID, int | None]:
+        engine = make_engine(app_role_url(tenancy_db))
+        try:
+            sm = make_sessionmaker(engine)
+            async with org_scoped_session(sm, org_id) as session:
+                return await quote_values(session, quote_ids)
         finally:
             await engine.dispose()
 
@@ -266,6 +281,42 @@ def test_aggregate_first_accept_pattern(tenancy_db: str, seeder: Seeder) -> None
     assert agg["this_quote_is_largest"] is False
 
 
+def test_aggregate_value_range_scoped_to_current_currency(tenancy_db: str, seeder: Seeder) -> None:
+    """A CHF quote's value must be ranged only against the account's other CHF
+    quotes — EUR history must never enter the band (tier-1 money rule)."""
+    org_id = seeder.org("brief-currency")
+    account_id = seeder.account(org_id, name="Mixed Currency AG")
+    # Two EUR priors at 50_000€ and one CHF prior at 1_000 CHF.
+    for n, total in enumerate(["50000.00", "50000.00"]):
+        q = _seed_priced_quote(
+            seeder, org_id, account_id, f"EUR-{n}", status=QuoteStatus.won, line_totals=[total]
+        )
+        seeder.sql(
+            "UPDATE quote SET currency = 'EUR' WHERE id = :id AND org_id = :org",
+            {"id": str(q), "org": str(org_id)},
+        )
+    chf_prior = _seed_priced_quote(
+        seeder, org_id, account_id, "CHF-1", status=QuoteStatus.lost, line_totals=["1000.00"]
+    )
+    seeder.sql(
+        "UPDATE quote SET currency = 'CHF' WHERE id = :id AND org_id = :org",
+        {"id": str(chf_prior), "org": str(org_id)},
+    )
+    # Current quote is CHF at 2_000 CHF — largest CHF, but far below the EUR figures.
+    current = _seed_priced_quote(
+        seeder, org_id, account_id, "CUR-CHF", status=QuoteStatus.draft, line_totals=["2000.00"]
+    )
+    seeder.sql(
+        "UPDATE quote SET currency = 'CHF' WHERE id = :id AND org_id = :org",
+        {"id": str(current), "org": str(org_id)},
+    )
+    agg = _run_aggregate(tenancy_db, org_id, account_id, current, currency="CHF")
+    assert agg is not None
+    # Only the single CHF prior (1_000 CHF) is in range — the EUR 50k are excluded.
+    assert agg["prior_value_max_minor"] == 100_000  # 1_000 CHF, not 50_000 €
+    assert agg["this_quote_is_largest"] is True  # 2_000 > 1_000 CHF
+
+
 def test_aggregate_below_threshold_returns_none(tenancy_db: str, seeder: Seeder) -> None:
     org_id = seeder.org("brief-thresh")
     account_id = seeder.account(org_id, name="Sparse Corp")
@@ -282,7 +333,10 @@ def test_aggregate_excludes_trashed_prior_quotes(tenancy_db: str, seeder: Seeder
     for n in range(3):
         seeder.quote(org_id, f"K-{n}", status=QuoteStatus.won, account_id=account_id)
     trashed = seeder.quote(org_id, "TRASH", status=QuoteStatus.won, account_id=account_id)
-    seeder.sql("UPDATE quote SET deleted_at = now() WHERE id = :id", {"id": str(trashed)})
+    seeder.sql(
+        "UPDATE quote SET deleted_at = now() WHERE id = :id AND org_id = :org",
+        {"id": str(trashed), "org": str(org_id)},
+    )
     current = seeder.quote(org_id, "CUR4", status=QuoteStatus.draft, account_id=account_id)
     agg = _run_aggregate(tenancy_db, org_id, account_id, current)
     assert agg is not None
@@ -346,17 +400,47 @@ def test_quote_values_sums_highest_break_per_line(tenancy_db: str, seeder: Seede
         {"org": str(org_id), "c": str(comp_id)},
     )
 
-    async def _run() -> dict[uuid.UUID, int | None]:
-        engine = make_engine(app_role_url(tenancy_db))
-        try:
-            sm = make_sessionmaker(engine)
-            async with org_scoped_session(sm, org_id) as session:
-                return await quote_values(session, [quote_id])
-        finally:
-            await engine.dispose()
-
-    values = asyncio.run(_run())
+    values = _run_quote_values(tenancy_db, org_id, [quote_id])
     assert values[quote_id] == 420_000  # 4_200 € (qty-10 break), not the qty-1 break
+
+
+def _add_line(
+    seeder: Seeder, org_id: uuid.UUID, quote_id: uuid.UUID, pos: int, total: str | None
+) -> None:
+    """One line item on ``quote_id``; ``total`` None seeds a line with NO break."""
+    part_id = seeder.part(org_id)
+    comp_id = uuid.uuid4()
+    seeder.sql(
+        "INSERT INTO component (id, org_id, part_id, is_root_component) "
+        "VALUES (:id, :org, :p, true)",
+        {"id": str(comp_id), "org": str(org_id), "p": str(part_id)},
+    )
+    seeder.sql(
+        "INSERT INTO quote_item (id, org_id, quote_id, root_component_id, position) "
+        "VALUES (gen_random_uuid(), :org, :q, :c, :pos)",
+        {"org": str(org_id), "q": str(quote_id), "c": str(comp_id), "pos": pos},
+    )
+    if total is not None:
+        seeder.sql(
+            "INSERT INTO component_quantity (id, org_id, component_id, quantity, total_price) "
+            "VALUES (gen_random_uuid(), :org, :c, 1, :tp)",
+            {"org": str(org_id), "c": str(comp_id), "tp": total},
+        )
+
+
+def test_quote_values_partial_pricing_is_unknown_not_understated(
+    tenancy_db: str, seeder: Seeder
+) -> None:
+    """A quote with one priced line and one UNPRICED line (no break) must read as
+    None — never the priced line's total alone, which would understate it and
+    corrupt the value-range signal."""
+    org_id = seeder.org("brief-partial")
+    account_id = seeder.account(org_id, name="Partial Co")
+    quote_id = seeder.quote(org_id, "PP-1", status=QuoteStatus.draft, account_id=account_id)
+    _add_line(seeder, org_id, quote_id, 0, "500.00")  # priced
+    _add_line(seeder, org_id, quote_id, 1, None)  # no break → unpriced
+    values = _run_quote_values(tenancy_db, org_id, [quote_id])
+    assert values[quote_id] is None  # unknown, not 50_000
 
 
 # --------------------------------------------------------------------------- #

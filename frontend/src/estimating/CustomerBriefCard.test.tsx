@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -60,6 +61,34 @@ describe('CustomerBriefCard (M5.10)', () => {
     await renderWithProviders(<CustomerBriefCard quoteId="q4" />);
     expect(await screen.findByTestId('customer-brief-card')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /ausblenden|dismiss/i }));
+    expect(screen.queryByTestId('customer-brief-card')).not.toBeInTheDocument();
+  });
+
+  it('clears the previous customer brief when the quote changes', async () => {
+    // q5 → a brief; q6 → omitted. Switching the prop on the SAME mount must not
+    // leave the previous customer's brief on screen.
+    getCustomerBrief.mockImplementation((id: string) =>
+      id === 'q5'
+        ? Promise.resolve(brief(['Kunde A Info.']))
+        : Promise.resolve({ brief: null, reason: 'insufficient_data' }),
+    );
+
+    function Harness() {
+      const [qid, setQid] = useState('q5');
+      return (
+        <>
+          <button type="button" onClick={() => setQid('q6')}>
+            next
+          </button>
+          <CustomerBriefCard quoteId={qid} />
+        </>
+      );
+    }
+
+    await renderWithProviders(<Harness />);
+    expect(await screen.findByText(/Kunde A Info/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await waitFor(() => expect(screen.queryByText(/Kunde A Info/)).not.toBeInTheDocument());
     expect(screen.queryByTestId('customer-brief-card')).not.toBeInTheDocument();
   });
 });
