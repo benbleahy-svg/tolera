@@ -188,6 +188,24 @@ def test_date_placed_range_filter(seeder: Seeder, app_client: TestClient) -> Non
     assert {r["number"] for r in recent["rows"]} == {"O-B"}
 
 
+def test_date_placed_naive_payload_interpreted_as_utc(
+    seeder: Seeder, app_client: TestClient
+) -> None:
+    """The frontend sends a naive local-day boundary ("YYYY-MM-DDT00:00:00", no
+    offset). It is accepted (not a 422) and interpreted as **UTC** — same result as
+    the offset-aware cutoff — so the timestamptz comparison is unambiguous."""
+    org, user = _org_admin(seeder, "orders-date-naive")
+    _seed_two_accounts_orders(seeder, org)
+    # Strip the offset → the exact shape OrdersPage.buildFilters emits.
+    naive_cutoff = (datetime.now(UTC) - timedelta(days=5)).replace(tzinfo=None).isoformat()
+    assert "+" not in naive_cutoff and not naive_cutoff.endswith("Z")
+    with _as_admin(app_client, org, user) as client:
+        recent = _search(
+            client, filters=[{"field": "created_at", "op": "gte", "value": naive_cutoff}]
+        )
+    assert {r["number"] for r in recent["rows"]} == {"O-B"}
+
+
 def test_free_text_search(seeder: Seeder, app_client: TestClient) -> None:
     org, user = _org_admin(seeder, "orders-search")
     _seed_two_accounts_orders(seeder, org)

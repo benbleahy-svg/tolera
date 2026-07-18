@@ -12,11 +12,12 @@ describe('formatOrderDate', () => {
     expect(out).toContain('2026');
   });
 
-  it('renders a full timestamp as a local date', () => {
-    // 10:00Z lands on the same calendar day for any realistic timezone.
-    const out = formatOrderDate('2026-07-15T10:00:00Z', 'de-DE');
-    expect(out).toMatch(/^15\./);
-    expect(out).toContain('2026');
+  it('renders a full timestamp as the standard local date (German-localized)', () => {
+    // A full timestamp is an instant: its rendered calendar day depends on the
+    // runtime timezone, so assert it delegates to the standard localized parse
+    // rather than pinning a specific day (which would be TZ-flaky).
+    const iso = '2026-07-15T10:00:00Z';
+    expect(formatOrderDate(iso, 'de-DE')).toBe(new Date(iso).toLocaleDateString('de-DE'));
   });
 
   it('renders null / empty as an em dash', () => {

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -109,10 +109,15 @@ def _coerce_scalar(kind: _Kind, value: Any) -> Any:
             if not isinstance(value, str):
                 raise ValueError("expected a UUID string")
             return uuid.UUID(value)
-        # datetime
+        # datetime — the "Date Placed" (created_at) column is timestamptz stored in
+        # UTC. The frontend sends a naive local-day boundary (e.g. "2026-07-01T00:00:00");
+        # attach UTC explicitly so the comparison is unambiguous at the Python layer
+        # (never left to the driver's naive-datetime interpretation). Offset-aware
+        # inputs are respected as given.
         if not isinstance(value, str):
             raise ValueError("expected an ISO-8601 datetime string")
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
+        return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid value for {kind} field: {value!r}") from exc
 

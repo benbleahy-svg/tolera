@@ -10,7 +10,7 @@
  * line when set), matching the ERP-owned model.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -39,17 +39,26 @@ export function OrderDetailPage() {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(() => {
+  useEffect(() => {
     if (!orderId) return;
+    // Clear the previous order/error so a slow fetch never shows a stale order
+    // while navigating between details; ignore a response that resolves after the
+    // orderId changed (cancelled) so it can't overwrite the current view.
+    let active = true;
+    setOrder(null);
+    setError(null);
     api
       .getOrder(orderId)
-      .then(setOrder)
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
+      .then((next) => {
+        if (active) setOrder(next);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof ApiError ? e.message : String(e));
+      });
+    return () => {
+      active = false;
+    };
   }, [api, orderId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const numLocale = orderDateLocale(i18n.language);
   const fmtDate = (iso: string | null) => formatOrderDate(iso, numLocale);
@@ -197,6 +206,16 @@ export function OrderDetailPage() {
           <div className="orders-detail-note">
             <dd>{order.tax_note ?? t('orders.detail.kleinunternehmer')}</dd>
           </div>
+        ) : order.tax_rate_lines && order.tax_rate_lines.length > 0 ? (
+          // Render the persisted per-rate §14 breakdown (a mixed-rate order carries
+          // e.g. 19% + 7%); one aggregate line would misstate it. Read-only — the
+          // figures are the stored breakdown, never recomputed here.
+          order.tax_rate_lines.map((line) => (
+            <div key={line.rate_pct}>
+              <dt>{t('orders.detail.vat', { rate: line.rate_pct.toLocaleString(numLocale) })}</dt>
+              <dd className="orders-num">{money(line.vat_minor)}</dd>
+            </div>
+          ))
         ) : (
           <div>
             <dt>
