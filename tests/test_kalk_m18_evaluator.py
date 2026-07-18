@@ -119,14 +119,15 @@ def test_operation_name_and_notes() -> None:
 
 
 def test_unsupported_context_rejected() -> None:
-    # add_on graduated at M1.11; operation_generation stays out until M4
-    result = evaluate("PRICE = 1", context_type="operation_generation")
+    # every context has graduated (operation_generation last, M4.10) — the
+    # guard now covers a genuinely unknown context string
+    result = evaluate("PRICE = 1", context_type="no_such_context")
     assert "invalid_context" in {e.code for e in result.errors}
 
 
 def test_check_rejects_unsupported_context() -> None:
     """CHECK must never bless a context evaluate() would refuse to run."""
-    result = check("PRICE = 1", context_type="operation_generation")
+    result = check("PRICE = 1", context_type="no_such_context")
     assert not result.ok
     assert "invalid_context" in {e.code for e in result.errors}
 

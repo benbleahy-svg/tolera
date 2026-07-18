@@ -603,6 +603,14 @@ async def run_interrogation(
             # both the fresh and cache-hit paths, so a re-run can't go stale.
             part.geometry_vector = build_geometry_vector(result)
             await _apply_to_geometry(session, run, result)
+            # M4.10 persistent geometry memory (spec #assembly): a signature
+            # the org has converted before auto-tags this part's manufactured
+            # child components as purchased — no re-convert.
+            from .purchased_components import apply_purchased_memory_by_hash
+
+            await apply_purchased_memory_by_hash(
+                session, org_id=run.org_id, part_id=part.id, geom_hash=geom_hash
+            )
             return {
                 "run_id": str(run.id),
                 "part_id": str(part.id),

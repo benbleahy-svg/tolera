@@ -394,6 +394,7 @@ async def seed_configure_catalog(
     templates_created = await _seed_email_templates(session, org_id)
     rules_created = await _seed_rules(session, org_id)
     interrogation_profiles_created = await _seed_interrogation_profiles(session, org_id)
+    await _seed_oem_products(session, org_id)
 
     await session.flush()
     return ConfigureSeedResult(
@@ -1024,6 +1025,39 @@ _MILLING_MATERIAL_VARIANTS: list[tuple[str, str, dict[str, float]]] = [
         },
     ),
 ]
+
+
+# ---------------------------------------------------------------------------
+# §M4.10 — mock OEM catalog (spec #assembly Smart Match; M6 Würth feeds the
+# same table with real data). Idempotent by (brand, oem_part_number).
+# ---------------------------------------------------------------------------
+_OEM_PRODUCTS: tuple[tuple[str, str, dict[str, str]], ...] = (
+    ("PEM", "F-440-1", {"typ": "Einpressmutter", "gewinde": "M4"}),
+    ("PEM", "CLS-440-2", {"typ": "Einpressmutter", "gewinde": "M4", "material": "1.4301"}),
+    ("PEM", "FH-M5-10", {"typ": "Einpressbolzen", "gewinde": "M5"}),
+    ("Würth", "0965 5 X 10", {"typ": "Zylinderschraube DIN 912", "gewinde": "M5"}),
+    ("Würth", "0407 6", {"typ": "Sechskantmutter DIN 934", "gewinde": "M6"}),
+)
+
+
+async def _seed_oem_products(session: AsyncSession, org_id: uuid.UUID) -> int:
+    from .models import OemProduct
+
+    existing = {
+        (row.brand, row.oem_part_number)
+        for row in (
+            await session.scalars(select(OemProduct).where(OemProduct.org_id == org_id))
+        ).all()
+    }
+    created = 0
+    for brand, oem_part_number, specs in _OEM_PRODUCTS:
+        if (brand, oem_part_number) in existing:
+            continue
+        session.add(
+            OemProduct(org_id=org_id, brand=brand, oem_part_number=oem_part_number, specs=specs)
+        )
+        created += 1
+    return created
 
 
 async def _seed_interrogation_profiles(session: AsyncSession, org_id: uuid.UUID) -> int:

@@ -27,6 +27,7 @@ import {
 import { CreateRuleModal, type NewRule } from '../review/CreateRuleModal';
 import { useHasPermission } from '../session/session';
 import { AddOnsSection } from './AddOnsSection';
+import AssemblyComponentsSection from './AssemblyComponentsSection';
 import { CommunicationsSection } from './CommunicationsSection';
 import { BulkCreateDialog } from './BulkCreateDialog';
 import { useEstimatingApi } from './api';
@@ -85,6 +86,7 @@ export function EstimatingPage() {
   const [bomStatus, setBomStatus] = useState<BomStatus | null>(null);
   const [bomBuilderOpen, setBomBuilderOpen] = useState(false);
   const [bomPublishedToast, setBomPublishedToast] = useState(false);
+  const [bomPublishCount, setBomPublishCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // The active line item is derived SYNCHRONOUSLY from the URL (M5.0) — never a
@@ -661,12 +663,29 @@ export function EstimatingPage() {
           onPublished={() => {
             setBomBuilderOpen(false);
             setBomPublishedToast(true);
+            setBomPublishCount((n) => n + 1);
             bomApi
               .getBomStatus(quoteItemId)
               .then(setBomStatus)
               .catch(() => undefined);
           }}
           onClose={() => setBomBuilderOpen(false)}
+        />
+      )}
+
+      {/* M4.10 (spec #assembly): the Assembly Components section — renders
+          nothing when the item has no published children. */}
+      {quoteItemId && (
+        <AssemblyComponentsSection
+          api={api}
+          quoteItemId={quoteItemId}
+          editable={editable}
+          formatMoney={formatMoney}
+          refreshToken={bomPublishCount}
+          onChanged={() => {
+            if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+            loadPricing();
+          }}
         />
       )}
 

@@ -20,9 +20,12 @@ Semantics encoded here (KB ``The-BOM-Builder``; DOMAIN-MODEL §1):
     re-edit); parts that vanish from the tree lose their child component and
     are soft-deleted when nothing else references them (ASSUMED — cheap to
     reverse; the alternative is orphan rows polluting the Part Library).
-  * **Purchased rows publish unassigned** — the purchased-component library
-    lands in M4.10 (DECISIONS.md 2026-07-17); CHECK reports them as a notice,
-    never an error.
+  * **Purchased rows link to the PC library** (M4.10, the D34 tightening —
+    KB: purchased rows must be tied to a library record before publish):
+    an explicit ``purchased_component_id``, or an exact part-number auto-link
+    (KB ``purchased-components``). While the org's library is EMPTY an
+    unassigned row stays a notice (the pre-library M4.9 flow keeps working);
+    once the library has records it becomes a blocking error.
 """
 
 from __future__ import annotations
@@ -92,6 +95,8 @@ class BomRow(BaseModel):
     qty: int = 1
     primary_file_id: uuid.UUID | None = None
     supporting_file_ids: list[uuid.UUID] = Field(default_factory=list)
+    #: M4.10: the PC-library record a purchased row is tied to (D34 tightening)
+    purchased_component_id: uuid.UUID | None = None
     children: list[BomRow] = Field(default_factory=list)
 
 
@@ -377,19 +382,93 @@ def validate_doc(
                     row_ids=[row.row_id],
                 )
             )
-        if row.row_type == "purchased":
-            notices.append(
+    return errors, notices
+
+
+async def resolve_purchased_links(
+    session: AsyncSession, doc: BomDoc
+) -> tuple[dict[str, uuid.UUID], list[BomIssue], list[BomIssue]]:
+    """Tie purchased rows to PC-library records (M4.10, the D34 tightening).
+
+    Per row: an explicit ``purchased_component_id`` (must be a live library
+    record), else an exact part-number auto-link (KB ``purchased-components``:
+    a child whose part number matches a library entry converts automatically).
+    An unresolved row is a blocking **error** once the org's library has
+    records, a **notice** while it is empty (the pre-library flow)."""
+    from .models import PurchasedComponent
+    from .purchased_components import auto_link_purchased_by_name
+
+    links: dict[str, uuid.UUID] = {}
+    errors: list[BomIssue] = []
+    notices: list[BomIssue] = []
+    purchased_rows = [r for r in _walk(doc.root) if r.row_type == "purchased"]
+    if not purchased_rows:
+        return links, errors, notices
+
+    library_has_records = (
+        await session.scalar(
+            select(PurchasedComponent.id).where(PurchasedComponent.deleted_at.is_(None)).limit(1)
+        )
+    ) is not None
+
+    for row in purchased_rows:
+        if row.purchased_component_id is not None:
+            pc = await session.get(PurchasedComponent, row.purchased_component_id)
+            if pc is None or pc.deleted_at is not None:
+                errors.append(
+                    BomIssue(
+                        code="purchased_link_invalid",
+                        message="The linked purchased component no longer exists.",
+                        row_ids=[row.row_id],
+                    )
+                )
+            else:
+                links[row.row_id] = pc.id
+            continue
+        names = {n for n in (row.part_number,) if n}
+        auto = await auto_link_purchased_by_name(session, names=names)
+        if auto is not None:
+            links[row.row_id] = auto.id
+            continue
+        issue = BomIssue(
+            code="purchased_unassigned",
+            message=(
+                "Kaufteile müssen mit einem Eintrag der Kaufteil-Bibliothek "
+                "verknüpft werden (Zeile zuordnen oder neu anlegen)."
+                if library_has_records
+                else "Purchased parts are not linked to a component library record yet."
+            ),
+            row_ids=[row.row_id],
+        )
+        (errors if library_has_records else notices).append(issue)
+
+    # linked rows (same part#+rev = ONE part) must agree on the library record
+    # — otherwise commit order would silently pick the winner (CodeRabbit)
+    by_key: dict[tuple[str, str], set[uuid.UUID]] = {}
+    key_rows: dict[tuple[str, str], list[str]] = {}
+    for row in purchased_rows:
+        pc_id = links.get(row.row_id)
+        if pc_id is None:
+            continue
+        key = _part_key(row)
+        if key is None:
+            continue
+        by_key.setdefault(key, set()).add(pc_id)
+        key_rows.setdefault(key, []).append(row.row_id)
+    for key, pc_ids in by_key.items():
+        if len(pc_ids) > 1:
+            errors.append(
                 BomIssue(
-                    code="purchased_unassigned",
+                    code="purchased_link_conflict",
                     message=(
-                        "Purchased parts are not linked to a component library "
-                        "record yet (arrives with M4.10)."
+                        "Verknüpfte Zeilen desselben Teils zeigen auf "
+                        "unterschiedliche Kaufteil-Einträge."
                     ),
-                    row_ids=[row.row_id],
+                    row_ids=key_rows[key],
                 )
             )
 
-    return errors, notices
+    return links, errors, notices
 
 
 # --------------------------------------------------------------------------- #
@@ -564,6 +643,9 @@ class PublishedNodeOut(BaseModel):
 
     node_id: uuid.UUID
     part_id: uuid.UUID
+    #: M4.10: the quoting-layer component for this part (the assembly
+    #: components section + Smart Match navigate by component id)
+    component_id: uuid.UUID | None
     part_number: str | None
     revision: str | None
     description: str | None
@@ -887,6 +969,9 @@ async def check_bom(
     child_nodes, parts, files, _findings, _picked = await _builder_inputs(session, ctx)
     del child_nodes, parts
     errors, notices = validate_doc(doc, set(files.keys()))
+    _links, pc_errors, pc_notices = await resolve_purchased_links(session, doc)
+    errors.extend(pc_errors)
+    notices.extend(pc_notices)
     return CheckOut(errors=errors, notices=notices, unique_parts=unique_part_count(doc))
 
 
@@ -917,6 +1002,9 @@ async def publish_bom(
     doc = await _resolve_doc(session, ctx, body.payload if body else None)
     child_nodes, parts, files, _findings, _picked = await _builder_inputs(session, ctx)
     errors, notices = validate_doc(doc, set(files.keys()))
+    purchased_links, pc_errors, pc_notices = await resolve_purchased_links(session, doc)
+    errors.extend(pc_errors)
+    notices.extend(pc_notices)
     if errors:
         raise AppError(
             "bom_invalid",
@@ -928,7 +1016,9 @@ async def publish_bom(
             },
         )
 
-    tree = await _commit_tree(session, ctx, doc, child_nodes, parts, files)
+    tree = await _commit_tree(
+        session, ctx, doc, child_nodes, parts, files, purchased_links=purchased_links
+    )
     await session.execute(sa_delete(BomDraft).where(BomDraft.quote_item_id == ctx.quote_item.id))
     await session.flush()
     return PublishOut(tree=tree)
@@ -968,6 +1058,8 @@ async def _commit_tree(
     child_nodes: list[Node],
     parts: dict[uuid.UUID, Part],
     files: dict[uuid.UUID, PartFile],
+    *,
+    purchased_links: dict[str, uuid.UUID] | None = None,
 ) -> PublishedNodeOut:
     org_id = ctx.quote_item.org_id
     root_part = ctx.root_part
@@ -1065,6 +1157,46 @@ async def _commit_tree(
             session.add(component)
         component.obtain_method = part.obtain_method
         component.is_assembly = part.is_assembly
+        if part.obtain_method is not ObtainMethod.purchased and (
+            component.purchased_component_id is not None
+        ):
+            # republished as manufactured: the stale library link and its
+            # frozen price must not keep pricing the row (CodeRabbit)
+            component.purchased_component_id = None
+            component.piece_price = None
+
+    # ---- purchased rows: tie components to their PC-library records --------- #
+    # (M4.10, D34 tightening) — the frozen-at-publish piece price becomes the
+    # component's purchased cost input (E4-d; DECISIONS.md 2026-07-09 (4)).
+    if purchased_links:
+        from .models import PurchasedComponent
+
+        pc_ids = set(purchased_links.values())
+        pcs = {
+            pc.id: pc
+            for pc in (
+                await session.scalars(
+                    select(PurchasedComponent).where(PurchasedComponent.id.in_(pc_ids))
+                )
+            ).all()
+        }
+        for row_id, pc_id in purchased_links.items():
+            linked_part = part_for_row.get(row_id)
+            pc = pcs.get(pc_id)
+            if linked_part is None or pc is None:
+                continue
+            linked_component = existing_components.get(linked_part.id)
+            if linked_component is None:
+                linked_component = await session.scalar(
+                    select(Component).where(
+                        Component.part_id == linked_part.id,
+                        Component.is_root_component.is_(False),
+                    )
+                )
+            if linked_component is None:  # pragma: no cover — created just above
+                continue
+            linked_component.purchased_component_id = pc.id
+            linked_component.piece_price = pc.piece_price
 
     # ---- root part/component take the root row's data ----------------------- #
     # The grid is the authority for the root's identity: publishing writes what
@@ -1077,6 +1209,25 @@ async def _commit_tree(
     root_part.obtain_method = ObtainMethod.manufactured
     ctx.root_component.is_assembly = root_part.is_assembly
     ctx.root_component.obtain_method = ObtainMethod.manufactured
+
+    # M4.10 (spec #assembly "Assembly | Parent-Level"): an assembly root
+    # without a process is assigned the built-in parent-level process and its
+    # assembly-labour router (Assembly | Manufactured + Shipping Prep — the
+    # ASSEMBLY/PER-QUOTE-ITEM-flagged template rows). Never overrides a
+    # process the estimator already chose.
+    if root_part.is_assembly and ctx.root_component.process_id is None:
+        from .models import Process
+        from .routing import generate_router
+
+        parent_level = await session.scalar(
+            select(Process).where(
+                Process.name == "Assembly | Parent-Level", Process.deleted_at.is_(None)
+            )
+        )
+        if parent_level is not None:
+            ctx.root_component.process_id = parent_level.id
+            await session.flush()
+            await generate_router(session, org_id, ctx.root_component)
 
     # ---- rebuild nodes (order = sibling position; flat qty stays derived) --- #
     await session.execute(
@@ -1218,6 +1369,17 @@ async def _commit_tree(
         assert node.parent_node_id is not None  # created as children above
         children_of.setdefault(node.parent_node_id, []).append((node, row, part))
 
+    tree_part_ids = {part.id for _n, _r, part in created_nodes} | {root_part.id}
+    component_by_part: dict[uuid.UUID, uuid.UUID] = dict(
+        (
+            await session.execute(
+                select(Component.part_id, Component.id).where(Component.part_id.in_(tree_part_ids))
+            )
+        )
+        .tuples()
+        .all()
+    )
+
     def build_out(
         node: Node, row: BomRow, part: Part, *, multiplier: int, is_root: bool
     ) -> PublishedNodeOut:
@@ -1225,6 +1387,7 @@ async def _commit_tree(
         return PublishedNodeOut(
             node_id=node.id,
             part_id=part.id,
+            component_id=component_by_part.get(part.id),
             part_number=part.part_number,
             revision=part.revision,
             description=part.description,

@@ -66,6 +66,9 @@ class ContextData:
     custom_attributes: dict[str, Any] = field(default_factory=dict)
     children: list[KalkObject] = field(default_factory=list)
     descendants: list[KalkObject] = field(default_factory=list)  # recursive flat BOM
+    # operation-cost context (M4.10) — the generate_operation() payload this
+    # operation was created with (KB custom-operation-generation)
+    operation_properties: dict[str, Any] = field(default_factory=dict)
     # add-on context (KALK-REFERENCE §11.4 / §7 price dictionary; M1.11) —
     # effective prices of the add-on cells above the active one, plus the
     # --required_add_on-- / --non_required_add_on-- accumulators
