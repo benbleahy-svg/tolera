@@ -272,6 +272,8 @@ async def checkout(
     # must 401 before any business rule, so this check follows the token check).
     if not payload.selections:
         raise _invalid("Select at least one line item to place an order.")
+    if len({s.quote_item_id for s in payload.selections}) != len(payload.selections):
+        raise _invalid("Each line item may be selected only once.")
 
     sessionmaker: async_sessionmaker[AsyncSession] = request.app.state.sessionmaker
     now = datetime.now(UTC)

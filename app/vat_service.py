@@ -244,9 +244,11 @@ async def resolve_order_tax(
         return _kleinunternehmer_breakdown(net, currency, customer_ust_id_nr=customer_id), None
 
     buyer_country = parse_vat_country(buyer_ust_id_nr)
-    if not _is_intra_eu_b2b(shop_country, buyer_country):
-        # Domestic (incl. same-country VAT-IDs, CH shops, non-EU buyers): no
-        # cross-border reverse-charge question → VIES is never consulted.
+    has_supplier_id = bool(supplier_ust_id_nr and supplier_ust_id_nr.strip())
+    if not (_is_intra_eu_b2b(shop_country, buyer_country) and has_supplier_id):
+        # Domestic (incl. same-country VAT-IDs, CH shops, non-EU buyers, and a
+        # shop with no USt-IdNr — which may not issue a §13b invoice, §14 UStG):
+        # no cross-border reverse-charge question → VIES is never consulted.
         return _domestic_breakdown(
             net, shop_country, currency, customer_ust_id_nr=customer_id
         ), None

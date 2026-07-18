@@ -12,14 +12,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+
+from app.models import OrgCountry
 from app.vat_service import (
     ViesResult,
     format_money,
     parse_vat_country,
     resolve_order_tax,
 )
-
-from app.models import OrgCountry
 
 _NOW = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
 
@@ -156,6 +156,26 @@ async def test_eu_b2b_valid_vies_is_reverse_charge() -> None:
     assert tb.customer_ust_id_nr == "ATU12345678"
     assert vies.calls == ["ATU12345678"]
     assert vres is not None and vres.valid is True
+
+
+@pytest.mark.asyncio
+async def test_reverse_charge_needs_a_supplier_vat_id() -> None:
+    # A shop with no USt-IdNr may not issue a §13b invoice (§14 UStG requires the
+    # supplier VAT-ID) → fall back to domestic VAT, and never consult VIES.
+    vies = _StubVies(valid=True)
+    tb, vres = await resolve_order_tax(
+        net=Decimal("1000.00"),
+        shop_country=OrgCountry.DE,
+        currency="EUR",
+        is_kleinunternehmer=False,
+        buyer_ust_id_nr="ATU12345678",
+        supplier_ust_id_nr=None,
+        vies=vies,
+    )
+    assert tb.reverse_charge is False
+    assert tb.vat_minor == 19000
+    assert vies.calls == []
+    assert vres is None
 
 
 @pytest.mark.asyncio

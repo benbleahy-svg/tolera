@@ -221,6 +221,27 @@ def test_checkout_rejects_unknown_quantity(seeder: Seeder, app_client: TestClien
     assert res.status_code == 422, res.text
 
 
+def test_checkout_rejects_duplicate_line_selection(seeder: Seeder, app_client: TestClient) -> None:
+    org, user = _org_admin(seeder, "checkout-dup")
+    with _as_admin(app_client, org, user) as client:
+        qid, _ = _priced_quote(client)
+    _, token = _mint(seeder, app_client, org, qid)
+    ids = _first_line_ids(_portal(app_client, token))
+
+    res = app_client.post(
+        f"/api/public/quotes/{token}/checkout",
+        json={
+            "selections": [
+                {"quote_item_id": ids["quote_item_id"], "quantity": ids["quantity"]},
+                {"quote_item_id": ids["quote_item_id"], "quantity": ids["quantity"]},
+            ],
+            "po_number": "PO-DUP",
+            "shipping_method": "no_shipping_fees",
+        },
+    )
+    assert res.status_code == 422, res.text
+
+
 def test_checkout_blocked_on_soft_expired_quote(seeder: Seeder, app_client: TestClient) -> None:
     org, user = _org_admin(seeder, "checkout-expired")
     with _as_admin(app_client, org, user) as client:
