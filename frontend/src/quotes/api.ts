@@ -9,6 +9,7 @@ import { useAuth } from '@clerk/clerk-react';
 
 import { apiFetch, type TokenGetter } from '../api/client';
 import type {
+  CustomerBriefResponse,
   QuoteSearchRequest,
   QuoteSearchResponse,
   SavedView,
@@ -35,6 +36,8 @@ export interface QuotesApi {
   updateSavedView: (id: string, body: Partial<SavedViewCreate>) => Promise<SavedView>;
   deleteSavedView: (id: string) => Promise<void>;
   getTriageBrief: (quoteId: string) => Promise<TriageBriefResponse>;
+  /** M5.10 — on-demand Customer Intelligence Brief for the send composer. */
+  getCustomerBrief: (quoteId: string) => Promise<CustomerBriefResponse>;
   /** M5.0 — Bulk Refresh Pricing over a quotes-list multi-selection. */
   bulkRefreshPricing: (quoteIds: string[]) => Promise<BulkRefreshResult>;
 }
@@ -55,6 +58,8 @@ export function useQuotesApi(): QuotesApi {
         apiFetch(`/api/saved-views/${id}`, token, { method: 'DELETE' }),
       getTriageBrief: (quoteId) =>
         apiFetch(`/api/quotes/${quoteId}/triage-brief`, token),
+      getCustomerBrief: (quoteId) =>
+        apiFetch(`/api/quotes/${quoteId}/customer-brief`, token),
       bulkRefreshPricing: (quoteIds) =>
         apiFetch('/api/quotes/bulk-refresh-pricing', token, {
           method: 'POST',

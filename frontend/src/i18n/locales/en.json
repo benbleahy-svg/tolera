@@ -1122,6 +1122,10 @@
       "facility_phone": "Facility phone"
     }
   },
+  "customerBrief": {
+    "title": "About {{account}}",
+    "dismiss": "Dismiss customer brief"
+  },
   "sendComposer": {
     "title": "Who will get this quote?",
     "send_quote": "Send quote",

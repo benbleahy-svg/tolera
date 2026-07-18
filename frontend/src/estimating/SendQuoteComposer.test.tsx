@@ -31,6 +31,12 @@ vi.mock('../settings/api', () => ({
   useEmailTemplatesApi: () => templatesApi,
 }));
 
+// The M5.10 Customer Intelligence Brief card mounts in the composer; stub its
+// API so the send-composer tests stay focused (the card omits itself on null).
+vi.mock('../quotes/api', () => ({
+  useQuotesApi: () => ({ getCustomerBrief: vi.fn().mockResolvedValue({ brief: null, reason: 'insufficient_data' }) }),
+}));
+
 function template(over: Partial<EmailTemplate> = {}): EmailTemplate {
   return {
     id: 'qt-1',

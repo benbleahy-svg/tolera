@@ -58,6 +58,11 @@ class AiFlags:
         """The M4.12 gate: master first, then the requote-diff flag."""
         return self.master_enabled and self.requote_diff_enabled
 
+    @property
+    def customer_brief_active(self) -> bool:
+        """The M5.10 gate: master first, then the customer-brief flag."""
+        return self.master_enabled and self.customer_brief_enabled
+
 
 #: All-enabled default returned when an org has no ``org_ai_settings`` row.
 DEFAULT_AI_FLAGS = AiFlags()

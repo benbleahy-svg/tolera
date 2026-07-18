@@ -125,3 +125,21 @@ export interface TriageBriefResponse {
   brief: TriageBrief | null;
   ai?: { enabled: boolean; reason: string };
 }
+
+// --- M5.10 Customer Intelligence Brief (spec #ai-customer-brief) ---
+export interface CustomerBrief {
+  version: number;
+  prompt_version: string;
+  generated_at: string;
+  account_name: string;
+  /** 2-3 German bullets synthesised on demand; never persisted. */
+  bullets: string[];
+  /** The deterministic aggregate the bullets were written from (transparency). */
+  signals: Record<string, unknown>;
+}
+
+export interface CustomerBriefResponse {
+  brief: CustomerBrief | null;
+  /** Why the card is absent when brief is null (ai_disabled, insufficient_data, …). */
+  reason: string;
+}

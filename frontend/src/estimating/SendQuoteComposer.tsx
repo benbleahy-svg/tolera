@@ -14,6 +14,7 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useEmailApi, useEmailTemplatesApi } from '../settings/api';
 import type { EmailTemplate, SendQuoteBody, SendQuotePreview } from '../settings/types';
+import { CustomerBriefCard } from './CustomerBriefCard';
 
 type RecipientType = 'to' | 'cc' | 'bcc';
 
@@ -154,6 +155,9 @@ export function SendQuoteComposer({ quoteId, onClose, onSent }: Props) {
             {error}
           </div>
         )}
+
+        {/* AI Feature 5 (M5.10): "About this customer" brief, above To/CC/BCC. */}
+        <CustomerBriefCard quoteId={quoteId} />
 
         <ul className="recipient-list">
           {recipients.map((r, i) => (

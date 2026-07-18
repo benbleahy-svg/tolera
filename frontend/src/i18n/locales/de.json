@@ -1122,6 +1122,10 @@
       "facility_phone": "Standort Telefon"
     }
   },
+  "customerBrief": {
+    "title": "Über {{account}}",
+    "dismiss": "Kundeninfo ausblenden"
+  },
   "sendComposer": {
     "title": "Wer erhält dieses Angebot?",
     "send_quote": "Angebot senden",
