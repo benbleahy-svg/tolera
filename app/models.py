@@ -3175,3 +3175,103 @@ class CustomInterrogationOperationDef(Base):
     operation_def_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     org_id: Mapped[uuid.UUID] = _org_fk()
     created_at: Mapped[datetime] = _ts()
+
+
+# --------------------------------------------------------------------------- #
+# M5.1 — Digital Quote buyer portal (unauthenticated token access)
+# --------------------------------------------------------------------------- #
+class QuoteTokenScope(enum.StrEnum):
+    """What external surface a :class:`QuoteToken` unlocks (spec ``#digitalquote``
+    build-implications: "unified — covers all external access").
+
+    Only ``buyer_portal`` is honoured in M5.1 — the buyer opens the read-only
+    quote at ``/q/:token`` with no login. ``vendor_share`` (file-scoped sourcing
+    links) and ``vendor_rfq`` (outside-process RFQ) are **reserved for M6**; the
+    value exists here so the token table is minted once and never reshaped, but
+    the M5.1 service mints/accepts only ``buyer_portal``. Values are append-only."""
+
+    buyer_portal = "buyer_portal"
+    vendor_share = "vendor_share"
+    vendor_rfq = "vendor_rfq"
+
+
+_quote_token_scope_enum = Enum(QuoteTokenScope, name="quote_token_scope", create_type=False)
+
+
+class QuoteToken(Base):
+    """A per-recipient external-access credential for a quote (spec ``#digitalquote``).
+
+    The wire form is a **signed JWT** whose ``exp`` claim is deliberately omitted:
+    expiry is a *soft* application-layer property (a passed ``quote.expiration_date``
+    shows an EXPIRED badge but the portal stays reachable — DECISIONS quote-lifecycle
+    + spec ``#digital-quote-settings`` "Discrepancy to note"), so the token itself must
+    never hard-expire. The JWT carries ``org``/``quote``/``jti``/``scope``; the signed
+    ``org`` claim is what lets the public endpoint open the org-scoped RLS session
+    before any DB read. ``id`` is the JWT ``jti`` — the row is the authority for
+    revocation (``revoked_at``), which the signature alone cannot express.
+
+    ``quote_id`` is nullable at the DB (the unified entity also serves the file-only
+    vendor-share scope in M6) but the service enforces NOT NULL for ``buyer_portal``.
+    ``file_permissions`` is reserved for the vendor scopes (M6). The
+    ``external_share_id`` / ``vendor_rfq_recipient_id`` columns the spec's unified
+    sketch lists are **deferred** to M6 with their target tables (the M1.4 precedent:
+    no speculative column without a FK target)."""
+
+    __tablename__ = "quote_token"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_quote_token_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_quote_token_quote_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_quote_token_org_quote", "org_id", "quote_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    scope: Mapped[QuoteTokenScope] = mapped_column(_quote_token_scope_enum, nullable=False)
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    recipient_email: Mapped[str | None] = mapped_column(String)
+    #: The signed JWT string — stored so Settings can list/copy a recipient's link
+    #: (and so a leaked/rotated secret is auditable); the row stays authoritative.
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Reserved for vendor-share / vendor-RFQ file scoping (M6); NULL for buyer_portal.
+    file_permissions: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+
+class QuoteTokenAccess(Base):
+    """Append-only access log for :class:`QuoteToken` loads (spec ``#digitalquote``
+    "Access is logged (feeds the CUI audit log)").
+
+    One row per successful portal load — the minimal export-control audit trail M5.1
+    owns; full CUI/GDPR archival hardening is the M6 compliance pass. Org-scoped +
+    RLS like every tenant table; CASCADE with the token."""
+
+    __tablename__ = "quote_token_access"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "quote_token_id"],
+            ["quote_token.org_id", "quote_token.id"],
+            name="fk_quote_token_access_token_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_quote_token_access_org_token", "org_id", "quote_token_id", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_token_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: Truncated/hashed at the edge is a later concern — we store the observed
+    #: client IP + user-agent as the audit record (never customer print content).
+    ip_address: Mapped[str | None] = mapped_column(String)
+    user_agent: Mapped[str | None] = mapped_column(String)
+    occurred_at: Mapped[datetime] = _ts()

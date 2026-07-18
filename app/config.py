@@ -172,6 +172,29 @@ class Settings(BaseSettings):
     # Inbound sync cadence (spec: "Celery task every 5 min").
     email_sync_interval_seconds: int = 300
 
+    # --- Digital Quote buyer portal (M5.1 — spec #digitalquote) ---
+    # HMAC secret the app both mints and verifies the per-recipient QuoteToken
+    # JWT with (HS256). The token deliberately omits ``exp`` (soft app-layer
+    # expiry), so the signature is the whole credential — an unset secret must
+    # FAIL CLOSED outside dev/test (the clerk/mailgun/email precedent), never
+    # silently sign with a blank key. Delivered as env (Infisical in prod).
+    quote_token_secret: str = ""
+
+    def resolve_quote_token_secret(self) -> str:
+        """The HMAC key for buyer-portal tokens. Fail closed: outside dev/test a
+        blank secret is a misconfiguration, not a fallback — an unsigned/blank-key
+        token would let anyone forge portal access to any quote."""
+        if self.quote_token_secret:
+            return self.quote_token_secret
+        if self.environment.lower() in {"development", "test"}:
+            # A fixed, non-secret dev key so the app boots and tests run without env.
+            # ≥32 bytes so HS256 doesn't warn; never used outside dev/test.
+            return "dev-insecure-quote-token-secret-do-not-use-in-production"
+        raise ValueError(
+            "QUOTE_TOKEN_SECRET must be set outside development/test — buyer-portal "
+            "tokens are signed with it and must never use a blank/default key."
+        )
+
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"
     default_locale: str = "de-DE"

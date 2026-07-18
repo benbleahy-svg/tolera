@@ -16,6 +16,7 @@ from .accounts import accounts_router, contacts_router
 from .addons import addons_router
 from .bom_builder import bom_router
 from .bulk_create import bulk_create_router
+from .buyer_portal import buyer_router
 from .collab import collab_router
 from .config import Settings, get_settings
 from .config_completeness import config_completeness_router
@@ -114,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rule_suggest_router)
     app.include_router(requote_router)
     app.include_router(assembly_router)
+    app.include_router(buyer_router)
 
     return app
 
