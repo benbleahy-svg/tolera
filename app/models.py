@@ -2218,22 +2218,57 @@ class WorkflowStepDef(Base):
     updated_at: Mapped[datetime] = _updated_ts()
 
 
+class EmailTemplateType(enum.StrEnum):
+    """The three composer template families (spec ``#settings`` Email Templates,
+    DemoH 08): the send-quote email, the order-shipment email, and the order-refund
+    email. Each family may hold many named templates, at most one flagged DEFAULT."""
+
+    quote_send = "quote_send"
+    order_shipment = "order_shipment"
+    order_refund = "order_refund"
+
+
+_email_template_type_enum = Enum(EmailTemplateType, name="email_template_type", create_type=False)
+
+
 class EmailTemplate(Base):
-    """A customer-facing email template (SEED-AND-FIXTURES §7 — German-first,
-    keyed ``quote_sent`` / ``rfq_received`` / …). Seeded in M1.12; the M5 send
-    flow consumes and edits them."""
+    """A customer-facing email template (spec ``#settings`` Email Templates —
+    German-first). Per-type (``quote_send`` / ``order_shipment`` / ``order_refund``),
+    each with a display ``name`` and an optional DEFAULT flag; the body carries the
+    ``%%FIELD%%`` merge fields the send composer resolves (M5.5). Seeded in M1.12 and
+    extended by M5.5; the send flow consumes and edits them.
+
+    ``key`` is the legacy M1.12 discriminator, kept nullable for provenance — new
+    templates are addressed by ``(template_type, is_default)`` and ``name``, not key."""
 
     __tablename__ = "email_template"
     __table_args__ = (
-        UniqueConstraint("org_id", "key", "locale", name="uq_email_template_org_key_locale"),
+        # At most one DEFAULT template per (type, locale) in an org — a partial
+        # unique index (see migration 0043); listed here for autogenerate parity.
+        Index(
+            "uq_email_template_default_per_type",
+            "org_id",
+            "template_type",
+            "locale",
+            unique=True,
+            postgresql_where=text("is_default"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = _org_fk()
-    key: Mapped[str] = mapped_column(String, nullable=False)
+    template_type: Mapped[EmailTemplateType] = mapped_column(
+        _email_template_type_enum, nullable=False, server_default=EmailTemplateType.quote_send.value
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False, server_default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    #: Legacy M1.12 key (``quote_sent`` / ``rfq_received`` / …) — nullable provenance.
+    key: Mapped[str | None] = mapped_column(String)
     locale: Mapped[str] = mapped_column(String, nullable=False, server_default="de-DE")
     subject: Mapped[str] = mapped_column(String, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    #: The user who last saved the template (``app_user.id``; NULL for seeded rows).
+    last_edited_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -3469,3 +3504,40 @@ class OrderLine(Base):
     add_ons: Mapped[list[Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+# --------------------------------------------------------------------------- #
+# Domain-event outbox (M5.5 — INTEGRATION-API-CONTRACT event catalog)
+# --------------------------------------------------------------------------- #
+
+
+class DomainEvent(Base):
+    """A persisted domain event on the org's outbox (M5.5).
+
+    The send-quote composer writes a ``quote.sent`` row in the same transaction as
+    the Sent lifecycle transition — the durable seam M3.5's ``send_email`` note
+    deferred to "the M5 send-quote composer". This is the *emit* side only: the
+    signed **webhook delivery** off this outbox (INTEGRATION-API-CONTRACT webhook
+    round-trip) is the M6 dispatcher's job, which reads rows where
+    ``delivered_at IS NULL``. Org-scoped + RLS like every tenant table."""
+
+    __tablename__ = "domain_event"
+    __table_args__ = (
+        Index("ix_domain_event_org_type", "org_id", "event_type", "occurred_at"),
+        Index(
+            "ix_domain_event_undelivered",
+            "org_id",
+            "occurred_at",
+            postgresql_where=text("delivered_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    #: Dotted event name from the catalog, e.g. ``quote.sent``.
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    #: The event payload (ids + summary fields) a subscriber's webhook receives.
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    #: Set by the (M6) webhook dispatcher once every subscriber has been notified.
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    occurred_at: Mapped[datetime] = _ts()

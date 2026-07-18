@@ -24,6 +24,7 @@ order is an *Auftragsbestätigung* → the full §14 block from stored data.
 from __future__ import annotations
 
 import base64
+import json
 import mimetypes
 import re
 import uuid
@@ -514,10 +515,10 @@ async def _resolve_preparers(
     session: AsyncSession, quote: Quote, settings: DisplaySettings
 ) -> list[dict[str, Any]]:
     """The quote's preparer contact block(s) per the Preparer & Contact radio
-    (Salesperson / Estimator / Both). Reads the quote's assigned users; a person
-    who is both salesperson and estimator is shown once."""
-    from .models import AppUser
-
+    (Salesperson / Estimator / Both). Identities come through ``app_org_members()``
+    — the scoped ``SECURITY DEFINER`` view (M0.2) the restricted role must use for
+    ``app_user`` (a direct read is ``permission denied``); a person who is both
+    salesperson and estimator is shown once."""
     wants_sales = settings.preparer in (PreparerDisplay.salesperson, PreparerDisplay.both)
     wants_est = settings.preparer in (PreparerDisplay.estimator, PreparerDisplay.both)
     entries: list[tuple[str, uuid.UUID]] = []
@@ -525,6 +526,14 @@ async def _resolve_preparers(
         entries.append(("Vertrieb", quote.salesperson_id))
     if wants_est and quote.estimator_id is not None:
         entries.append(("Kalkulation", quote.estimator_id))
+    if not entries:
+        return []
+
+    from sqlalchemy import text
+
+    raw = (await session.execute(text("SELECT app_org_members()"))).scalar_one()
+    members = json.loads(raw) if isinstance(raw, str) else raw
+    by_id = {str(m["id"]): m for m in (members or [])}
 
     out: list[dict[str, Any]] = []
     seen: set[uuid.UUID] = set()
@@ -532,11 +541,11 @@ async def _resolve_preparers(
         if user_id in seen:
             continue
         seen.add(user_id)
-        user = await session.get(AppUser, user_id)
-        if user is None:
+        member = by_id.get(str(user_id))
+        if member is None:
             continue
-        name = f"{user.first_name or ''} {user.last_name or ''}".strip() or None
-        out.append({"label": label, "name": name, "email": user.email, "phone": None})
+        name = f"{member.get('first_name') or ''} {member.get('last_name') or ''}".strip() or None
+        out.append({"label": label, "name": name, "email": member.get("email"), "phone": None})
     return out
 
 

@@ -31,6 +31,7 @@ import { CommunicationsSection } from './CommunicationsSection';
 import { BulkCreateDialog } from './BulkCreateDialog';
 import { useEstimatingApi } from './api';
 import { ChangeProcessModal } from './ChangeProcessModal';
+import { SendQuoteComposer } from './SendQuoteComposer';
 import { LeadTimesSection } from './LeadTimesSection';
 import { LineItemActionsMenu } from './LineItemActionsMenu';
 import { LineItemSidebar } from './LineItemSidebar';
@@ -75,6 +76,7 @@ export function EstimatingPage() {
   const [material, setMaterial] = useState<MaterialSearchHit | null>(null);
   const [drawerOpId, setDrawerOpId] = useState<string | null>(null);
   const [changingProcess, setChangingProcess] = useState(false);
+  const [sendingQuote, setSendingQuote] = useState(false);
   const [ruleSuggestion, setRuleSuggestion] = useState<RuleSuggestionPayload | null>(null);
   const [seedingRule, setSeedingRule] = useState(false);
   const [bulkCreating, setBulkCreating] = useState(false);
@@ -495,6 +497,15 @@ export function EstimatingPage() {
         <h2>
           {t('estimating.title', { number: quote.number })}
         </h2>
+        {canEdit && (
+          <button
+            type="button"
+            className="est-send-quote"
+            onClick={() => setSendingQuote(true)}
+          >
+            {t('sendComposer.send_quote')}
+          </button>
+        )}
         {partId && (
           <PartMatchesChip
             key={partId}
@@ -943,6 +954,16 @@ export function EstimatingPage() {
             );
           }}
           onClose={() => setChangingProcess(false)}
+        />
+      )}
+      {sendingQuote && (
+        <SendQuoteComposer
+          quoteId={quoteId}
+          onClose={() => setSendingQuote(false)}
+          onSent={() => {
+            // Reflect the new Sent status on the quote header.
+            api.getQuote(quoteId).then(setQuote).catch(fail);
+          }}
         />
       )}
       </main>

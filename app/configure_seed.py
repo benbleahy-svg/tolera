@@ -48,6 +48,7 @@ from app.models import (
     CustomTable,
     DiscountDef,
     EmailTemplate,
+    EmailTemplateType,
     Material,
     MaterialClass,
     MaterialFamily,
@@ -336,10 +337,43 @@ _CUSTOM_TABLES: tuple[tuple[str, list[dict[str, str]]], ...] = (
     ),
 )
 
-_EMAIL_TEMPLATES: tuple[tuple[str, str, str], ...] = (
-    ("quote_sent", "de-DE", "Ihr Angebot {{quote_number}}"),
-    ("rfq_received", "de-DE", "Anfrage erhalten"),
-    ("follow_up", "de-DE", "Erinnerung: Ihr Angebot {{quote_number}}"),
+#: Seed one DEFAULT template per composer type (spec ``#settings`` Email Templates,
+#: German-first). Bodies carry the ``%%FIELD%%`` merge fields the M5.5 send composer
+#: resolves — never the old Jinja ``{{…}}`` form (M5.5 block scope). Tuple shape:
+#: ``(template_type, name, subject, body)``.
+_EMAIL_TEMPLATES: tuple[tuple[EmailTemplateType, str, str, str], ...] = (
+    (
+        EmailTemplateType.quote_send,
+        "Standard-Angebot",
+        "Ihr Angebot %%QUOTE_NUMBER%%",
+        "Guten Tag %%CUSTOMER_FIRST_NAME%%,\n\n"
+        "vielen Dank für Ihre Anfrage. Ihr Angebot %%QUOTE_NUMBER%% "
+        "für die Teile %%PART_NUMBERS%% steht bereit. "
+        "Sie können Mengen und Lieferzeiten wählen und direkt online bestellen:\n\n"
+        "%%QUOTE_LINK%%\n\n"
+        "Bei Fragen erreichen Sie mich gerne.\n\n"
+        "Mit freundlichen Grüßen\n"
+        "%%ESTIMATOR_FIRST_NAME%% %%ESTIMATOR_LAST_NAME%%\n"
+        "%%FACILITY_NAME%%",
+    ),
+    (
+        EmailTemplateType.order_shipment,
+        "Standard-Versandbenachrichtigung",
+        "Ihre Bestellung wurde versandt",
+        "Guten Tag %%CUSTOMER_FIRST_NAME%%,\n\n"
+        "Ihre Bestellung zu Angebot %%QUOTE_NUMBER%% wurde soeben versandt.\n\n"
+        "Mit freundlichen Grüßen\n"
+        "%%FACILITY_NAME%%",
+    ),
+    (
+        EmailTemplateType.order_refund,
+        "Standard-Erstattung",
+        "Ihre Erstattung wurde bearbeitet",
+        "Guten Tag %%CUSTOMER_FIRST_NAME%%,\n\n"
+        "wir haben die Zahlung zu Angebot %%QUOTE_NUMBER%% erstattet.\n\n"
+        "Mit freundlichen Grüßen\n"
+        "%%FACILITY_NAME%%",
+    ),
 )
 
 
@@ -712,17 +746,28 @@ async def _seed_custom_tables(session: AsyncSession, org_id: uuid.UUID) -> int:
 
 
 async def _seed_email_templates(session: AsyncSession, org_id: uuid.UUID) -> int:
+    """Seed one DEFAULT template per composer type (idempotent per type+locale)."""
     existing = {
-        (row.key, row.locale)
+        row.template_type
         for row in (
             await session.scalars(select(EmailTemplate).where(EmailTemplate.org_id == org_id))
         ).all()
     }
     created = 0
-    for key, locale, subject in _EMAIL_TEMPLATES:
-        if (key, locale) in existing:
+    for template_type, name, subject, body in _EMAIL_TEMPLATES:
+        if template_type in existing:
             continue
-        session.add(EmailTemplate(org_id=org_id, key=key, locale=locale, subject=subject))
+        session.add(
+            EmailTemplate(
+                org_id=org_id,
+                template_type=template_type,
+                name=name,
+                is_default=True,
+                locale="de-DE",
+                subject=subject,
+                body=body,
+            )
+        )
         created += 1
     return created
 

@@ -25,6 +25,7 @@ from .custom_tables import custom_tables_router
 from .db import make_engine, make_sessionmaker
 from .email_connections import router as email_connections_router
 from .email_ingest import ingest_router
+from .email_templates import email_templates_router
 from .email_threads import router as email_threads_router
 from .errors import register_exception_handlers
 from .file_split import split_router
@@ -46,6 +47,7 @@ from .parts import parts_router
 from .pdf_api import pdf_router
 from .pricing import pricing_router
 from .quote_assembly import assembly_router
+from .quote_send import quote_send_router
 from .quotes import quotes_router
 from .requote_diff import requote_router
 from .review_items import review_items_router
@@ -112,6 +114,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ingest_router)
     app.include_router(email_connections_router)
     app.include_router(email_threads_router)
+    app.include_router(email_templates_router)
+    app.include_router(quote_send_router)
     app.include_router(rules_router)
     app.include_router(review_items_router)
     app.include_router(rule_suggest_router)

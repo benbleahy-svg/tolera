@@ -24,6 +24,7 @@ import { FileViewerPage } from './viewer/FileViewerPage';
 import { QuotesPage } from './quotes/QuotesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { EmailConnectionPage } from './settings/EmailConnectionPage';
+import { EmailTemplatesPage } from './settings/EmailTemplatesPage';
 import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
@@ -77,6 +78,8 @@ export default function App() {
         <Route path="/configure/interrogations" element={<InterrogationsPage />} />
         {/* Settings → User Profile → Email Connection (M3.5). */}
         <Route path="/settings/email" element={<EmailConnectionPage />} />
+        {/* Settings → Email Templates (M5.5). */}
+        <Route path="/settings/email-templates" element={<EmailTemplatesPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />
