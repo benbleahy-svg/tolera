@@ -24,6 +24,7 @@ net; tax is M5.3, checkout/order money is M5.2.
 
 from __future__ import annotations
 
+import enum
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -59,15 +60,43 @@ buyer_router = APIRouter(prefix="/api/public/quotes", tags=["buyer-portal"])
 # --------------------------------------------------------------------------- #
 # Display Settings — the buyer-visibility toggles (persistence lands in M5.8).
 # --------------------------------------------------------------------------- #
+class TotalDisplay(enum.StrEnum):
+    """The document total/subtotal display mode (spec :866 ``total_display: range
+    | max | none``; PDF radio :4187)."""
+
+    price_range = "price_range"  # AB {min}..{max} across the quote's breaks
+    maximum_price = "maximum_price"  # the single highest unit price (smallest qty)
+    none = "none"  # don't display a total/subtotal
+
+
+class PreparerDisplay(enum.StrEnum):
+    """Whose contact block prints as the quote preparer (spec :867 radio)."""
+
+    salesperson = "salesperson"
+    estimator = "estimator"
+    both = "both"
+
+
+class NotesPlacement(enum.StrEnum):
+    """Where the quote-notes block sits relative to the line items (spec :868)."""
+
+    above = "above"
+    below = "below"
+
+
 @dataclass(frozen=True)
 class DisplaySettings:
-    """Which line-item fields the digital quote exposes to the buyer.
+    """The single ``QuoteDisplaySettings`` (per org) entity — applies to the
+    digital quote (live) **and** the PDF (on send) (spec :866-868).
 
     Persistence + the Settings UI are M5.8 (build-plan: "Quote Display Settings
-    persistence (the toggles M5.4/M5.1 read)"); M5.1 owns the *read* side — this
-    value object + defaults + the gating projection. Defaults mirror the spec's
-    line-item card (identity + process/material on; dimensions/DFM opt-in)."""
+    persistence (the toggles M5.4/M5.1 read)"); M5.1 owns the buyer-portal *read*
+    side (the line-item show flags), M5.4 extends it with the PDF-facing header /
+    total / preparer / notes-placement controls. Defaults mirror the spec's
+    line-item card (identity + process/material on; dimensions/DFM opt-in) and the
+    quote-header defaults (numbers + facility contact shown)."""
 
+    # --- Line-item fields (buyer portal card + PDF rows) ---
     show_part_number: bool = True
     show_revision: bool = True
     show_description: bool = True
@@ -75,7 +104,22 @@ class DisplaySettings:
     show_material: bool = True
     show_dimensions: bool = False
     show_dfm: bool = False
-    show_3d: bool = True
+    show_3d: bool = True  # "3D Part Preview (digital only)" — portal thumbnail
+    # Consumed by the M5.4 PDF (_quote_line). The digital-quote *portal* does not
+    # yet render the file name — that wiring lands with M5.1/M5.8; the toggle is
+    # PDF-only until then.
+    show_part_file_name: bool = False
+    show_thumbnail: bool = False  # PDF: embed a static part thumbnail image
+    # --- Quote header/footer fields (PDF-facing; spec :4186) ---
+    show_quote_number: bool = True
+    show_rfq_number: bool = True
+    show_facility_phone: bool = True
+    show_facility_website: bool = True
+    show_digital_quote_link: bool = True
+    # --- Radios (spec :4187-4188 / :866-868) ---
+    total_display: TotalDisplay = TotalDisplay.price_range
+    preparer: PreparerDisplay = PreparerDisplay.salesperson
+    notes_placement: NotesPlacement = NotesPlacement.above
 
 
 DEFAULT_DISPLAY_SETTINGS = DisplaySettings()

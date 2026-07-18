@@ -44,6 +44,7 @@ from .notes import router as notes_router
 from .operations import operations_router
 from .part_library import library_router as part_library_router
 from .parts import parts_router
+from .pdf_api import pdf_router
 from .pricing import pricing_router
 from .purchased_components import purchased_components_router
 from .quote_assembly import assembly_router
@@ -122,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(assembly_router)
     app.include_router(buyer_router)
     app.include_router(checkout_router)
+    app.include_router(pdf_router)
 
     return app
 

@@ -32,6 +32,12 @@ dependencies = [
     # match. `regex` enforces `timeout=` inside the engine. Do not swap back.
     "regex>=2024.11.6",
     "pgvector>=0.5.0",
+    # M5.4 — white-label quote/order PDF. WeasyPrint renders Jinja2 HTML → PDF
+    # server-side (needs native pango/cairo; installed in CI + the Docker
+    # dev/prod/worker stages). Jinja2 is the template engine (already transitively
+    # present via FastAPI, pinned explicitly here as a direct import).
+    "weasyprint>=63.0",
+    "jinja2>=3.1.0",
 ]
 
 [dependency-groups]
@@ -100,6 +106,11 @@ ignore_missing_imports = true
 # aioboto3 / boto3 ship incomplete stubs; the async S3 client is dynamic.
 [[tool.mypy.overrides]]
 module = ["aioboto3.*", "boto3.*", "botocore.*"]
+ignore_missing_imports = true
+
+# WeasyPrint ships no py.typed marker (M5.4 PDF rendering).
+[[tool.mypy.overrides]]
+module = ["weasyprint.*"]
 ignore_missing_imports = true
 
 # Celery is untyped; its decorator + base class would otherwise trip strict mode.
