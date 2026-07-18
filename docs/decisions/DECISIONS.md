@@ -1050,6 +1050,6 @@ Spec `#partview` routes per line item with a left sidebar; the built page is `/q
 - **Geometry significance:** `|volume Δ| > 5 %` OR any bbox dimension Δ > 1.0 mm OR **any** feature-count change → `significant = true`. Geometry unavailable (PDF-only side) → `available = false`, `significant = false` (an exact-file match means byte-identical inputs).
 - **Material finding changes:** added/removed findings in category `requirements`; any tolerance change on a matched callout; any `material`/`finish`/`coating` finding added/removed/changed.
 - **Finding set-diff identity:** grouped by `(type, role)`; a lone leftover pair counts as *changed* only when anchored by a non-empty role or equal `normalized_value` — otherwise an add + a remove.
-- **Baseline choice:** exact-file match preferred over exact-geometric; within a bucket, the matched part's most recent non-trashed quote.
+- **Baseline choice:** exact-file match preferred over exact-geometric; within a bucket, the matched part's most recent non-trashed quote **created at or before the target quote** (a later quote is a later revision, never a requote baseline), with a deterministic total-order tie-break (`created_at DESC, quote id DESC, item position, item id`) so re-resolution always picks the same baseline.
 
 **Revisit trigger:** M4.13 (Accept-All gate) review; Fechner feedback that a real requote was mis-labelled cosmetic/material.

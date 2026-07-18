@@ -78,7 +78,9 @@ BBOX_SIGNIFICANT_MM = 1.0
 _MATERIAL_TYPES = {"material", "finish", "coating"}
 
 #: Fields compared for the changed/unchanged verdict on a finding pair.
-_COMPARE_FIELDS = ("normalized_value", "value", "tolerance", "gdt", "units")
+#: ``category`` is included so a category-only transition (e.g. a note
+#: reclassified into ``requirements``) surfaces as a change, not a no-op.
+_COMPARE_FIELDS = ("normalized_value", "value", "tolerance", "gdt", "units", "category")
 
 requote_router = APIRouter(prefix="/api/quotes", tags=["requote-diff"])
 
@@ -242,7 +244,10 @@ def finding_diff(
             material.append(
                 {"kind": "changed", "reason": "tolerance_changed", "finding": entry["b"]}
             )
-        elif entry["b"].get("category") == "requirements":
+        elif "requirements" in (entry["a"].get("category"), entry["b"].get("category")):
+            # Either direction is material: a callout becoming a requirement
+            # AND a requirement being dropped both invalidate the prior router
+            # review (M4.13's Accept-All must stay suppressed for both).
             material.append(
                 {"kind": "changed", "reason": "requirements_changed", "finding": entry["b"]}
             )
@@ -393,10 +398,12 @@ async def _part_findings(session: AsyncSession, part_id: uuid.UUID) -> list[dict
 
 
 async def _find_baseline(
-    session: AsyncSession, part: Part, *, exclude_quote_id: uuid.UUID
+    session: AsyncSession, part: Part, *, target_quote: Quote
 ) -> dict[str, Any] | None:
-    """The most recent prior quote of an Exact-File / Exact-Geometric matched
-    part (exact_file preferred — byte-identical beats topology-identical)."""
+    """The most recent chronologically-PRIOR quote of an Exact-File /
+    Exact-Geometric matched part (exact_file preferred — byte-identical beats
+    topology-identical). A quote created after the target is a *later*
+    revision, never a requote baseline."""
     keys = await _subject_keys(session, part)
     exact_file = await _parts_with_file_key(session, part.id, PartFile.file_hash, keys["hashes"])
     exact_geometric: list[uuid.UUID] = []
@@ -420,9 +427,17 @@ async def _find_baseline(
                 .where(
                     Component.part_id.in_(candidate_ids),
                     Quote.deleted_at.is_(None),
-                    Quote.id != exclude_quote_id,
+                    Quote.id != target_quote.id,
+                    Quote.created_at <= target_quote.created_at,
                 )
-                .order_by(Quote.created_at.desc(), QuoteItem.position)
+                # Total order: id/position break created_at ties so a re-run
+                # always picks the same baseline (deterministic re-resolution).
+                .order_by(
+                    Quote.created_at.desc(),
+                    Quote.id.desc(),
+                    QuoteItem.position,
+                    QuoteItem.id,
+                )
             )
         ).first()
         if row is None:
@@ -476,7 +491,7 @@ async def build_requote_snapshot(
     if quote.status != QuoteStatus.draft:
         return {"skipped": "not_draft"}
 
-    baseline = await _find_baseline(session, part, exclude_quote_id=quote.id)
+    baseline = await _find_baseline(session, part, target_quote=quote)
     if baseline is None:
         return {"skipped": "no_baseline"}
     matched = baseline["part"]
@@ -499,9 +514,10 @@ async def build_requote_snapshot(
     from .ai_settings import get_ai_flags
 
     flags = await get_ai_flags(session, org_id)
-    # The RFQ flag OR the part-level dual-use flag on EITHER revision — the
-    # flag travels with the part across quotes (DECISIONS 2026-06-26), and the
-    # diff payload carries extracted print values from both revisions.
+    # The part-level dual-use flag on EITHER revision (the flag travels with
+    # the part across quotes, DECISIONS 2026-06-26) OR an export-controlled RFQ
+    # on EITHER quote — the diff payload carries extracted print values from
+    # both revisions, so both sides' RFQs gate the external provider.
     export_controlled = (
         bool(part.export_controlled)
         or bool(matched.export_controlled)
@@ -509,7 +525,7 @@ async def build_requote_snapshot(
             (
                 await session.scalars(
                     select(RequestForQuote.id).where(
-                        RequestForQuote.quote_id == quote.id,
+                        RequestForQuote.quote_id.in_([quote.id, baseline["quote_id"]]),
                         RequestForQuote.export_controlled.is_(True),
                     )
                 )
@@ -749,8 +765,16 @@ async def refresh_requote_diff(
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
 ) -> dict[str, Any]:
     """Manual trigger (spec trigger (c) — the Part Library match panel):
-    re-enqueue the diff for every part on the quote."""
+    re-enqueue the diff for every part on the quote. Frozen quotes are
+    rejected up front — the task would skip them anyway, and a 202 "queued"
+    answer for work that can never land would be a lie."""
     quote = await _get_quote_or_404(session, quote_id)
+    if quote.status != QuoteStatus.draft:
+        raise AppError(
+            "quote_locked",
+            "This quote is no longer a draft; the requote gate is frozen.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
     part_ids = (
         await session.scalars(
             select(Component.part_id)

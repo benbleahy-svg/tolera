@@ -164,14 +164,24 @@ export function EstimatingPage() {
       setRequoteBusy(true);
       api
         .importRouter(entry.target_component_id, entry.matched.component_id)
-        .then(() => api.postRequoteChoice(quoteId, entry.part_id, 'import_router'))
-        .then((r) => {
-          setRequoteEntries(r.entries);
+        .then(() => {
+          // The import succeeded: reflect the copied router immediately and
+          // dismiss the panel optimistically — the audit POST below must not
+          // gate what already happened server-side.
           if (componentId) {
             api.getCosting(componentId).then(setCosting).catch(fail);
             loadPricing();
           }
+          setRequoteEntries((prev) =>
+            prev.map((e) =>
+              e.part_id === entry.part_id
+                ? { ...e, choice: { choice: 'import_router' as const, at: new Date().toISOString() } }
+                : e,
+            ),
+          );
+          return api.postRequoteChoice(quoteId, entry.part_id, 'import_router');
         })
+        .then((r) => setRequoteEntries(r.entries))
         .catch(fail)
         .finally(() => setRequoteBusy(false));
     },

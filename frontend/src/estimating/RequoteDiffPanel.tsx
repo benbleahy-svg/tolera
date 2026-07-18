@@ -7,7 +7,7 @@
  * button is the only path that touches the router.
  */
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { RequoteDiffEntry, RequoteFinding } from './types';
@@ -40,6 +40,7 @@ export function RequoteDiffPanel({
   onStartFresh,
 }: Props): React.ReactElement {
   const { t } = useTranslation();
+  const bodyId = useId();
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState(false);
 
@@ -56,6 +57,8 @@ export function RequoteDiffPanel({
         <button
           type="button"
           className="requote-toggle"
+          aria-expanded={open}
+          aria-controls={bodyId}
           onClick={() => setOpen((v) => !v)}
         >
           {open ? t('requote.hide_changes') : t('requote.see_changes')}
@@ -63,7 +66,7 @@ export function RequoteDiffPanel({
       </div>
 
       {open && (
-        <div className="requote-body">
+        <div className="requote-body" id={bodyId}>
           {entry.synthesis && (
             <p className="requote-synthesis" data-testid="requote-synthesis">
               {entry.synthesis}

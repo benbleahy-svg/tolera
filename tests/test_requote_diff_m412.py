@@ -195,6 +195,26 @@ def test_finding_diff_material_on_material_type_change() -> None:
     assert any(m["reason"] == "material_changed" for m in diff["material_changes"])
 
 
+def test_finding_diff_category_transition_into_requirements_is_material() -> None:
+    """A callout reclassified INTO requirements is a change (category is part
+    of the compared identity), and it is material."""
+    a = _finding(type_="note", category="regions", role="flag_note", value="FAI")
+    b = _finding(type_="note", category="requirements", role="flag_note", value="FAI")
+    diff = finding_diff([a], [b])
+    [changed] = diff["changed"]
+    assert "category" in changed["changes"]
+    assert any(m["reason"] == "requirements_changed" for m in diff["material_changes"])
+
+
+def test_finding_diff_category_transition_out_of_requirements_is_material() -> None:
+    """Dropping requirement status is just as material as gaining it — M4.13's
+    Accept-All must stay suppressed in both directions."""
+    a = _finding(type_="note", category="requirements", role="flag_note", value="FAI")
+    b = _finding(type_="note", category="regions", role="flag_note", value="FAI")
+    diff = finding_diff([a], [b])
+    assert any(m["reason"] == "requirements_changed" for m in diff["material_changes"])
+
+
 def test_finding_diff_cosmetic_value_change_not_material() -> None:
     # A re-worded title-block note (category ``regions``) is cosmetic.
     a = _finding(type_="note", category="regions", role="title_block", value="Zeichnung Rev A")
@@ -732,3 +752,76 @@ def test_refresh_pins_the_named_quote(
     assert out["quote_id"] == str(ids["new_quote"])
     assert _fetch_requote_diff(tenancy_db, org, ids["new_quote"]) is not None
     assert _fetch_requote_diff(tenancy_db, org, newer_quote) is None
+
+
+def test_later_quote_is_never_a_baseline(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+) -> None:
+    """The matched part's only quote was created AFTER the target quote — a
+    later revision, not a requote baseline: the task must skip."""
+    org, admin = _org_with_admin(seeder, "org-rqd14")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        target_quote = seeder.quote(org, "Q-2026-5000")
+        target_item = _quote_item(app_client, target_quote)
+        later_quote = seeder.quote(org, "Q-2026-5001")
+        later_item = _quote_item(app_client, later_quote)
+    part_target = uuid.UUID(target_item["part_id"])
+    part_later = uuid.UUID(later_item["part_id"])
+    for pid in (part_target, part_later):
+        seeder.sql(
+            "UPDATE part SET geom_hash = :h WHERE id = :id AND org_id = :org",
+            {"h": GEOM_HASH, "id": str(pid), "org": str(org)},
+        )
+    out = asyncio.run(
+        run_generate_requote_diff(
+            app_role_url(tenancy_db),
+            org_id=org,
+            part_id=part_target,
+            quote_id=target_quote,
+        )
+    )
+    assert out.get("skipped") == "no_baseline"
+    assert _fetch_requote_diff(tenancy_db, org, target_quote) is None
+
+
+def test_export_controlled_baseline_rfq_skips_synthesis(
+    tenancy_db: str,
+    app_client: TestClient,
+    seeder: Seeder,
+    fake_synthesizer: _FakeSynthesizer,
+) -> None:
+    """An export-controlled RFQ on the BASELINE quote gates the LLM too — its
+    print's extracted values are inside the diff payload."""
+    org, admin = _org_with_admin(seeder, "org-rqd15")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _seed_requote_pair(seeder, app_client, org)
+    seeder.sql(
+        "INSERT INTO request_for_quote (id, org_id, quote_id, subject, export_controlled) "
+        "VALUES (:id, :org, :q, 'RFQ Rev A', TRUE)",
+        {"id": str(uuid.uuid4()), "org": str(org), "q": str(ids["prior_quote"])},
+    )
+    out = _run_diff(tenancy_db, org, ids["part_b"])
+    assert out["ok"] is True
+    cached = _fetch_requote_diff(tenancy_db, org, ids["new_quote"])
+    assert cached is not None
+    entry = cached["entries"][str(ids["part_b"])]
+    assert entry["ai"] == {"enabled": False, "reason": "export_controlled"}
+    assert fake_synthesizer.calls == 0
+
+
+def test_refresh_rejected_on_locked_quote(
+    app_client: TestClient, seeder: Seeder, fake_synthesizer: _FakeSynthesizer
+) -> None:
+    org, admin = _org_with_admin(seeder, "org-rqd16")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        ids = _seed_requote_pair(seeder, app_client, org)
+        seeder.sql(
+            "UPDATE quote SET status = 'sent' WHERE id = :id AND org_id = :org",
+            {"id": str(ids["new_quote"]), "org": str(org)},
+        )
+        resp = app_client.post(f"/api/quotes/{ids['new_quote']}/requote-diff/refresh")
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "quote_locked"
