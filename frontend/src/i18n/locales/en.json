@@ -276,6 +276,68 @@
       "gross": "Total",
       "reverse_charge": "Reverse charge — recipient liable for VAT",
       "kleinunternehmer": "No VAT charged (§ 19 UStG small-business scheme)."
+    },
+    "shipping": {
+      "none": "None",
+      "bill_at_shipment": "Bill me at time of shipment",
+      "use_my_shipping_account": "Use customer shipping account",
+      "no_shipping_fees": "No shipping fees"
+    },
+    "edit": {
+      "title": "Edit order",
+      "intro": "Before shipment you can change the PO number, addresses and shipping method. Every change is recorded in the order history.",
+      "po_number": "PO number",
+      "company": "Company",
+      "billing_address": "Billing address",
+      "shipping_method": "Shipping method",
+      "notes": "Notes",
+      "notify_buyer": "Notify customer of update to order",
+      "save": "Save changes",
+      "saving": "Saving …",
+      "cancel": "Cancel",
+      "saved": "Changes saved.",
+      "no_changes": "No changes made."
+    },
+    "history": {
+      "title": "Order history",
+      "created": "Order created",
+      "edited": "Order edited",
+      "notified": "Customer notified",
+      "empty": "No changes yet."
+    },
+    "build": {
+      "title": "Build order",
+      "selected": "{{n}}/{{total}} selected",
+      "edit_ships_on": "Edit Ships On",
+      "search_placeholder": "Search by part # / filename",
+      "col_qty": "Qty",
+      "col_lead": "Lead time",
+      "col_ships_on": "Ships on",
+      "col_unit": "Unit price",
+      "col_total": "Total price",
+      "lead_days": "{{n}} days",
+      "discounts": "Discounts",
+      "additional_charges": "Additional charges",
+      "percent": "Percent",
+      "price": "Price",
+      "add_adjustment": "Add adjustment",
+      "add_charge": "Add additional charge",
+      "remove_line": "Remove line",
+      "parts_in_order": "{{n}} parts in order",
+      "subtotal": "Subtotal",
+      "continue": "Continue to shipping & payment",
+      "step2_title": "Shipping & payment",
+      "payment_method": "Payment method",
+      "payment_not_provided": "Not provided",
+      "payment_po": "Purchase order",
+      "po_number": "PO number",
+      "shipping_method": "Shipping method",
+      "billing_address": "Billing address",
+      "go_back": "Go back",
+      "review_order": "Review & create order",
+      "creating": "Creating …",
+      "adjustment_label": "Label",
+      "no_lines": "No lines to order."
     }
   },
   "common": {
@@ -382,7 +444,8 @@
       "on_hold": "On hold",
       "completed": "Completed",
       "no_quote": "No quote"
-    }
+    },
+    "facilitate_order": "Build order"
   },
   "kalk": {
     "formula": "Kalk formula",

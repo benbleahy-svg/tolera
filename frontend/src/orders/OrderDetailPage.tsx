@@ -10,13 +10,14 @@
  * line when set), matching the ERP-owned model.
  */
 
-import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
 import { formatMinor } from '../portal/money';
 import { formatOrderDate, orderDateLocale } from './dates';
+import { EditOrderDrawer } from './EditOrderDrawer';
 import { useOrdersApi } from './api';
 import type { OrderDetail } from './types';
 
@@ -35,9 +36,12 @@ export function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const { t, i18n } = useTranslation();
   const api = useOrdersApi();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     if (!orderId) return;
@@ -58,7 +62,21 @@ export function OrderDetailPage() {
     return () => {
       active = false;
     };
-  }, [api, orderId]);
+  }, [api, orderId, reloadKey]);
+
+  // Deep link: the Orders-list Edit action navigates to `?edit=1` — open the
+  // drawer once the (editable) order has loaded.
+  useEffect(() => {
+    if (order?.can_edit && searchParams.get('edit') === '1') setEditing(true);
+  }, [order?.can_edit, searchParams]);
+
+  const closeEdit = useCallback(() => {
+    setEditing(false);
+    if (searchParams.get('edit')) {
+      searchParams.delete('edit');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const numLocale = orderDateLocale(i18n.language);
   const fmtDate = (iso: string | null) => formatOrderDate(iso, numLocale);
@@ -111,17 +129,23 @@ export function OrderDetailPage() {
             {t('orders.actions.download_pdf')}
           </button>
           {order.can_edit && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled
-              title={t('orders.detail.edit_soon')}
-            >
+            <button type="button" className="btn btn-primary" onClick={() => setEditing(true)}>
               {t('orders.actions.edit')}
             </button>
           )}
         </div>
       </div>
+
+      {editing && order.can_edit && (
+        <EditOrderDrawer
+          order={order}
+          onClose={closeEdit}
+          onSaved={() => {
+            closeEdit();
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
 
       <dl className="orders-detail-grid">
         <div>

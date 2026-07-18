@@ -93,6 +93,9 @@ vi.mock('../review/api', async () => {
   return { ...actual, useRuleSuggestApi: () => ruleSuggestApi };
 });
 vi.mock('../configure/api', () => ({ useConfigureApi: () => ({ importRules: vi.fn() }) }));
+// M5.7 — the Facilitate Order entry uses the orders API (Clerk-bound); stub it so
+// these Clerk-free unit tests don't touch auth.
+vi.mock('../orders/api', () => ({ useOrdersApi: () => ({ facilitateOrder: vi.fn() }) }));
 
 // M4.9: the BOM banner probe — no suggestion/children by default (no banner).
 // One hoisted instance: EstimatingPage keys an effect on the api object, so a

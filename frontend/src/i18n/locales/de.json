@@ -276,6 +276,68 @@
       "gross": "Gesamtbetrag",
       "reverse_charge": "Steuerschuldnerschaft des Leistungsempfängers",
       "kleinunternehmer": "Kein Ausweis von Umsatzsteuer gemäß § 19 UStG."
+    },
+    "shipping": {
+      "none": "Keine",
+      "bill_at_shipment": "Bei Versand berechnen",
+      "use_my_shipping_account": "Kunden-Versandkonto nutzen",
+      "no_shipping_fees": "Keine Versandkosten"
+    },
+    "edit": {
+      "title": "Auftrag bearbeiten",
+      "intro": "Vor dem Versand können Bestellnummer, Adressen und Versandart geändert werden. Jede Änderung wird im Auftragsverlauf festgehalten.",
+      "po_number": "Bestellnummer",
+      "company": "Firma",
+      "billing_address": "Rechnungsadresse",
+      "shipping_method": "Versandart",
+      "notes": "Notizen",
+      "notify_buyer": "Käufer über die Änderung benachrichtigen",
+      "save": "Änderungen speichern",
+      "saving": "Wird gespeichert …",
+      "cancel": "Abbrechen",
+      "saved": "Änderungen gespeichert.",
+      "no_changes": "Keine Änderungen vorgenommen."
+    },
+    "history": {
+      "title": "Auftragsverlauf",
+      "created": "Auftrag erstellt",
+      "edited": "Auftrag bearbeitet",
+      "notified": "Käufer benachrichtigt",
+      "empty": "Noch keine Änderungen."
+    },
+    "build": {
+      "title": "Auftrag erstellen",
+      "selected": "{{n}}/{{total}} ausgewählt",
+      "edit_ships_on": "Versanddatum ändern",
+      "search_placeholder": "Nach Teilenummer / Dateiname suchen",
+      "col_qty": "Menge",
+      "col_lead": "Lieferzeit",
+      "col_ships_on": "Versand am",
+      "col_unit": "Einzelpreis",
+      "col_total": "Gesamt",
+      "lead_days": "{{n}} Tage",
+      "discounts": "Rabatte",
+      "additional_charges": "Zusätzliche Kosten",
+      "percent": "Prozent",
+      "price": "Preis",
+      "add_adjustment": "Rabatt hinzufügen",
+      "add_charge": "Zusätzliche Kosten hinzufügen",
+      "remove_line": "Position entfernen",
+      "parts_in_order": "{{n}} Teile im Auftrag",
+      "subtotal": "Zwischensumme",
+      "continue": "Weiter zu Versand & Zahlung",
+      "step2_title": "Versand & Zahlung",
+      "payment_method": "Zahlungsart",
+      "payment_not_provided": "Nicht angegeben",
+      "payment_po": "Bestellung (PO)",
+      "po_number": "Bestellnummer",
+      "shipping_method": "Versandart",
+      "billing_address": "Rechnungsadresse",
+      "go_back": "Zurück",
+      "review_order": "Auftrag prüfen & erstellen",
+      "creating": "Wird erstellt …",
+      "adjustment_label": "Bezeichnung",
+      "no_lines": "Keine Positionen zum Erstellen."
     }
   },
   "common": {
@@ -382,7 +444,8 @@
       "on_hold": "Zurückgestellt",
       "completed": "Abgeschlossen",
       "no_quote": "Kein Angebot"
-    }
+    },
+    "facilitate_order": "Auftrag erstellen"
   },
   "kalk": {
     "formula": "Kalk-Formel",

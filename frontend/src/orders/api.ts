@@ -13,7 +13,12 @@ import { useAuth } from '@clerk/clerk-react';
 import { apiDownload, apiFetch, type TokenGetter } from '../api/client';
 import type {
   ErpPushResult,
+  FacilitateOrderRequest,
+  FacilitateOrderResult,
   OrderDetail,
+  OrderEditRequest,
+  OrderEditResult,
+  OrderHistoryEvent,
   OrderSearchRequest,
   OrderSearchResponse,
 } from './types';
@@ -25,6 +30,15 @@ export interface OrdersApi {
   downloadOrderPdf: (id: string) => Promise<Blob>;
   /** ERP push — a v1 stub (returns `not_configured`); the adapter is M6. */
   pushToErp: (id: string) => Promise<ErpPushResult>;
+  /** Build an Order from a quote internally (M5.7 Facilitate Order). */
+  facilitateOrder: (
+    quoteId: string,
+    req: FacilitateOrderRequest,
+  ) => Promise<FacilitateOrderResult>;
+  /** Edit an order before shipment (M5.7); records a history entry. */
+  editOrder: (id: string, req: OrderEditRequest) => Promise<OrderEditResult>;
+  /** The order's history trail, oldest first (M5.7). */
+  getOrderHistory: (id: string) => Promise<OrderHistoryEvent[]>;
 }
 
 /** Build an orders API client bound to the current Clerk session token. */
@@ -38,6 +52,14 @@ export function useOrdersApi(): OrdersApi {
       getOrder: (id) => apiFetch(`/api/orders/${id}`, token),
       downloadOrderPdf: (id) => apiDownload(`/api/orders/${id}/pdf`, token),
       pushToErp: (id) => apiFetch(`/api/orders/${id}/push-to-erp`, token, { method: 'POST' }),
+      facilitateOrder: (quoteId, req) =>
+        apiFetch(`/api/quotes/${quoteId}/facilitate-order`, token, {
+          method: 'POST',
+          body: req,
+        }),
+      editOrder: (id, req) =>
+        apiFetch(`/api/orders/${id}`, token, { method: 'PATCH', body: req }),
+      getOrderHistory: (id) => apiFetch(`/api/orders/${id}/history`, token),
     };
   }, [getToken]);
 }

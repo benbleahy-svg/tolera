@@ -28,6 +28,7 @@ from .email_connections import router as email_connections_router
 from .email_ingest import ingest_router
 from .email_threads import router as email_threads_router
 from .errors import register_exception_handlers
+from .facilitate import facilitate_router
 from .file_split import split_router
 from .health import router as health_router
 from .interrogation import interrogation_router
@@ -125,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(assembly_router)
     app.include_router(buyer_router)
     app.include_router(checkout_router)
+    app.include_router(facilitate_router)
     app.include_router(pdf_router)
 
     return app

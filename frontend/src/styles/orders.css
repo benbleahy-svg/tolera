@@ -193,3 +193,94 @@
   padding-top: 6px;
   font-weight: 650;
 }
+
+/* --- M5.7 Edit Order drawer + history trail -------------------------------- */
+.orders-edit-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(15, 23, 42, 0.35);
+}
+.orders-edit-panel {
+  width: min(460px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px 24px;
+  background: var(--surface, #fff);
+  box-shadow: -8px 0 24px rgba(15, 23, 42, 0.15);
+}
+.orders-edit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.orders-edit-close {
+  border: 0;
+  background: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-muted, #64748b);
+}
+.orders-edit-intro {
+  margin: 4px 0 16px;
+  font-size: 13px;
+  color: var(--text-muted, #64748b);
+}
+.orders-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.orders-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.orders-edit-form input,
+.orders-edit-form textarea,
+.orders-edit-form select {
+  font: inherit;
+  padding: 7px 9px;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 6px;
+}
+.orders-edit-notify {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.orders-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.orders-history {
+  margin-top: 24px;
+  border-top: 1px solid var(--border, #e2e8f0);
+  padding-top: 16px;
+}
+.orders-history-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.orders-history-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.orders-history-when {
+  color: var(--text-muted, #64748b);
+  min-width: 92px;
+}
