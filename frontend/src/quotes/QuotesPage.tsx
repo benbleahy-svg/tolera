@@ -195,16 +195,17 @@ export function QuotesPage() {
     api
       .bulkRefreshPricing(ids)
       .then((r) => {
+        // A stale response (the user changed view/filter/page while the refresh ran)
+        // must not touch the current view, selection, or message — apply() already
+        // reset the selection for the new view.
+        if (requestSeq.current !== searchSeqAtStart) return;
         setBulkMsg(
           r.mode === 'async'
             ? t('quotes.bulk_refresh_queued', { count: r.quote_count ?? ids.length })
             : t('quotes.bulk_refresh_done', { count: r.refreshed_quotes ?? 0 }),
         );
         setSelected(new Set());
-        // Only re-search if the user hasn't navigated to a different view meanwhile.
-        if (requestSeq.current === searchSeqAtStart) {
-          runSearch(requestFor(active, filters, sort, page)); // reflect any repriced rows
-        }
+        runSearch(requestFor(active, filters, sort, page)); // reflect any repriced rows
       })
       .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)))
       .finally(() => setBulkBusy(false));

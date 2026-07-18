@@ -163,11 +163,27 @@ export function EstimatingPage() {
       .catch(() => setRequoteEntries([]));
   }, [api, quoteId, fail]);
 
+  // Guards every item-scoped async load against a line-item switch (M3.10/M5.0):
+  // a response for component A must never paint after the user moved to B.
+  const activeComponentRef = useRef<string | null>(null);
+
   const loadPricing = useCallback(() => {
     if (!componentId) return;
-    api.getPricing(componentId).then(setPricing).catch(fail);
+    const cid = componentId;
+    api
+      .getPricing(cid)
+      .then((p) => {
+        if (activeComponentRef.current === cid) setPricing(p);
+      })
+      .catch(fail);
     // quote-level VAT totals move with every price/add-on change
-    if (quoteId) api.getQuoteTotals(quoteId).then(setTotals).catch(fail);
+    if (quoteId)
+      api
+        .getQuoteTotals(quoteId)
+        .then((tot) => {
+          if (activeComponentRef.current === cid) setTotals(tot);
+        })
+        .catch(fail);
   }, [api, componentId, quoteId, fail]);
 
   // M4.12 — the explicit three-choice requote gate. Every choice is recorded
@@ -249,17 +265,27 @@ export function EstimatingPage() {
     [api, quoteId, fail, loadPricing],
   );
 
-  // Guards the async rule-suggestion probe against a line-item switch (M3.10):
-  // a probe fired for component A must not paint A's chip after the user moved
-  // to component B.
-  const activeComponentRef = useRef<string | null>(null);
+  // Switching line items drops the previous component's item-scoped state so the
+  // old item's numbers never linger under the new one. Keyed on componentId ALONE
+  // (not the load deps) so it fires once per real switch — never on an unrelated
+  // re-render, which would blank a freshly-loaded costing.
+  useEffect(() => {
+    setCosting(null);
+    setPricing(null);
+    setTotals(null);
+    setRuleSuggestion(null);
+  }, [componentId]);
 
   useEffect(() => {
     if (!componentId) return;
-    // Switching line items: drop any chip from the previous component.
-    activeComponentRef.current = componentId;
-    setRuleSuggestion(null);
-    api.getCosting(componentId).then(setCosting).catch(fail);
+    const cid = componentId;
+    activeComponentRef.current = cid;
+    api
+      .getCosting(cid)
+      .then((c) => {
+        if (activeComponentRef.current === cid) setCosting(c);
+      })
+      .catch(fail);
     loadPricing();
   }, [api, componentId, fail, loadPricing]);
 

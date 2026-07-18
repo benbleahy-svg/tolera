@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { makeMe, renderWithProviders } from '../test/render';
@@ -143,6 +143,10 @@ describe('QuotesPage', () => {
     await renderWithProviders(<QuotesPage />, { route: '/quotes' });
     expect(await screen.findByText('Q-1')).toBeInTheDocument();
     expect(screen.getByText('7')).toBeInTheDocument();
+    // Q-2 has no prioritised line → its priority cell (index 4: checkbox, number,
+    // rfq, status, priority) renders the em dash, scoped to Q-2's row.
+    const q2Row = screen.getByText('Q-2').closest('tr') as HTMLTableRowElement;
+    expect(within(q2Row).getAllByRole('cell')[4]).toHaveTextContent('—');
   });
 
   it('offers the Highest Priority system view when the server lists it', async () => {

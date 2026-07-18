@@ -565,6 +565,7 @@ describe('EstimatingPage', () => {
         is_pre_installed: false,
         sort_order: 0,
         cost_formula: null,
+        variable_visibility: {},
       },
     ]);
     addOperation.mockResolvedValue(costing([]));

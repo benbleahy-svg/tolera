@@ -172,6 +172,43 @@ def test_bulk_refresh_org_scoped(app_client: TestClient, seeder: Seeder) -> None
     assert after == before  # org B's bulk refresh never touched org A's quote
 
 
+def test_bulk_refresh_isolates_a_failing_quote(
+    app_client: TestClient, seeder: Seeder, monkeypatch: Any
+) -> None:
+    """One quote that errors mid-refresh is counted ``failed`` and rolled back (its
+    SAVEPOINT), while the other quotes in the same batch still commit."""
+    import app.pricing as pricing
+
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        res = app_client.post(
+            "/api/pricing-item-defs",
+            json={"name": "General Markup", "calc_type": "markup", "default_pct": "10"},
+        )
+        def_id = res.json()["id"]
+        q_ok, c_ok = _quote_with_factory_markup(app_client, "100.0000")
+        q_bad, c_bad = _quote_with_factory_markup(app_client, "100.0000")
+        app_client.patch(f"/api/pricing-item-defs/{def_id}", json={"default_pct": "30"})
+
+        real = pricing.refresh_quote_pricing
+
+        async def flaky(session: Any, org_id: Any, quote_id: Any) -> Any:
+            if str(quote_id) == q_bad:
+                raise RuntimeError("boom")
+            return await real(session, org_id, quote_id)
+
+        monkeypatch.setattr(pricing, "refresh_quote_pricing", flaky)
+        body = _bulk(app_client, [q_ok, q_bad]).json()
+        monkeypatch.undo()
+
+        assert body["refreshed_quotes"] == 1
+        assert body["failed"] == 1
+        # The good quote committed at the new 30% (100 → 130); the bad one rolled
+        # back its savepoint and stays frozen at 10% (110).
+        assert Decimal(_total(_pricing(app_client, c_ok), 1)["total_price"]) == Decimal("130.00")
+        assert Decimal(_total(_pricing(app_client, c_bad), 1)["total_price"]) == Decimal("110.00")
+
+
 def test_bulk_refresh_broker_down_is_503(
     app_client: TestClient, seeder: Seeder, monkeypatch: Any
 ) -> None:

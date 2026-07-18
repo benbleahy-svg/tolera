@@ -2211,8 +2211,16 @@ async def bulk_refresh_pricing(
     refreshed_quotes = 0
     refreshed_items = 0
     skipped = 0
+    failed = 0
     for quote_id in ids:
-        n = await refresh_quote_pricing(session, principal.active_org_id, quote_id)
+        # A SAVEPOINT per quote so one quote that errors (e.g. a broken Kalk
+        # formula) rolls back only itself — the already-refreshed quotes persist.
+        try:
+            async with session.begin_nested():
+                n = await refresh_quote_pricing(session, principal.active_org_id, quote_id)
+        except Exception:  # isolate one bad quote from the rest of the batch
+            failed += 1
+            continue
         if n is None:
             skipped += 1
             continue
@@ -2223,4 +2231,5 @@ async def bulk_refresh_pricing(
         "refreshed_quotes": refreshed_quotes,
         "refreshed_items": refreshed_items,
         "skipped": skipped,
+        "failed": failed,
     }

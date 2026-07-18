@@ -31,27 +31,37 @@ BULK_REFRESH_SYNC_MAX = 10
 async def run_bulk_refresh(
     db_url: str, *, org_id: uuid.UUID, quote_ids: list[uuid.UUID]
 ) -> dict[str, Any]:
-    """Task core — refresh each quote's pricing in one org-scoped transaction,
-    preserving every ``manual_*`` (the engine's contract). Missing/trashed quotes
-    are skipped, not errors. Idempotent: re-running re-snapshots to the same result."""
+    """Task core — refresh each quote's pricing, preserving every ``manual_*`` (the
+    engine's contract). Missing/trashed quotes are skipped; a quote that errors
+    (e.g. a broken Kalk formula) is counted ``failed`` and does not roll back the
+    others. **One transaction per quote** so the ``with_for_update`` locks release
+    incrementally rather than spanning the whole (up to 500-quote) task. Idempotent:
+    re-running re-snapshots to the same result."""
     engine = make_engine(db_url)
     try:
         sessionmaker = make_sessionmaker(engine)
         refreshed_quotes = 0
         refreshed_items = 0
         skipped = 0
-        async with org_scoped_session(sessionmaker, org_id) as session:
-            for quote_id in quote_ids:
-                n = await refresh_quote_pricing(session, org_id, quote_id)
-                if n is None:
-                    skipped += 1
-                    continue
-                refreshed_quotes += 1
-                refreshed_items += n
+        failed = 0
+        for quote_id in quote_ids:
+            try:
+                async with org_scoped_session(sessionmaker, org_id) as session:
+                    n = await refresh_quote_pricing(session, org_id, quote_id)
+            except Exception:  # isolate one bad quote from the rest of the batch
+                logger.warning("bulk_refresh_quote_failed", extra={"quote_id": str(quote_id)})
+                failed += 1
+                continue
+            if n is None:
+                skipped += 1
+                continue
+            refreshed_quotes += 1
+            refreshed_items += n
         return {
             "refreshed_quotes": refreshed_quotes,
             "refreshed_items": refreshed_items,
             "skipped": skipped,
+            "failed": failed,
         }
     finally:
         await engine.dispose()
