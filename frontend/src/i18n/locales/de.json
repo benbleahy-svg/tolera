@@ -183,7 +183,8 @@
       "drafts": "Entwürfe",
       "outstanding": "Versendet",
       "overdue": "Überfällig",
-      "filtered": "Gefiltert"
+      "filtered": "Gefiltert",
+      "highest_priority": "Höchste Priorität"
     },
     "filter": {
       "status_label": "Status",
@@ -204,7 +205,13 @@
       "won": "Gewonnen",
       "lost": "Verloren",
       "expired": "Abgelaufen"
-    }
+    },
+    "bulk_refresh": "Preise aktualisieren",
+    "bulk_refresh_n": "Preise aktualisieren ({{count}})",
+    "bulk_refresh_done": "{{count}} Angebote aktualisiert",
+    "bulk_refresh_queued": "{{count}} Angebote werden im Hintergrund aktualisiert",
+    "select_all": "Alle auswählen",
+    "select_row": "Angebot {{number}} auswählen"
   },
   "common": {
     "cancel": "Abbrechen",
@@ -291,7 +298,26 @@
     "collapse_section": "{{title}} einklappen",
     "expand_section": "{{title}} ausklappen",
     "change_process_title": "Prozess und Werkstoff ändern",
-    "process_search_placeholder": "Prozess filtern …"
+    "process_search_placeholder": "Prozess filtern …",
+    "return_to_quotes": "Zurück zur Angebotsliste",
+    "line_items": "Positionen",
+    "no_line_items": "Noch keine Positionen",
+    "add_line_item": "Position hinzufügen",
+    "requested_finishes": "Angeforderte Oberflächen",
+    "no_finishes": "Keine",
+    "add_finish": "Oberfläche hinzufügen",
+    "remove_finish": "{{name}} entfernen",
+    "no_finish_defs": "Keine Oberflächen-Vorgänge in der Bibliothek",
+    "actions_menu": "AKTIONEN",
+    "priority": "Priorität",
+    "priority_none": "Keine",
+    "workflow_status": {
+      "not_started": "Nicht begonnen",
+      "in_progress": "In Bearbeitung",
+      "on_hold": "Zurückgestellt",
+      "completed": "Abgeschlossen",
+      "no_quote": "Kein Angebot"
+    }
   },
   "kalk": {
     "formula": "Kalk-Formel",

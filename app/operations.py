@@ -530,11 +530,16 @@ async def list_operation_defs(
     session: Annotated[AsyncSession, Depends(get_session)],
     _: Annotated[Principal, Depends(require(Permission.view_all))],
     q: Annotated[str | None, Query(max_length=100)] = None,
+    is_finish: Annotated[bool | None, Query()] = None,
 ) -> list[OperationDefOut]:
-    """The picker's type-ahead: live defs, case-insensitive substring on name."""
+    """The picker's type-ahead: live defs, case-insensitive substring on name.
+    ``is_finish=true`` narrows to finish operations — the source for the estimating
+    band's REQUESTED FINISHES multi-select (M5.0 #partview)."""
     stmt = select(OperationDef).where(OperationDef.deleted_at.is_(None))
     if q:
         stmt = stmt.where(OperationDef.name.ilike(f"%{q}%"))
+    if is_finish is not None:
+        stmt = stmt.where(OperationDef.is_finish.is_(is_finish))
     defs = (
         await session.scalars(
             stmt.order_by(OperationDef.sort_order, OperationDef.name).limit(SEARCH_LIMIT)

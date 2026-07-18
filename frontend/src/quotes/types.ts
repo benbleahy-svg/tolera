@@ -12,10 +12,11 @@ export type FilterField =
   | 'salesperson_id'
   | 'estimator_id'
   | 'created_at'
-  | 'due_date';
+  | 'due_date'
+  | 'priority';
 
 export type FilterOp = 'eq' | 'in' | 'is_null' | 'gte' | 'lte';
-export type SortField = 'created_at' | 'due_date' | 'status' | 'number';
+export type SortField = 'created_at' | 'due_date' | 'status' | 'number' | 'priority';
 export type SortDir = 'asc' | 'desc';
 
 export interface FilterClause {
@@ -39,6 +40,8 @@ export interface QuoteRow {
   rfq_number: string | null;
   due_date: string | null;
   created_at: string;
+  /** M5.0 — derived MAX(line-item priority); null renders as "—". */
+  priority: number | null;
 }
 
 export interface QuoteSearchRequest {

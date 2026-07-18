@@ -183,7 +183,8 @@
       "drafts": "Drafts",
       "outstanding": "Outstanding",
       "overdue": "Overdue",
-      "filtered": "Filtered"
+      "filtered": "Filtered",
+      "highest_priority": "Highest Priority"
     },
     "filter": {
       "status_label": "Status",
@@ -204,7 +205,13 @@
       "won": "Won",
       "lost": "Lost",
       "expired": "Expired"
-    }
+    },
+    "bulk_refresh": "Refresh Pricing",
+    "bulk_refresh_n": "Refresh Pricing ({{count}})",
+    "bulk_refresh_done": "{{count}} quotes refreshed",
+    "bulk_refresh_queued": "{{count}} quotes refreshing in the background",
+    "select_all": "Select all",
+    "select_row": "Select quote {{number}}"
   },
   "common": {
     "cancel": "Cancel",
@@ -291,7 +298,26 @@
     "collapse_section": "Collapse {{title}}",
     "expand_section": "Expand {{title}}",
     "change_process_title": "Update Process and Material",
-    "process_search_placeholder": "Filter processes …"
+    "process_search_placeholder": "Filter processes …",
+    "return_to_quotes": "Return to quotes",
+    "line_items": "Line items",
+    "no_line_items": "No line items yet",
+    "add_line_item": "Add line item",
+    "requested_finishes": "Requested Finishes",
+    "no_finishes": "None",
+    "add_finish": "Add finish",
+    "remove_finish": "Remove {{name}}",
+    "no_finish_defs": "No finish operations in the library",
+    "actions_menu": "ACTIONS",
+    "priority": "Priority",
+    "priority_none": "None",
+    "workflow_status": {
+      "not_started": "Not started",
+      "in_progress": "In progress",
+      "on_hold": "On hold",
+      "completed": "Completed",
+      "no_quote": "No quote"
+    }
   },
   "kalk": {
     "formula": "Kalk formula",

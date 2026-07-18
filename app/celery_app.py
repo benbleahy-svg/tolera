@@ -31,6 +31,7 @@ celery_app = Celery(
         "app.triage",
         "app.rule_suggest",
         "app.requote_diff",
+        "app.bulk_refresh",
     ],
 )
 
