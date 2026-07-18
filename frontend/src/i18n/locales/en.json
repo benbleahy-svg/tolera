@@ -213,6 +213,71 @@
     "select_all": "Select all",
     "select_row": "Select quote {{number}}"
   },
+  "orders": {
+    "views_label": "Order views",
+    "views": {
+      "all": "All Orders",
+      "buyer_portal": "Buyer Portal",
+      "facilitated": "Facilitated",
+      "awaiting_shipment": "Awaiting Shipment",
+      "filtered": "Filtered"
+    },
+    "search_placeholder": "Search by order, quote, PO or customer",
+    "filter": {
+      "date_from": "From",
+      "date_to": "To",
+      "account": "Customer",
+      "all_accounts": "All customers"
+    },
+    "col": {
+      "number": "Order #",
+      "quote": "Quote #",
+      "account": "Account",
+      "contact": "Contact",
+      "po": "PO Number",
+      "date_placed": "Date Placed",
+      "parts": "Parts",
+      "total": "Order Total (net)",
+      "source": "Source",
+      "expected_ship": "Expected Ship Date",
+      "actions": "Actions"
+    },
+    "source": {
+      "buyer_portal": "Buyer Portal",
+      "facilitated": "Facilitated"
+    },
+    "actions": {
+      "menu": "Actions for order {{number}}",
+      "view": "Open order",
+      "open_quote": "Open quote",
+      "edit": "Edit order",
+      "download_pdf": "Download order PDF"
+    },
+    "empty": "No orders found.",
+    "footer": "{{from}}–{{to}} of {{total}} orders",
+    "prev": "Previous",
+    "next": "Next",
+    "detail": {
+      "back": "Back to orders",
+      "loading": "Loading order …",
+      "title": "Order {{number}}",
+      "edit_soon": "Editing arrives in M5.7.",
+      "shipped_at": "Shipped on",
+      "billing_address": "Billing address",
+      "lines": "Line items",
+      "line_part": "Part",
+      "line_qty": "Qty",
+      "line_ships_on": "Ships on",
+      "line_unit": "Unit price",
+      "line_total": "Total",
+      "line_position": "Line {{position}}",
+      "net": "Net",
+      "vat": "VAT ({{rate}}%)",
+      "gross": "Total",
+      "reverse_charge": "Reverse charge — recipient liable for VAT",
+      "kleinunternehmer": "No VAT charged (§ 19 UStG small-business scheme)."
+    }
+  },
   "common": {
     "cancel": "Cancel",
     "save": "Save",
