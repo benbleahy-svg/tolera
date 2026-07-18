@@ -189,9 +189,21 @@ class Seeder:
         country: str = "DE",
         currency: str = "EUR",
         locale: str = "de-DE",
+        ust_id_nr: str | None = None,
+        commercial_register: str | None = None,
+        facility_address: str | None = None,
     ) -> uuid.UUID:
         return self._loop.run_until_complete(
-            self._org(slug, name, country=country, currency=currency, locale=locale)
+            self._org(
+                slug,
+                name,
+                country=country,
+                currency=currency,
+                locale=locale,
+                ust_id_nr=ust_id_nr,
+                commercial_register=commercial_register,
+                facility_address=facility_address,
+            )
         )
 
     def user(self, email: str) -> uuid.UUID:
@@ -464,7 +476,16 @@ class Seeder:
             )
 
     async def _org(
-        self, slug: str, name: str | None, *, country: str, currency: str, locale: str
+        self,
+        slug: str,
+        name: str | None,
+        *,
+        country: str,
+        currency: str,
+        locale: str,
+        ust_id_nr: str | None = None,
+        commercial_register: str | None = None,
+        facility_address: str | None = None,
     ) -> uuid.UUID:
         async with AsyncSession(self._engine) as session, session.begin():
             row = Organization(
@@ -473,6 +494,9 @@ class Seeder:
                 country=OrgCountry(country),
                 currency=currency,
                 locale=locale,
+                ust_id_nr=ust_id_nr,
+                commercial_register=commercial_register,
+                facility_address=facility_address,
             )
             session.add(row)
             await session.flush()

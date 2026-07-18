@@ -262,6 +262,46 @@ def test_preview_does_not_send_or_transition(
     assert rows[0][0] == QuoteStatus.draft.value  # still draft
 
 
+def test_quote_email_carries_impressum_footer(
+    client: TestClient, seeder: Seeder, provider: MockProvider
+) -> None:
+    # M5.9 AC: customer-facing quote emails carry the legal Impressum + USt-IdNr,
+    # appended server-side (not the editable template body).
+    org = seeder.org(
+        "send-impressum",
+        "Send-Impressum GmbH",
+        ust_id_nr="DE123456789",
+        commercial_register="Amtsgericht München, HRB 123456",
+        facility_address="Musterstraße 1\n80331 München",
+    )
+    user = seeder.user("jan@send-impressum.example")
+    seeder.membership(user, org, [MembershipRole.admin])
+    account = seeder.account(org, "Kunde GmbH")
+    contact = seeder.contact(org, account, "chris@kunde.de")
+    quote = seeder.quote(org, "Q-imp-1", account_id=account, contact_id=contact, estimator_id=user)
+    with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        client.post("/email-connections/smtp", json=SMTP_PAYLOAD)
+        resp = client.post(f"/api/quotes/{quote}/send", json=_send_body())
+    assert resp.status_code == 200, resp.text
+    body_html = provider.sent[0]["body_html"]
+    assert "Impressum" in body_html
+    assert "Handelsregister" in body_html
+    assert "Amtsgericht München, HRB 123456" in body_html
+    assert "USt-IdNr." in body_html and "DE123456789" in body_html
+
+
+def test_quote_email_omits_impressum_when_org_has_no_legal_identity(
+    client: TestClient, seeder: Seeder, provider: MockProvider
+) -> None:
+    # Never invent: a plain org (no register/VAT-ID) sends no Impressum block.
+    org, user, quote = _setup(seeder, "send-no-imp")
+    with authed(client, user_id=user, org_id=org, roles=[MembershipRole.admin]):
+        client.post("/email-connections/smtp", json=SMTP_PAYLOAD)
+        resp = client.post(f"/api/quotes/{quote}/send", json=_send_body())
+    assert resp.status_code == 200, resp.text
+    assert "Impressum" not in provider.sent[0]["body_html"]
+
+
 def test_send_requires_quote_finalize(
     client: TestClient, seeder: Seeder, provider: MockProvider
 ) -> None:

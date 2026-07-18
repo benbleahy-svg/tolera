@@ -48,6 +48,7 @@ class _Org:
         self.currency = kw.get("currency", "EUR")
         self.locale = kw.get("locale", "de-DE")
         self.ust_id_nr = kw.get("ust_id_nr", "DE123456789")
+        self.commercial_register = kw.get("commercial_register", "Amtsgericht München, HRB 123456")
         self.logo_object_key = kw.get("logo_object_key")
         self.brand_accent_color = kw.get("brand_accent_color", "#1a3c5e")
         self.facility_phone = kw.get("facility_phone", "+49 89 1234567")
@@ -146,6 +147,38 @@ def test_quote_pdf_shows_org_identity() -> None:
     html = render_document_html(_quote_ctx())
     assert "Fechner Zerspanung GmbH" in html
     assert "Angebot" in html  # German doc title
+
+
+def test_quote_pdf_carries_impressum_footer() -> None:
+    # M5.9 AC: customer-facing PDF footers carry Impressum + company register + USt-IdNr.
+    html = render_document_html(_quote_ctx())
+    assert "Impressum" in html
+    # label + value (the value is span-wrapped, so assert the pieces)
+    assert "Handelsregister:" in html
+    assert "Amtsgericht München, HRB 123456" in html
+    assert "USt-IdNr.:" in html
+    assert "DE123456789" in html
+    # Rendered once (in the footer, not also the header) — no duplicate identity.
+    assert html.count("USt-IdNr.:") == 1
+    assert html.count("DE123456789") == 1
+
+
+def test_impressum_footer_omitted_when_no_register_or_vatid() -> None:
+    # Never invent: an org without a register or USt-IdNr renders no Impressum block.
+    org = _Org(ust_id_nr=None, commercial_register=None)
+    ctx = build_quote_context(
+        org=cast("Organization", org),
+        payload=_buyer_payload(),
+        settings=DisplaySettings(),
+        content=QuoteContent(),
+        document_date="18.07.2026",
+        logo_data_uri=None,
+        file_names={},
+        preparers=None,
+        digital_quote_link=None,
+    )
+    html = render_document_html(ctx)
+    assert "Impressum" not in html
 
 
 def test_accent_color_injection_falls_back_to_default() -> None:

@@ -4,6 +4,9 @@
   "country": "DE",
   "currency": "EUR",
   "locale": "de-DE",
+  "ust_id_nr": "DE123456789",
+  "facility_address": "Musterstraße 1\n80331 München",
+  "commercial_register": "Amtsgericht München, HRB 123456",
   "users": [
     { "email": "admin@fechner.example", "roles": ["admin"], "first_name": "Pilot", "last_name": "Admin" },
     { "email": "estimator@fechner.example", "roles": ["estimator"] }

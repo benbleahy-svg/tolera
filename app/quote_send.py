@@ -49,6 +49,7 @@ from .email_providers import (
 )
 from .errors import AppError
 from .events import emit_event
+from .impressum import impressum_footer_html
 from .merge_fields import build_merge_values, render_merge
 from .models import (
     EmailDirection,
@@ -191,6 +192,11 @@ async def _resolve_content(
     values = await build_merge_values(session, org, quote, quote_link=link)
     subject = render_merge(payload.subject, values)
     body_html = render_merge(payload.body_html, values, escape_html=True)
+    # Append the legal Impressum footer server-side (M5.9): it is trusted, always
+    # present, and NOT part of the estimator-editable template body — so a
+    # customer-facing quote email always carries the Impressum / USt-IdNr
+    # (DACH-DELTA §Email). Empty string when the org has no register/VAT-ID.
+    body_html += impressum_footer_html(org)
     return subject, body_html
 
 

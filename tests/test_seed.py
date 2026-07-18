@@ -65,7 +65,8 @@ async def _fetch_org(owner_url: str, slug: str) -> dict[str, Any]:
             row = (
                 await conn.execute(
                     text(
-                        "SELECT slug, name, country, currency, locale "
+                        "SELECT slug, name, country, currency, locale, "
+                        "ust_id_nr, commercial_register, facility_address "
                         "FROM organization WHERE slug = :slug"
                     ),
                     {"slug": slug},
@@ -151,6 +152,11 @@ def test_seeded_fechner_org_has_expected_dach_identity(clean_db: str) -> None:
     assert fechner["country"] == "DE"
     assert fechner["currency"] == "EUR"
     assert fechner["locale"] == "de-DE"
+    # Legal identity for the Impressum footer (M5.9): register + USt-IdNr seeded so
+    # the golden-thread PDF/email footer is non-empty.
+    assert fechner["ust_id_nr"] == "DE123456789"
+    assert fechner["commercial_register"] == "Amtsgericht München, HRB 123456"
+    assert fechner["facility_address"] == "Musterstraße 1\n80331 München"
 
 
 def test_seed_is_idempotent_on_rerun(clean_db: str) -> None:

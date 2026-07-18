@@ -207,6 +207,12 @@ class Organization(Base):
     # onto reverse-charge invoices (§14 UStG). ``is_kleinunternehmer`` (§19) is
     # the per-org flag that suppresses every VAT line (DECISIONS 2026-07-18).
     ust_id_nr: Mapped[str | None] = mapped_column(String)
+    # Commercial-register entry for the legal Impressum footer on customer-facing
+    # PDFs + quote emails (M5.9; DACH-DELTA §Email/§37). Free text so one column
+    # covers DE Handelsregister/HRB, AT Firmenbuch, CH HR (e.g. "Amtsgericht
+    # München, HRB 123456"). Display-only — never enters tax math. Nullable → a
+    # bare org simply renders no Impressum block (never invented).
+    commercial_register: Mapped[str | None] = mapped_column(String)
     is_kleinunternehmer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
