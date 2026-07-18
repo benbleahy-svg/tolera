@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
@@ -32,7 +32,10 @@ import { BulkCreateDialog } from './BulkCreateDialog';
 import { useEstimatingApi } from './api';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { LeadTimesSection } from './LeadTimesSection';
+import { LineItemActionsMenu } from './LineItemActionsMenu';
+import { LineItemSidebar } from './LineItemSidebar';
 import { MaterialPicker } from './MaterialPicker';
+import { RequestedFinishes } from './RequestedFinishes';
 import { OperationDrawer } from './OperationDrawer';
 import { ReviewItemsPanel } from '../review/ReviewItemsPanel';
 import { OperationsSection } from './OperationsSection';
@@ -54,7 +57,10 @@ import type {
 } from './types';
 
 export function EstimatingPage() {
-  const { quoteId } = useParams<{ quoteId: string }>();
+  // M5.0 #partview — the spec route is /quotes/edit/:id/:lineItemId (a left sidebar
+  // picks the item). `/quotes/edit/:id` (no item) forwards to the first one below.
+  const { id: quoteId, lineItemId } = useParams<{ id: string; lineItemId?: string }>();
+  const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const api = useEstimatingApi();
   const suggestApi = useRuleSuggestApi();
@@ -62,7 +68,6 @@ export function EstimatingPage() {
   const canEdit = useHasPermission('quote_edit');
 
   const [quote, setQuote] = useState<QuoteSummary | null>(null);
-  const [itemIndex, setItemIndex] = useState(0);
   const [costing, setCosting] = useState<ComponentCosting | null>(null);
   const [pricing, setPricing] = useState<PricingSummary | null>(null);
   const [totals, setTotals] = useState<QuoteTotals | null>(null);
@@ -82,9 +87,31 @@ export function EstimatingPage() {
   const [bomPublishedToast, setBomPublishedToast] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The active line item is derived SYNCHRONOUSLY from the URL (M5.0) — never a
+  // state+effect, so a deep link to a non-first item never briefly loads item 0's
+  // costing (the CodeRabbit race). Falls back to 0 while the quote loads / before
+  // the forward-to-first effect below fires.
+  const resolvedIndex = quote ? quote.items.findIndex((i) => i.id === lineItemId) : -1;
+  const itemIndex = resolvedIndex >= 0 ? resolvedIndex : 0;
+
   const componentId = quote?.items[itemIndex]?.root_component_id ?? null;
   const partId = quote?.items[itemIndex]?.part_id ?? null;
   const quoteItemId = quote?.items[itemIndex]?.id ?? null;
+
+  // If the URL lacks a valid lineItemId but the quote has items, forward to the
+  // first — so `/quotes/edit/:id` and the old-route redirect both land on a real item.
+  useEffect(() => {
+    if (!quote || !quoteId || quote.items.length === 0) return;
+    if (quote.items.findIndex((i) => i.id === lineItemId) === -1) {
+      navigate(`/quotes/edit/${quoteId}/${quote.items[0].id}`, { replace: true });
+    }
+  }, [quote, quoteId, lineItemId, navigate]);
+
+  // Switching line items closes any open operation drawer (it belongs to the
+  // previous component).
+  useEffect(() => {
+    setDrawerOpId(null);
+  }, [lineItemId]);
 
   const fail = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : String(e));
@@ -136,11 +163,27 @@ export function EstimatingPage() {
       .catch(() => setRequoteEntries([]));
   }, [api, quoteId, fail]);
 
+  // Guards every item-scoped async load against a line-item switch (M3.10/M5.0):
+  // a response for component A must never paint after the user moved to B.
+  const activeComponentRef = useRef<string | null>(null);
+
   const loadPricing = useCallback(() => {
     if (!componentId) return;
-    api.getPricing(componentId).then(setPricing).catch(fail);
+    const cid = componentId;
+    api
+      .getPricing(cid)
+      .then((p) => {
+        if (activeComponentRef.current === cid) setPricing(p);
+      })
+      .catch(fail);
     // quote-level VAT totals move with every price/add-on change
-    if (quoteId) api.getQuoteTotals(quoteId).then(setTotals).catch(fail);
+    if (quoteId)
+      api
+        .getQuoteTotals(quoteId)
+        .then((tot) => {
+          if (activeComponentRef.current === cid) setTotals(tot);
+        })
+        .catch(fail);
   }, [api, componentId, quoteId, fail]);
 
   // M4.12 — the explicit three-choice requote gate. Every choice is recorded
@@ -222,17 +265,27 @@ export function EstimatingPage() {
     [api, quoteId, fail, loadPricing],
   );
 
-  // Guards the async rule-suggestion probe against a line-item switch (M3.10):
-  // a probe fired for component A must not paint A's chip after the user moved
-  // to component B.
-  const activeComponentRef = useRef<string | null>(null);
+  // Switching line items drops the previous component's item-scoped state so the
+  // old item's numbers never linger under the new one. Keyed on componentId ALONE
+  // (not the load deps) so it fires once per real switch — never on an unrelated
+  // re-render, which would blank a freshly-loaded costing.
+  useEffect(() => {
+    setCosting(null);
+    setPricing(null);
+    setTotals(null);
+    setRuleSuggestion(null);
+  }, [componentId]);
 
   useEffect(() => {
     if (!componentId) return;
-    // Switching line items: drop any chip from the previous component.
-    activeComponentRef.current = componentId;
-    setRuleSuggestion(null);
-    api.getCosting(componentId).then(setCosting).catch(fail);
+    const cid = componentId;
+    activeComponentRef.current = cid;
+    api
+      .getCosting(cid)
+      .then((c) => {
+        if (activeComponentRef.current === cid) setCosting(c);
+      })
+      .catch(fail);
     loadPricing();
   }, [api, componentId, fail, loadPricing]);
 
@@ -387,30 +440,61 @@ export function EstimatingPage() {
       .catch(fail);
   };
 
+  // M5.0 — sidebar navigation + line-item costing-inputs actions.
+  const selectItem = (itemId: string) => navigate(`/quotes/edit/${quoteId}/${itemId}`);
+
+  const addLineItem = () => {
+    setError(null);
+    api
+      .addLineItem(quoteId)
+      .then((next) => {
+        setQuote(next);
+        const added = next.items[next.items.length - 1];
+        if (added) navigate(`/quotes/edit/${quoteId}/${added.id}`);
+      })
+      .catch(fail);
+  };
+
+  const attachFinish = (defId: string) => {
+    if (componentId) apply(api.addOperation(componentId, { operation_def_id: defId }));
+  };
+
+  const removeFinish = (operationId: string) => {
+    setError(null);
+    api
+      .removeOperation(operationId)
+      .then(() => {
+        if (componentId) api.getCosting(componentId).then(setCosting).catch(fail);
+        loadPricing();
+      })
+      .catch(fail);
+  };
+
+  const setPriority = (priority: number | null) => {
+    if (!quoteItemId) return;
+    setError(null);
+    api.setLineItemPriority(quoteId, quoteItemId, priority).then(setQuote).catch(fail);
+  };
+
+  const activeItem = quote.items[itemIndex] ?? null;
+
   return (
-    <main className="est-page">
+    <div className="est-layout">
+      <LineItemSidebar
+        quote={quote}
+        activeItemId={quoteItemId}
+        editable={editable}
+        onSelect={selectItem}
+        onAddItem={addLineItem}
+      />
+      <main className="est-page">
       <header className="est-header">
+        <Link className="est-return-link" to="/quotes">
+          {t('estimating.return_to_quotes')}
+        </Link>
         <h2>
           {t('estimating.title', { number: quote.number })}
         </h2>
-        {quote.items.length > 1 && (
-          <label>
-            {t('estimating.line_item')}
-            <select
-              value={itemIndex}
-              onChange={(e) => {
-                setItemIndex(Number(e.target.value));
-                setDrawerOpId(null);
-              }}
-            >
-              {quote.items.map((item, index) => (
-                <option key={item.id} value={index}>
-                  {t('estimating.item_option', { position: item.position })}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         {partId && (
           <PartMatchesChip
             key={partId}
@@ -471,6 +555,22 @@ export function EstimatingPage() {
             }}
             disabled={!editable}
           />
+          {componentId && (
+            <RequestedFinishes
+              operations={costing?.operations ?? []}
+              loadFinishDefs={api.listFinishDefs}
+              onAttach={attachFinish}
+              onRemove={removeFinish}
+              disabled={!editable}
+            />
+          )}
+          {activeItem && (
+            <LineItemActionsMenu
+              priority={activeItem.priority}
+              onSetPriority={setPriority}
+              disabled={!editable}
+            />
+          )}
         </div>
       </header>
 
@@ -845,6 +945,7 @@ export function EstimatingPage() {
           onClose={() => setChangingProcess(false)}
         />
       )}
-    </main>
+      </main>
+    </div>
   );
 }

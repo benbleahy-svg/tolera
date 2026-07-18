@@ -49,6 +49,16 @@ export interface EstimatingApi {
   updateMaterial: (materialId: string, body: MaterialUpdateBody) => Promise<MaterialOut>;
   listProcesses: () => Promise<ProcessOut[]>;
   listOperationDefs: (q: string) => Promise<OperationDefOut[]>;
+  /** M5.0 #partview — finish op-defs backing the REQUESTED FINISHES multi-select. */
+  listFinishDefs: () => Promise<OperationDefOut[]>;
+  /** M5.0 #partview — set/clear a line item's priority (drives the quotes grid). */
+  setLineItemPriority: (
+    quoteId: string,
+    itemId: string,
+    priority: number | null,
+  ) => Promise<QuoteSummary>;
+  /** M5.0 — add a root line item (the sidebar's "add line item"). */
+  addLineItem: (quoteId: string) => Promise<QuoteSummary>;
   setComponentMaterial: (
     componentId: string,
     materialId: string | null,
@@ -163,6 +173,14 @@ export function useEstimatingApi(): EstimatingApi {
       listProcesses: () => apiFetch('/api/processes', token),
       listOperationDefs: (q) =>
         apiFetch(`/api/operation-defs?q=${encodeURIComponent(q)}`, token),
+      listFinishDefs: () => apiFetch('/api/operation-defs?is_finish=true', token),
+      setLineItemPriority: (quoteId, itemId, priority) =>
+        apiFetch(`/api/quotes/${quoteId}/items/${itemId}`, token, {
+          method: 'PATCH',
+          body: { priority },
+        }),
+      addLineItem: (quoteId) =>
+        apiFetch(`/api/quotes/${quoteId}/items`, token, { method: 'POST' }),
       setComponentMaterial: (componentId, materialId) =>
         apiFetch(`/api/components/${componentId}/material`, token, {
           method: 'PATCH',

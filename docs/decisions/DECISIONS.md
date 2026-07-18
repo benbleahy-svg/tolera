@@ -19,6 +19,19 @@
 
 ---
 
+## [2026-07-18] M5.0 estimating-shell implementation assumptions (recorded)
+
+**Context.** M5.0 (estimating shell, PR pending) ships four grill-time `ASSUMED:` choices the sources under-specify. All were classified **cheap to reverse** per CLAUDE.md §6.3 (no money/tax math, no tenancy/authz change, no external contract), so they were applied with inline notes rather than a halt; recorded here for the audit trail.
+
+**Assumed (applied):**
+- **`quote_item.priority` type = nullable `INTEGER`, positive (`>= 1`), UI range 1–10.** The spec `#partview` domain note says "priority … numeric priorities seen (6, 7) and blank" and the quotes-list column is "Priority numeric / blank" — so the stored value is numeric, not a DB enum ("enum selector" describes the widget). Nullable int is forward-safe for the derived MAX/order; the exact ceiling (10) is cosmetic (Pydantic-validated, no hard DB bound beyond `>= 1`). Migration `0038_line_item_priority`.
+- **"Highest Priority" view = a computed system view sorting by MAX(priority) DESC NULLS LAST** (not a stored SavedView) — system/derived views are code-computed (2026-06-25 *SavedView sharing*). With a numeric field, the spec's "Priority field = High" reads as "most urgent first"; unprioritised quotes fall to the bottom.
+- **REQUESTED FINISHES = attach/detach finish `Operation`s** (`is_finish=true`) from the finish op-def library (`GET /api/operation-defs?is_finish=true`), so operations stay the single source of truth — no separate finish table (2026-07-17 *REQUESTED FINISHES owner*).
+- **Bulk Refresh sync/async threshold `BULK_REFRESH_SYNC_MAX = 10`** — at/below runs inline; above hands to Celery (`app.bulk_refresh`). A one-constant knob; the engine is M1.10's `refresh_quote_pricing`, override-preserving either way.
+- **Migration numbering:** `0038_line_item_priority` shares the `0038` ordinal with the in-flight M4.14 (`0038_opdef_variable_visibility`); both branch off `0037`. If both merge, a trivial alembic merge-migration reconciles the two heads (standard).
+
+**Revisit trigger:** Fechner feedback on the priority scale; PP-parity evidence contradicting the finishes-as-operations model.
+
 ## [2026-07-17] Decision-review session — all 19 OPEN items resolved; five blocks chartered
 
 **Status:** RESOLVED (Benjamin, interactive decision-review session — each item put to him individually with a recommendation; details in each entry, updated in place)

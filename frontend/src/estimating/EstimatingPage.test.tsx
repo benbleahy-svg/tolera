@@ -5,7 +5,7 @@ import { Route, Routes } from 'react-router-dom';
 
 import { renderWithProviders } from '../test/render';
 import { EstimatingPage } from './EstimatingPage';
-import type { ComponentCosting, OperationOut, QuoteCellOut } from './types';
+import type { ComponentCosting, OperationDefOut, OperationOut, QuoteCellOut } from './types';
 
 const getQuote = vi.fn();
 const getCosting = vi.fn();
@@ -14,6 +14,9 @@ const searchMaterials = vi.fn();
 const updateMaterial = vi.fn();
 const listProcesses = vi.fn();
 const listOperationDefs = vi.fn();
+const listFinishDefs = vi.fn<() => Promise<OperationDefOut[]>>(() => Promise.resolve([]));
+const setLineItemPriority = vi.fn();
+const addLineItem = vi.fn();
 const setComponentMaterial = vi.fn();
 const setComponentProcess = vi.fn();
 const addOperation = vi.fn();
@@ -113,6 +116,9 @@ vi.mock('./api', () => ({
     updateMaterial,
     listProcesses,
     listOperationDefs,
+    listFinishDefs,
+    setLineItemPriority,
+    addLineItem,
     setComponentMaterial,
     setComponentProcess,
     addOperation,
@@ -235,6 +241,8 @@ const QUOTE = {
       position: 1,
       root_component_id: 'c1',
       part_id: 'p1',
+      workflow_status: 'not_started',
+      priority: null,
       quantities: [
         { quantity: 1, make_quantity: 1, deliver_quantity: 1 },
         { quantity: 10, make_quantity: 10, deliver_quantity: 10 },
@@ -246,9 +254,9 @@ const QUOTE = {
 function renderPage() {
   return renderWithProviders(
     <Routes>
-      <Route path="/quotes/:quoteId" element={<EstimatingPage />} />
+      <Route path="/quotes/edit/:id/:lineItemId" element={<EstimatingPage />} />
     </Routes>,
-    { route: '/quotes/q1' },
+    { route: '/quotes/edit/q1/item-1' },
   );
 }
 
@@ -463,6 +471,109 @@ describe('EstimatingPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Aktualisieren' }));
     await waitFor(() =>
       expect(setComponentProcess).toHaveBeenCalledWith('c1', 'proc-mill', false),
+    );
+  });
+
+  // ------------------------------------------------------------- M5.0 shell
+  it('renders the line-item sidebar and the add-line-item affordance', async () => {
+    getCosting.mockResolvedValue(costing([]));
+    await renderPage();
+    // The sidebar carries the quote title and the add-item button.
+    expect(await screen.findByRole('button', { name: 'Position hinzufügen' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Positionen')).toBeInTheDocument();
+  });
+
+  it('sets a line-item priority via the ACTIONS menu', async () => {
+    getCosting.mockResolvedValue(costing([]));
+    setLineItemPriority.mockResolvedValue(QUOTE);
+    await renderPage();
+    await userEvent.click(await screen.findByText('AKTIONEN'));
+    await userEvent.selectOptions(screen.getByLabelText('Priorität'), '7');
+    await waitFor(() =>
+      expect(setLineItemPriority).toHaveBeenCalledWith('q1', 'item-1', 7),
+    );
+  });
+
+  it('renders the first line item when the URL omits the line item', async () => {
+    // `/quotes/edit/:id` (the old-route redirect target) resolves to the first item:
+    // its component costing loads and the sidebar marks it active.
+    getCosting.mockResolvedValue(
+      costing([op('Drehen', [cell(1, '25.0000'), cell(10, '160.0000')])]),
+    );
+    await renderWithProviders(
+      <Routes>
+        <Route path="/quotes/edit/:id" element={<EstimatingPage />} />
+        <Route path="/quotes/edit/:id/:lineItemId" element={<EstimatingPage />} />
+      </Routes>,
+      { route: '/quotes/edit/q1' },
+    );
+    expect(await screen.findByText('Drehen')).toBeInTheDocument();
+    expect(getCosting).toHaveBeenCalledWith('c1');
+    const active = screen.getByRole('button', { current: true });
+    expect(active).toHaveTextContent('1');
+  });
+
+  it('deep-links to a non-first line item and loads only its costing', async () => {
+    // A two-item quote opened directly at item-2 must resolve the active item from
+    // the URL synchronously — item-2's component costing loads, item-1's does not.
+    getQuote.mockResolvedValue({
+      ...QUOTE,
+      items: [
+        QUOTE.items[0],
+        {
+          id: 'item-2',
+          position: 2,
+          root_component_id: 'c2',
+          part_id: 'p2',
+          workflow_status: 'not_started',
+          priority: null,
+          quantities: [{ quantity: 1, make_quantity: 1, deliver_quantity: 1 }],
+        },
+      ],
+    });
+    getCosting.mockImplementation((cid: string) =>
+      Promise.resolve(costing([op(cid === 'c2' ? 'Fräsen' : 'Drehen', [cell(1, '25.0000')])])),
+    );
+    await renderWithProviders(
+      <Routes>
+        <Route path="/quotes/edit/:id/:lineItemId" element={<EstimatingPage />} />
+      </Routes>,
+      { route: '/quotes/edit/q1/item-2' },
+    );
+    expect(await screen.findByText('Fräsen')).toBeInTheDocument();
+    expect(getCosting).toHaveBeenCalledWith('c2');
+    expect(getCosting).not.toHaveBeenCalledWith('c1');
+    expect(screen.getByRole('button', { current: true })).toHaveTextContent('2');
+  });
+
+  it('attaches a requested finish from the finish library', async () => {
+    getCosting.mockResolvedValue(costing([]));
+    listFinishDefs.mockResolvedValue([
+      {
+        id: 'fd1',
+        name: 'Eloxieren',
+        category: 'operation',
+        calculation_mode: 'labour_only',
+        run_rate: null,
+        labour_rate: null,
+        setup_basis: 'flat',
+        setup_cost: null,
+        setup_time_mins: null,
+        surcharge_pct: '0',
+        is_outside_service: false,
+        is_finish: true,
+        is_pre_installed: false,
+        sort_order: 0,
+        cost_formula: null,
+        variable_visibility: {},
+      },
+    ]);
+    addOperation.mockResolvedValue(costing([]));
+    await renderPage();
+    await userEvent.click(await screen.findByText('Oberfläche hinzufügen'));
+    await userEvent.click(await screen.findByLabelText('Eloxieren'));
+    await waitFor(() =>
+      expect(addOperation).toHaveBeenCalledWith('c1', { operation_def_id: 'fd1' }),
     );
   });
 });

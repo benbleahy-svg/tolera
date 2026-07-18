@@ -159,3 +159,23 @@
     width: 100%;
   }
 }
+
+/* --------------------------------------------------------------------------
+   M5.0 — quotes-list multi-select + Bulk Refresh Pricing
+   -------------------------------------------------------------------------- */
+.quotes-select-col {
+  width: 2rem;
+  text-align: center;
+}
+
+.quotes-bulk-refresh:not(:disabled) {
+  font-weight: 600;
+}
+
+.quotes-bulk-msg {
+  margin: 0.25rem 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  background: var(--surface-active, #e8f5ec);
+  font-size: 0.9rem;
+}
