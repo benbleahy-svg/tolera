@@ -41,7 +41,7 @@ from typing import Annotated, Any, Protocol
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
-from sqlalchemy import false, or_, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,7 +49,17 @@ from .auth import Principal
 from .authz import Permission, require
 from .deps import get_session
 from .errors import AppError
-from .models import Vendor, VendorContact, VendorStatus
+from .models import (
+    Quote,
+    Vendor,
+    VendorContact,
+    VendorRfq,
+    VendorRfqLine,
+    VendorRfqRecipient,
+    VendorRfqResponse,
+    VendorRfqStatus,
+    VendorStatus,
+)
 
 vendors_router = APIRouter(prefix="/api/vendors", tags=["vendors"])
 vendor_contacts_router = APIRouter(prefix="/api/vendor-contacts", tags=["vendors"])
@@ -356,17 +366,35 @@ async def _active_rfq_counts(
 ) -> dict[uuid.UUID, int]:
     """Open vendor RFQs per vendor — the directory's "Active RFQs" column.
 
-    Returns zero for every vendor today, and that is the *correct* answer rather
-    than a placeholder: M6.2's ``vendor_rfq_recipient`` identifies its vendor by
-    a denormalized ``vendor_name`` text column with **no FK to** ``vendor`` (the
-    entity did not exist when the portal was built), so there is no join from a
-    vendor row to an RFQ to count. M6.4 — the batch-send modal, which is what
-    actually creates recipients from picked vendors — adds the ``vendor_id`` link
-    and replaces this body with the real aggregate.
-
-    Keeping it a single seam means the column, the DTO field and the UI ship now
-    and M6.4 lands as one query. Deliberately not feature-flagged."""
-    return {}
+    M6.3 shipped this reading zero because ``vendor_rfq_recipient`` had no FK to
+    ``vendor``; M6.4 added ``vendor_id`` (and is what creates recipients from picked
+    vendors), so this is now the real aggregate: batches still ``open`` on which this
+    vendor has **not** answered — which is what "awaiting response" means everywhere
+    else in the funnel (the line chip, the workflow soft warning)."""
+    if not vendor_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(VendorRfqRecipient.vendor_id, func.count(func.distinct(VendorRfq.id)))
+            .join(
+                VendorRfq,
+                (VendorRfq.id == VendorRfqRecipient.rfq_id)
+                & (VendorRfq.org_id == VendorRfqRecipient.org_id),
+            )
+            .outerjoin(
+                VendorRfqResponse,
+                (VendorRfqResponse.recipient_id == VendorRfqRecipient.id)
+                & (VendorRfqResponse.org_id == VendorRfqRecipient.org_id),
+            )
+            .where(
+                VendorRfqRecipient.vendor_id.in_(vendor_ids),
+                VendorRfq.status == VendorRfqStatus.open,
+                VendorRfqResponse.id.is_(None),
+            )
+            .group_by(VendorRfqRecipient.vendor_id)
+        )
+    ).all()
+    return {vendor_id: count for vendor_id, count in rows if vendor_id is not None}
 
 
 async def _get_vendor_or_404(session: AsyncSession, vendor_id: uuid.UUID) -> Vendor:
@@ -725,15 +753,75 @@ async def list_vendor_rfq_history(
     vendor_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[dict[str, Any]]:
-    """The detail view's **RFQ History** tab — read-only here.
+    """The detail view's **RFQ History** tab — every RFQ sent to this vendor.
 
-    M6.3 owns the tab; its *content* is written by M6.4+ (the batch send that
-    creates a ``VendorRFQ``) and M6.6 (the responses + which quote a price was
-    applied to). Until then a vendor genuinely has no history, so this returns an
-    empty list rather than 404 — the tab renders its empty state, and M6.4 fills
-    this query in without the UI changing shape."""
+    M6.3 shipped the tab; M6.4 (the batch send) is what writes the rows and fills
+    this query in, exactly as planned — the UI shape did not change. The *quoted
+    prices* per qty break and the "applied to which quote" column arrive with M6.6,
+    which owns responses and Apply; a batch with no response yet honestly shows none.
+
+    Newest first, and read-only: history is a record of what was sent."""
     await _get_vendor_or_404(session, vendor_id)
-    return []
+    rows = (
+        await session.execute(
+            select(
+                VendorRfq.id,
+                VendorRfq.number,
+                VendorRfq.quote_id,
+                Quote.number,
+                VendorRfq.status,
+                VendorRfq.need_by_date,
+                VendorRfq.created_at,
+                VendorRfq.sent_at,
+                func.count(func.distinct(VendorRfqLine.quote_item_id)),
+                func.count(func.distinct(VendorRfqResponse.id)),
+            )
+            .join(
+                VendorRfqRecipient,
+                (VendorRfqRecipient.rfq_id == VendorRfq.id)
+                & (VendorRfqRecipient.org_id == VendorRfq.org_id),
+            )
+            .join(Quote, (Quote.id == VendorRfq.quote_id) & (Quote.org_id == VendorRfq.org_id))
+            .outerjoin(
+                VendorRfqLine,
+                (VendorRfqLine.rfq_id == VendorRfq.id) & (VendorRfqLine.org_id == VendorRfq.org_id),
+            )
+            .outerjoin(
+                VendorRfqResponse,
+                (VendorRfqResponse.recipient_id == VendorRfqRecipient.id)
+                & (VendorRfqResponse.org_id == VendorRfqRecipient.org_id),
+            )
+            .where(VendorRfqRecipient.vendor_id == vendor_id)
+            .group_by(VendorRfq.id, Quote.number)
+            .order_by(VendorRfq.created_at.desc())
+        )
+    ).all()
+    return [
+        {
+            "rfq_id": str(rfq_id),
+            "number": number,
+            "quote_id": str(quote_id),
+            "quote_number": quote_number,
+            "status": rfq_status.value,
+            "need_by_date": need_by.isoformat() if need_by is not None else None,
+            "created_at": created_at.isoformat(),
+            "sent_at": sent_at.isoformat() if sent_at is not None else None,
+            "line_item_count": line_count,
+            "responded": response_count > 0,
+        }
+        for (
+            rfq_id,
+            number,
+            quote_id,
+            quote_number,
+            rfq_status,
+            need_by,
+            created_at,
+            sent_at,
+            line_count,
+            response_count,
+        ) in rows
+    ]
 
 
 # --------------------------------------------------------------------------- #

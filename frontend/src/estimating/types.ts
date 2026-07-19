@@ -195,6 +195,10 @@ export interface QuoteItemSummary {
   workflow_status: string;
   /** M5.0 #partview — per-line-item priority (higher = more urgent), or null. */
   priority: number | null;
+  /** M6.4 #vendor-rfq — Make vs part-level Buy (Buy hides the internal-cost side). */
+  costing_mode: 'make' | 'buy';
+  /** M6.4 #vendor-rfq — vendors on open RFQs yet to answer; 0 = no awaiting chip. */
+  awaiting_vendor_responses: number;
   quantities: { quantity: number; make_quantity: number; deliver_quantity: number }[];
 }
 
@@ -204,6 +208,8 @@ export interface QuoteSummary {
   status: string;
   currency: string;
   missing_rates_item_count: number;
+  /** M6.4 #vendor-rfq — line items with RFQs in flight; drives the soft warning. */
+  pending_vendor_rfq_item_count: number;
   items: QuoteItemSummary[];
 }
 

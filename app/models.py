@@ -741,6 +741,24 @@ class QiWorkflowStatus(enum.StrEnum):
     no_quote = "no_quote"
 
 
+class CostingMode(enum.StrEnum):
+    """Make vs Buy for one line item (spec ``#vendor-rfq`` → "Operation-level vs
+    part-level distinction"; M6.4).
+
+    ``make`` is the default: the part is built in-house and the router's operations
+    drive its cost, with an *operation-level* outside service (anodize, plating…)
+    contributing to the outside bucket like any other step. ``buy`` means the whole
+    part is outsourced — internal costing is disabled and the vendor's price becomes
+    the line's cost. The pricing layer (markup items, margin, discounts) stays live
+    in both modes; only the *cost* side changes."""
+
+    make = "make"
+    buy = "buy"
+
+
+_costing_mode_enum = Enum(CostingMode, name="costing_mode", create_type=False)
+
+
 class SavedViewScope(enum.StrEnum):
     """Which list a saved view targets. M1.3 implements ``quotes`` only; the
     ``line_items`` scope exists in the type for forward-compat (M1.6) and is rejected
@@ -977,6 +995,13 @@ class QuoteItem(Base):
     #: urgent). The quotes grid/filter/"Highest Priority" view derive MAX(priority)
     #: per quote (DECISIONS 2026-07-17 *Quote-level priority home*).
     priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: M6.4 Buy mode (spec ``#vendor-rfq`` "Operation-level vs part-level"): ``buy``
+    #: means the whole part is outsourced — internal costing is disabled and the
+    #: vendor's price *is* the cost (``component_quantity.manual_outside_cost``).
+    #: The pricing layer (markup items, margin, discounts) stays live either way.
+    costing_mode: Mapped[CostingMode] = mapped_column(
+        _costing_mode_enum, nullable=False, server_default=CostingMode.make.value
+    )
     workflow_status: Mapped[QiWorkflowStatus] = mapped_column(
         _qi_workflow_status_enum, nullable=False, server_default=QiWorkflowStatus.not_started.value
     )
@@ -1073,7 +1098,19 @@ class ComponentQuantity(Base):
     # rounded HALF-UP to 2 dp at this boundary (DECISIONS.md 2026-07-09).
     material_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     inside_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    #: Resolved outside-service cost for this break = ``COALESCE(manual, calc)``
+    #: (M6.4). Everything downstream — unit_cost, the Kalk ``OUTSIDE_COST`` context,
+    #: the summary — reads this one; the two cells below are the calc-vs-override
+    #: pair behind it (CLAUDE.md §5: persist both, recalculation never destroys
+    #: human input). **Break total, not a unit price** — same as its siblings.
     outside_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    #: What the router's outside-service operations computed (0 in Buy mode, where
+    #: internal costing is disabled). Written by every reprice.
+    calc_outside_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    #: The estimator's outside-service override — and where M6.6's one-click Apply
+    #: writes the accepted vendor price (unit price times this break's quantity).
+    #: Never touched by a reprice.
+    manual_outside_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     purchased_component_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     child_override_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
@@ -4127,6 +4164,9 @@ class VendorContact(Base):
             unique=True,
             postgresql_where=text("deleted_at IS NULL"),
         ),
+        # Composite-FK target (house pattern; DDL in 0052) — vendor_rfq_recipient
+        # pins its quoting contact to (org_id, id).
+        UniqueConstraint("org_id", "id", name="uq_vendor_contact_org_id_id"),
     )
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
 
@@ -4148,6 +4188,24 @@ class VendorContact(Base):
 # ---------------------------------------------------------------------------
 # Vendor RFQ (M6.2) — outside-process sourcing
 # ---------------------------------------------------------------------------
+
+
+class VendorRfqStatus(enum.StrEnum):
+    """Lifecycle of an RFQ batch (spec ``#vendor-rfq`` build implications:
+    ``status ENUM(open|closed|cancelled)``; M6.4).
+
+    ``open`` from the moment the batch is sent until the estimator applies a response
+    or closes it (M6.6); ``closed`` once its outcome is settled; ``cancelled`` when the
+    estimator withdraws it. Only ``open`` batches feed the "Awaiting N vendor
+    response(s)" chip, the workflow-advance soft warning, and the vendor directory's
+    Active-RFQ count."""
+
+    open = "open"
+    closed = "closed"
+    cancelled = "cancelled"
+
+
+_vendor_rfq_status_enum = Enum(VendorRfqStatus, name="vendor_rfq_status", create_type=False)
 
 
 class VendorRfq(Base):
@@ -4174,7 +4232,15 @@ class VendorRfq(Base):
             name="fk_vendor_rfq_quote_org",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["created_by", "org_id"],
+            ["user_org_membership.user_id", "user_org_membership.org_id"],
+            name="fk_vendor_rfq_created_by_membership",
+        ),
         Index("ix_vendor_rfq_org_quote", "org_id", "quote_id"),
+        # The awaiting-chip / soft-warning / Active-RFQ aggregates all filter on
+        # open batches; keep that lookup off a seq scan as history accumulates.
+        Index("ix_vendor_rfq_org_status", "org_id", "status"),
     )
 
     id: Mapped[uuid.UUID] = _pk()
@@ -4186,6 +4252,13 @@ class VendorRfq(Base):
     need_by_date: Mapped[date | None] = mapped_column(Date)
     #: Free-text the estimator appends to the email and the portal shows verbatim.
     message: Mapped[str | None] = mapped_column(Text)
+    #: Batch lifecycle (M6.4). Batches are created ``open``; M6.6 closes them.
+    status: Mapped[VendorRfqStatus] = mapped_column(
+        _vendor_rfq_status_enum, nullable=False, server_default=VendorRfqStatus.open.value
+    )
+    #: The estimator who composed the batch — pinned to a membership of this org by
+    #: the composite FK, like ``quote.estimator_id`` (M1.4 precedent).
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
@@ -4234,10 +4307,11 @@ class VendorRfqRecipient(Base):
     Sends are **blind**: one recipient per vendor, one token per recipient, so a vendor
     can never enumerate the others (spec "BCC-isolated — vendors cannot see each other").
 
-    ``vendor_id`` is deliberately **absent**: the ``Vendor`` table is M6.3's, and the
-    M1.4 precedent forbids a speculative column without a FK target. The company name
-    and quoting-contact email are denormalised here so the portal is renderable now;
-    M6.3/M6.4 add the FK and backfill."""
+    ``vendor_id``/``vendor_contact_id`` link the recipient to the M6.3 directory (added
+    in M6.4, once ``Vendor`` existed) and are what the vendor's Active-RFQ count and
+    RFQ History join on. They stay **nullable**: ``vendor_name``/``contact_email`` are a
+    send-time *snapshot* — renaming or archiving a vendor must not rewrite history, and
+    an M6.5 email-channel recipient may have no directory row at all."""
 
     __tablename__ = "vendor_rfq_recipient"
     __table_args__ = (
@@ -4248,16 +4322,34 @@ class VendorRfqRecipient(Base):
             name="fk_vendor_rfq_recipient_rfq_org",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["org_id", "vendor_id"],
+            ["vendor.org_id", "vendor.id"],
+            name="fk_vendor_rfq_recipient_vendor_org",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "vendor_contact_id"],
+            ["vendor_contact.org_id", "vendor_contact.id"],
+            name="fk_vendor_rfq_recipient_contact_org",
+        ),
         Index("ix_vendor_rfq_recipient_org_rfq", "org_id", "rfq_id"),
+        # Active-RFQ count + RFQ History both start from the vendor.
+        Index("ix_vendor_rfq_recipient_org_vendor", "org_id", "vendor_id"),
     )
 
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = _org_fk()
     rfq_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    #: Vendor company name (denormalised until M6.3's ``Vendor`` exists).
+    #: Vendor company name **as sent** — a snapshot, not a live join (see class doc).
     vendor_name: Mapped[str] = mapped_column(String, nullable=False)
     #: Quoting contact the RFQ email goes to (M6.5); shown on no vendor-facing surface.
     contact_email: Mapped[str | None] = mapped_column(String)
+    #: The directory row this recipient is (M6.4). Nullable — see the class doc.
+    vendor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vendor_contact_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: When *this vendor's* copy went out. M6.4 creates the batch; M6.5 owns the
+    #: transport, so a batch composed today may have recipients not yet mailed.
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -4306,6 +4398,12 @@ class VendorRfqResponse(Base):
     attachment_content_type: Mapped[str | None] = mapped_column(String)
     #: True when the submission arrived after the batch's ``need_by_date`` (soft cutoff).
     is_late: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    #: When this response won — i.e. M6.6's one-click Apply wrote its price into the
+    #: line's outside-service cost. **Written by M6.6**; M6.4 only *reads* it, as the
+    #: top two vendor-ranking signals (spec: "most recent accepted response", then
+    #: "historical acceptance rate"). Until M6.6 lands it is uniformly NULL and the
+    #: ranking degrades cleanly to the capability-match signals below it.
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     submitted_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 

@@ -333,9 +333,17 @@ class Seeder:
         *,
         role: FileRole = FileRole.supporting,
         file_type: str = "brep_cad",
+        is_redacted: bool = False,
     ) -> uuid.UUID:
         return self._loop.run_until_complete(
-            self._part_file(org_id, part_id, filename, role=role, file_type=file_type)
+            self._part_file(
+                org_id,
+                part_id,
+                filename,
+                role=role,
+                file_type=file_type,
+                is_redacted=is_redacted,
+            )
         )
 
     def quote(
@@ -695,6 +703,7 @@ class Seeder:
         *,
         role: FileRole,
         file_type: str,
+        is_redacted: bool = False,
     ) -> uuid.UUID:
         async with AsyncSession(self._engine) as session, session.begin():
             row = PartFile(
@@ -705,6 +714,7 @@ class Seeder:
                 file_type=file_type,
                 size_bytes=0,
                 role=role,
+                is_redacted=is_redacted,
             )
             session.add(row)
             await session.flush()
