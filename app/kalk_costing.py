@@ -44,6 +44,7 @@ the drawer surfaces them via ``GET /api/operations/{id}/kalk``.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -86,8 +87,43 @@ def _f(value: Decimal | None) -> float | None:
     return float(value) if value is not None else None
 
 
+#: ``session.info`` keys for the two org-wide snapshots below. Sessions here are
+#: transaction-scoped (one per request / per worker task), so this cache lives
+#: exactly as long as the consistent read it belongs to — it can never serve a
+#: stale table across requests.
+_TABLE_PROVIDER_CACHE_KEY = "kalk_table_provider"
+_DEF_NAMES_CACHE_KEY = "kalk_def_names"
+
+
 async def load_table_provider(session: AsyncSession) -> MappingTableProvider:
-    """Snapshot every org custom table (RLS-scoped session ⇒ org-scoped data)."""
+    """Snapshot every org custom table (RLS-scoped session ⇒ org-scoped data).
+
+    **Memoised per session.** This is an org-wide snapshot, not a per-component
+    read, but it used to be re-issued once per costed child — two full scans of
+    ``custom_table`` + ``custom_table_row`` each time. On a 120-component assembly
+    that was 240 needless full-table reads for one page load (M6.9 perf pass)."""
+    cached = session.info.get(_TABLE_PROVIDER_CACHE_KEY)
+    if cached is not None:
+        assert isinstance(cached, MappingTableProvider)
+        return cached
+    provider = await _load_table_provider_uncached(session)
+    session.info[_TABLE_PROVIDER_CACHE_KEY] = provider
+    return provider
+
+
+async def load_def_names(session: AsyncSession) -> dict[uuid.UUID, str]:
+    """Operation-definition id → name, org-wide. Memoised for the same reason."""
+    cached = session.info.get(_DEF_NAMES_CACHE_KEY)
+    if cached is not None:
+        assert isinstance(cached, dict)
+        return cached
+    rows = (await session.execute(select(OperationDef.id, OperationDef.name))).tuples().all()
+    names = dict(rows)
+    session.info[_DEF_NAMES_CACHE_KEY] = names
+    return names
+
+
+async def _load_table_provider_uncached(session: AsyncSession) -> MappingTableProvider:
     tables = (await session.scalars(select(CustomTable))).all()
     rows = (await session.scalars(select(CustomTableRow).order_by(CustomTableRow.row_number))).all()
     rows_by_table: dict[uuid.UUID, list[tuple[int, dict[str, Any]]]] = {}
@@ -126,32 +162,155 @@ class KalkEnv:
     nest_values: dict[int, dict[str, float]] = field(default_factory=dict)
 
 
+@dataclass
+class KalkPrefetch:
+    """Batched inputs for many components' Kalk environments (M6.9 perf pass).
+
+    :func:`load_kalk_env` reads six per-component rows. Called once per child of a
+    large assembly that is six round-trips per component — the N+1 that made a
+    120-part BOM issue over a thousand sequential queries for one page.
+
+    Building this once turns those into six ``IN``-queries total. It is strictly
+    optional: ``load_kalk_env`` without a prefetch behaves exactly as before, so
+    every single-component caller is untouched.
+    """
+
+    parts: dict[uuid.UUID, Part]
+    geometries: dict[uuid.UUID, PartGeometry]
+    materials: dict[uuid.UUID, Material]
+    families: dict[uuid.UUID, MaterialFamily]
+    #: Component ids whose quote item carries the export-control flag.
+    export_controlled: frozenset[uuid.UUID]
+    nests_by_component: dict[uuid.UUID, list[Nest]]
+
+
+async def build_kalk_prefetch(
+    session: AsyncSession, components: Sequence[Component]
+) -> KalkPrefetch:
+    """Load every component's Kalk inputs in a fixed number of queries."""
+    if not components:
+        return KalkPrefetch({}, {}, {}, {}, frozenset(), {})
+
+    component_ids = [c.id for c in components]
+    part_ids = {c.part_id for c in components}
+    material_ids = {c.material_id for c in components if c.material_id is not None}
+
+    parts = {
+        p.id: p for p in (await session.scalars(select(Part).where(Part.id.in_(part_ids)))).all()
+    }
+    geometries = {
+        g.part_id: g
+        for g in (
+            await session.scalars(select(PartGeometry).where(PartGeometry.part_id.in_(part_ids)))
+        ).all()
+    }
+    materials = (
+        {
+            m.id: m
+            for m in (
+                await session.scalars(select(Material).where(Material.id.in_(material_ids)))
+            ).all()
+        }
+        if material_ids
+        else {}
+    )
+    family_ids = {m.family_id for m in materials.values()}
+    families = (
+        {
+            f.id: f
+            for f in (
+                await session.scalars(
+                    select(MaterialFamily).where(MaterialFamily.id.in_(family_ids))
+                )
+            ).all()
+        }
+        if family_ids
+        else {}
+    )
+    export_controlled = frozenset(
+        (
+            await session.scalars(
+                select(QuoteItem.root_component_id).where(
+                    QuoteItem.root_component_id.in_(component_ids),
+                    QuoteItem.export_controlled.is_(True),
+                )
+            )
+        ).all()
+    )
+    # One scan for every component's nests. The per-component form uses a JSONB
+    # containment match, which has no batched equivalent, so this filters in
+    # Python over the (small) set of nests that name any of these components.
+    nests_by_component: dict[uuid.UUID, list[Nest]] = {}
+    wanted = {str(cid) for cid in component_ids}
+    for nest in (await session.scalars(select(Nest))).all():
+        for raw_id in (nest.config or {}).get("component_ids", []):
+            if raw_id in wanted:
+                nests_by_component.setdefault(uuid.UUID(raw_id), []).append(nest)
+    return KalkPrefetch(
+        parts=parts,
+        geometries=geometries,
+        materials=materials,
+        families=families,
+        export_controlled=export_controlled,
+        nests_by_component=nests_by_component,
+    )
+
+
 async def load_kalk_env(
-    session: AsyncSession, component: Component, breaks: list[ComponentQuantity]
+    session: AsyncSession,
+    component: Component,
+    breaks: list[ComponentQuantity],
+    prefetch: KalkPrefetch | None = None,
 ) -> KalkEnv:
-    part = await session.get(Part, component.part_id)
+    """Everything one component's Kalk evaluations read.
+
+    Pass ``prefetch`` (from :func:`build_kalk_prefetch`) when costing many
+    components at once — the six per-component reads below are then served from
+    memory instead of the database. Omitting it preserves the original behaviour
+    exactly, which is why every single-component caller needs no change."""
+    if prefetch is not None:
+        part = prefetch.parts.get(component.part_id)
+        geometry = prefetch.geometries.get(component.part_id)
+        material = (
+            prefetch.materials.get(component.material_id)
+            if component.material_id is not None
+            else None
+        )
+        material_family = (
+            prefetch.families.get(material.family_id) if material is not None else None
+        )
+        export_controlled = component.id in prefetch.export_controlled
+        nests = prefetch.nests_by_component.get(component.id, [])
+    else:
+        part = await session.get(Part, component.part_id)
+        geometry = await session.scalar(
+            select(PartGeometry).where(PartGeometry.part_id == component.part_id)
+        )
+        material = (
+            await session.get(Material, component.material_id)
+            if component.material_id is not None
+            else None
+        )
+        material_family = (
+            await session.get(MaterialFamily, material.family_id) if material is not None else None
+        )
+        export_controlled = bool(
+            await session.scalar(
+                select(QuoteItem.export_controlled).where(
+                    QuoteItem.root_component_id == component.id
+                )
+            )
+        )
+        nests = list(
+            (
+                await session.scalars(
+                    select(Nest).where(Nest.config.contains({"component_ids": [str(component.id)]}))
+                )
+            ).all()
+        )
     assert part is not None  # FK-guaranteed
-    geometry = await session.scalar(select(PartGeometry).where(PartGeometry.part_id == part.id))
-    material = (
-        await session.get(Material, component.material_id)
-        if component.material_id is not None
-        else None
-    )
-    material_family = (
-        await session.get(MaterialFamily, material.family_id) if material is not None else None
-    )
-    export_controlled = bool(
-        await session.scalar(
-            select(QuoteItem.export_controlled).where(QuoteItem.root_component_id == component.id)
-        )
-    )
-    def_rows = (await session.execute(select(OperationDef.id, OperationDef.name))).tuples().all()
+    def_names = await load_def_names(session)
     ordered = sorted(breaks, key=lambda b: b.quantity)
-    nests = (
-        await session.scalars(
-            select(Nest).where(Nest.config.contains({"component_ids": [str(component.id)]}))
-        )
-    ).all()
     nest_values: dict[int, dict[str, float]] = {}
     for nest in nests:
         config, result = nest.config or {}, nest.result or {}
@@ -191,7 +350,7 @@ async def load_kalk_env(
         make_quantities=[
             b.make_quantity if b.make_quantity is not None else b.quantity for b in ordered
         ],
-        def_names=dict(def_rows),
+        def_names=def_names,
         nest_values=nest_values,
     )
 

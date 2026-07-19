@@ -243,6 +243,11 @@ class Organization(Base):
     # München, HRB 123456"). Display-only — never enters tax math. Nullable → a
     # bare org simply renders no Impressum block (never invented).
     commercial_register: Mapped[str | None] = mapped_column(String)
+    #: URL of the shop's Datenschutzerklärung (M6.9). DACH-DELTA §5 requires it on
+    #: every customer- and vendor-facing surface, but unlike the Impressum it is a
+    #: document the shop publishes — nothing in the schema derives it. Nullable, and
+    #: a null renders no link rather than an invented one (CLAUDE.md §6.4).
+    privacy_policy_url: Mapped[str | None] = mapped_column(String)
     is_kleinunternehmer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )

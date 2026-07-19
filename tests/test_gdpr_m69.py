@@ -314,3 +314,37 @@ def test_the_two_policy_halves_do_not_contradict_each_other() -> None:
     # record that stays. Pin that, so the split is a decision and not an accident.
     assert ("request_for_quote", "email") in erasable
     assert ("request_for_quote", "description") in retained
+
+
+# --------------------------------------------------------------------------- #
+# Impressum + Datenschutzerklärung on the external portals
+#
+# DACH-DELTA §5: "Impressum + Datenschutzerklärung on all customer-facing
+# surfaces"; §41 names the vendor portal too. M5.9 covered the quote PDF and the
+# quote email — the two React portals were the remaining gap.
+# --------------------------------------------------------------------------- #
+def test_legal_block_renders_only_what_the_org_configured() -> None:
+    """ "Render what's present, never invent" — the contract app/impressum.py
+    already holds for a missing commercial register, extended to the privacy URL."""
+    from dataclasses import dataclass
+
+    from app.impressum import legal_block
+
+    @dataclass
+    class _Org:
+        name: str | None = "Fechner Zerspanung GmbH"
+        facility_address: str | None = "Musterstr. 1\n80331 München"
+        commercial_register: str | None = "Amtsgericht München, HRB 123456"
+        ust_id_nr: str | None = "DE123456789"
+        privacy_policy_url: str | None = "https://fechner.de/datenschutz"
+
+    full = legal_block(_Org())
+    assert full["privacy_policy_url"] == "https://fechner.de/datenschutz"
+    values = [line["value"] for line in full["impressum"]]
+    assert "Amtsgericht München, HRB 123456" in values
+
+    # A shop that has published no privacy policy gets a null, never a guess.
+    assert legal_block(_Org(privacy_policy_url=None))["privacy_policy_url"] is None
+    # And one with no register/VAT-ID emits no Impressum at all (M5.9 contract).
+    bare = legal_block(_Org(commercial_register=None, ust_id_nr=None))
+    assert bare["impressum"] == []

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape
-from typing import Protocol
+from typing import Protocol, TypedDict
 
 #: de-DE footer labels. Kept here (not the i18n catalog) because the Impressum is
 #: assembled server-side for the PDF/email footer, always in the pilot's de-DE.
@@ -93,3 +93,36 @@ def impressum_footer_html(org: OrgIdentity) -> str:
         '<hr style="border:none;border-top:1px solid #ccc;margin:16px 0 8px;">'
         f'<div style="color:#666;font-size:11px;line-height:1.4;">{body}</div>'
     )
+
+
+class ImpressumLineOut(TypedDict):
+    label: str | None
+    value: str
+
+
+class LegalBlock(TypedDict):
+    """The legal footer's JSON shape, typed so portal callers and tests get real
+    field types instead of ``object``."""
+
+    heading: str
+    impressum: list[ImpressumLineOut]
+    privacy_policy_url: str | None
+
+
+def legal_block(org: OrgIdentity) -> LegalBlock:
+    """The legal footer as **structured data** for an API payload (M6.9).
+
+    DACH-DELTA §5 requires Impressum + Datenschutzerklärung on all customer- and
+    vendor-facing surfaces. M5.9 covered the server-rendered ones (quote PDF,
+    quote email) via :func:`impressum_footer_html`; the buyer and vendor portals
+    are React, so they need the same facts as JSON rather than trusted HTML.
+
+    Both parts render only when present — an org with no commercial register gets
+    an empty ``impressum``, and one that has published no privacy policy gets a
+    null ``privacy_policy_url``. Neither is ever invented (CLAUDE.md §6.4).
+    """
+    return {
+        "heading": HEADING,
+        "impressum": [{"label": line.label, "value": line.value} for line in impressum_lines(org)],
+        "privacy_policy_url": getattr(org, "privacy_policy_url", None),
+    }

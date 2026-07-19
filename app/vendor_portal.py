@@ -48,6 +48,7 @@ from .db import org_scoped_session
 from .deps import get_app_settings, get_storage
 from .errors import AppError
 from .events import emit_event
+from .impressum import legal_block
 from .metrics import vendor_rfq_portal_events
 from .models import (
     Component,
@@ -384,6 +385,9 @@ async def build_vendor_payload(
             "country": scope.org.country.value,
             "locale": scope.org.locale,
         },
+        # Impressum + Datenschutzerklärung (M6.9). DACH-DELTA §5 names vendor-facing
+        # surfaces explicitly ("GDPR data-handling for external parties", §5/§41).
+        "legal": legal_block(scope.org),
         # The vendor's own identity only — the batch's other recipients are never
         # exposed (blind multi-send, spec "BCC-isolated").
         "vendor": {"name": scope.recipient.vendor_name},
