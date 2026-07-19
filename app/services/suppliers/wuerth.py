@@ -124,6 +124,9 @@ class LiveWuerthClient:
         import httpx
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
+            # The recorded contract is a whole-catalogue document, so this is a
+            # faithful mock swap. A live endpoint with a part-number filter should
+            # narrow it here (the shape stays identical) rather than pull it all.
             resp = await client.get(f"{self._base_url}/catalog", headers=self._headers())
             resp.raise_for_status()
             body: dict[str, Any] = resp.json()
@@ -147,8 +150,11 @@ class WuerthMaterialPricingAdapter:
         {SupplierCapability.availability_pricing, SupplierCapability.sourcing_rfq}
     )
 
-    def __init__(self, client: WuerthClient) -> None:
+    def __init__(self, client: WuerthClient, *, mode: str = "fixture") -> None:
         self.client = client
+        #: ``fixture`` | ``live`` — surfaced to the caller so a mock send is never
+        #: reported (or audited) as though it reached the supplier.
+        self.mode = mode
 
     async def availability(
         self, oem_part_numbers: list[str], *, quantities: list[int]
@@ -161,26 +167,29 @@ class WuerthMaterialPricingAdapter:
             logger.warning("wuerth availability lookup failed", exc_info=True)
             raise SupplierUnavailable(SUPPLIER) from None
 
+        # Parsing lives inside the guard too: live-API drift (a renamed key, a
+        # string where a number belongs) is likelier than an outage, and it must
+        # degrade exactly the same way rather than 500 the estimating page.
         try:
             currency = str(document["currency"])
             by_part = {
                 normalize_part_number(str(raw["oem_part_number"])): raw
                 for raw in document.get("items", [])
             }
-        except (KeyError, TypeError) as exc:
+            wanted = sorted({int(q) for q in quantities if int(q) > 0})
+            items = tuple(
+                _build_item(
+                    part_number,
+                    by_part.get(normalize_part_number(part_number)),
+                    currency,
+                    wanted,
+                )
+                for part_number in oem_part_numbers
+            )
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
             logger.warning("wuerth returned an unusable document: %s", type(exc).__name__)
             raise SupplierUnavailable(SUPPLIER) from None
 
-        wanted = sorted({int(q) for q in quantities if int(q) > 0})
-        items = tuple(
-            _build_item(
-                part_number,
-                by_part.get(normalize_part_number(part_number)),
-                currency,
-                wanted,
-            )
-            for part_number in oem_part_numbers
-        )
         return AvailabilityResult(supplier=SUPPLIER, items=items)
 
     async def send_rfq(self, request: SourcingRfqRequest) -> SourcingRfqResult:
@@ -191,12 +200,19 @@ class WuerthMaterialPricingAdapter:
             logger.warning("wuerth rfq send failed", exc_info=True)
             raise SupplierUnavailable(SUPPLIER) from None
 
-        return SourcingRfqResult(
-            reference=str(body.get("reference", request.reference)),
-            accepted=bool(body.get("accepted", False)),
-            supplier_reference=body.get("supplier_reference"),
-            estimated_response_hours=body.get("estimated_response_hours"),
-        )
+        # Same reasoning as the lookup: an acknowledgement we cannot parse is a
+        # failed send (clean 503), never a 500.
+        try:
+            return SourcingRfqResult(
+                reference=str(body.get("reference", request.reference)),
+                accepted=bool(body.get("accepted", False)),
+                supplier_reference=body.get("supplier_reference"),
+                estimated_response_hours=body.get("estimated_response_hours"),
+                mode=self.mode,
+            )
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            logger.warning("wuerth returned an unusable ack: %s", type(exc).__name__)
+            raise SupplierUnavailable(SUPPLIER) from None
 
 
 def _build_item(
@@ -213,18 +229,15 @@ def _build_item(
     stock_int = int(stock) if stock is not None else None
     breaks = sorted(raw.get("price_breaks", []), key=lambda b: int(b["min_quantity"]))
 
-    quotes = []
-    for quantity in quantities:
-        unit_price = _price_for(breaks, quantity)
-        if unit_price is None:
-            continue
-        quotes.append(
-            QuantityQuote(
-                quantity=quantity,
-                unit_price_minor=unit_price,
-                status=classify_stock(stock_int, quantity),
-            )
+    quotes = [
+        QuantityQuote(
+            quantity=quantity,
+            # None = carried, but not quoted at this quantity (see QuantityQuote).
+            unit_price_minor=_price_for(breaks, quantity),
+            status=classify_stock(stock_int, quantity),
         )
+        for quantity in quantities
+    ]
 
     return AvailabilityItem(
         oem_part_number=part_number,
@@ -288,9 +301,10 @@ def build_wuerth_adapter(settings: Settings) -> WuerthMaterialPricingAdapter:
                 settings.wuerth_base_url,
                 settings.wuerth_api_key,
                 timeout_seconds=settings.wuerth_timeout_seconds,
-            )
+            ),
+            mode="live",
         )
-    return WuerthMaterialPricingAdapter(FixtureWuerthClient())
+    return WuerthMaterialPricingAdapter(FixtureWuerthClient(), mode="fixture")
 
 
 def get_sourcing_adapter(request: Request) -> WuerthMaterialPricingAdapter:

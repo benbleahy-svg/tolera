@@ -263,6 +263,17 @@ class Settings(BaseSettings):
                 raise ValueError("WUERTH_BASE_URL must be set when WUERTH_MODE=live.")
             if not self.wuerth_api_key:
                 raise ValueError("WUERTH_API_KEY must be set when WUERTH_MODE=live.")
+            return
+        # Fixture mode: the recorded response is runtime data, not test data — an
+        # image that forgot to ship it would degrade every lookup and read as a
+        # supplier outage. Boot loudly instead.
+        from .services.suppliers.wuerth import FIXTURE_PATH
+
+        if not FIXTURE_PATH.exists():
+            raise ValueError(
+                f"WUERTH_MODE=fixture requires the recorded response at {FIXTURE_PATH} "
+                "(ship fixtures/wuerth with the image, or set WUERTH_MODE=live)."
+            )
 
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"

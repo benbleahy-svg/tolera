@@ -18,9 +18,10 @@ export type AvailabilityStatus = 'available' | 'at_risk' | 'insufficient' | 'unk
 
 export interface QuantityQuote {
   quantity: number;
-  /** Minor units (cents) of `AvailabilityItem.currency`. */
-  unit_price_minor: number;
-  extended_price_minor: number;
+  /** Minor units (cents) of `AvailabilityItem.currency`; null = not quoted at
+   *  this quantity (the supplier carries the part, but not that break). */
+  unit_price_minor: number | null;
+  extended_price_minor: number | null;
   status: AvailabilityStatus;
 }
 
@@ -47,6 +48,9 @@ export interface SourcingRfqOut {
   accepted: boolean;
   supplier_reference: string | null;
   estimated_response_hours: number | null;
+  /** `fixture` while supplier procurement is pending — labelled in the UI so a
+   *  mock send is never mistaken for a real one. */
+  mode: string;
 }
 
 function makeApi(getToken: TokenGetter) {

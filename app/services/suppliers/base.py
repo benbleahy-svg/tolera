@@ -72,16 +72,24 @@ def classify_stock(quantity_available: int | None, required: int) -> Availabilit
 
 @dataclass(frozen=True, slots=True)
 class QuantityQuote:
-    """The supplier's price for one requested quantity."""
+    """The supplier's answer for one requested quantity.
+
+    ``unit_price_minor`` is ``None`` when the supplier carries the part but
+    quotes no price at that quantity (e.g. its cheapest break starts at 5 and
+    the line asks for 1). The row is still returned: dropping it would leave one
+    of the estimator's make-quantities silently missing from the table.
+    """
 
     quantity: int
     #: Unit price in minor units of :attr:`AvailabilityItem.currency` (int, never float).
-    unit_price_minor: int
+    unit_price_minor: int | None
     status: AvailabilityStatus
 
     @property
-    def extended_price_minor(self) -> int:
+    def extended_price_minor(self) -> int | None:
         """Unit price times quantity, still in minor units."""
+        if self.unit_price_minor is None:
+            return None
         return self.unit_price_minor * self.quantity
 
 
@@ -138,12 +146,19 @@ class SourcingRfqRequest:
 
 @dataclass(frozen=True, slots=True)
 class SourcingRfqResult:
-    """The supplier's acknowledgement of a sourcing RFQ."""
+    """The supplier's acknowledgement of a sourcing RFQ.
+
+    ``mode`` says whether this went to the real supplier (``live``) or to the
+    recorded fixture (``fixture``). It is carried all the way to the UI and the
+    audit event on purpose: while procurement is pending, an estimator must not
+    read "Anfrage gesendet" as "Würth has it".
+    """
 
     reference: str
     accepted: bool
     supplier_reference: str | None = None
     estimated_response_hours: int | None = None
+    mode: str = "fixture"
 
 
 class SupplierUnavailable(Exception):

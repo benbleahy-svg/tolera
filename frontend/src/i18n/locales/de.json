@@ -1888,6 +1888,8 @@
       "at_risk": "Bestand knapp",
       "insufficient": "Nicht ausreichend",
       "unknown": "Unbekannt"
-    }
+    },
+    "not_quoted": "kein Preis",
+    "rfq_mock": "(Testmodus — noch nicht an den Lieferanten übermittelt.)"
   }
 }

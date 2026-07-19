@@ -65,8 +65,9 @@ Adapter = Annotated[WuerthMaterialPricingAdapter, Depends(get_sourcing_adapter)]
 class QuantityQuoteOut(BaseModel):
     quantity: int
     #: Minor units of ``AvailabilityItemOut.currency`` (CLAUDE.md §5) — never a float.
-    unit_price_minor: int
-    extended_price_minor: int
+    #: ``null`` = the supplier carries the part but quotes no price at this quantity.
+    unit_price_minor: int | None
+    extended_price_minor: int | None
     #: ``available`` | ``at_risk`` | ``insufficient`` | ``unknown`` — the inventory dot.
     status: str
 
@@ -98,8 +99,10 @@ class AvailabilityOut(BaseModel):
 class SourcingRfqIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    purchased_component_ids: Annotated[list[uuid.UUID], Field(min_length=1)]
-    quantities: Annotated[list[int], Field(min_length=1)]
+    purchased_component_ids: Annotated[
+        list[uuid.UUID], Field(min_length=1, max_length=MAX_RFQ_COMPONENTS)
+    ]
+    quantities: Annotated[list[int], Field(min_length=1, max_length=MAX_QUANTITIES)]
     message: Annotated[str | None, Field(max_length=2000)] = None
     #: The shop's own purchasing address for the reply; never a customer address.
     reply_to: Annotated[str | None, Field(max_length=320)] = None
@@ -111,6 +114,9 @@ class SourcingRfqOut(BaseModel):
     accepted: bool
     supplier_reference: str | None = None
     estimated_response_hours: int | None = None
+    #: ``fixture`` while procurement is pending, ``live`` once credentials land.
+    #: The UI labels a fixture send so nobody believes the supplier has it.
+    mode: str = "fixture"
 
 
 # --------------------------------------------------------------------------- #
@@ -137,16 +143,19 @@ def _parse_quantities(raw: str) -> list[int]:
 
 
 def _check_quantities(values: list[int]) -> list[int]:
+    """Validate, de-duplicate and sort — the list is forwarded to the supplier,
+    so ``[1] * 50000`` must not become a 50 000-element outbound payload."""
     if not values:
         raise AppError("invalid_quantities", "Mindestens eine Menge ist erforderlich.")
     if any(value <= 0 for value in values):
         raise AppError("invalid_quantities", "Mengen müssen größer als 0 sein.")
-    if len(set(values)) > MAX_QUANTITIES:
+    unique = sorted(set(values))
+    if len(unique) > MAX_QUANTITIES:
         raise AppError(
             "too_many_quantities",
             f"Höchstens {MAX_QUANTITIES} Mengenstufen pro Abfrage.",
         )
-    return values
+    return unique
 
 
 async def _load_components(
@@ -261,12 +270,6 @@ async def send_sourcing_rfq(
     on the org's event outbox so the disclosure is auditable (M6.9).
     """
     wanted = _check_quantities(payload.quantities)
-    if len(payload.purchased_component_ids) > MAX_RFQ_COMPONENTS:
-        raise AppError(
-            "too_many_components",
-            f"Höchstens {MAX_RFQ_COMPONENTS} Artikel pro Anfrage.",
-        )
-
     components = await _load_components(
         session, principal.active_org_id, payload.purchased_component_ids
     )
@@ -307,6 +310,9 @@ async def send_sourcing_rfq(
         "sourcing.rfq_sent",
         {
             "supplier": adapter.supplier,
+            # fixture vs live is part of the audit record: a mock send must never
+            # read, later, as evidence that the supplier was contacted.
+            "mode": result.mode,
             "reference": result.reference,
             "supplier_reference": result.supplier_reference,
             "purchased_component_ids": [str(component.id) for component in components],
@@ -321,4 +327,5 @@ async def send_sourcing_rfq(
         accepted=result.accepted,
         supplier_reference=result.supplier_reference,
         estimated_response_hours=result.estimated_response_hours,
+        mode=result.mode,
     )

@@ -40,6 +40,7 @@ describe('ToleraSourcePanel', () => {
       accepted: true,
       supplier_reference: 'WUE-1',
       estimated_response_hours: 24,
+      mode: 'fixture',
     });
   });
 
@@ -119,6 +120,31 @@ describe('ToleraSourcePanel', () => {
       quantities: [100, 9000],
     });
     expect(await screen.findByText(/TS-RFQ-abc/)).toBeInTheDocument();
+  });
+
+  it('labels a fixture-mode send so it is not mistaken for a real one', async () => {
+    await open();
+    await screen.findByRole('table');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Anfrage senden' }));
+
+    expect(await screen.findByText(/Testmodus/)).toBeInTheDocument();
+  });
+
+  it('shows a quantity the supplier does not quote instead of dropping the row', async () => {
+    availability.mockResolvedValue({
+      ...PRICED,
+      item: {
+        ...PRICED.item,
+        quotes: [
+          { quantity: 1, unit_price_minor: null, extended_price_minor: null, status: 'available' },
+        ],
+      },
+    });
+
+    await open([1]);
+
+    expect(await screen.findAllByText('kein Preis')).toHaveLength(2);
   });
 
   it('surfaces a failed send instead of silently claiming success', async () => {

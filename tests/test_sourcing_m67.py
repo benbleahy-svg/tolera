@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import inspect
 import uuid
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -148,6 +149,87 @@ async def test_client_failure_raises_supplier_unavailable_not_the_raw_error() ->
     assert excinfo.value.supplier == "wuerth"
 
 
+class _MalformedClient:
+    """A supplier that answers 200 with drifted/garbage content."""
+
+    def __init__(self, document: Any, ack: Any = None) -> None:
+        self._document = document
+        self._ack = ack
+
+    async def fetch_catalog(self) -> Any:
+        return self._document
+
+    async def send_rfq(self, request: Any) -> Any:
+        return self._ack
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        pytest.param({"items": []}, id="no-currency"),
+        pytest.param({"currency": "EUR", "items": [{"brand": "W"}]}, id="item-without-part-number"),
+        pytest.param(
+            {
+                "currency": "EUR",
+                "items": [{"oem_part_number": "X", "price_breaks": [{"min_quantity": 1}]}],
+            },
+            id="break-without-price",
+        ),
+        pytest.param(
+            {
+                "currency": "EUR",
+                "items": [{"oem_part_number": "X", "quantity_available": "n/a"}],
+            },
+            id="stock-not-a-number",
+        ),
+        pytest.param("not a document at all", id="not-an-object"),
+    ],
+)
+async def test_drifted_supplier_payloads_degrade_rather_than_crash(document: Any) -> None:
+    """Live-API drift is likelier than an outage and must degrade identically —
+    a 500 on the estimating page is exactly what "never blocks costing" forbids."""
+    adapter = WuerthMaterialPricingAdapter(_MalformedClient(document))
+
+    with pytest.raises(SupplierUnavailable):
+        await adapter.availability(["X"], quantities=[1])
+
+
+async def test_unusable_rfq_acknowledgement_is_a_failed_send_not_a_crash() -> None:
+    adapter = WuerthMaterialPricingAdapter(_MalformedClient({}, ack=["unexpected", "list"]))
+
+    with pytest.raises(SupplierUnavailable):
+        await adapter.send_rfq(
+            SourcingRfqRequest(
+                reference="TS-RFQ-9",
+                requested_by="Fechner GmbH",
+                lines=[SourcingRfqLine(oem_part_number="0384 06", quantities=[10])],
+            )
+        )
+
+
+async def test_quantity_below_the_lowest_break_is_reported_unpriced_not_dropped() -> None:
+    """A missing row would silently lose one of the estimator's make quantities."""
+    client = _MalformedClient(
+        {
+            "currency": "EUR",
+            "items": [
+                {
+                    "oem_part_number": "X",
+                    "quantity_available": 100,
+                    "price_breaks": [{"min_quantity": 5, "unit_price_minor": 40}],
+                }
+            ],
+        }
+    )
+    result = await WuerthMaterialPricingAdapter(client).availability(["X"], quantities=[1, 10])
+
+    quotes = result.items[0].quotes
+    assert [q.quantity for q in quotes] == [1, 10]
+    assert quotes[0].unit_price_minor is None
+    assert quotes[0].extended_price_minor is None
+    assert quotes[1].unit_price_minor == 40
+
+
 # --------------------------------------------------------------------------- #
 # 3 · RFQ-send request shape (AC 4)
 # --------------------------------------------------------------------------- #
@@ -189,6 +271,8 @@ async def test_rfq_send_produces_the_documented_request_shape() -> None:
     assert result.accepted is True
     assert result.reference == "TS-RFQ-1234"
     assert result.supplier_reference
+    # Fixture mode must announce itself — a mock send is not a send.
+    assert result.mode == "fixture"
 
 
 async def test_rfq_request_omits_optional_keys_and_never_attaches_files() -> None:
@@ -232,6 +316,18 @@ def test_fixture_mode_builds_a_fixture_client_and_needs_no_credentials() -> None
     adapter = build_wuerth_adapter(build_settings(wuerth_mode="fixture"))
 
     assert isinstance(adapter.client, FixtureWuerthClient)
+    assert adapter.mode == "fixture"
+
+
+def test_fixture_mode_fails_closed_when_the_recorded_response_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deploy that forgot to ship fixtures/wuerth would degrade every lookup
+    and read as a supplier outage — boot loudly instead."""
+    monkeypatch.setattr(wuerth_module, "FIXTURE_PATH", Path("/nonexistent/catalog.json"))
+
+    with pytest.raises(ValueError, match="WUERTH_MODE=fixture"):
+        build_settings(wuerth_mode="fixture").validate_wuerth()
 
 
 def test_live_mode_builds_the_http_client_from_settings_only() -> None:
@@ -244,6 +340,7 @@ def test_live_mode_builds_the_http_client_from_settings_only() -> None:
     adapter = build_wuerth_adapter(settings)
 
     assert isinstance(adapter.client, LiveWuerthClient)
+    assert adapter.mode == "live"
 
 
 def test_live_mode_without_a_key_fails_closed_at_validation() -> None:
@@ -374,11 +471,12 @@ def test_rfq_send_records_an_org_scoped_audit_event(app_client: TestClient, seed
     body = resp.json()
     assert body["accepted"] is True
     assert body["reference"].startswith("TS-RFQ-")
+    assert body["mode"] == "fixture"
 
     assert (
         seeder.count(
             "domain_event",
-            "org_id = :org AND event_type = 'sourcing.rfq_sent'",
+            "org_id = :org AND event_type = 'sourcing.rfq_sent' AND payload->>'mode' = 'fixture'",
             {"org": org},
         )
         == 1

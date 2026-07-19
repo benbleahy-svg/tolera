@@ -1888,6 +1888,8 @@
       "at_risk": "Stock at risk",
       "insufficient": "Insufficient",
       "unknown": "Unknown"
-    }
+    },
+    "not_quoted": "not quoted",
+    "rfq_mock": "(test mode — not actually transmitted to the supplier.)"
   }
 }

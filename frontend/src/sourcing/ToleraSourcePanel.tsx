@@ -46,12 +46,17 @@ export function ToleraSourcePanel({
   const [failed, setFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const [sentReference, setSentReference] = useState<string | null>(null);
+  const [sentMode, setSentMode] = useState<string | null>(null);
   const [sendFailed, setSendFailed] = useState(false);
 
   const breaks = quantities.length > 0 ? quantities : [1];
 
   useEffect(() => {
     let cancelled = false;
+    // Reset first: a refetch must not leave the previous answer (or a stale
+    // "unavailable" badge) on screen while the new one is in flight.
+    setResult(null);
+    setFailed(false);
     api
       .availability(purchasedComponentId, breaks)
       .then((res) => {
@@ -116,10 +121,14 @@ export function ToleraSourcePanel({
                   <tr key={quote.quantity}>
                     <td className="est-num">{quote.quantity}</td>
                     <td className="est-num">
-                      {formatMinor(quote.unit_price_minor, item.currency)}
+                      {quote.unit_price_minor == null
+                        ? t('sourcing.not_quoted')
+                        : formatMinor(quote.unit_price_minor, item.currency)}
                     </td>
                     <td className="est-num">
-                      {formatMinor(quote.extended_price_minor, item.currency)}
+                      {quote.extended_price_minor == null
+                        ? t('sourcing.not_quoted')
+                        : formatMinor(quote.extended_price_minor, item.currency)}
                     </td>
                     <td>
                       <span aria-hidden="true">{DOT[quote.status]}</span>{' '}
@@ -138,6 +147,10 @@ export function ToleraSourcePanel({
         {sentReference && (
           <p className="src-sent" role="status">
             {t('sourcing.rfq_sent', { reference: sentReference })}
+            {/* While procurement is pending the send goes to the recorded
+                fixture — say so, rather than letting the estimator wait for an
+                answer that was never requested. */}
+            {sentMode === 'fixture' && ` ${t('sourcing.rfq_mock')}`}
           </p>
         )}
         {sendFailed && (
@@ -163,6 +176,7 @@ export function ToleraSourcePanel({
                   quantities: breaks,
                 });
                 setSentReference(res.reference);
+                setSentMode(res.mode);
               } catch {
                 setSendFailed(true);
               } finally {
