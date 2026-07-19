@@ -433,3 +433,27 @@ def test_every_screening_outcome_is_recorded_without_naming_the_match(
     assert detail["lists"] == ["eu-consolidated"]
     # The matched party's name is third-party PII — it must not be in the log.
     assert "Sanktioniert AG" not in str(detail)
+
+
+def test_the_request_edge_refusal_survives_its_own_422(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """The subtle one. ``org_scoped_session`` rolls back on error, so an audit
+    entry sharing the request's transaction would vanish with the AppError —
+    losing exactly the event that must be on record. The edge therefore writes
+    through ``record_ai_skip_standalone``, in its own committed transaction."""
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    part_id = _flagged_part(seeder, org_id)
+
+    with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
+        upload = app_client.post(
+            f"/api/parts/{part_id}/files",
+            files=[("files", ("BR-100.pdf", b"%PDF-1.4 test", "application/pdf"))],
+        )
+        file_id = uuid.UUID(upload.json()[0]["id"])
+        resp = app_client.post(f"/api/parts/{part_id}/files/{file_id}/extract")
+
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "export_controlled"
+    # The refusal is on record despite the request having failed.
+    assert ("lens_extract.request", "part_file") in _skips(seeder, org_id)
