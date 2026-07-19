@@ -1,0 +1,191 @@
+/* Public vendor-RFQ portal (M6.2). White-label — NO Tolera branding; this is the
+   shop's page, addressed to its supplier. Reuses the buyer portal's neutral
+   tokens and its `.portal-state` / `.portal-error` states; only the response-form
+   surfaces are new. Wide price grids scroll inside their own container so the
+   page body never scrolls sideways. */
+
+.portal {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+  color: #1f2933;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.portal-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid #e4e7eb;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.portal-shop-name {
+  font-size: 1.4rem;
+  margin: 0;
+}
+
+.portal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: #52606d;
+}
+
+.portal-vendor {
+  font-weight: 600;
+}
+
+/* The soft-cutoff note. Deliberately informational styling — an alarming banner
+   would read as "closed", which this portal never is (spec). */
+.portal-note {
+  background: #f5f7fa;
+  border-left: 3px solid #9aa5b1;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.9rem;
+  color: #52606d;
+}
+
+.portal-message {
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 0.75rem 0.9rem;
+  white-space: pre-line;
+}
+
+.portal-success {
+  background: #ecfdf5;
+  border-left: 3px solid #059669;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.9rem;
+}
+
+.portal-muted {
+  color: #52606d;
+  font-size: 0.9rem;
+}
+
+.vendor-rfq-line {
+  border: 1px solid #e4e7eb;
+  border-radius: 6px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem;
+  background: #fff;
+}
+
+.vendor-rfq-line h2 {
+  font-size: 1.05rem;
+  margin: 0 0 0.35rem;
+}
+
+.vendor-rfq-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 0.75rem;
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.vendor-rfq-facts dt {
+  color: #52606d;
+}
+
+.vendor-rfq-facts dd {
+  margin: 0;
+}
+
+.vendor-rfq-files {
+  margin: 0.4rem 0 0.8rem;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.vendor-rfq-cannot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.6rem 0;
+  font-size: 0.95rem;
+}
+
+.vendor-rfq-prices {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.vendor-rfq-prices th,
+.vendor-rfq-prices td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #e4e7eb;
+  font-size: 0.9rem;
+}
+
+.vendor-rfq-prices input {
+  width: 9rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #cbd2d9;
+  border-radius: 3px;
+  font: inherit;
+}
+
+.vendor-rfq-notes,
+.vendor-rfq-footer label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  color: #52606d;
+}
+
+.vendor-rfq-notes textarea,
+.vendor-rfq-footer textarea {
+  min-height: 3.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #cbd2d9;
+  border-radius: 3px;
+  font: inherit;
+  color: #1f2933;
+}
+
+.vendor-rfq-footer {
+  border-top: 1px solid #e4e7eb;
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 22rem;
+}
+
+.vendor-rfq-footer select,
+.vendor-rfq-footer input[type='date'] {
+  padding: 0.35rem 0.4rem;
+  border: 1px solid #cbd2d9;
+  border-radius: 3px;
+  font: inherit;
+  color: #1f2933;
+}
+
+.vendor-rfq-footer button {
+  margin-top: 0.5rem;
+  padding: 0.55rem 1rem;
+  border: 0;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vendor-rfq-footer button:disabled {
+  background: #cbd2d9;
+  cursor: not-allowed;
+}

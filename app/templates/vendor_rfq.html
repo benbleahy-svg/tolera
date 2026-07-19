@@ -1,0 +1,129 @@
+{#
+  M6.2 — Vendor RFQ record sheet (WeasyPrint → A4 PDF), spec #vendor-rfq
+  "Download RFQ PDF button — generates a PDF of the full RFQ for the vendor's records".
+
+  DUMB renderer, like document.html: the context IS the vendor portal payload
+  (app.vendor_portal.build_vendor_payload), which is already an allowlist projection —
+  so this sheet can never print a customer price, an internal cost, or another vendor.
+  There is deliberately NO price column: the vendor supplies prices, it does not receive
+  any. White-label (zero platform branding) and German-labelled, like every other
+  outbound document. Autoescaping is ON — no `|safe`.
+#}
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 16mm 20mm 16mm;
+    @bottom-center {
+      content: "Seite " counter(page) " / " counter(pages);
+      font-size: 8pt;
+      color: #777;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.4;
+    color: #1a1a1a;
+  }
+  header.doc {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 3px solid #1a1a1a;
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+  header.doc .shop-name { font-size: 13pt; font-weight: 700; }
+  header.doc .meta { text-align: right; font-size: 8.5pt; color: #444; }
+  h1.doc-title { font-size: 18pt; margin: 4px 0 10px; }
+  .vendor, .message { margin-bottom: 12px; font-size: 9pt; }
+  .message { padding: 8px 10px; background: #f5f6f8; border-radius: 3px; white-space: pre-line; }
+  .late-note { font-size: 8.5pt; color: #444; margin-bottom: 10px; }
+  table.items { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  table.items th {
+    text-align: left;
+    border-bottom: 2px solid #1a1a1a;
+    padding: 5px 6px;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: #555;
+  }
+  table.items td { padding: 5px 6px; vertical-align: top; border-top: 1px solid #ddd; }
+  .part-title { font-weight: 700; font-size: 10pt; }
+  .muted { color: #666; font-size: 8.5pt; }
+  ul.files { margin: 3px 0 0 14px; padding: 0; color: #444; font-size: 8.5pt; }
+</style>
+
+<header class="doc">
+  <div>
+    <div class="shop-name">{{ shop.name }}</div>
+    <div class="muted">Anfrage an Lieferanten</div>
+  </div>
+  <div class="meta">
+    <div><strong>Anfrage-Nr.</strong> {{ rfq_number }}</div>
+    {% if quote_number %}
+    <div>Referenz: {{ quote_number }}</div>
+    {% endif %}
+    {% if need_by_date %}
+    <div>Rückmeldung erbeten bis: {{ need_by_date }}</div>
+    {% endif %}
+  </div>
+</header>
+
+<h1 class="doc-title">Anfrage {{ rfq_number }}</h1>
+
+<div class="vendor"><strong>Lieferant:</strong> {{ vendor.name }}</div>
+
+{% if message %}
+<div class="message">{{ message }}</div>
+{% endif %}
+
+<table class="items">
+  <thead>
+    <tr>
+      <th style="width: 42%">Teil</th>
+      <th style="width: 20%">Verfahren</th>
+      <th style="width: 38%">Stückzahlen</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for line in lines %}
+    <tr>
+      <td>
+        <div class="part-title">
+          {{ line.part_number }}{% if line.revision %} Rev. {{ line.revision }}{% endif %}
+        </div>
+        {% if line.description %}
+        <div class="muted">{{ line.description }}</div>
+        {% endif %}
+        {% if line.estimator_notes %}
+        <div class="muted">Hinweis: {{ line.estimator_notes }}</div>
+        {% endif %}
+        {% if line.files %}
+        <ul class="files">
+          {% for f in line.files %}
+          <li>{{ f.filename }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </td>
+      <td>{{ line.process or "—" }}</td>
+      <td>
+        {% if line.quantities %}
+          {{ line.quantities | join(" · ") }} Stk.
+        {% else %}
+          —
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{# Soft cutoff (spec): the portal never closes, so the sheet must not imply it does. #}
+<div class="late-note">
+  Bitte reichen Sie Ihr Angebot über den Portal-Link aus der Anfrage-E-Mail ein.
+  Auch nach dem genannten Termin bleibt das Portal geöffnet.
+</div>

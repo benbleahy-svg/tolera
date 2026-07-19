@@ -8,6 +8,7 @@ import App from './App.tsx'
 import { applyBrand, BRAND } from './brand'
 import i18n from './i18n'
 import { PortalApp } from './portal/PortalApp'
+import { VendorPortalApp } from './vendor-portal/VendorPortalApp'
 import { SessionProvider } from './session/SessionProvider'
 import { applyMode, getInitialMode } from './theme/theme'
 import './index.css'
@@ -22,6 +23,7 @@ import './styles/lens.css'
 import './styles/review.css'
 import './styles/bom.css'
 import './styles/portal.css'
+import './styles/vendor-portal.css'
 
 // Apply the persisted colour mode + brand (title + colour token) before first paint.
 applyMode(getInitialMode())
@@ -30,15 +32,22 @@ document.title = BRAND.name
 
 const root = createRoot(document.getElementById('root')!)
 
-// The public, unauthenticated buyer portal (`/q/:token`, M5.1) renders a
-// SEPARATE tree with NO Clerk / session / AppShell — it must never read the
+// The public, unauthenticated portals — the buyer's Digital Quote (`/q/:token`,
+// M5.1) and the vendor's RFQ response form (`/vendor-rfq/:token`, M6.2) — render
+// SEPARATE trees with NO Clerk / session / AppShell; they must never read the
 // Clerk publishable key. Everything else is the authenticated app.
-if (window.location.pathname.startsWith('/q/')) {
+const publicTree = window.location.pathname.startsWith('/q/')
+  ? <PortalApp />
+  : window.location.pathname.startsWith('/vendor-rfq/')
+    ? <VendorPortalApp />
+    : null
+
+if (publicTree) {
   root.render(
     <StrictMode>
       <I18nextProvider i18n={i18n}>
         <BrowserRouter>
-          <PortalApp />
+          {publicTree}
         </BrowserRouter>
       </I18nextProvider>
     </StrictMode>,

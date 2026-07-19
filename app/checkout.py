@@ -269,7 +269,8 @@ async def checkout(
         claims = decode_jwt(secret, token)
     except InvalidToken as exc:
         raise _rejected() from exc
-    if claims.scope is not QuoteTokenScope.buyer_portal:
+    # ``quote_id is None`` = a recipient-scoped vendor token (M6.2) — never a buyer.
+    if claims.scope is not QuoteTokenScope.buyer_portal or claims.quote_id is None:
         raise _rejected()
 
     # Token authenticated → now validate the submission (an invalid credential
