@@ -19,6 +19,7 @@ import {
   OrdersIcon,
   PartsIcon,
   QuotesIcon,
+  SuppliersIcon,
 } from './icons';
 
 export interface NavItem {
@@ -35,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/quotes', labelKey: 'nav.quotes', Icon: QuotesIcon, permission: 'view_all' },
   { to: '/orders', labelKey: 'nav.orders', Icon: OrdersIcon, permission: 'view_all' },
   { to: '/contacts', labelKey: 'nav.contacts', Icon: ContactsIcon, permission: 'view_all' },
+  { to: '/suppliers', labelKey: 'nav.suppliers', Icon: SuppliersIcon, permission: 'view_all' },
   { to: '/configure', labelKey: 'nav.configure', Icon: ConfigureIcon, permission: 'config_edit' },
   { to: '/analytics', labelKey: 'nav.analytics', Icon: AnalyticsIcon, permission: 'view_all' },
 ];

@@ -5,6 +5,7 @@
     "quotes": "Quotes",
     "orders": "Orders",
     "contacts": "Contacts",
+    "suppliers": "Suppliers",
     "configure": "Configure",
     "analytics": "Analytics"
   },
@@ -156,6 +157,63 @@
       "create": "Create",
       "archive": "Archive",
       "restore": "Restore"
+    }
+  },
+  "suppliers": {
+    "add_vendor": "Add vendor",
+    "create_title": "New vendor",
+    "search_placeholder": "Search vendors by name or VAT ID",
+    "filter_process": "Filter by process",
+    "filter_material": "Filter by material",
+    "show_archived": "Show archived",
+    "empty": "No vendors yet.",
+    "loading": "Loading …",
+    "tag_placeholder": "Comma-separated, e.g. anodize, plating",
+    "back_to_directory": "Back to supplier directory",
+    "quoting_contacts": "Quoting contacts",
+    "no_contacts": "No contacts yet.",
+    "no_rfq_history": "No RFQs sent to this vendor yet.",
+    "primary": "Primary",
+    "cc": "CC",
+    "erp_manual": "Entered manually",
+    "erp_managed_hint": "Company data comes from the connected ERP ({{id}}) and is maintained there. Capabilities and notes stay editable here.",
+    "notes_internal_only": "Internal notes — never visible to the vendor.",
+    "col": {
+      "name": "Vendor",
+      "processes": "Processes",
+      "materials": "Materials",
+      "active_rfqs": "Active RFQs"
+    },
+    "tab": {
+      "overview": "Overview",
+      "rfq_history": "RFQ History",
+      "capabilities": "Capabilities",
+      "notes": "Notes"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "archived": "Archived"
+    },
+    "field": {
+      "name": "Company name",
+      "address": "Address",
+      "vat_id": "VAT ID",
+      "phone": "Phone",
+      "status": "Status",
+      "erp_status": "ERP sync",
+      "processes": "Processes",
+      "materials": "Materials",
+      "notes": "Notes",
+      "contact_email": "Contact email",
+      "contact_name": "Contact name"
+    },
+    "actions": {
+      "save": "Save",
+      "cancel": "Cancel",
+      "create": "Create",
+      "activate": "Activate",
+      "deactivate": "Deactivate"
     }
   },
   "quotes": {

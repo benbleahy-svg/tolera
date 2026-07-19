@@ -137,6 +137,14 @@ export const ContactsIcon = () => (
   </Svg>
 );
 
+export const SuppliersIcon = () => (
+  <Svg>
+    <path d="M1.5 6.5 3 2.5h10l1.5 4" />
+    <path d="M1.5 6.5h13v7h-13z" />
+    <path d="M6 6.5v2.5h4V6.5" />
+  </Svg>
+);
+
 export const ConfigureIcon = () => (
   <Svg>
     <circle cx="8" cy="8" r="2.2" />

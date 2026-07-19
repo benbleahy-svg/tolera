@@ -19,6 +19,48 @@
 
 ---
 
+## [2026-07-19] M6.3 Vendor Library — nav placement conflict + implementation assumptions (recorded)
+
+**Status:** RESOLVED (one genuine source conflict resolved up the precedence ladder; the rest cheap-to-reverse per CLAUDE.md §6.3 — recorded, not blocking. New tables are added, so logged for traceability.)
+
+**Context.** `/block M6.3` — the Supplier Directory (spec `#vendor-rfq`). The spec fixes the list columns, the four detail tabs, the data model and the one-way ERP→BF sync direction.
+
+1. **Source conflict — where Suppliers lives in the nav. Resolved: top-level.** `build-plan/M6-differentiators-hardening.md` §M6.3 opens "**Configure** gains a Suppliers section", but the spec `#vendor-rfq` says "**Top-level sidebar item Suppliers**, parallel to Quotes / Orders / Contacts". Precedence (CLAUDE.md §2: spec = tier 2 > build-plan) puts it in the **primary sidebar** at `/suppliers`, between Contacts and Configure. Visible with `view_all`; writes gated on `config_edit`. *Not silently picked — the ladder decides it.*
+2. **`Vendor` is its own table, not `account.type='vendor'`.** The spec is explicit that vendors are "separate entities from Accounts — distinct data model, separate auth scope", and the M6.2 portal token scope must never be able to reach customer rows. Migration `0051`, reversible; both tables org-scoped with FORCE RLS and a composite `(org_id, id)` FK from `vendor_contact`, mirroring account/contact. *Expensive to reverse, but the spec answers it — no OPEN needed.*
+3. **Writes gated on `config_edit`, not `quote_edit`.** Vendors are org master data, not quote-line data. The authz matrix has no vendor-specific row, so the nearest capability is used. *Reversible: a permission constant.*
+4. **"Active RFQs" column ships reading 0.** `vendor_rfq` is created by **M6.4** (M6.3 scopes out the batch-send modal that produces one), so every vendor honestly has zero today. The count is a single seam (`app.vendors._active_rfq_counts`) M6.4 replaces with the real aggregate — deliberately **not** feature-flagged, since 0 is the correct answer, not a placeholder. *Reversible: one function.*
+5. **`VendorExternalOut` is the vendor-facing serialization seam.** The AC "Notes never serialize into any vendor-facing payload" was otherwise untestable at M6.3 time, when no vendor-facing surface rendered from `Vendor` at all. The external DTO **cannot express** `notes`, capabilities, ERP ids or response history, so a future leak would have to be a deliberate new field rather than an oversight. **Adoption is future work:** M6.4 (batch send) and M6.5 (outbound email) are expected to render from it. **M6.2's portal is deliberately *not* listed** — it renders from `vendor_rfq_recipient.vendor_name` and never touches `Vendor`, so it neither uses nor needs this DTO today (see the merge note below). *Reversible: a DTO.*
+6. **ERP-owned = identity + contacts; BF-only = capabilities/notes/status.** A vendor with `erp_vendor_id` rejects writes to name/address/vat_id/phone/website and to its contacts (409 `vendor_erp_managed`), because the next sync would overwrite them anyway; capabilities and notes stay editable and never write back (spec "Vendor data sources"). *Reversible: the field partition.*
+7. **DACH.** `vendor.vat_id` carries the EU vendor **USt-IdNr** (DACH-DELTA-LAYER §5 / "Vendor RFQ / Collaboration"). **No VIES validation** hangs off it — §3 scopes VIES to the customer/Account path. Vendor contacts are B2B data subjects: stored EU-side (Hetzner), **no consent flow**, no portal-level acknowledgment — that much the spec and the DACH delta settle. What they do **not** settle is the lawful basis, the transparency obligation, or a retention period for vendor contact personal data; those are **not invented here** and are logged as `OPEN` below (CLAUDE.md §6.4 — never invent a regulatory rule). *Reversible: add validation later if the pilot needs it.*
+8. **Capabilities are JSONB tags, not join tables** (`{"processes": [...], "materials": [...]}`, normalized lowercase on write, GIN-indexed). They are free-text chips typed by estimators and read back whole by the filter and (M6.4) the vendor ranking. Process + material filters **intersect** (AND), matching the toolbar's two independent filters. *Reversible: a column shape, no FK web to unwind.*
+9. **Demo vendors seeded** (`app.vendor_seed`, idempotent like `app.crm_seed`): three DACH suppliers covering anodize / plating / heat-treat over aluminium / titanium / steel, so `scripts/checkpoint.sh` never opens an empty Suppliers screen and M6.4 has counterparties to rank. *Reversible: seed data.*
+
+**OPEN: GDPR handling of vendor contact personal data (lawful basis · transparency · retention).**
+
+**Status:** OPEN — **non-blocking for M6.3's code** (no schema or endpoint depends on the answer; the fields and residency are already correct), but **must be resolved before pilot go-live**, since it governs the ROPA entry and the deletion job.
+
+**Question.** A `vendor_contact` row holds a named person's business email, name and phone. The spec (`#vendor-rfq` "GDPR / data handling") settles residency and that no consent flow is needed; DACH-DELTA §5 requires a lawful basis, data-subject rights, a ROPA entry and "retention reconciled with GoBD". Neither states, for **vendor** contacts specifically:
+  1. **Lawful basis** — Art. 6(1)(b) *contract/pre-contractual* (the RFQ is a step toward a contract with the vendor) vs Art. 6(1)(f) *legitimate interest* (sourcing), which additionally requires a documented balancing test (LIA).
+  2. **Transparency** — Art. 14 applies where the contact's data came from the shop's ERP or a supplier list rather than the person; whether the outbound RFQ email must carry a privacy-notice link, and in which template.
+  3. **Retention/deletion** — how long a vendor contact survives its last RFQ, and how that reconciles with **GoBD's 10-year** retention for the *commercial* records (the RFQ + any resulting order), which is a different obligation from retaining the *person's* contact details.
+
+**Options + recommended default.**
+  * **Lawful basis → 6(1)(b) for contacts on an active RFQ, 6(1)(f) (with a short LIA) for directory entries never yet contacted.** Recommended: it matches what the data is actually used for and avoids claiming contract cover for speculative sourcing.
+  * **Transparency → add a privacy-notice link to the vendor RFQ email template + the portal footer (M6.5 owns the template).** Recommended: cheapest compliant option, and Art. 14 is likely engaged via ERP-sourced contacts.
+  * **Retention → keep the contact while the vendor is live; on vendor archive, purge contact PII after a defined window (suggest 24 months post-last-RFQ) while retaining the RFQ/order records themselves for GoBD 10 years in de-identified form.** Recommended default, but the window is a legal call, not an engineering one.
+
+**Affects:** M6.3 (`vendor_contact` — the data at rest today); M6.5 (the outbound email template that would carry the notice); M6.9 (pilot hardening — the GDPR pack + ROPA); any deletion/retention job. **Not blocking the M6.3 merge.**
+
+---
+
+**Merge note (M6.2 landed mid-block).** `origin/develop` gained M6.2's vendor-RFQ portal while this block was building; both branches added a `0050_*` migration off `0049`. Resolved by renumbering this one to **`0051_vendor_library`** on top of `0050_vendor_rfq` (single alembic head, verified). The two models sets are complementary — M6.2 added `VendorRfq*`, this adds `Vendor`/`VendorContact`. **M6.2's `vendor_rfq_recipient` identifies its vendor by a denormalized `vendor_name` text column with no FK to `vendor`** (the entity did not exist yet), so there is still no join from a vendor to its RFQs — `active_rfq_count` stays 0 and **M6.4 owns adding the `vendor_id` link**.
+
+**Review dispositions (recorded).** A fresh-context review found and this PR fixed: a ragged CSV row crashing the whole import with a 500 (`csv.DictReader` files surplus fields under the `None` restkey as a *list*); unique-index violations returning 500 instead of a 409 envelope (now mapped, per `app.accounts._flush_unique_email`, with a per-row SAVEPOINT so one bad CSV row cannot roll back the good ones); a whitespace-only capability filter degrading to a no-op (`@> '{"processes": []}'` matches every row); `erp_vendor_id` being client-settable at create with no route to clear it (removed — server-set by the M6.8 sync only); and the Overview tab being read-only despite the block promising "add/**edit** a vendor" (identity fields are now editable, and *disabled* when ERP-managed, which is what makes AC (e) meaningful in the UI). **Known limitation, deliberately accepted:** AC (c) is enforced *prospectively* — `VendorExternalOut` is not yet consumed by a live vendor-facing surface (M6.2's portal renders from `vendor_rfq_recipient`, not `Vendor`), so nothing leaks today, but the guarantee binds only once M6.4/M6.5 adopt the seam.
+
+**Affects:** M6.3 (this PR); M6.4 (batch-send — consumes these vendors + the `_active_rfq_counts` seam + `VendorExternalOut`); M6.5 (outbound email — must render vendor identity through the external DTO); M6.6 (RFQ History content); M6.8 (the real ERP vendor-identity sync behind `erp_vendor_id`).
+
+---
+
 ## [2026-07-18] M5.6 Orders list + detail — implementation assumptions (recorded)
 
 **Status:** RESOLVED (choices classified per CLAUDE.md §6.3; all cheap-to-reverse — recorded, not blocking. A schema column is added, so logged for traceability.)

@@ -4010,6 +4010,141 @@ class DomainEvent(Base):
     occurred_at: Mapped[datetime] = _ts()
 
 
+class VendorStatus(enum.StrEnum):
+    """Whether a vendor is currently used for sourcing (spec ``#vendor-rfq`` →
+    Vendor Detail "Active/Inactive toggle"). Distinct from ``deleted_at``: an
+    *inactive* vendor is a live row deliberately excluded from RFQ suggestions;
+    an *archived* one is removed from the directory but retained for history."""
+
+    active = "active"
+    inactive = "inactive"
+
+
+_vendor_status_enum = Enum(VendorStatus, name="vendor_status", create_type=False)
+
+
+class Vendor(Base):
+    """An outside-process supplier — the counterparty of the Vendor RFQ funnel
+    (spec ``#vendor-rfq`` → "Supplier Directory"; M6.3).
+
+    **Not an Account.** The spec is explicit that "vendors are separate entities
+    from Accounts (customers) — distinct data model, separate auth scope", so this
+    is its own table rather than ``account.type = 'vendor'``: vendors carry
+    capabilities, portal credentials and response history that have no meaning on a
+    customer, and the vendor portal (M6.2/M6.5) authenticates against a scope that
+    must never reach customer rows.
+
+    ``erp_vendor_id`` marks a row owned by the connected ERP. The sync is **one-way
+    ERP → Tolera**: the ERP is source of truth for company identity + contact data
+    (those fields reject writes here — see ``app.vendors``), while BF-only data
+    (capabilities, notes, portal creds, response history) is editable and **never
+    writes back**.
+
+    ``vat_id`` is the EU vendor **USt-IdNr** required by DACH-DELTA-LAYER §5 /
+    the "Vendor RFQ / Collaboration" row. It is stored for the outbound paperwork
+    only — VIES validation is the customer-side (Account) path, not this one.
+
+    Org-scoped; RLS keys on ``org_id``. Archived by soft-delete like ``account``."""
+
+    __tablename__ = "vendor"
+    __table_args__ = (
+        # Composite-FK target so vendor_contact.vendor_id is pinned to the same org.
+        UniqueConstraint("org_id", "id", name="uq_vendor_org_id_id"),
+        # The directory list filters org_id (RLS) + deleted_at; lead with org_id.
+        Index("ix_vendor_org_deleted_at", "org_id", "deleted_at"),
+        # An ERP vendor id is unique per org among live rows — re-importing the same
+        # ERP record must update, never duplicate. Archived rows free the id again.
+        Index(
+            "uq_vendor_org_erp_id_live",
+            "org_id",
+            "erp_vendor_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND erp_vendor_id IS NOT NULL"),
+        ),
+        # The capabilities filter is a JSONB containment probe; GIN makes it indexed
+        # rather than a per-row scan as the directory grows.
+        Index("ix_vendor_capabilities", "capabilities", postgresql_using="gin"),
+    )
+    # See Account: fetch server defaults via RETURNING so post-flush response
+    # building doesn't trip the async MissingGreenlet refresh.
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    #: Free-text postal address (EU format, newline-separated) — one field rather
+    #: than split lines: it is only ever rendered whole on the RFQ paperwork.
+    address: Mapped[str | None] = mapped_column(Text)
+    #: EU vendor VAT-ID / USt-IdNr (DACH-DELTA §5).
+    vat_id: Mapped[str | None] = mapped_column(String)
+    phone: Mapped[str | None] = mapped_column(String)
+    website: Mapped[str | None] = mapped_column(String)
+    #: Non-null ⇒ identity is owned by the connected ERP (one-way ERP → Tolera).
+    erp_vendor_id: Mapped[str | None] = mapped_column(String)
+    status: Mapped[VendorStatus] = mapped_column(
+        _vendor_status_enum, nullable=False, server_default=VendorStatus.active.value
+    )
+    #: ``{"processes": [...], "materials": [...]}`` — the tag chips the directory
+    #: filters on and (from M6.4) the AI vendor ranking matches against. Tags are
+    #: normalized lowercase on write so the filter can be a containment probe.
+    capabilities: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text('\'{"processes": [], "materials": []}\'::jsonb')
+    )
+    #: **Internal only.** Never serialized into a vendor-facing payload — the
+    #: external DTO in ``app.vendors`` cannot express it (spec ``#vendor-rfq``
+    #: Notes tab: "Internal notes — never visible to the vendor").
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+
+
+class VendorContact(Base):
+    """A quoting contact at a Vendor (spec ``#vendor-rfq``: "quoting contact(s)
+    (primary + CC list)"); M6.3.
+
+    ``is_primary`` addresses the RFQ; ``cc`` rides along on it. Both are plain
+    flags rather than one enum because the spec allows a contact to be neither
+    (a recorded contact who isn't on the RFQ distribution). Org-scoped; the
+    composite FK pins the parent vendor to the same org."""
+
+    __tablename__ = "vendor_contact"
+    __table_args__ = (
+        # A contact's vendor must be in the SAME org — cross-org attachment is
+        # impossible at the DB, not merely RLS-scoped (the account/contact pattern).
+        ForeignKeyConstraint(
+            ["org_id", "vendor_id"],
+            ["vendor.org_id", "vendor.id"],
+            name="fk_vendor_contact_vendor_same_org",
+        ),
+        # Contacts are always listed by their parent vendor.
+        Index("ix_vendor_contact_vendor_id", "vendor_id"),
+        # One address per vendor among live rows; an archived one frees it again.
+        Index(
+            "uq_vendor_contact_vendor_email_live",
+            "vendor_id",
+            "email",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    vendor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    name: Mapped[str | None] = mapped_column(String)
+    email: Mapped[str] = mapped_column(CITEXT, nullable=False)
+    phone: Mapped[str | None] = mapped_column(String)
+    #: The addressee of the outbound RFQ email (M6.5).
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    #: Copied on the outbound RFQ email.
+    cc: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+    deleted_at: Mapped[datetime | None] = _deleted_at()
+
+
 # ---------------------------------------------------------------------------
 # Vendor RFQ (M6.2) — outside-process sourcing
 # ---------------------------------------------------------------------------

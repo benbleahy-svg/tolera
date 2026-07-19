@@ -5,6 +5,7 @@
     "quotes": "Angebote",
     "orders": "Aufträge",
     "contacts": "Kontakte",
+    "suppliers": "Lieferanten",
     "configure": "Konfiguration",
     "analytics": "Auswertungen"
   },
@@ -156,6 +157,63 @@
       "create": "Anlegen",
       "archive": "Archivieren",
       "restore": "Wiederherstellen"
+    }
+  },
+  "suppliers": {
+    "add_vendor": "Lieferant hinzufügen",
+    "create_title": "Neuer Lieferant",
+    "search_placeholder": "Lieferanten nach Name oder USt-IdNr. suchen",
+    "filter_process": "Nach Verfahren filtern",
+    "filter_material": "Nach Werkstoff filtern",
+    "show_archived": "Archivierte anzeigen",
+    "empty": "Noch keine Lieferanten.",
+    "loading": "Wird geladen …",
+    "tag_placeholder": "Kommagetrennt, z. B. Eloxieren, Verzinken",
+    "back_to_directory": "Zurück zum Lieferantenverzeichnis",
+    "quoting_contacts": "Ansprechpartner für Anfragen",
+    "no_contacts": "Noch keine Ansprechpartner.",
+    "no_rfq_history": "Noch keine Anfragen an diesen Lieferanten.",
+    "primary": "Hauptkontakt",
+    "cc": "Kopie",
+    "erp_manual": "Manuell angelegt",
+    "erp_managed_hint": "Stammdaten stammen aus dem ERP ({{id}}) und werden dort gepflegt. Fähigkeiten und Notizen bleiben hier bearbeitbar.",
+    "notes_internal_only": "Interne Notizen — für den Lieferanten nie sichtbar.",
+    "col": {
+      "name": "Lieferant",
+      "processes": "Verfahren",
+      "materials": "Werkstoffe",
+      "active_rfqs": "Offene Anfragen"
+    },
+    "tab": {
+      "overview": "Übersicht",
+      "rfq_history": "Anfragehistorie",
+      "capabilities": "Fähigkeiten",
+      "notes": "Notizen"
+    },
+    "status": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "archived": "Archiviert"
+    },
+    "field": {
+      "name": "Firmenname",
+      "address": "Anschrift",
+      "vat_id": "USt-IdNr.",
+      "phone": "Telefon",
+      "status": "Status",
+      "erp_status": "ERP-Abgleich",
+      "processes": "Verfahren",
+      "materials": "Werkstoffe",
+      "notes": "Notizen",
+      "contact_email": "E-Mail des Ansprechpartners",
+      "contact_name": "Name des Ansprechpartners"
+    },
+    "actions": {
+      "save": "Speichern",
+      "cancel": "Abbrechen",
+      "create": "Anlegen",
+      "activate": "Aktivieren",
+      "deactivate": "Deaktivieren"
     }
   },
   "quotes": {

@@ -22,6 +22,7 @@ from app.db import make_engine, make_sessionmaker
 from app.logging import configure_logging
 from app.seed import DEFAULT_SEEDS_DIR, apply_seeds, load_seeds
 from app.services.org_service import OrgResult, OrgSpec
+from app.vendor_seed import VendorSeedResult, seed_vendors
 
 logger = logging.getLogger("scripts.seed_demo")
 
@@ -44,6 +45,11 @@ async def _run(
             async with sessionmaker() as session, session.begin():
                 configure = await seed_configure_catalog(session, org_id=result.org_id)
             _log_configure(result.slug, configure)
+            # M6.3: the Supplier Directory's demo vendors — every org, own
+            # transaction, so the Suppliers nav is never an empty screen.
+            async with sessionmaker() as session, session.begin():
+                vendors = await seed_vendors(session, org_id=result.org_id)
+            _log_vendors(result.slug, vendors)
         # Seed the golden-thread CRM (Fechner account + contact) once the pilot org
         # exists — its own transaction so a CRM hiccup can't undo provisioning.
         crm: CrmSeedResult | None = None
@@ -54,6 +60,18 @@ async def _run(
         return results, crm
     finally:
         await engine.dispose()
+
+
+def _log_vendors(slug: str, vendors: VendorSeedResult) -> None:
+    logger.info(
+        "seeded vendors",
+        extra={
+            "slug": slug,
+            "vendors_total": len(vendors.vendor_ids),
+            "vendors_created": vendors.vendors_created,
+            "contacts_created": vendors.contacts_created,
+        },
+    )
 
 
 def _log_catalog(slug: str, catalog: CatalogSeedResult) -> None:
