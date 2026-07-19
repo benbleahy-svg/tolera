@@ -248,16 +248,21 @@ tr.est-missing-rate td {
 .work-queue { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
 .queue-row {
   display: grid;
-  grid-template-columns: 7rem minmax(8rem, 1fr) auto 4rem auto;
+  /* Six columns, one per child — the org badge (4) is rendered only for a
+     cross-org row. Every child below is placed explicitly rather than relying on
+     auto-placement, which would shift the whole row (badge landing in the score's
+     narrow column, the link wrapping to a second line) whenever an optional
+     child appears. An empty column 4 collapses to 0 + one gap. */
+  grid-template-columns: 7rem minmax(8rem, 1fr) auto auto 4rem auto;
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border, #e4e7ec);
   border-radius: 8px;
 }
-.queue-source { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted, #667085); }
-.queue-label { font-weight: 600; }
-.queue-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.queue-source { grid-column: 1; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted, #667085); }
+.queue-label { grid-column: 2; font-weight: 600; }
+.queue-chips { grid-column: 3; display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .queue-chip {
   font-size: 0.72rem;
   padding: 0.1rem 0.45rem;
@@ -265,8 +270,11 @@ tr.est-missing-rate td {
   background: var(--surface-2, #f2f4f7);
   color: var(--t2, #475467);
 }
-.queue-org-badge { font-size: 0.72rem; padding: 0.1rem 0.45rem; border: 1px dashed var(--border, #e4e7ec); border-radius: 999px; }
-.queue-urgency { font-variant-numeric: tabular-nums; font-weight: 600; border: none; background: none; cursor: pointer; padding: 0.15rem 0.35rem; }
+.queue-org-badge { grid-column: 4; font-size: 0.72rem; padding: 0.1rem 0.45rem; border: 1px dashed var(--border, #e4e7ec); border-radius: 999px; }
+.queue-urgency { grid-column: 5; font-variant-numeric: tabular-nums; font-weight: 600; border: none; background: none; cursor: pointer; padding: 0.15rem 0.35rem; }
+/* Column 6 is the row's action: the open link, or the cross-org hint that
+   replaces it while the org switch is still M5.12. */
+.queue-cross-org-hint, .work-queue .queue-row > a { grid-column: 6; }
 .queue-cross-org-hint { font-size: 0.72rem; color: var(--muted, #667085); font-style: italic; }
 /* The explainability panel spans the row it belongs to. */
 .queue-factors { grid-column: 1 / -1; width: 100%; font-size: 0.75rem; border-collapse: collapse; }
