@@ -57,6 +57,17 @@ describe('SuppliersPage', () => {
     expect(screen.getByText('Offene Anfragen')).toBeInTheDocument();
   });
 
+  it('marks archived vendors distinctly, even when they are still active', async () => {
+    listVendors.mockResolvedValue([
+      vendor('Alt-Lieferant', { archived: true }), // archived but status 'active'
+      vendor('Ruhend', { status: 'inactive' }),
+    ]);
+    await renderWithProviders(<SuppliersPage />, { route: '/suppliers' });
+
+    expect(await screen.findByText('Archiviert')).toBeInTheDocument();
+    expect(screen.getByText('Inaktiv')).toBeInTheDocument();
+  });
+
   it('passes the process filter through to the API', async () => {
     listVendors.mockResolvedValue([]);
     await renderWithProviders(<SuppliersPage />, { route: '/suppliers' });

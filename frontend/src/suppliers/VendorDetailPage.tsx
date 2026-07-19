@@ -127,14 +127,33 @@ export function VendorDetailPage() {
         ))}
       </div>
 
+      {/* Each editable tab seeds its form state from `vendor` once, at mount. Keying
+          on `updated_at` remounts it whenever the backend row changes, so the fields
+          re-initialise from what was actually stored — the server normalises on
+          write (capability tags are lowercased and de-duplicated, strings trimmed),
+          and without this the inputs would keep showing the raw text the user typed
+          rather than the truth that was saved. */}
       {tab === 'overview' && (
-        <OverviewTab vendor={vendor} contacts={contacts} canEdit={canEdit} onSave={save} />
+        <OverviewTab
+          key={vendor.updated_at}
+          vendor={vendor}
+          contacts={contacts}
+          canEdit={canEdit}
+          onSave={save}
+        />
       )}
       {tab === 'rfq_history' && <RfqHistoryTab entries={history} />}
       {tab === 'capabilities' && (
-        <CapabilitiesTab vendor={vendor} canEdit={canEdit} onSave={save} />
+        <CapabilitiesTab
+          key={vendor.updated_at}
+          vendor={vendor}
+          canEdit={canEdit}
+          onSave={save}
+        />
       )}
-      {tab === 'notes' && <NotesTab vendor={vendor} canEdit={canEdit} onSave={save} />}
+      {tab === 'notes' && (
+        <NotesTab key={vendor.updated_at} vendor={vendor} canEdit={canEdit} onSave={save} />
+      )}
     </section>
   );
 }

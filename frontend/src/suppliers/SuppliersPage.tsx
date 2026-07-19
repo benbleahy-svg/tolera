@@ -146,6 +146,13 @@ export function SuppliersPage() {
                       {t('suppliers.status.inactive')}
                     </span>
                   )}
+                  {/* Archived is orthogonal to inactive — with "Show archived" on,
+                      an archived-but-active vendor would otherwise look ordinary. */}
+                  {vendor.archived && (
+                    <span className="crm-chip crm-chip-archived">
+                      {t('suppliers.status.archived')}
+                    </span>
+                  )}
                 </td>
                 <td>
                   <TagChips tags={vendor.capabilities.processes} label={t('suppliers.col.processes')} />

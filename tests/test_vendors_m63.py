@@ -558,3 +558,65 @@ def test_blank_capability_filter_matches_nothing_not_everything(
     with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
         _seed_directory(app_client)
         assert app_client.get("/api/vendors", params={"process": "   "}).json() == []
+
+
+# --------------------------------------------------------------------------- #
+# Explicit null vs omitted (partial-update semantics)
+# --------------------------------------------------------------------------- #
+def test_explicit_null_on_a_not_null_field_is_422_not_500(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """``{"name": null}`` used to reach the ORM and blow up on the NOT NULL
+    constraint (500). It must fail request validation instead, and leave the row
+    untouched."""
+    org, admin = _org_with_admin(seeder, "org-a")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        vendor_id = app_client.post(
+            "/api/vendors",
+            json={"name": "Galvanik Süd", "capabilities": {"processes": ["plating"]}},
+        ).json()["id"]
+
+        for payload in ({"name": None}, {"status": None}, {"capabilities": None}):
+            resp = app_client.patch(f"/api/vendors/{vendor_id}", json=payload)
+            assert resp.status_code == 422, (payload, resp.status_code)
+
+        # Nothing was written.
+        after = app_client.get(f"/api/vendors/{vendor_id}").json()
+        assert after["name"] == "Galvanik Süd"
+        assert after["status"] == "active"
+        assert after["capabilities"]["processes"] == ["plating"]
+
+        contact_id = app_client.post(
+            f"/api/vendors/{vendor_id}/contacts", json={"email": "k@galvanik.example"}
+        ).json()["id"]
+        for payload in ({"email": None}, {"is_primary": None}, {"cc": None}):
+            resp = app_client.patch(f"/api/vendor-contacts/{contact_id}", json=payload)
+            assert resp.status_code == 422, (payload, resp.status_code)
+
+
+def test_explicit_null_still_clears_a_nullable_field(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """The guard must not break the way the UI empties an optional field: the
+    nullable columns still accept an explicit null."""
+    org, admin = _org_with_admin(seeder, "org-a")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        vendor_id = app_client.post(
+            "/api/vendors",
+            json={"name": "Galvanik Süd", "vat_id": "DE123456789", "notes": "intern"},
+        ).json()["id"]
+
+        cleared = app_client.patch(
+            f"/api/vendors/{vendor_id}", json={"vat_id": None, "notes": None, "address": None}
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["vat_id"] is None
+        assert cleared.json()["notes"] is None
+
+        contact_id = app_client.post(
+            f"/api/vendors/{vendor_id}/contacts",
+            json={"email": "k@galvanik.example", "name": "Bernd"},
+        ).json()["id"]
+        patched = app_client.patch(f"/api/vendor-contacts/{contact_id}", json={"name": None})
+        assert patched.status_code == 200
+        assert patched.json()["name"] is None

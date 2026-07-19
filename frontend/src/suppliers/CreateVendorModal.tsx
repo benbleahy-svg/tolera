@@ -131,9 +131,14 @@ export function CreateVendorModal({
           </label>
           <label className="crm-field">
             <span>{t('suppliers.field.contact_email')}</span>
+            {/* A contact is only submitted when it has an address (the RFQ has to
+                reach someone), so a name typed without one would be silently
+                dropped. Requiring the address once a name is present lets native
+                validation catch the half-filled contact at submit time. */}
             <input
               type="email"
               value={contactEmail}
+              required={contactName.trim() !== ''}
               onChange={(e) => setContactEmail(e.target.value)}
             />
           </label>

@@ -147,6 +147,32 @@ describe('VendorDetailPage', () => {
     });
   });
 
+  it('re-seeds the form from the server after a save (tags come back normalized)', async () => {
+    // The server lowercases + de-duplicates capability tags on write; the field
+    // must show what was stored, not the raw text that was typed.
+    const saved = vendor({
+      capabilities: { processes: ['plating', 'anodize'], materials: ['steel'] },
+      updated_at: '2026-07-19T10:00:00Z',
+    });
+    // The server is the source of truth after a write, so a refetch returns the
+    // normalized row too — otherwise the mock would "un-save" it.
+    updateVendor.mockResolvedValue(saved);
+    getVendor.mockResolvedValue(vendor());
+    await renderWithProviders(<VendorDetailPage />, {
+      route: '/suppliers/ven-1',
+      me: makeMe({ effective_permissions: ['view_all', 'config_edit'], roles: ['admin'] }),
+    });
+    await userEvent.click(await screen.findByRole('tab', { name: 'Fähigkeiten' }));
+
+    const processes = screen.getByDisplayValue('plating');
+    await userEvent.clear(processes);
+    await userEvent.type(processes, 'Plating, ANODIZE');
+    getVendor.mockResolvedValue(saved);
+    await userEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+
+    expect(await screen.findByDisplayValue('plating, anodize')).toBeInTheDocument();
+  });
+
   it('hides the save action without config_edit', async () => {
     await renderWithProviders(<VendorDetailPage />, {
       route: '/suppliers/ven-1',

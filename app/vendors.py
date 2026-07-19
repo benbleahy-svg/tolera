@@ -11,9 +11,11 @@ Three rules from the block's sources are load-bearing here:
 
 * **Notes never reach the vendor.** The Notes tab is "internal notes — never
   visible to the vendor". Rather than trusting future callers to remember,
-  :class:`VendorExternalOut` is the one DTO any vendor-facing surface (the M6.2
-  portal, the M6.4 batch send, the M6.5 outbound email) serializes through, and it
-  *cannot express* ``notes`` — a leak would have to be a deliberate new field.
+  :class:`VendorExternalOut` is the one DTO a vendor-facing surface should
+  serialize through, and it *cannot express* ``notes`` — a leak would have to be a
+  deliberate new field. Adoption is still ahead (M6.4's batch send, M6.5's
+  outbound email); M6.2's portal renders from ``vendor_rfq_recipient``, not
+  ``Vendor``, so nothing serializes a vendor's notes today.
 * **ERP identity is read-only.** The vendor sync is one-way ERP → Tolera: "ERP is
   source of truth for company identity and contact data", while BF-only data
   (capabilities, notes, portal creds, response history) "never writes back". So a
@@ -38,7 +40,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Protocol
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from sqlalchemy import false, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -82,6 +84,23 @@ def _normalize_email(value: str) -> str:
     if not _EMAIL_RE.match(cleaned):
         raise ValueError("not a valid email address")
     return cleaned
+
+
+def _reject_explicit_null[T](value: T, info: ValidationInfo) -> T:
+    """Reject an explicit ``null`` for a field the DB declares NOT NULL.
+
+    These update schemas type such fields as ``X | None`` only to express
+    *"omitted"* — the partial-update idiom — but a client sending an explicit
+    ``{"name": null}`` is indistinguishable from that at the ORM layer, and the
+    ``None`` sails through to a ``NotNullViolation`` and an opaque **500**.
+
+    A ``field_validator`` runs only for fields actually **present** in the
+    payload (defaults are not validated), so this rejects the explicit null while
+    leaving omission untouched — and it fires during request validation, so the
+    caller gets a normal 422 naming the field rather than an internal error."""
+    if value is None:
+        raise ValueError(f"{info.field_name} cannot be null; omit it to leave it unchanged")
+    return value
 
 
 def _normalize_tags(values: list[str]) -> list[str]:
@@ -129,7 +148,11 @@ class VendorContactCreate(BaseModel):
 
 
 class VendorContactUpdate(BaseModel):
-    """Partial update — only the fields present are changed."""
+    """Partial update — only the fields present are changed.
+
+    ``name``/``phone`` are nullable columns, so an explicit ``null`` legitimately
+    *clears* them. ``email``/``is_primary``/``cc`` are NOT NULL — for those the
+    ``| None`` means "omitted", and an explicit null is rejected as a 422."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -138,6 +161,8 @@ class VendorContactUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=50)
     is_primary: bool | None = None
     cc: bool | None = None
+
+    _no_null = field_validator("email", "is_primary", "cc")(_reject_explicit_null)
 
     @field_validator("email")
     @classmethod
@@ -184,7 +209,12 @@ class VendorCreate(BaseModel):
 
 class VendorUpdate(BaseModel):
     """Partial update — only the fields present are changed. On an ERP-sourced
-    vendor the identity fields are rejected (see :func:`_reject_erp_identity_write`)."""
+    vendor the identity fields are rejected (see :func:`_reject_erp_identity_write`).
+
+    ``address``/``vat_id``/``phone``/``website``/``notes`` are nullable columns, so
+    an explicit ``null`` legitimately *clears* them — that is how the UI empties a
+    field. ``name``/``status``/``capabilities`` are NOT NULL: there the ``| None``
+    only means "omitted", and an explicit null is rejected as a 422."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -196,6 +226,8 @@ class VendorUpdate(BaseModel):
     status: VendorStatus | None = None
     capabilities: Capabilities | None = None
     notes: str | None = None
+
+    _no_null = field_validator("name", "status", "capabilities")(_reject_explicit_null)
 
 
 class VendorOut(BaseModel):
@@ -229,8 +261,10 @@ class VendorExternalOut(BaseModel):
     Deliberately minimal: the vendor's own identity, nothing about how the shop
     regards them. It cannot express ``notes`` (spec ``#vendor-rfq``, Notes tab:
     "never visible to the vendor"), nor capabilities, response history or ERP ids.
-    M6.2's portal, M6.4's batch send and M6.5's outbound email all render from
-    this — so the confidentiality rule is enforced by the type, not by review."""
+    **Not yet consumed** — M6.2's portal renders from ``vendor_rfq_recipient``
+    and never touches ``Vendor``. M6.4's batch send and M6.5's outbound email are
+    the intended adopters; until one lands, this enforces the confidentiality rule
+    by construction for future callers rather than guarding a live payload."""
 
     model_config = ConfigDict(extra="forbid")
 
