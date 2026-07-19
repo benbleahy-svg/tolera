@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 
@@ -127,9 +127,11 @@ describe('EditOrderDrawer', () => {
     await user.type(poInput, 'PO-2');
     await user.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
 
-    expect(editOrder).toHaveBeenCalledWith('o-1', { po_number: 'PO-2' });
-    // onSaved bumps the reload key → the detail refetches.
-    expect(getOrder.mock.calls.length).toBeGreaterThan(beforeSave);
+    await waitFor(() => expect(editOrder).toHaveBeenCalledWith('o-1', { po_number: 'PO-2' }));
+    // onSaved bumps the reload key → the detail refetches. That happens *after*
+    // the mutation resolves, so it needs its own wait rather than riding on the
+    // one above.
+    await waitFor(() => expect(getOrder.mock.calls.length).toBeGreaterThan(beforeSave));
   });
 
   it('records the notify-buyer intent when checked', async () => {
@@ -143,10 +145,12 @@ describe('EditOrderDrawer', () => {
     await user.click(screen.getByLabelText('Käufer über die Änderung benachrichtigen'));
     await user.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
 
-    expect(editOrder).toHaveBeenCalledWith('o-1', {
-      billing_address: 'Neue Str. 5',
-      notify_buyer: true,
-    });
+    await waitFor(() =>
+      expect(editOrder).toHaveBeenCalledWith('o-1', {
+        billing_address: 'Neue Str. 5',
+        notify_buyer: true,
+      }),
+    );
   });
 
   it('blocks an empty edit with a no-changes message', async () => {
