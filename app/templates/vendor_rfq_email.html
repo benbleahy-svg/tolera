@@ -1,0 +1,157 @@
+{#
+  M6.5 — the outbound vendor RFQ email (spec `#vendor-rfq` → "Outbound RFQ email").
+
+  System-generated, German-first (CLAUDE.md §5), and deliberately a *third* template
+  rather than a variant of `document.html` or `vendor_rfq.html`:
+
+  * `document.html` is price-bearing (customer prices, margins, tax) — a vendor must
+    never see it;
+  * `vendor_rfq.html` is the A4 record sheet WeasyPrint renders for the portal's
+    "Download RFQ PDF", laid out for paper.
+
+  This one is laid out for a 2007-era mail client: tables, inline styles, no external
+  asset (the logo is the same inlined `data:` URI the PDFs use), no `<style>` block
+  that Outlook or Gmail would strip. Everything it can render comes from the same
+  context the portal already shows this vendor, so the email can never disclose more
+  than the page behind the link.
+
+  Autoescaped by the shared Jinja env (`app/pdf.py`) — vendor names, part descriptions
+  and the estimator's free-text message are all untrusted. `impressum_html` is the one
+  deliberate exception: `app.impressum` escapes its own values and returns trusted
+  markup, exactly as the quote email uses it.
+#}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="background:#f4f5f7;padding:24px 0;font-family:Helvetica,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0"
+             style="width:640px;max-width:100%;background:#ffffff;border-radius:6px;
+                    border-top:4px solid {{ shop.accent_color }};">
+
+        {# ---------- shop identity ---------- #}
+        <tr>
+          <td style="padding:24px 24px 8px;">
+            {% if shop.logo_data_uri %}
+              <img src="{{ shop.logo_data_uri }}" alt="{{ shop.name }}"
+                   style="max-height:48px;max-width:220px;display:block;border:0;">
+            {% else %}
+              <div style="font-size:18px;font-weight:bold;color:#111;">{{ shop.name }}</div>
+            {% endif %}
+          </td>
+        </tr>
+
+        {# ---------- the ask ---------- #}
+        <tr>
+          <td style="padding:8px 24px 0;">
+            <h1 style="margin:0 0 4px;font-size:20px;color:#111;">
+              Anfrage {{ rfq.reference }}
+            </h1>
+            <p style="margin:0 0 16px;color:#555;font-size:14px;">
+              {% if vendor.contact_name %}Guten Tag {{ vendor.contact_name }},{% else %}Sehr geehrte Damen und Herren,{% endif %}
+              wir bitten Sie um ein Angebot zu den folgenden Positionen.
+            </p>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+                   style="font-size:13px;color:#333;margin:0 0 16px;">
+              <tr>
+                <td style="padding:2px 12px 2px 0;color:#777;">Referenz</td>
+                <td style="padding:2px 0;font-weight:bold;">{{ rfq.reference }}</td>
+              </tr>
+              {% if rfq.need_by_date %}
+              <tr>
+                <td style="padding:2px 12px 2px 0;color:#777;">Angebot erbeten bis</td>
+                <td style="padding:2px 0;font-weight:bold;">{{ rfq.need_by_date }}</td>
+              </tr>
+              {% endif %}
+              <tr>
+                <td style="padding:2px 12px 2px 0;color:#777;">Empfänger</td>
+                <td style="padding:2px 0;">{{ vendor.name }}</td>
+              </tr>
+            </table>
+            {% if rfq.message %}
+              <p style="margin:0 0 16px;padding:12px;background:#f7f7f9;border-radius:4px;
+                        font-size:13px;color:#333;white-space:pre-wrap;">{{ rfq.message }}</p>
+            {% endif %}
+          </td>
+        </tr>
+
+        {# ---------- the parts table ---------- #}
+        <tr>
+          <td style="padding:0 24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="border-collapse:collapse;font-size:13px;">
+              <tr style="background:#f0f1f4;">
+                <th align="left" style="padding:8px;border-bottom:1px solid #ddd;">Teil</th>
+                <th align="left" style="padding:8px;border-bottom:1px solid #ddd;">Verfahren</th>
+                <th align="left" style="padding:8px;border-bottom:1px solid #ddd;">Stückzahlen</th>
+              </tr>
+              {% for line in lines %}
+              <tr>
+                <td style="padding:8px;border-bottom:1px solid #eee;vertical-align:top;">
+                  <strong>{{ line.part_number or '—' }}</strong>{% if line.revision %}
+                    <span style="color:#777;"> Rev. {{ line.revision }}</span>{% endif %}
+                  {% if line.description %}
+                    <div style="color:#555;">{{ line.description }}</div>
+                  {% endif %}
+                  {% if line.material %}
+                    <div style="color:#777;font-size:12px;">Werkstoff: {{ line.material }}</div>
+                  {% endif %}
+                  {% if line.estimator_notes %}
+                    <div style="color:#333;font-size:12px;margin-top:4px;white-space:pre-wrap;">
+                      {{ line.estimator_notes }}</div>
+                  {% endif %}
+                  {% if line.files %}
+                    <div style="margin-top:6px;font-size:12px;">
+                      {% for file in line.files %}
+                        <a href="{{ file.url }}" style="color:{{ shop.accent_color }};">
+                          {{ file.filename }}</a>{% if not loop.last %} · {% endif %}
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                </td>
+                <td style="padding:8px;border-bottom:1px solid #eee;vertical-align:top;">
+                  {{ line.process or '—' }}
+                </td>
+                <td style="padding:8px;border-bottom:1px solid #eee;vertical-align:top;">
+                  {% if line.quantities %}{{ line.quantities | join(' / ') }}{% else %}—{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </table>
+          </td>
+        </tr>
+
+        {# ---------- the portal link ---------- #}
+        <tr>
+          <td align="center" style="padding:24px;">
+            <a href="{{ portal_url }}"
+               style="display:inline-block;padding:12px 28px;background:{{ shop.accent_color }};
+                      color:#ffffff;text-decoration:none;border-radius:4px;font-weight:bold;
+                      font-size:15px;">Angebot abgeben</a>
+            <p style="margin:12px 0 0;color:#777;font-size:12px;">
+              Oder antworten Sie einfach auf diese E-Mail — bitte lassen Sie
+              „{{ rfq.reference }}“ im Betreff stehen, damit wir Ihr Angebot der
+              richtigen Anfrage zuordnen können.
+            </p>
+          </td>
+        </tr>
+
+        {# ---------- who to ask ---------- #}
+        {% if estimator.name or estimator.email %}
+        <tr>
+          <td style="padding:0 24px 16px;font-size:13px;color:#555;">
+            Ihr Ansprechpartner: {{ estimator.name or shop.name }}{% if estimator.email %}
+              , <a href="mailto:{{ estimator.email }}"
+                   style="color:{{ shop.accent_color }};">{{ estimator.email }}</a>{% endif %}
+          </td>
+        </tr>
+        {% endif %}
+
+        <tr>
+          <td style="padding:0 24px 24px;">
+            {{ impressum_html | safe }}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
