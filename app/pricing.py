@@ -185,7 +185,7 @@ async def _material_names(
 
 async def _material_names_bulk(
     session: AsyncSession, material_ids: set[uuid.UUID]
-) -> dict[uuid.UUID | None, tuple[str | None, str | None]]:
+) -> dict[uuid.UUID, tuple[str | None, str | None]]:
     """``material_id -> (display name, family name)`` for many materials at once.
 
     The batched counterpart of :func:`_material_names`, which costs two
@@ -287,7 +287,11 @@ async def _load_children(
             continue  # a node without a quoting layer contributes nothing yet
         part = parts_by_id.get(part_id)
         assert part is not None  # FK-guaranteed
-        material_name, family_name = names_by_material.get(component.material_id, (None, None))
+        material_name, family_name = (
+            names_by_material.get(component.material_id, (None, None))
+            if component.material_id is not None
+            else (None, None)
+        )
         operations = ops_by_component.get(component.id, [])
         info = ChildInfo(
             component=component,

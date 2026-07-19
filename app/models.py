@@ -4859,3 +4859,47 @@ class ExportControlAccess(Base):
     ip_address: Mapped[str | None] = mapped_column(String)
     user_agent: Mapped[str | None] = mapped_column(String)
     occurred_at: Mapped[datetime] = _ts()
+
+
+class GdprRequestKind(enum.StrEnum):
+    """Which data-subject right was exercised."""
+
+    export = "export"
+    erasure = "erasure"
+
+
+_gdpr_request_kind_enum = Enum(GdprRequestKind, name="gdpr_request_kind", create_type=False)
+
+
+class GdprRequestLog(Base):
+    """Append-only record of every data-subject export/erasure (M6.9).
+
+    Erasure destroys direct identifiers across six tables; without this, the
+    tombstone values were the only trace and they name no actor, so "who erased
+    whom, and when" was unanswerable right after the most destructive action the
+    product offers.
+
+    A sibling of :class:`ExportControlAccess` rather than a row in it: that table
+    is the export-control ("CUI Audit") trail the spec surfaces as its own CSV,
+    and folding an unrelated action into it would make that export wrong.
+
+    ``subject_email`` is retained deliberately — an erasure log that cannot say
+    *whose* data was erased cannot evidence compliance with the request it
+    records. It is the only personal datum here.
+    """
+
+    __tablename__ = "gdpr_request_log"
+    __table_args__ = (Index("ix_gdpr_request_log_org_occurred", "org_id", "occurred_at"),)
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    #: No FK: the entry outlives the admin who ran it.
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    kind: Mapped[GdprRequestKind] = mapped_column(_gdpr_request_kind_enum, nullable=False)
+    subject_email: Mapped[str] = mapped_column(String, nullable=False)
+    #: Per-table row counts, e.g. ``{"contact": 1, "account": 1}``.
+    affected: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    affected_row_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    occurred_at: Mapped[datetime] = _ts()

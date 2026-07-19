@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from sqlalchemy import or_ as sa_or
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -237,12 +238,30 @@ async def build_kalk_prefetch(
             )
         ).all()
     )
-    # One scan for every component's nests. The per-component form uses a JSONB
-    # containment match, which has no batched equivalent, so this filters in
-    # Python over the (small) set of nests that name any of these components.
+    # One query for every component's nests. Keeps the per-component form's JSONB
+    # containment predicate — OR'd across the batch — rather than scanning the
+    # table and filtering in Python: an org that has run nesting for a year has
+    # tens of thousands of nest rows, and loading all of their config/result JSONB
+    # on every pricing call would be strictly worse than the N+1 this replaces
+    # (unbounded, versus bounded by BOM size).
+    #
+    # ``ORDER BY`` is explicit because ``nest_values`` below is last-write-wins per
+    # quantity: without it, which nest feeds Kalk would be decided by physical row
+    # order (tier-1 "no determinism break in Kalk").
     nests_by_component: dict[uuid.UUID, list[Nest]] = {}
     wanted = {str(cid) for cid in component_ids}
-    for nest in (await session.scalars(select(Nest))).all():
+    matching = (
+        await session.scalars(
+            select(Nest)
+            .where(
+                sa_or(
+                    *(Nest.config.contains({"component_ids": [str(cid)]}) for cid in component_ids)
+                )
+            )
+            .order_by(Nest.created_at, Nest.id)
+        )
+    ).all()
+    for nest in matching:
         for raw_id in (nest.config or {}).get("component_ids", []):
             if raw_id in wanted:
                 nests_by_component.setdefault(uuid.UUID(raw_id), []).append(nest)
@@ -304,7 +323,9 @@ async def load_kalk_env(
         nests = list(
             (
                 await session.scalars(
-                    select(Nest).where(Nest.config.contains({"component_ids": [str(component.id)]}))
+                    select(Nest)
+                    .where(Nest.config.contains({"component_ids": [str(component.id)]}))
+                    .order_by(Nest.created_at, Nest.id)
                 )
             ).all()
         )

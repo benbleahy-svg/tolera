@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import uuid
 from collections.abc import Sequence
 from datetime import datetime
@@ -58,6 +59,8 @@ from .models import (
     ExportRegime,
     Organization,
 )
+
+logger = logging.getLogger("app.export_control")
 
 #: Keys never permitted in ``detail`` — a cheap structural guard against a call
 #: site drifting into logging print content or customer PII.
@@ -262,16 +265,39 @@ async def record_ai_skip_standalone(
 
     This opens a short session of its own, writes, and commits, so the entry
     survives the 4xx that follows.
+
+    **Never raises.** It checks out a *second* pool connection while the caller
+    still holds its own, so under enough concurrency the checkout can time out.
+    Letting that propagate would turn the intended 422 into a 500 *and* still
+    lose the entry — strictly worse than the degraded outcome. The refusal
+    itself (the thing that protects the data) has already happened by the time
+    this is called; only its record is at risk, so a failure is logged loudly
+    and swallowed. This is the concrete form of the module's rule that an audit
+    write must never be the thing that fails a request.
     """
-    async with org_scoped_session(sessionmaker, org_id) as session:
-        await record_access(
-            session,
-            org_id=org_id,
-            subject_type=subject_type,
-            subject_id=subject_id,
-            action=ExportControlAction.ai_skip,
-            actor_user_id=actor_user_id,
-            detail={"reason": "export_controlled", "route": route},
+    try:
+        async with org_scoped_session(sessionmaker, org_id) as session:
+            await record_access(
+                session,
+                org_id=org_id,
+                subject_type=subject_type,
+                subject_id=subject_id,
+                action=ExportControlAction.ai_skip,
+                actor_user_id=actor_user_id,
+                detail={"reason": "export_controlled", "route": route},
+            )
+    except Exception:
+        # ERROR, not warning: a missing compliance entry is a real gap an
+        # operator must see, even though it must not break the request.
+        logger.error(
+            "export_control_audit_write_failed",
+            extra={
+                "route": route,
+                "subject_type": str(subject_type),
+                "subject_id": str(subject_id),
+                "org_id": str(org_id),
+            },
+            exc_info=True,
         )
 
 

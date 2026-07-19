@@ -52,6 +52,7 @@ from .auth import Principal
 from .authz import Permission, require
 from .deps import get_session
 from .errors import AppError
+from .models import GdprRequestKind, GdprRequestLog
 from .retention import (
     ERASURE_POLICY,
     RETENTION_POLICY,
@@ -88,6 +89,24 @@ class SubjectLocator:
     table: str
     email_column: str
     context_columns: tuple[str, ...]
+    #: True when the column's type is ``citext``, which compares
+    #: case-insensitively in the database. The four customer/vendor tables use it;
+    #: ``quote_token.recipient_email`` and ``vendor_rfq_recipient.contact_email``
+    #: are plain ``text``. Without this distinction an erasure would silently
+    #: skip exactly those two rows for an address typed in different case —
+    #: returning 200 with a partial result that reads as a complete erasure.
+    citext: bool = True
+
+    @property
+    def match_predicate(self) -> str:
+        """SQL comparing the email column to ``:email``.
+
+        ``citext`` columns are compared directly so their indexes stay usable;
+        plain ``text`` columns are folded on both sides."""
+        column = _assert_identifier(self.email_column)
+        if self.citext:
+            return f"{column} = :email"
+        return f"lower({column}) = lower(:email)"
 
 
 #: Every table where a customer/vendor data subject is reachable. Deliberately
@@ -97,8 +116,15 @@ SUBJECT_LOCATORS: tuple[SubjectLocator, ...] = (
     SubjectLocator("account", "email", ("id", "name", "created_at", "deleted_at")),
     SubjectLocator("request_for_quote", "email", ("id", "quote_id", "created_at")),
     SubjectLocator("vendor_contact", "email", ("id", "vendor_id", "created_at", "deleted_at")),
-    SubjectLocator("quote_token", "recipient_email", ("id", "scope", "quote_id", "created_at")),
-    SubjectLocator("vendor_rfq_recipient", "contact_email", ("id", "rfq_id", "sent_at")),
+    SubjectLocator(
+        "quote_token",
+        "recipient_email",
+        ("id", "scope", "quote_id", "created_at"),
+        citext=False,
+    ),
+    SubjectLocator(
+        "vendor_rfq_recipient", "contact_email", ("id", "rfq_id", "sent_at"), citext=False
+    ),
 )
 
 
@@ -176,6 +202,31 @@ def _retained_report() -> list[dict[str, str]]:
     ]
 
 
+def _record_request(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    kind: GdprRequestKind,
+    email: str,
+    affected: dict[str, int],
+) -> None:
+    """File the request in the append-only :class:`GdprRequestLog`.
+
+    Shares the caller's transaction on purpose: if the erasure rolls back, so
+    does its record, and the log never claims a destruction that did not happen.
+    """
+    session.add(
+        GdprRequestLog(
+            org_id=principal.active_org_id,
+            actor_user_id=principal.user_id,
+            kind=kind,
+            subject_email=email,
+            affected=dict(affected),
+            affected_row_count=sum(affected.values()),
+        )
+    )
+
+
 @gdpr_router.post("/subject-export", response_model=SubjectExport)
 async def export_subject(
     payload: SubjectRequest,
@@ -193,17 +244,20 @@ async def export_subject(
     total = 0
     for locator in SUBJECT_LOCATORS:
         table = _assert_identifier(locator.table)
-        email_col = _assert_identifier(locator.email_column)
         columns = [
             _assert_identifier(c)
-            for c in (*locator.context_columns, email_col, *_erasable_columns(locator.table))
+            for c in (
+                *locator.context_columns,
+                locator.email_column,
+                *_erasable_columns(locator.table),
+            )
         ]
         # dict.fromkeys preserves order while de-duplicating (the email column
         # is usually in the erasable set too).
         select_list = ", ".join(dict.fromkeys(columns))
         rows = (
             await session.execute(
-                text(f"SELECT {select_list} FROM {table} WHERE {email_col} = :email"),
+                text(f"SELECT {select_list} FROM {table} WHERE {locator.match_predicate}"),
                 {"email": email},
             )
         ).mappings()
@@ -212,6 +266,15 @@ async def export_subject(
             records[locator.table] = found
             total += len(found)
 
+    # An access request is itself a processing activity worth evidencing — and
+    # it exposes a person's whole record, so who ran it matters.
+    _record_request(
+        session,
+        principal=principal,
+        kind=GdprRequestKind.export,
+        email=email,
+        affected={table: len(rows) for table, rows in records.items()},
+    )
     return SubjectExport(
         email=email,
         org_id=str(principal.active_org_id),
@@ -248,7 +311,6 @@ async def erase_subject(
     total = 0
     for locator in SUBJECT_LOCATORS:
         table = _assert_identifier(locator.table)
-        email_col = _assert_identifier(locator.email_column)
         erasable = _erasable_columns(locator.table)
         if not erasable:
             continue
@@ -257,7 +319,7 @@ async def erase_subject(
         ids = list(
             (
                 await session.execute(
-                    text(f"SELECT id FROM {table} WHERE {email_col} = :email"),
+                    text(f"SELECT id FROM {table} WHERE {locator.match_predicate}"),
                     {"email": email},
                 )
             ).scalars()
@@ -277,6 +339,13 @@ async def erase_subject(
             anonymized[locator.table] = len(ids)
             total += len(ids)
 
+    _record_request(
+        session,
+        principal=principal,
+        kind=GdprRequestKind.erasure,
+        email=email,
+        affected=anonymized,
+    )
     await session.flush()
     return ErasureReport(
         email=email,

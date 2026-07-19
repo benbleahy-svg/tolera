@@ -457,3 +457,36 @@ def test_the_request_edge_refusal_survives_its_own_422(
     assert resp.json()["code"] == "export_controlled"
     # The refusal is on record despite the request having failed.
     assert ("lens_extract.request", "part_file") in _skips(seeder, org_id)
+
+
+def test_a_failing_audit_write_never_breaks_the_refusal(
+    app_client: TestClient, seeder: Seeder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``record_ai_skip_standalone`` checks out a second pool connection while the
+    request still holds its own, so under load that checkout can time out. Letting
+    it propagate would turn the intended 422 into a 500 *and* still lose the entry
+    — strictly worse than the degraded outcome. The refusal itself has already
+    happened; only its record is at risk."""
+    import app.export_control as export_control
+
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    part_id = _flagged_part(seeder, org_id)
+
+    def _boom(*args: Any, **kwargs: Any) -> Any:
+        # Fail the way a starved pool actually fails: at connection checkout,
+        # inside the helper, so the helper's own guard is what is under test.
+        raise TimeoutError("QueuePool limit of size 5 overflow 10 reached")
+
+    monkeypatch.setattr(export_control, "org_scoped_session", _boom)
+
+    with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
+        upload = app_client.post(
+            f"/api/parts/{part_id}/files",
+            files=[("files", ("BR-100.pdf", b"%PDF-1.4 test", "application/pdf"))],
+        )
+        file_id = uuid.UUID(upload.json()[0]["id"])
+        resp = app_client.post(f"/api/parts/{part_id}/files/{file_id}/extract")
+
+    # Still the correct refusal, never a 500 — the data was protected either way.
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "export_controlled"

@@ -348,3 +348,114 @@ def test_legal_block_renders_only_what_the_org_configured() -> None:
     # And one with no register/VAT-ID emits no Impressum at all (M5.9 contract).
     bare = legal_block(_Org(commercial_register=None, ust_id_nr=None))
     assert bare["impressum"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Ship-review fixes
+# --------------------------------------------------------------------------- #
+def test_erasure_matches_case_insensitively_on_plain_text_columns(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """Four of the six subject tables use ``citext``; ``quote_token.recipient_email``
+    and ``vendor_rfq_recipient.contact_email`` are plain ``text``. Without folding
+    those, an address typed in different case erases the contact but silently
+    skips the tokens — a 200 with a partial result that reads as complete."""
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    _seed_subject(seeder, org_id)
+    quote_id = seeder.quote(org_id, "Q-CASE-1")
+    token_id = uuid.uuid4()
+    seeder.sql(
+        "INSERT INTO quote_token (id, org_id, scope, quote_id, recipient_email, token) "
+        "VALUES (:id, :org, 'buyer_portal', :q, :email, :token)",
+        {
+            "id": token_id,
+            "org": org_id,
+            "q": quote_id,
+            "email": SUBJECT,
+            "token": f"tok-{token_id}",
+        },
+    )
+
+    with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
+        resp = app_client.post(
+            "/api/settings/privacy/subject-erasure",
+            # Same address, different case — as it would be pasted from a letter.
+            json={"email": SUBJECT.upper(), "confirm_email": SUBJECT.upper()},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["anonymized"].get("quote_token") == 1
+    [(recipient,)] = seeder.fetch(
+        "SELECT recipient_email FROM quote_token WHERE id = :id", {"id": token_id}
+    )
+    assert recipient.endswith(f"@{ANONYMOUS_EMAIL_DOMAIN}")
+
+
+def test_erasure_is_recorded_in_the_append_only_request_log(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """The most destructive endpoint in the product must not be the one that
+    leaves no trace. Tombstones name no actor, so without this "who erased whom"
+    is unanswerable straight after the fact."""
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    _seed_subject(seeder, org_id)
+
+    with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
+        app_client.post(
+            "/api/settings/privacy/subject-erasure",
+            json={"email": SUBJECT, "confirm_email": SUBJECT},
+        )
+
+    [(kind, subject, actor, count)] = seeder.fetch(
+        "SELECT kind::text, subject_email, actor_user_id, affected_row_count "
+        "FROM gdpr_request_log WHERE org_id = :org",
+        {"org": org_id},
+    )
+    assert kind == "erasure"
+    assert subject == SUBJECT  # retained deliberately: an erasure log must say whose
+    assert actor == admin
+    assert count == 1
+
+
+def test_subject_export_is_recorded_too(app_client: TestClient, seeder: Seeder) -> None:
+    """An access request exposes a person's whole record — who ran it matters."""
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    _seed_subject(seeder, org_id)
+    with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
+        app_client.post("/api/settings/privacy/subject-export", json={"email": SUBJECT})
+    [(kind,)] = seeder.fetch(
+        "SELECT kind::text FROM gdpr_request_log WHERE org_id = :org", {"org": org_id}
+    )
+    assert kind == "export"
+
+
+def test_the_request_log_is_append_only_for_the_app_role(tenancy_db: str, seeder: Seeder) -> None:
+    """Same guarantee as the export-control log: the app role may not rewrite it."""
+    import asyncio
+
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from tests.conftest import app_role_url
+
+    org_id = seeder.org("fechner")
+    seeder.sql(
+        "INSERT INTO gdpr_request_log (org_id, kind, subject_email) "
+        "VALUES (:org, 'erasure', :email)",
+        {"org": org_id, "email": SUBJECT},
+    )
+
+    async def _attempt() -> None:
+        engine = create_async_engine(app_role_url(tenancy_db))
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    sa_text("SELECT set_config('app.current_org_id', :org, true)"),
+                    {"org": str(org_id)},
+                )
+                await conn.execute(sa_text("DELETE FROM gdpr_request_log"))
+        finally:
+            await engine.dispose()
+
+    with pytest.raises(Exception, match=r"(?i)permission denied"):
+        asyncio.run(_attempt())
