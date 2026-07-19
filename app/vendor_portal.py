@@ -43,8 +43,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from .av import scan_gate_error
 from .db import org_scoped_session
-from .deps import get_storage
+from .deps import get_app_settings, get_storage
 from .errors import AppError
 from .events import emit_event
 from .metrics import vendor_rfq_portal_events
@@ -723,6 +724,11 @@ async def download_vendor_file(
         # Belt and braces: the allowlist alone must not reach a file off this batch.
         if part_file is None or part_file.part_id not in part_ids:
             raise _rejected()
+        # M3.13: the outbound forward gate. Unlike the allowlist checks above this
+        # is answered honestly (403/409, not the opaque rejection) — the file IS
+        # the vendor's to see, it is just not cleared to leave the system yet.
+        if (blocked := scan_gate_error(part_file, get_app_settings(request))) is not None:
+            raise blocked
         key, filename, content_type = (
             part_file.storage_key,
             part_file.filename,

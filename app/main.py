@@ -72,6 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
     settings.validate_storage()  # fail closed on a misconfigured object store
+    settings.validate_av()  # …and on unscanned uploads outside development/test (M3.13)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

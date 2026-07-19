@@ -85,6 +85,9 @@ export interface PartFile {
   size_bytes: number;
   role: FileRole;
   is_redacted: boolean;
+  /** M3.13 malware verdict; `infected` files are blocked from download/forward. */
+  scan_status: 'pending' | 'clean' | 'infected' | 'error';
+  scan_signature: string | null;
   /** The file this one was derived from (M2.5 split pages), if any. */
   source_file_id: string | null;
   created_at: string;

@@ -64,6 +64,32 @@ services:
       mc mb --ignore-existing local/tolera-files
       "
 
+  # ClamAV daemon — the malware scanner behind M3.13 (DECISIONS.md 2026-06-25:
+  # in our own infrastructure, never a cloud scanning API, which would add a GDPR
+  # subprocessor for customer prints). Only the worker talks to it; the API
+  # process never does (scanning is async, off the request path).
+  clamav:
+    image: clamav/clamav:1.4
+    environment:
+      # Skip the freshclam update on boot in dev — the bundled signature DB
+      # detects EICAR, which is all the fixtures need, and the download makes a
+      # cold `docker compose up` several minutes slower. Real deployments leave
+      # updates ON (the image runs freshclam on a schedule by default).
+      FRESHCLAM_CHECKS: "1"
+    volumes:
+      # Raise the INSTREAM ceiling above the app's 200 MB upload cap
+      # (MAX_UPLOAD_MB) so a legitimate large CAD file is scanned, not refused.
+      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    healthcheck:
+      # clamd answers PING with PONG once its signature DB is loaded — which is
+      # what "ready" means here (the daemon accepts connections well before).
+      test: ["CMD-SHELL", "clamdcheck.sh || exit 1"]
+      interval: 10s
+      timeout: 5s
+      # The first boot loads ~1 GB of signatures; be patient before failing.
+      retries: 30
+      start_period: 120s
+
   app:
     build:
       context: .
@@ -85,6 +111,11 @@ services:
       S3_REGION: eu-central-1
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
+      # M3.13 — the API never talks to clamd (scanning is async, on the worker);
+      # it reads these only to know the gate is live, so an unscanned file is
+      # held back from download/forward instead of waved through.
+      AV_SCANNER: clamav
+      CLAMAV_HOST: clamav
     ports:
       - "8000:8000"
     volumes:
@@ -120,6 +151,9 @@ services:
       S3_REGION: eu-central-1
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
+      # M3.13 — the scan-on-store task runs here.
+      AV_SCANNER: clamav
+      CLAMAV_HOST: clamav
     volumes:
       - .:/app
       - /app/.venv
@@ -132,6 +166,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      clamav:
+        condition: service_healthy
 
   beat:
     build:

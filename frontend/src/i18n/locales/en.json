@@ -112,6 +112,12 @@
         "document": "Document",
         "email": "Email",
         "archive": "Archive"
+      },
+      "scan": {
+        "pending": "Virus scan running",
+        "infected": "Quarantined",
+        "pending_hint": "This file is still being scanned for malware and cannot be downloaded yet.",
+        "infected_hint": "Flagged as malware ({{signature}}) — download and vendor forwarding are blocked."
       }
     }
   },

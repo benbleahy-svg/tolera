@@ -49,6 +49,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from .av_scan import enqueue_scan
+from .config import Settings
 from .db import org_scoped_session, run_after_commit
 from .email_ingest import ParsedEmail
 from .file_types import classify
@@ -191,6 +193,7 @@ async def _first_line_part(session: Any, rfq_id: uuid.UUID) -> Part | None:
 async def _file_vendor_pdf(
     session: Any,
     storage: ObjectStorage,
+    settings: Settings,
     *,
     org_id: uuid.UUID,
     part: Part,
@@ -201,7 +204,10 @@ async def _file_vendor_pdf(
 
     Deliberately not via ``parts._store_files_on_part``: that pipeline may promote an
     upload to the part's PRIMARY and enqueue geometry work, neither of which is right
-    for a supplier's price sheet."""
+    for a supplier's price sheet. What it *does* borrow from that pipeline is the
+    **AV scan** (M3.13): this is an unauthenticated inbound file from outside the shop,
+    so it is queued for scanning exactly like an upload and stays ``pending`` — which
+    the download gate treats as not-downloadable — until clamd returns a verdict."""
     category = classify(filename)
     if category is None:
         return None
@@ -223,6 +229,7 @@ async def _file_vendor_pdf(
     )
     session.add(row)
     await session.flush()
+    enqueue_scan(session, settings, org_id, file_id)
     return row
 
 
@@ -249,6 +256,7 @@ def _pick_attachment(parsed: ParsedEmail) -> tuple[str, bytes] | None:
 async def handle_vendor_reply(
     sessionmaker: async_sessionmaker[Any],
     storage: ObjectStorage,
+    settings: Settings,
     *,
     org_id: uuid.UUID,
     message_id: str,
@@ -292,6 +300,7 @@ async def handle_vendor_reply(
             stored = await _file_vendor_pdf(
                 session,
                 storage,
+                settings,
                 org_id=org_id,
                 part=part,
                 filename=attachment[0],

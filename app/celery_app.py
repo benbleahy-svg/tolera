@@ -22,6 +22,7 @@ celery_app = Celery(
     # the module via its router, so eager/in-process dispatch still works).
     include=[
         "app.tasks",
+        "app.av_scan",
         "app.file_split",
         "app.interrogation",
         "app.email_ingest",

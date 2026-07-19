@@ -60,6 +60,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
 from .authz import Permission, require
+from .av import ScanStatus, scan_gate_error
+from .av_scan import enqueue_scan
 from .config import Settings
 from .db import run_after_commit
 from .deps import get_app_settings, get_session, get_storage
@@ -221,6 +223,9 @@ class PartFileOut(BaseModel):
     is_redacted: bool
     # The file this one was derived from (M2.5 split pages), if any.
     source_file_id: uuid.UUID | None
+    # Malware verdict (M3.13); ``scan_signature`` names the finding when infected.
+    scan_status: ScanStatus
+    scan_signature: str | None
     created_at: datetime
 
 
@@ -288,6 +293,8 @@ def _part_file_out(pf: PartFile) -> PartFileOut:
         role=FileRole(pf.role),
         is_redacted=pf.is_redacted,
         source_file_id=pf.source_file_id,
+        scan_status=ScanStatus(pf.scan_status),
+        scan_signature=pf.scan_signature,
         created_at=pf.created_at,
     )
 
@@ -559,6 +566,7 @@ async def upload_library_parts(
                 part=part,
                 validated=batch,
                 stored_keys=stored_keys,
+                settings=settings,
             )
             primary = next((r for r in rows if r.role == FileRole.primary), rows[0])
             stem, _, _ = primary.filename.rpartition(".")
@@ -811,6 +819,7 @@ async def upload_part_files(
             part=part,
             validated=validated,
             stored_keys=stored_keys,
+            settings=settings,
         )
     except IntegrityError as exc:
         await _discard_blobs(storage, stored_keys)
@@ -914,6 +923,7 @@ async def _store_files_on_part(
     part: Part,
     validated: list[tuple[UploadFile, str, str]],
     stored_keys: list[str],
+    settings: Settings,
 ) -> list[PartFile]:
     """Phase 2 for one part: store blobs, create indexed rows, assign PRIMARY.
 
@@ -950,6 +960,10 @@ async def _store_files_on_part(
             # Post-commit only (run_after_commit): the worker re-reads the
             # committed row; a failed/rolled-back request enqueues nothing.
             run_after_commit(session, partial(_enqueue_pdf_text, org_id, file_id))
+        # Malware scan (M3.13) — async, post-commit, for EVERY stored file. The
+        # row is born ``pending``; the download/forward gate keeps the bytes in
+        # until clamd says ``clean``.
+        enqueue_scan(session, settings, org_id, file_id)
 
     # Insert the part_file rows BEFORE pointing part.primary_file_id at one of
     # them: that FK is a plain column (no ORM relationship), so the unit of work
@@ -1008,9 +1022,15 @@ async def download_part_file(
     file_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     storage: Annotated[ObjectStorage, Depends(get_storage)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> StreamingResponse:
-    """Stream a file back byte-identically (M1.2 acceptance: round-trips intact)."""
+    """Stream a file back byte-identically (M1.2 acceptance: round-trips intact).
+
+    Gated on the M3.13 malware verdict: an infected file is 403, an unscanned one
+    409 — the bytes never leave the system on an unknown verdict."""
     pf = await _get_part_file_or_404(session, part_id, file_id)
+    if (blocked := scan_gate_error(pf, settings)) is not None:
+        raise blocked
     return StreamingResponse(
         storage.stream(pf.storage_key),
         media_type=pf.content_type or "application/octet-stream",
@@ -1075,6 +1095,10 @@ async def create_redacted_copy(
             size_bytes=size,
             role=FileRole.supporting,
             is_redacted=True,
+            # A redacted copy is rendered from a file we have already judged, so
+            # it inherits that verdict rather than starting a second scan (M3.13).
+            scan_status=ScanStatus(source.scan_status),
+            scan_signature=source.scan_signature,
             # Index the redacted copy like any upload (M2.12) — its own hash and
             # its own (redaction-stripped) text, never the source's.
             file_hash=digest,

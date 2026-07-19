@@ -128,7 +128,24 @@ export function FilesPanel({
           <tbody>
             {files.map((file) => (
               <tr key={file.id}>
-                <td>{file.filename}</td>
+                <td>
+                  {file.filename}
+                  {file.scan_status === 'infected' && (
+                    <span
+                      className="crm-chip files-chip-quarantined"
+                      title={t('parts.files.scan.infected_hint', {
+                        signature: file.scan_signature ?? '—',
+                      })}
+                    >
+                      {t('parts.files.scan.infected')}
+                    </span>
+                  )}
+                  {file.scan_status === 'pending' && (
+                    <span className="crm-chip" title={t('parts.files.scan.pending_hint')}>
+                      {t('parts.files.scan.pending')}
+                    </span>
+                  )}
+                </td>
                 <td>{t(`parts.files.type.${file.file_type}`, file.file_type)}</td>
                 <td>{formatBytes(file.size_bytes, i18n.language)}</td>
                 <td>
@@ -139,13 +156,15 @@ export function FilesPanel({
                   )}
                 </td>
                 <td className="files-actions">
-                  <button
-                    type="button"
-                    className="btn btn-link"
-                    onClick={() => onDownload(file.id, file.filename)}
-                  >
-                    {t('parts.files.download')}
-                  </button>
+                  {file.scan_status !== 'infected' && (
+                    <button
+                      type="button"
+                      className="btn btn-link"
+                      onClick={() => onDownload(file.id, file.filename)}
+                    >
+                      {t('parts.files.download')}
+                    </button>
+                  )}
                   {canEdit && file.role !== 'primary' && (
                     <button
                       type="button"

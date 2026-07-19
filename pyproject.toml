@@ -117,6 +117,7 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = [
     "app.tasks",
+    "app.av_scan",
     "app.celery_app",
     "app.file_split",
     "app.interrogation",

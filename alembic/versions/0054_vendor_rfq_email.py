@@ -26,13 +26,18 @@ and its return leg need (spec ``#vendor-rfq`` → "Outbound RFQ email" +
   corpus the never-hallucinate guard checks extracted prices against, so a re-run of
   the extraction does not need the raw MIME back.
 
+Renumbered to 0054 on top of M3.13's ``0053_part_file_scan_status``, which landed on
+``develop`` while this block was building (the same single-head resolution M6.3 made
+against M6.2). The two are complementary: that one adds the AV scan state this block's
+vendor forward gate reads, this one the email columns.
+
 Reversible: ``downgrade`` drops every added column and the index. No enum is touched —
 the outbound RFQ email is *system-generated* per the spec, so it needs no
 ``email_template_type`` value (a PG enum value cannot be dropped, which would have
 broken the reversible-migration invariant).
 
-Revision ID: 0053_vendor_rfq_email
-Revises: 0052_vendor_rfq_batch_send
+Revision ID: 0054_vendor_rfq_email
+Revises: 0053_part_file_scan_status
 Create Date: 2026-07-19
 """
 
@@ -42,8 +47,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0053_vendor_rfq_email"
-down_revision: str | None = "0052_vendor_rfq_batch_send"
+revision: str = "0054_vendor_rfq_email"
+down_revision: str | None = "0053_part_file_scan_status"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

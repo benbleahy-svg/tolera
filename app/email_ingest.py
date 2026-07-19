@@ -524,6 +524,7 @@ async def mailgun_inbound(
         vendor_result = await handle_vendor_reply(
             sessionmaker,
             storage,
+            settings,
             org_id=org_id,
             message_id=message_id,
             subject=subject_header,
@@ -731,6 +732,7 @@ async def _file_attachments(
             part=part,
             validated=validated,
             stored_keys=stored_keys,
+            settings=settings,
         )
         for row in rows:
             row.rfq_id = rfq_id

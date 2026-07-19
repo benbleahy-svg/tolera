@@ -909,3 +909,41 @@ def test_two_model_items_for_one_line_are_merged_not_crashed(
         {"rid": rfq["recipient_id"]},
     )
     assert [r.unit_price for r in rows] == [Decimal("12.5000")]
+
+
+def test_the_vendors_inbound_pdf_is_queued_for_virus_scanning(
+    app_client: TestClient,
+    seeder: Seeder,
+    mail: MockProvider,
+    vendor_lens: Any,
+    eager_celery: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M3.13's gate only helps if this file enters it. The reply attachment arrives
+    from outside the shop over an unauthenticated channel and is written straight to
+    ``part_file`` (not through the upload pipeline), so it has to be enqueued for
+    scanning explicitly — otherwise it sits ``pending`` forever, undownloadable, and
+    the one inbound path that most needs scanning is the one that skips it."""
+    queued: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "app.vendor_reply_ingest.enqueue_scan",
+        lambda _session, _settings, org_id, file_id: queued.append((str(org_id), str(file_id))),
+    )
+    rfq = _open_batch(app_client, seeder, mail)
+    vendor_lens.lines = []
+
+    _post_reply(
+        app_client,
+        _reply_eml(
+            subject=f"AW: RFQ-{rfq['number']}",
+            sender="vertrieb@fremd.example",
+            body="Angebot im Anhang.",
+            pdf=b"%PDF-1.7\nAngebot\n",
+            filename="angebot-alpha.pdf",
+        ),
+    )
+
+    stored = seeder.fetch(
+        "SELECT id FROM part_file WHERE filename = :n", {"n": "angebot-alpha.pdf"}
+    )[0]
+    assert queued == [(str(rfq["org"]), str(stored.id))]
