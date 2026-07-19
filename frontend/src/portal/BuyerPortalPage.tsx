@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
+import { LegalFooter } from '../shared/LegalFooter';
 import { fetchBuyerQuote } from './api';
 import { CheckoutFlow } from './CheckoutFlow';
 import { LineItemCard } from './LineItemCard';
@@ -239,6 +240,7 @@ export function BuyerPortalPage() {
           onCheckout={() => setCheckingOut(true)}
         />
       </main>
+      <LegalFooter legal={quote.legal} />
     </div>
   );
 }

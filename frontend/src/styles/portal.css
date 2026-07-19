@@ -541,3 +541,33 @@
   font-size: 0.85rem;
   margin-bottom: 1rem;
 }
+
+/* Impressum + Datenschutzerklärung footer (M6.9; DACH-DELTA §5).
+   Shared by the buyer and vendor portals via LegalFooter. Deliberately quiet —
+   it is a legal disclosure that must be present and findable, not a call to
+   action competing with the quote. Tokens only, no raw hex. */
+.portal-legal {
+  margin: 32px auto 0;
+  padding: 16px 0 24px;
+  max-width: 900px;
+  border-top: 1px solid var(--portal-line);
+  color: var(--portal-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.portal-legal-heading {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.portal-legal-line {
+  margin: 0;
+  /* Addresses arrive with real newlines from the org record. */
+  white-space: pre-line;
+}
+
+.portal-legal-line a {
+  color: var(--portal-muted);
+  text-decoration: underline;
+}
