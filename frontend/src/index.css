@@ -1,61 +1,100 @@
 /*
- * Design tokens — the Claude/Anthropic aesthetic (spec #ui-system, confirmed
- * 2026-06-13). All components consume these CSS custom properties; never raw
- * hex. `data-theme="claude"` selects the palette, `data-mode="light|dark"`
- * inverts it (see theme.ts). v1 ships only the Claude theme; the token
+ * Design tokens — "Ruhig" (Attio-quiet) palette, adopted 2026-07-19 from the
+ * approved reskin preview (design direction A). All components consume these
+ * CSS custom properties; never raw hex. `data-theme="claude"` selects the
+ * palette, `data-mode="light|dark"` inverts it (see theme.ts). The token
  * architecture supports per-tenant re-theming later with no code changes.
  *
- * Default mode is light (DECISIONS.md 2026-06-24 "Default colour mode"). The
- * sidebar background is INVARIANT — always dark, ignoring data-mode (spec rule).
+ * Default mode is light (DECISIONS.md 2026-06-24 "Default colour mode").
+ * Reskin note: the sidebar follows the mode now (light sidebar in light mode —
+ * the defining Attio trait), superseding the earlier invariant-dark rule.
  */
 
 :root,
 [data-theme='claude'][data-mode='light'] {
-  --p: #cc6431; /* primary / terracotta */
-  --p-h: #b35428; /* primary hover */
-  --p-bg: #faeee5; /* primary tint */
-  --p-t: #8b3918; /* primary text on p-bg */
-  --canvas: #f7f2ea; /* page background — warm sand */
-  --surface: #fffdf9; /* card / panel */
-  --s2: #f2ede4; /* secondary surface (hover rows) */
-  --s3: #eae4da; /* tertiary surface (pressed/selected) */
-  --border: #e2dad0;
-  --text: #2e2c29;
-  --t2: #6b6862; /* muted */
-  --t3: #b3b0a9; /* disabled / placeholder */
-  --danger: #b4231f; /* error / destructive text */
+  --p: #4762ff; /* primary / quiet indigo */
+  --p-h: #3a52e6; /* primary hover */
+  --p-bg: #eef1ff; /* primary tint */
+  --p-t: #2c3bb8; /* primary text on p-bg */
+  --canvas: #ffffff; /* page background */
+  --surface: #ffffff; /* card / panel */
+  --s2: #f6f7f9; /* secondary surface (hover rows) */
+  --s3: #eef0f3; /* tertiary surface (pressed/selected) */
+  --border: #ececef;
+  --text: #191c20;
+  --t2: #6a6f77; /* muted */
+  --t3: #a7abb2; /* disabled / placeholder */
+  --danger: #d5342b; /* error / destructive text */
   --on-primary: #fff; /* text/icon on a --p fill */
 
-  /* Sidebar is invariant — always dark. Do not theme it. */
-  --sidebar-bg: #1c1916; /* warm charcoal (light mode) */
-  --sidebar-text: rgba(255, 255, 255, 0.92);
-  --sidebar-muted: rgba(255, 255, 255, 0.45);
-  --sidebar-faint: rgba(255, 255, 255, 0.3);
-  --sidebar-hover: rgba(255, 255, 255, 0.07);
+  /* semantic accents */
+  --ai: #7c5cff; /* AI-Governor signal (suggestions, never blockers) */
+  --info: #4762ff;
+  --warn: #d99a1f;
+  --warn-bg: #fff7e0;
+  --warn-border: #ecd08a;
+  --warn-text: #7a5b10;
+  --success: #1e8a50;
+
+  /* Sidebar — light, quiet (follows mode since the 2026-07-19 reskin) */
+  --sidebar-bg: #fbfbfa;
+  --sidebar-text: #33373d;
+  --sidebar-muted: #6b7077;
+  --sidebar-faint: #a4a8ae;
+  --sidebar-hover: #f0f0ee;
+  --sidebar-border: #ececef;
+  --sidebar-active-bg: #eef1ff;
+  --sidebar-active-text: #2c3bb8;
 
   --sw: 216px; /* expanded sidebar width */
   --sw-collapsed: 56px; /* collapsed icon rail */
+  --radius: 7px;
+
+  /* Aliases — later blocks referenced these names with ad-hoc fallbacks;
+     binding them to the palette pulls every screen into the theme. */
+  --muted: var(--t2);
+  --accent: var(--p);
+  --surface-2: var(--s2);
+  --surface-hover: var(--s2);
+  --surface-active: var(--p-bg);
+  --text-muted: var(--t2);
+  --color-ai-signal: var(--ai);
 
   color-scheme: light;
 }
 
 [data-theme='claude'][data-mode='dark'] {
-  --p: #e07845;
-  --p-h: #ce6538;
-  --p-bg: #28140a;
-  --p-t: #f0a882;
-  --canvas: #13110e; /* warm near-black */
-  --surface: #1a1714;
-  --s2: #1f1c18;
-  --s3: #252119;
-  --border: #2b2820;
-  --text: #e4e2dd;
-  --t2: #8c8a85;
-  --t3: #555350;
-  --danger: #f08a85; /* error — lightened for the dark canvas */
-  --on-primary: #fff; /* white reads on terracotta in both modes */
+  --p: #7d90ff;
+  --p-h: #6b7dff;
+  --p-bg: #1a1e33;
+  --p-t: #aab6ff;
+  --canvas: #0d0e11;
+  --surface: #141519;
+  --s2: #191b20;
+  --s3: #1f222a;
+  --border: #23262e;
+  --text: #e6e8ec;
+  --t2: #8b9098;
+  --t3: #565b63;
+  --danger: #ff6b61; /* error — lightened for the dark canvas */
+  --on-primary: #0d0e11; /* dark text reads on the light indigo fill */
 
-  --sidebar-bg: #0e0c0a; /* deepest warm near-black (dark mode) */
+  --ai: #9d8cff;
+  --info: #7d90ff;
+  --warn: #e2b23e;
+  --warn-bg: #2a2410;
+  --warn-border: #57491c;
+  --warn-text: #e8c76a;
+  --success: #4cc38a;
+
+  --sidebar-bg: #101114;
+  --sidebar-text: #c3c7cd;
+  --sidebar-muted: #8b9098;
+  --sidebar-faint: #565b63;
+  --sidebar-hover: #1d1f25;
+  --sidebar-border: #23262e;
+  --sidebar-active-bg: #1a1e33;
+  --sidebar-active-text: #aab6ff;
 
   color-scheme: dark;
 }
@@ -84,12 +123,65 @@ code,
   font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
 }
 
+/* ---- Attio-quiet control baseline (reskin 2026-07-19) ----
+   Native controls get the quiet look by default, so screens that never adopted
+   .btn/.crm-* still read as one product. Class styles override as before. */
+button {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 7px);
+  padding: 5px 11px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+button:hover:not(:disabled) {
+  background: var(--s2);
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 7px);
+  padding: 5px 9px;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--t3);
+}
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--p);
+  padding: 0;
+  border: none;
+  background: none;
+}
+:is(button, input, select, textarea):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--p) 55%, transparent);
+  outline-offset: 1px;
+}
+a {
+  color: var(--p-t);
+}
+
 /* M1.14 #missing-rates-warning / #operation-rates-banner — amber, non-blocking */
 .est-warning-banner {
-  background: #fef3c7;
-  border: 1px solid #d4a72c;
-  border-radius: 4px;
-  color: #713f12;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius, 7px);
+  color: var(--warn-text);
   padding: 0.5rem 0.75rem;
   display: flex;
   align-items: center;
@@ -97,15 +189,16 @@ code,
   flex-wrap: wrap;
 }
 .est-warning-banner a {
-  color: #713f12;
+  color: var(--warn-text);
   font-weight: 600;
 }
 tr.est-missing-rate td {
-  background: #fef9e7;
+  background: color-mix(in srgb, var(--warn-bg) 55%, var(--surface));
 }
 .est-chip-warning {
-  background: #d4a72c;
+  background: var(--warn);
   color: #fff;
+  border-color: var(--warn);
 }
 
 /* M2.1 PDF viewer */
@@ -146,8 +239,8 @@ tr.est-missing-rate td {
 /* blue = collection over budget, orange = single body over budget (SS: cube tree icons) */
 .cad-tree-icon { display: inline-flex; align-items: center; line-height: 1; }
 .cad-tree-icon svg { display: block; }
-.cad-tree-icon-blue { color: #3b82f6; }
-.cad-tree-icon-orange { color: #f59e0b; }
+.cad-tree-icon-blue { color: var(--info); }
+.cad-tree-icon-orange { color: var(--warn); }
 /* display-options gear + popover (SS: gear top-right of the viewer) */
 .cad-display-options { position: relative; margin-left: auto; }
 .cad-gear { font-size: 1rem; line-height: 1; padding: 0.2rem 0.45rem; }
@@ -232,7 +325,7 @@ tr.est-missing-rate td {
 .dfm-warnings ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.15rem; }
 .dfm-warning-row { display: flex; align-items: center; gap: 0.35rem; }
 .dfm-expand { border: none; background: none; padding: 0.25rem; cursor: pointer; color: var(--muted, #667085); font-size: 0.7rem; min-width: 1.5rem; min-height: 1.5rem; }
-.dfm-severity-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #f5b942; flex: none; }
+.dfm-severity-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--warn); flex: none; }
 .dfm-warning-name { font-size: 0.8rem; color: var(--text, #1a1f27); }
 .dfm-info { color: var(--muted, #667085); cursor: help; font-size: 0.75rem; }
 .dfm-warnings .dfm-instances { margin: 0 0 0.25rem 1.9rem; padding: 0; list-style: none; font-size: 0.72rem; color: var(--muted, #667085); }
@@ -241,9 +334,16 @@ tr.est-missing-rate td {
 /* M6.1 — Dashboard work queue (spec #newscope §2). One merged, prioritised list:
    source badge · entity · reason chips · urgency (click/hover = the factors).
    Deliberately flat and dense — this is a queue to work through, not a report. */
-.dashboard-kpis dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0 0 1rem; }
-.dashboard-kpis .kpi dt { font-size: 0.75rem; color: var(--muted, #667085); margin: 0; }
-.dashboard-kpis .kpi dd { font-size: 1.4rem; font-weight: 600; margin: 0; }
+.dashboard-kpis dl { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0 0 1.25rem; }
+.dashboard-kpis .kpi {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0.7rem 1rem 0.75rem;
+  min-width: 9.5rem;
+}
+.dashboard-kpis .kpi dt { font-size: 0.72rem; font-weight: 500; color: var(--t2); margin: 0 0 0.15rem; }
+.dashboard-kpis .kpi dd { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.02em; margin: 0; font-variant-numeric: tabular-nums; }
 .dashboard-queue { margin-bottom: 1.5rem; }
 .work-queue { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
 .queue-row {

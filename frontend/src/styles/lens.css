@@ -5,7 +5,7 @@
  * turns solid only after the explicit Accept (CLAUDE.md §1).
  */
 :root {
-  --color-ai-signal: #7c3aed;
+  --color-ai-signal: var(--ai, #7c5cff);
   --ai-suggested-opacity: 0.55;
 }
 

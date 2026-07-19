@@ -1,0 +1,195 @@
+/*
+ * Collaboration panel (M2.11 — TEAM/EXTERNAL chat + annotations + tasks).
+ * First stylesheet for this component (it shipped unstyled — 2026-07-19
+ * demo-fidelity pass): a quiet right-hand column beside the viewer canvas,
+ * matching the reference frames' part-panel placement (DemoB/10, DemoB/11).
+ * Tokens only — no raw hex.
+ */
+
+.collab-panel {
+  flex: 0 0 300px;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+/* ------------------------------------------------------------- channels */
+.collab-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.collab-tab {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--t2);
+}
+
+.collab-tab.is-active {
+  background: var(--p-bg);
+  border-color: transparent;
+  color: var(--p-t);
+}
+
+.collab-add-channel {
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  background: none;
+  color: var(--t2);
+}
+
+.collab-add-channel:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--t3);
+}
+
+/* ------------------------------------------------------------- messages */
+.collab-messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 6rem;
+}
+
+.collab-message {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface);
+}
+
+.collab-message.is-deleted {
+  border-style: dashed;
+  color: var(--t3);
+  font-style: italic;
+}
+
+.collab-message-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.2rem;
+}
+
+.collab-author {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.collab-edited {
+  font-size: 10.5px;
+  color: var(--t3);
+}
+
+.collab-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.collab-annotation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--p-bg);
+  border: 1px solid transparent;
+  color: var(--p-t);
+}
+
+.collab-message-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.collab-message-actions button {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.collab-empty {
+  color: var(--t2);
+  font-size: 12.5px;
+  padding: 0.5rem 0.25rem;
+  list-style: none;
+}
+
+.collab-error {
+  color: var(--danger);
+  margin: 0;
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------------------- composer */
+.collab-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.6rem;
+  position: relative;
+}
+
+.collab-composer textarea {
+  width: 100%;
+  min-height: 3.2rem;
+  resize: vertical;
+}
+
+.collab-composer > div:last-child,
+.collab-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.collab-attach,
+.collab-mentions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 11.5px;
+  color: var(--t2);
+}
+
+/* assignee/mention picker popover (the floating identity card) */
+.collab-assign {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 12rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(20, 22, 30, 0.1);
+  font-size: 12px;
+}
