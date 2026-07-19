@@ -33,8 +33,15 @@ celery_app = Celery(
         "app.rule_suggest",
         "app.requote_diff",
         "app.bulk_refresh",
+        "app.event_dispatch_tasks",
     ],
 )
+
+#: How often the domain-event outbox is drained (M6.8). 60s: the CRM deal write
+#: rides ``quote.sent``, so a sent quote should show up in the customer's CRM
+#: within about a minute — near-real-time in the spec's sense, without polling
+#: hard enough to matter.
+_EVENT_DRAIN_SECONDS = 60
 
 #: Nightly rule-suggestion scan cadence (spec ``#ai-rule-suggest``: "Nightly
 #: Celery job scans for patterns per org"). 24h; a fixed interval avoids a
@@ -62,6 +69,10 @@ celery_app.conf.update(
         "rule-suggest-scan": {
             "task": "app.scan_rule_suggestions",
             "schedule": _RULE_SUGGEST_SCAN_SECONDS,
+        },
+        "event-outbox-drain": {
+            "task": "app.drain_event_outbox",
+            "schedule": _EVENT_DRAIN_SECONDS,
         },
     },
     task_routes={

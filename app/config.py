@@ -275,6 +275,36 @@ class Settings(BaseSettings):
                 "(ship fixtures/wuerth with the image, or set WUERTH_MODE=live)."
             )
 
+    # --- HubSpot CRM (M6.8 — spec #crm; build-plan M6 "Adapter posture") ---
+    # Same mock-first posture as Würth above: ``fixture`` is the default and the
+    # committed pilot posture, running against ``fixtures/hubspot/crm.json``,
+    # which IS the contract. Promoting to real HubSpot is THIS config and
+    # nothing else. Note the free HubSpot tier has no API access at all (spec
+    # ``#crm``), so a live promotion also needs a paid portal.
+    hubspot_mode: str = "fixture"  # "fixture" | "live"
+    hubspot_base_url: str = ""
+    hubspot_api_key: str = ""
+    hubspot_timeout_seconds: float = 8.0
+
+    def validate_hubspot(self) -> None:
+        """Fail closed on a half-configured live adapter (mirrors validate_wuerth)."""
+        mode = self.hubspot_mode.strip().lower()
+        if mode not in {"fixture", "live"}:
+            raise ValueError(f"HUBSPOT_MODE must be 'fixture' or 'live', got {self.hubspot_mode!r}")
+        if mode == "live":
+            if not self.hubspot_base_url:
+                raise ValueError("HUBSPOT_BASE_URL must be set when HUBSPOT_MODE=live.")
+            if not self.hubspot_api_key:
+                raise ValueError("HUBSPOT_API_KEY must be set when HUBSPOT_MODE=live.")
+            return
+        from .services.crm.hubspot import FIXTURE_PATH
+
+        if not FIXTURE_PATH.exists():
+            raise ValueError(
+                f"HUBSPOT_MODE=fixture requires the recorded response at {FIXTURE_PATH} "
+                "(ship fixtures/hubspot with the image, or set HUBSPOT_MODE=live)."
+            )
+
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"
     default_locale: str = "de-DE"

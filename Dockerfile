@@ -46,6 +46,7 @@ COPY scripts ./scripts
 # the committed pilot posture, so this file is runtime data, not test data —
 # without it every sourcing lookup would degrade and look like a supplier outage.
 COPY fixtures/wuerth ./fixtures/wuerth
+COPY fixtures/hubspot ./fixtures/hubspot
 USER tolera
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -61,5 +62,6 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY fixtures/wuerth ./fixtures/wuerth
+COPY fixtures/hubspot ./fixtures/hubspot
 USER tolera
 CMD ["celery", "-A", "app.celery_app", "worker", "-Q", "celery,email", "--loglevel=INFO"]

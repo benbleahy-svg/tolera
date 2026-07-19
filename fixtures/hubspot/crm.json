@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "portal_id": "24681012",
+  "results": {
+    "companies": [
+      {
+        "id": "7001",
+        "properties": {
+          "name": "Fechner Präzisionstechnik GmbH",
+          "domain": "fechner-praezision.de",
+          "phone": "+49 711 5520140",
+          "email": "einkauf@fechner-praezision.de",
+          "hs_lastmodifieddate": "2026-07-14T09:12:33.000Z"
+        }
+      },
+      {
+        "id": "7002",
+        "properties": {
+          "name": "Zeiss Industrielle Messtechnik",
+          "domain": "zeiss.de",
+          "phone": "+49 7364 200",
+          "email": null,
+          "hs_lastmodifieddate": "2026-07-15T16:40:02.000Z"
+        }
+      },
+      {
+        "id": "7003",
+        "properties": {
+          "name": "Bühler Maschinenbau AG",
+          "domain": "buehler-mb.ch",
+          "phone": "+41 71 955 11 11",
+          "email": "beschaffung@buehler-mb.ch",
+          "hs_lastmodifieddate": "2026-07-16T07:05:19.000Z"
+        }
+      }
+    ],
+    "contacts": [
+      {
+        "id": "9001",
+        "properties": {
+          "email": "m.fechner@fechner-praezision.de",
+          "firstname": "Miriam",
+          "lastname": "Fechner",
+          "phone": "+49 711 5520141",
+          "associatedcompanyid": "7001",
+          "hs_lastmodifieddate": "2026-07-14T09:13:01.000Z"
+        }
+      },
+      {
+        "id": "9002",
+        "properties": {
+          "email": "einkauf@zeiss.de",
+          "firstname": "Tobias",
+          "lastname": "Ackermann",
+          "phone": null,
+          "associatedcompanyid": "7002",
+          "hs_lastmodifieddate": "2026-07-15T16:41:55.000Z"
+        }
+      },
+      {
+        "id": "9003",
+        "properties": {
+          "email": "r.keller@buehler-mb.ch",
+          "firstname": "Rahel",
+          "lastname": "Keller",
+          "phone": "+41 71 955 11 20",
+          "associatedcompanyid": null,
+          "hs_lastmodifieddate": "2026-07-16T07:06:44.000Z"
+        }
+      }
+    ]
+  }
+}
