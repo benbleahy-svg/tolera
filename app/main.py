@@ -61,6 +61,7 @@ from .rules import rules_router
 from .saved_views import saved_views_router
 from .storage import make_storage
 from .task_resources import register as register_task_resources
+from .vendor_portal import vendor_portal_router
 from .vendors import vendor_contacts_router, vendors_router
 from .work_queue import work_queue_router
 
@@ -139,6 +140,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(vendors_router)
     app.include_router(vendor_contacts_router)
     app.include_router(work_queue_router)
+    # Unauthenticated vendor surface — the token is the only credential (M6.2).
+    app.include_router(vendor_portal_router)
 
     return app
 

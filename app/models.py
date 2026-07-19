@@ -3505,10 +3505,16 @@ class QuoteToken(Base):
 
     ``quote_id`` is nullable at the DB (the unified entity also serves the file-only
     vendor-share scope in M6) but the service enforces NOT NULL for ``buyer_portal``.
-    ``file_permissions`` is reserved for the vendor scopes (M6). The
-    ``external_share_id`` / ``vendor_rfq_recipient_id`` columns the spec's unified
-    sketch lists are **deferred** to M6 with their target tables (the M1.4 precedent:
-    no speculative column without a FK target)."""
+    ``file_permissions`` is the vendor scopes' file allowlist: for ``vendor_rfq`` it is
+    ``{"part_file_ids": [...]}`` — the exact set of files this vendor may download, so a
+    per-vendor redacted-variant choice (M6.4) is enforced by the token, not by the UI.
+
+    ``vendor_rfq_recipient_id`` landed in M6.2 with its target table
+    (:class:`VendorRfqRecipient`); the ``external_share_id`` column the spec's unified
+    sketch lists is still **deferred** until its own table exists (the M1.4 precedent:
+    no speculative column without a FK target). A ``vendor_rfq`` token carries
+    ``quote_id = NULL`` — it is scoped to a recipient, and the buyer service rejects a
+    token without a quote."""
 
     __tablename__ = "quote_token"
     __table_args__ = (
@@ -3519,6 +3525,12 @@ class QuoteToken(Base):
             name="fk_quote_token_quote_org",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["org_id", "vendor_rfq_recipient_id"],
+            ["vendor_rfq_recipient.org_id", "vendor_rfq_recipient.id"],
+            name="fk_quote_token_vendor_rfq_recipient_org",
+            ondelete="CASCADE",
+        ),
         Index("ix_quote_token_org_quote", "org_id", "quote_id"),
     )
 
@@ -3526,6 +3538,9 @@ class QuoteToken(Base):
     org_id: Mapped[uuid.UUID] = _org_fk()
     scope: Mapped[QuoteTokenScope] = mapped_column(_quote_token_scope_enum, nullable=False)
     quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: Set for ``vendor_rfq`` tokens (NULL otherwise) — the one vendor + one batch the
+    #: portal link unlocks. Added in M6.2 with :class:`VendorRfqRecipient`.
+    vendor_rfq_recipient_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     recipient_email: Mapped[str | None] = mapped_column(String)
     #: The signed JWT string — stored so Settings can list/copy a recipient's link
     #: (and so a leaked/rotated secret is auditable); the row stays authoritative.
@@ -4128,3 +4143,244 @@ class VendorContact(Base):
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
     deleted_at: Mapped[datetime | None] = _deleted_at()
+
+
+# ---------------------------------------------------------------------------
+# Vendor RFQ (M6.2) — outside-process sourcing
+# ---------------------------------------------------------------------------
+
+
+class VendorRfq(Base):
+    """One RFQ **batch**: a set of the quote's line items sent out for outside-process
+    pricing (spec ``#vendor-rfq``, "Outbound RFQ Flow").
+
+    The batch is the unit the vendor portal renders: a token is scoped to one batch
+    **and** one recipient (:class:`VendorRfqRecipient`), so a vendor sees exactly the
+    lines of its own batch and nothing else of the tenant. M6.2 builds the batch as the
+    portal's substrate; the compose modal that *creates* it is M6.4, so everything here
+    is written by fixtures/tests until then.
+
+    ``need_by_date`` is a **soft** cutoff — the spec is explicit that the portal never
+    shows a hard "closed" state and a late submission still succeeds; it only drives the
+    late-response alert (M6.6) and the follow-up nudge."""
+
+    __tablename__ = "vendor_rfq"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_vendor_rfq_org_id_id"),
+        UniqueConstraint("org_id", "number", name="uq_vendor_rfq_org_number"),
+        ForeignKeyConstraint(
+            ["org_id", "quote_id"],
+            ["quote.org_id", "quote.id"],
+            name="fk_vendor_rfq_quote_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_vendor_rfq_org_quote", "org_id", "quote_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: Per-org human reference shown on the portal + in the outbound email ("RFQ #X").
+    number: Mapped[str] = mapped_column(String, nullable=False)
+    #: Soft response deadline — never blocks a submission (spec "Soft cutoff behaviour").
+    need_by_date: Mapped[date | None] = mapped_column(Date)
+    #: Free-text the estimator appends to the email and the portal shows verbatim.
+    message: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class VendorRfqLine(Base):
+    """One quote line item inside an RFQ batch (spec ``#vendor-rfq`` portal parts table).
+
+    Carries the *vendor-facing* note only. The vendor sees part identity, process, and
+    quantity breaks — never the internal cost, margin, or customer price of the line;
+    the projection in :mod:`app.vendor_portal` is an allowlist, matching the buyer
+    portal's posture (M5.1)."""
+
+    __tablename__ = "vendor_rfq_line"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_vendor_rfq_line_org_id_id"),
+        UniqueConstraint("rfq_id", "quote_item_id", name="uq_vendor_rfq_line_rfq_item"),
+        ForeignKeyConstraint(
+            ["org_id", "rfq_id"],
+            ["vendor_rfq.org_id", "vendor_rfq.id"],
+            name="fk_vendor_rfq_line_rfq_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "quote_item_id"],
+            ["quote_item.org_id", "quote_item.id"],
+            name="fk_vendor_rfq_line_item_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_vendor_rfq_line_org_rfq", "org_id", "rfq_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    rfq_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quote_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    #: Estimator notes written *for the vendor* (distinct from the internal quote notes).
+    estimator_notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+
+
+class VendorRfqRecipient(Base):
+    """One vendor on an RFQ batch — the entity a ``vendor_rfq`` token is scoped to.
+
+    Sends are **blind**: one recipient per vendor, one token per recipient, so a vendor
+    can never enumerate the others (spec "BCC-isolated — vendors cannot see each other").
+
+    ``vendor_id`` is deliberately **absent**: the ``Vendor`` table is M6.3's, and the
+    M1.4 precedent forbids a speculative column without a FK target. The company name
+    and quoting-contact email are denormalised here so the portal is renderable now;
+    M6.3/M6.4 add the FK and backfill."""
+
+    __tablename__ = "vendor_rfq_recipient"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_vendor_rfq_recipient_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "rfq_id"],
+            ["vendor_rfq.org_id", "vendor_rfq.id"],
+            name="fk_vendor_rfq_recipient_rfq_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_vendor_rfq_recipient_org_rfq", "org_id", "rfq_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    rfq_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: Vendor company name (denormalised until M6.3's ``Vendor`` exists).
+    vendor_name: Mapped[str] = mapped_column(String, nullable=False)
+    #: Quoting contact the RFQ email goes to (M6.5); shown on no vendor-facing surface.
+    contact_email: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class VendorRfqResponse(Base):
+    """A vendor's submission for its batch — at most one row per recipient.
+
+    A re-submit **updates** this row rather than appending: the portal has no login, so
+    a vendor correcting a typo would otherwise create an ambiguous second response for
+    the estimator's Apply (M6.6). ``submitted_at`` is refreshed on each save and
+    ``is_late`` is stamped against the batch's ``need_by_date`` at submission time — the
+    submission itself is never refused (spec: the portal stays open).
+
+    ``source`` distinguishes the portal channel from M6.5's AI-extracted email replies,
+    which land in the same table so M6.6 has exactly one Apply path."""
+
+    __tablename__ = "vendor_rfq_response"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_vendor_rfq_response_org_id_id"),
+        UniqueConstraint("recipient_id", name="uq_vendor_rfq_response_recipient"),
+        ForeignKeyConstraint(
+            ["org_id", "recipient_id"],
+            ["vendor_rfq_recipient.org_id", "vendor_rfq_recipient.id"],
+            name="fk_vendor_rfq_response_recipient_org",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "attachment_size_bytes IS NULL OR attachment_size_bytes >= 0",
+            name="ck_vendor_rfq_response_attachment_size_nonneg",
+        ),
+        Index("ix_vendor_rfq_response_org_recipient", "org_id", "recipient_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    recipient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: ``portal`` here; ``email`` is M6.5's Lens-extracted channel, ``instant`` is M6.7c.
+    source: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'portal'"))
+    #: Currency of every price on this response — vendors may quote EUR or CHF (DACH).
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default=text("'EUR'"))
+    valid_until: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
+    attachment_object_key: Mapped[str | None] = mapped_column(String)
+    attachment_filename: Mapped[str | None] = mapped_column(String)
+    attachment_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    attachment_content_type: Mapped[str | None] = mapped_column(String)
+    #: True when the submission arrived after the batch's ``need_by_date`` (soft cutoff).
+    is_late: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    submitted_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class VendorRfqResponseLine(Base):
+    """The vendor's answer for one line of the batch (spec: per-line response form).
+
+    ``cannot_quote`` is what makes a **partial** response first-class: the vendor ticks
+    it, supplies no prices for that line, and the submission still succeeds."""
+
+    __tablename__ = "vendor_rfq_response_line"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_vendor_rfq_response_line_org_id_id"),
+        UniqueConstraint(
+            "response_id", "rfq_line_id", name="uq_vendor_rfq_response_line_response_line"
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "response_id"],
+            ["vendor_rfq_response.org_id", "vendor_rfq_response.id"],
+            name="fk_vendor_rfq_response_line_response_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "rfq_line_id"],
+            ["vendor_rfq_line.org_id", "vendor_rfq_line.id"],
+            name="fk_vendor_rfq_response_line_line_org",
+            ondelete="CASCADE",
+        ),
+        Index("ix_vendor_rfq_response_line_org_response", "org_id", "response_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    response_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    rfq_line_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    cannot_quote: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+
+
+class VendorRfqResponsePrice(Base):
+    """One (quantity break → unit price + lead time) cell of a vendor's line answer.
+
+    Money is an exact ``numeric(14,4)`` Decimal with the currency carried on the parent
+    response — never a float (CLAUDE.md §5) — and the same scale as
+    :class:`ComponentQuantity`'s cost cells, which is where M6.6's Apply writes it."""
+
+    __tablename__ = "vendor_rfq_response_price"
+    __table_args__ = (
+        UniqueConstraint("org_id", "id", name="uq_vendor_rfq_response_price_org_id_id"),
+        UniqueConstraint(
+            "response_line_id", "quantity", name="uq_vendor_rfq_response_price_line_qty"
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "response_line_id"],
+            ["vendor_rfq_response_line.org_id", "vendor_rfq_response_line.id"],
+            name="fk_vendor_rfq_response_price_line_org",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("quantity > 0", name="ck_vendor_rfq_response_price_qty_positive"),
+        CheckConstraint(
+            "unit_price IS NULL OR unit_price >= 0", name="ck_vendor_rfq_response_price_nonneg"
+        ),
+        CheckConstraint(
+            "lead_time_days IS NULL OR lead_time_days >= 0",
+            name="ck_vendor_rfq_response_price_lead_nonneg",
+        ),
+        Index("ix_vendor_rfq_response_price_org_line", "org_id", "response_line_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    response_line_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)

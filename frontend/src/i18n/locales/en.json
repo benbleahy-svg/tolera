@@ -1798,5 +1798,32 @@
     "load_error": "Could not load settings.",
     "save_error": "Could not save.",
     "invalid_weight": "Weights must be numbers of 0 or more."
+  },
+  "vendorPortal": {
+    "addressed_to": "RFQ for {{vendor}}",
+    "cannot_quote": "I cannot quote this part",
+    "currency": "Currency",
+    "download_pdf": "Download RFQ PDF",
+    "estimator_notes": "Note",
+    "invalid_link": "This RFQ link is not valid or has been withdrawn.",
+    "lead_time_days": "Lead time (days)",
+    "lead_time_for": "Lead time for {{quantity}} off, part {{part}}",
+    "line_notes": "Notes on this part",
+    "loading": "Loading RFQ …",
+    "need_by": "Response requested by {{date}}",
+    "past_due_note": "The requested response date has passed. You can still submit your quote.",
+    "process": "Process",
+    "quantity": "Quantity",
+    "quote_notes": "Notes on this quote",
+    "revision": "Rev. {{rev}}",
+    "rfq_number": "RFQ {{number}}",
+    "submit": "Submit quote",
+    "submit_failed": "Your quote could not be submitted. Please check your entries and try again.",
+    "submitted_at": "We received your quote on {{date}}. You can revise it at any time.",
+    "submitting": "Submitting …",
+    "unit_price": "Unit price",
+    "unit_price_for": "Unit price for {{quantity}} off, part {{part}}",
+    "untitled_part": "No part number",
+    "valid_until": "Quote valid until"
   }
 }

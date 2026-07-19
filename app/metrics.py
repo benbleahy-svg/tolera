@@ -33,6 +33,14 @@ celery_queue_depth = Gauge(
     "celery_queue_depth",
     "Approximate number of tasks waiting in the default Celery queue.",
 )
+#: The Vendor-RFQ portal funnel the spec asks for "from day one" (M6.2 scope:
+#: open/submit/apply rate). ``opened`` and ``submitted`` are counted here; ``applied``
+#: is incremented by the estimator-side Apply (M6.6), closing the funnel.
+vendor_rfq_portal_events = Counter(
+    "vendor_rfq_portal_events_total",
+    "Vendor-RFQ portal funnel events (opened → submitted → applied).",
+    ["event"],
+)
 
 
 def observe_queue_depth(redis_url: str, queue: str = "celery") -> None:

@@ -31,8 +31,8 @@ keeps the containment filter indexed.
 ``downgrade`` drops both policies + grants, then the tables (child first) and the
 ``vendor_status`` enum — fully reversible, no data migration to unwind.
 
-Revision ID: 0050_vendor_library
-Revises: 0049_dashboard_work_queue
+Revision ID: 0051_vendor_library
+Revises: 0050_vendor_rfq
 Create Date: 2026-07-19
 """
 
@@ -42,8 +42,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0050_vendor_library"
-down_revision: str | None = "0049_dashboard_work_queue"
+revision: str = "0051_vendor_library"
+down_revision: str | None = "0050_vendor_rfq"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

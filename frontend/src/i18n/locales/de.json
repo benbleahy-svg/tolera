@@ -1798,5 +1798,32 @@
     "load_error": "Einstellungen konnten nicht geladen werden.",
     "save_error": "Speichern fehlgeschlagen.",
     "invalid_weight": "Gewichtungen müssen Zahlen ≥ 0 sein."
+  },
+  "vendorPortal": {
+    "addressed_to": "Anfrage an {{vendor}}",
+    "cannot_quote": "Dieses Teil kann ich nicht anbieten",
+    "currency": "Währung",
+    "download_pdf": "Anfrage als PDF",
+    "estimator_notes": "Hinweis",
+    "invalid_link": "Dieser Anfrage-Link ist ungültig oder wurde zurückgezogen.",
+    "lead_time_days": "Lieferzeit (Tage)",
+    "lead_time_for": "Lieferzeit für {{quantity}} Stück, Teil {{part}}",
+    "line_notes": "Anmerkungen zu diesem Teil",
+    "loading": "Anfrage wird geladen …",
+    "need_by": "Rückmeldung erbeten bis {{date}}",
+    "past_due_note": "Der gewünschte Rückmeldetermin ist überschritten. Sie können Ihr Angebot weiterhin einreichen.",
+    "process": "Verfahren",
+    "quantity": "Stückzahl",
+    "quote_notes": "Anmerkungen zum Angebot",
+    "revision": "Rev. {{rev}}",
+    "rfq_number": "Anfrage {{number}}",
+    "submit": "Angebot absenden",
+    "submit_failed": "Ihr Angebot konnte nicht gesendet werden. Bitte prüfen Sie Ihre Eingaben und versuchen Sie es erneut.",
+    "submitted_at": "Ihr Angebot ist bei uns eingegangen am {{date}}. Sie können es jederzeit überarbeiten.",
+    "submitting": "Wird gesendet …",
+    "unit_price": "Stückpreis",
+    "unit_price_for": "Stückpreis für {{quantity}} Stück, Teil {{part}}",
+    "untitled_part": "Ohne Teilenummer",
+    "valid_until": "Angebot gültig bis"
   }
 }

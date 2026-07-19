@@ -116,6 +116,16 @@ def render_document_html(ctx: dict[str, Any]) -> str:
     return _env.get_template("document.html").render(**ctx)
 
 
+def render_vendor_rfq_html(ctx: dict[str, Any]) -> str:
+    """Render the vendor's RFQ record sheet (M6.2, spec ``#vendor-rfq`` "Download RFQ PDF").
+
+    Deliberately a **separate template** from ``document.html``: that one is
+    price-bearing (customer prices, totals, tax) and a vendor must never see any of it.
+    The context is exactly the portal payload, so the PDF cannot drift wider than the
+    page the vendor is already allowed to read."""
+    return _env.get_template("vendor_rfq.html").render(**ctx)
+
+
 def weasyprint_available() -> bool:
     """True when WeasyPrint's native libs (pango/cairo) can be imported — the
     actual-PDF tests skip otherwise (mirrors the ``db_client`` DB-absent skip)."""

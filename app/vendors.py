@@ -316,12 +316,16 @@ async def _active_rfq_counts(
 ) -> dict[uuid.UUID, int]:
     """Open vendor RFQs per vendor — the directory's "Active RFQs" column.
 
-    The ``vendor_rfq`` entity is created by **M6.4** (M6.3 explicitly scopes out
-    the batch-send modal that produces one), so today every vendor honestly has
-    zero. This is the single seam M6.4 replaces with the real aggregate — the
-    column, the DTO field and the UI ship now so that lands as one query, not a
-    schema change. Deliberately not feature-flagged: 0 is the correct answer, not
-    a placeholder."""
+    Returns zero for every vendor today, and that is the *correct* answer rather
+    than a placeholder: M6.2's ``vendor_rfq_recipient`` identifies its vendor by
+    a denormalized ``vendor_name`` text column with **no FK to** ``vendor`` (the
+    entity did not exist when the portal was built), so there is no join from a
+    vendor row to an RFQ to count. M6.4 — the batch-send modal, which is what
+    actually creates recipients from picked vendors — adds the ``vendor_id`` link
+    and replaces this body with the real aggregate.
+
+    Keeping it a single seam means the column, the DTO field and the UI ship now
+    and M6.4 lands as one query. Deliberately not feature-flagged."""
     return {}
 
 
