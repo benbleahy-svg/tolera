@@ -34,7 +34,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
 from .authz import Permission, require
-from .deps import get_session
+from .av import scan_gate_error
+from .config import Settings
+from .deps import get_app_settings, get_session
 from .errors import AppError
 from .models import (
     Component,
@@ -454,7 +456,9 @@ async def send_batch(
 
     vendors = await _resolve_vendors(session, [r.vendor_id for r in payload.recipients])
     contacts = await _primary_contacts(session, list(vendors))
-    allowed_files = await _validate_files(session, payload.recipients, part_ids)
+    allowed_files = await _validate_files(
+        session, payload.recipients, part_ids, get_app_settings(request)
+    )
 
     if payload.costing_mode is not None:
         # Flipping Make/Buy changes what the line costs, so it goes through the same
@@ -608,7 +612,10 @@ async def _resolve_vendors(
 
 
 async def _validate_files(
-    session: AsyncSession, recipients: Sequence[RecipientIn], part_ids: set[uuid.UUID]
+    session: AsyncSession,
+    recipients: Sequence[RecipientIn],
+    part_ids: set[uuid.UUID],
+    settings: Settings,
 ) -> dict[uuid.UUID, list[uuid.UUID]]:
     """Every per-vendor allowlist may only name files of the parts in this batch.
 
@@ -616,10 +623,10 @@ async def _validate_files(
     it here too means the estimator finds out at send, not the vendor at download."""
     requested = {fid for r in recipients for fid in r.part_file_ids}
     if requested:
-        valid = set(
+        rows = (
             (
                 await session.execute(
-                    select(PartFile.id).where(
+                    select(PartFile).where(
                         PartFile.id.in_(requested), PartFile.part_id.in_(part_ids)
                     )
                 )
@@ -627,6 +634,7 @@ async def _validate_files(
             .scalars()
             .all()
         )
+        valid = {row.id for row in rows}
         stray = sorted(str(f) for f in requested - valid)
         if stray:
             raise AppError(
@@ -634,6 +642,19 @@ async def _validate_files(
                 "A selected file does not belong to a part in this RFQ.",
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 details={"part_file_ids": stray},
+            )
+        # M3.13 — the forward gate at *send* time. Granting a vendor a token for a
+        # file is the outbound disclosure; catching it here means the estimator
+        # finds out now, not the vendor at download (the same reasoning as the
+        # allowlist check above). The portal download re-checks independently, so
+        # a file that turns infected after the send is still blocked.
+        blocked = sorted(str(row.id) for row in rows if scan_gate_error(row, settings) is not None)
+        if blocked:
+            raise AppError(
+                "file_scan_not_clean",
+                "Eine ausgewählte Datei ist noch nicht virengeprüft oder wurde gesperrt.",
+                status_code=status.HTTP_409_CONFLICT,
+                details={"part_file_ids": blocked},
             )
     return {r.vendor_id: list(r.part_file_ids) for r in recipients}
 

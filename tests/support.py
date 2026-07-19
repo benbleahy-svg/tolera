@@ -76,14 +76,17 @@ def build_settings(
     app_database_url: str | None = None,
     *,
     max_upload_mb: int = 200,
+    **overrides: Any,
 ) -> Settings:
     """Construct deterministic test settings (init kwargs override any ``.env``).
 
     ``app_database_url`` is the restricted-role DSN the request-serving engine
     uses; when omitted the app falls back to the (owner) ``database_url``.
-    ``max_upload_mb`` lets a test exercise the upload size cap cheaply.
+    ``max_upload_mb`` lets a test exercise the upload size cap cheaply, and
+    ``**overrides`` sets any other field (e.g. ``av_scanner=`` for M3.13).
     """
     return Settings(
+        **overrides,
         environment="test",
         database_url=database_url,
         app_database_url=app_database_url,

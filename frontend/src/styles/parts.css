@@ -97,6 +97,14 @@
   color: var(--p-t);
   font-weight: 600;
 }
+/* M3.13 — a quarantined upload. Loud on purpose: the file is malware and its
+   download/forward actions are gone, so the row must explain itself. */
+.files-chip-quarantined {
+  background: var(--danger, #b3261e);
+  color: #fff;
+  font-weight: 600;
+  margin-left: 8px;
+}
 
 /* --------------------------------------------- Part Library (M2.12) */
 .parts-search {

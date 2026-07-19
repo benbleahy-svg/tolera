@@ -676,6 +676,7 @@ async def _file_attachments(
             part=part,
             validated=validated,
             stored_keys=stored_keys,
+            settings=settings,
         )
         for row in rows:
             row.rfq_id = rfq_id
