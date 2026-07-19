@@ -1867,5 +1867,29 @@
     "pending_warning_other": "{{count}} Positionen haben offene Lieferanten-Anfragen. Trotzdem fortfahren?",
     "sent_toast_one": "{{count}} Lieferanten-Anfrage erstellt",
     "sent_toast_other": "{{count}} Lieferanten-Anfragen erstellt"
+  },
+  "sourcing": {
+    "title": "Tolera Source — Verfügbarkeit & Preise",
+    "degraded": "Lieferantendaten derzeit nicht verfügbar — Kalkulation ist davon unberührt.",
+    "not_found": "Artikel {{partNumber}} ist beim Lieferanten nicht gelistet.",
+    "stock": "Lagerbestand: {{qty}} Stück",
+    "lead_time": "Lieferzeit {{days}} Tage",
+    "quantity": "Menge",
+    "unit_price": "Stückpreis",
+    "extended_price": "Gesamt",
+    "availability": "Verfügbarkeit",
+    "suggestion_note": "Lieferantenpreise sind Vorschläge — die Kalkulation wird dadurch nicht verändert.",
+    "send_rfq": "Anfrage senden",
+    "rfq_sent": "Anfrage gesendet (Referenz {{reference}}).",
+    "rfq_failed": "Anfrage konnte nicht gesendet werden. Bitte später erneut versuchen.",
+    "menu_source": "Tolera Source",
+    "status": {
+      "available": "Verfügbar",
+      "at_risk": "Bestand knapp",
+      "insufficient": "Nicht ausreichend",
+      "unknown": "Unbekannt"
+    },
+    "not_quoted": "kein Preis",
+    "rfq_mock": "(Testmodus — noch nicht an den Lieferanten übermittelt.)"
   }
 }

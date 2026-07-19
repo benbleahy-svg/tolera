@@ -236,6 +236,45 @@ class Settings(BaseSettings):
     vies_base_url: str = "https://ec.europa.eu/taxation_customs/vies/rest-api"
     vies_timeout_seconds: float = 8.0
 
+    # --- Würth / "Tolera Source" sourcing adapter (M6.7 — spec #integrations,
+    # #dach-connectors-tbl; DECISIONS.md 2026-06-14 "Würth API access") ---
+    # ``fixture`` is the default and the committed pilot posture: the adapter runs
+    # against the recorded response in ``fixtures/wuerth/catalog.json``, which IS
+    # the contract. Promoting to the real endpoint is THIS config and nothing
+    # else — no code change (build-plan M6 "Adapter posture").
+    wuerth_mode: str = "fixture"  # "fixture" | "live"
+    wuerth_base_url: str = ""
+    wuerth_api_key: str = ""
+    wuerth_timeout_seconds: float = 8.0
+
+    def validate_wuerth(self) -> None:
+        """Fail closed on a half-configured live adapter.
+
+        Unlike storage/AV there is no environment rule to enforce: ``fixture`` is
+        legitimate in production until procurement lands. What must never happen
+        is ``live`` without an endpoint or a key — that would silently degrade
+        every sourcing lookup into "supplier unavailable" and look like an outage.
+        """
+        mode = self.wuerth_mode.strip().lower()
+        if mode not in {"fixture", "live"}:
+            raise ValueError(f"WUERTH_MODE must be 'fixture' or 'live', got {self.wuerth_mode!r}")
+        if mode == "live":
+            if not self.wuerth_base_url:
+                raise ValueError("WUERTH_BASE_URL must be set when WUERTH_MODE=live.")
+            if not self.wuerth_api_key:
+                raise ValueError("WUERTH_API_KEY must be set when WUERTH_MODE=live.")
+            return
+        # Fixture mode: the recorded response is runtime data, not test data — an
+        # image that forgot to ship it would degrade every lookup and read as a
+        # supplier outage. Boot loudly instead.
+        from .services.suppliers.wuerth import FIXTURE_PATH
+
+        if not FIXTURE_PATH.exists():
+            raise ValueError(
+                f"WUERTH_MODE=fixture requires the recorded response at {FIXTURE_PATH} "
+                "(ship fixtures/wuerth with the image, or set WUERTH_MODE=live)."
+            )
+
     # --- Branding (parameterised from day one — DECISIONS: Product name and domain) ---
     brand: str = "tolera"
     default_locale: str = "de-DE"
