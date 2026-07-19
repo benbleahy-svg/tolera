@@ -17,6 +17,8 @@ import { AccountDetailPage } from './contacts/AccountDetailPage';
 import { ContactDetailPage } from './contacts/ContactDetailPage';
 import { ContactsPage } from './contacts/ContactsPage';
 import { DashboardPage } from './dashboard/DashboardPage';
+import { SuppliersPage } from './suppliers/SuppliersPage';
+import { VendorDetailPage } from './suppliers/VendorDetailPage';
 import { EstimatingPage } from './estimating/EstimatingPage';
 import { NestingPage } from './estimating/NestingPage';
 import { PartsPage } from './parts/PartsPage';
@@ -33,7 +35,15 @@ import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
 /** Nav destinations that have a real screen; the rest render a placeholder. */
-const REAL_ROUTES = new Set(['/', '/contacts', '/parts', '/quotes', '/orders', '/configure']);
+const REAL_ROUTES = new Set([
+  '/',
+  '/contacts',
+  '/parts',
+  '/quotes',
+  '/orders',
+  '/configure',
+  '/suppliers',
+]);
 
 /**
  * M5.0 — the estimating screen moved to the spec route `/quotes/edit/:id/:lineItemId`.
@@ -58,6 +68,8 @@ export default function App() {
         ))}
         <Route path="/" element={<DashboardPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
+        <Route path="/suppliers" element={<SuppliersPage />} />
+        <Route path="/suppliers/:vendorId" element={<VendorDetailPage />} />
         <Route path="/contacts/:accountId" element={<AccountDetailPage />} />
         <Route path="/contacts/:accountId/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/parts" element={<PartsPage />} />
