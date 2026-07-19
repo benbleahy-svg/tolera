@@ -15,7 +15,11 @@ pieces are needed and none exists yet:
   float, so the ordering is byte-identical on every machine.
 * ``recent_view`` — the *Recently opened* strip's substrate (last 8 quotes/parts
   per user). One row per (org, user, entity), upserted on open; ``opened_at``
-  carries the recency. Org-scoped + RLS like every tenant table.
+  carries the recency. Its RLS policy keys on **both** ``org_id`` and
+  ``user_id`` (the ``app.current_user_id`` GUC ``app.deps.get_session`` stamps):
+  a recents strip is personal, so "only your own rows" is enforced by the
+  database rather than by every handler remembering to filter — the same
+  posture the identity reads take.
 * ``account.is_vip`` — the VIP half of the score's ``flags(expedite/VIP/export)``
   term, which the spec names but the model never had. Additive with a ``false``
   default, so no existing row changes meaning.
@@ -86,7 +90,7 @@ AS $fn$
       AND n.kind = 'mention'
       AND n.read_at IS NULL
     ORDER BY n.created_at DESC
-    LIMIT LEAST(GREATEST(max_rows, 0), 200)
+    LIMIT LEAST(GREATEST(COALESCE(max_rows, 50), 0), 200)
   ) rows;
 $fn$
 """
@@ -156,8 +160,14 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE POLICY org_isolation ON recent_view
-            USING (org_id = current_setting('app.current_org_id', true)::uuid)
-            WITH CHECK (org_id = current_setting('app.current_org_id', true)::uuid)
+            USING (
+                org_id = current_setting('app.current_org_id', true)::uuid
+                AND user_id = current_setting('app.current_user_id', true)::uuid
+            )
+            WITH CHECK (
+                org_id = current_setting('app.current_org_id', true)::uuid
+                AND user_id = current_setting('app.current_user_id', true)::uuid
+            )
         """
     )
 

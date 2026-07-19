@@ -13,9 +13,11 @@ weights re-sorts deterministically").
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal
 
 import pytest
+
 from app.urgency import (
     DEFAULT_URGENCY_WEIGHTS,
     UrgencyInputs,
@@ -31,7 +33,7 @@ from app.urgency import (
 def _inputs(**kw: object) -> UrgencyInputs:
     base: dict[str, object] = {
         "days_to_due": None,
-        "value_minor": None,
+        "value_band": 0,
         "unresolved_count": 0,
         "expedite": False,
         "vip": False,
@@ -86,8 +88,22 @@ def test_value_band(value_minor: int | None, band: int) -> None:
 
 def test_value_factor_is_the_band_normalised_to_the_top_band() -> None:
     # The four factors must share one 0-1 scale or the weights are not comparable.
-    got = score_urgency(_inputs(value_minor=25_000_000), UrgencyWeights(value=Decimal(1)))
+    got = score_urgency(_inputs(value_band=4), UrgencyWeights(value=Decimal(1)))
     assert got.score == Decimal("1.0000")
+
+
+def test_scoring_takes_a_band_not_an_amount() -> None:
+    """CLAUDE.md §5: a bare minor-units integer with no currency is not a money
+    representation this codebase accepts. The scoring contract therefore takes
+    the band; the amount is converted once, at the DB boundary."""
+    assert "value_minor" not in {f.name for f in dataclasses.fields(UrgencyInputs)}
+    # Out-of-range bands are clamped rather than skewing the 0-1 scale.
+    assert score_urgency(_inputs(value_band=99), UrgencyWeights(value=Decimal(1))).score == (
+        Decimal("1.0000")
+    )
+    assert score_urgency(_inputs(value_band=-3), UrgencyWeights(value=Decimal(1))).score == (
+        Decimal("0.0000")
+    )
 
 
 @pytest.mark.parametrize(
@@ -125,9 +141,7 @@ def test_empty_row_scores_zero() -> None:
 
 
 def test_score_is_the_sum_of_its_contributions_exactly() -> None:
-    got = score_urgency(
-        _inputs(days_to_due=2, value_minor=6_000_000, unresolved_count=3, expedite=True)
-    )
+    got = score_urgency(_inputs(days_to_due=2, value_band=3, unresolved_count=3, expedite=True))
     assert sum((f.contribution for f in got.factors), Decimal(0)) == got.score
     # Hand-computed with the shipped defaults (0.40/0.25/0.25/0.10):
     #   due       0.5      * 0.40 = 0.2
@@ -151,20 +165,18 @@ def test_every_factor_is_explainable() -> None:
 
 
 def test_scores_are_quantised_to_four_places_no_float_drift() -> None:
-    got = score_urgency(_inputs(days_to_due=7, value_minor=123_456, unresolved_count=7, vip=True))
+    got = score_urgency(_inputs(days_to_due=7, value_band=1, unresolved_count=7, vip=True))
     assert got.score.as_tuple().exponent == -4
     assert (
-        score_urgency(
-            _inputs(days_to_due=7, value_minor=123_456, unresolved_count=7, vip=True)
-        ).score
+        score_urgency(_inputs(days_to_due=7, value_band=1, unresolved_count=7, vip=True)).score
         == got.score
     )  # stable across calls
 
 
 def test_reordering_weights_re_sorts_deterministically() -> None:
     """Acceptance criterion: changing the org's weights re-orders the queue."""
-    near_due_cheap = _inputs(days_to_due=1, value_minor=50_000)
-    far_due_rich = _inputs(days_to_due=20, value_minor=900_000_000)
+    near_due_cheap = _inputs(days_to_due=1, value_band=0)
+    far_due_rich = _inputs(days_to_due=20, value_band=4)
 
     due_heavy = UrgencyWeights(
         due=Decimal("0.90"), value=Decimal("0.10"), unresolved=Decimal(0), flags=Decimal(0)

@@ -74,7 +74,7 @@ from .models import (
 )
 from .quote_filters import ACTIVE_QUOTE_STATUSES as _OPEN_STATUSES
 from .quote_filters import owned_by
-from .urgency import UrgencyInputs, UrgencyWeights, score_urgency
+from .urgency import UrgencyInputs, UrgencyWeights, score_urgency, value_band
 
 work_queue_router = APIRouter(prefix="/api/work-queue", tags=["dashboard"])
 
@@ -222,7 +222,10 @@ class _QuoteSignals:
     number: str
     status: QuoteStatus
     due_date: datetime | None
-    value_minor: int | None
+    #: The quote's value **band** (see app.urgency.value_band) — banded here, at
+    #: the one place the amount and the org's currency are both in hand, so no
+    #: currency-less monetary value travels any further.
+    value_band: int
     unresolved_count: int
     expedite: bool
     vip: bool
@@ -324,8 +327,8 @@ async def _quote_signals(
             number=row.number,
             status=row.status,
             due_date=row.due_date,
-            # Numeric major units -> integer minor units at the boundary.
-            value_minor=None if total is None else int(Decimal(total) * 100),
+            # Numeric major units -> minor units -> band, all in one step here.
+            value_band=value_band(None if total is None else int(Decimal(total) * 100)),
             unresolved_count=unresolved.get(row.id, 0),
             expedite=row.id in expedited,
             vip=bool(row.vip),
@@ -351,7 +354,7 @@ def _score(
     scored = score_urgency(
         UrgencyInputs(
             days_to_due=days,
-            value_minor=signals.value_minor if signals else None,
+            value_band=signals.value_band if signals else 0,
             unresolved_count=signals.unresolved_count if signals else 0,
             expedite=signals.expedite if signals else False,
             vip=signals.vip if signals else False,

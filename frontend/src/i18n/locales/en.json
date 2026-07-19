@@ -1738,6 +1738,7 @@
     "save": "Save",
     "saved": "Saved.",
     "load_error": "Could not load settings.",
-    "save_error": "Could not save."
+    "save_error": "Could not save.",
+    "invalid_weight": "Weights must be numbers of 0 or more."
   }
 }

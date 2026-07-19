@@ -1738,6 +1738,7 @@
     "save": "Speichern",
     "saved": "Gespeichert.",
     "load_error": "Einstellungen konnten nicht geladen werden.",
-    "save_error": "Speichern fehlgeschlagen."
+    "save_error": "Speichern fehlgeschlagen.",
+    "invalid_weight": "Gewichtungen müssen Zahlen ≥ 0 sein."
   }
 }

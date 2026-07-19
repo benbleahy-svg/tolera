@@ -40,6 +40,20 @@ export function WorkQueueSettingsPage(): React.ReactElement {
   const save = async () => {
     if (!draft) return;
     setSaved(false);
+    // `min={0}` on the inputs is not enforcement: this is a type="button"
+    // handler, so nothing runs the browser's constraint validation and a blank
+    // or negative field would reach the API as a 422 with no field-level
+    // message. Check locally first (the backend still re-validates).
+    const invalid = WEIGHT_FIELDS.some((field) => {
+      const value = Number(draft[field]);
+      return draft[field] === '' || !Number.isFinite(value) || value < 0;
+    });
+    if (invalid) {
+      setError(t('workQueueSettings.invalid_weight'));
+      return;
+    }
+    // A prior failure must not stay on screen through a successful retry.
+    setError(null);
     try {
       setDraft(await api.saveSettings(draft));
       setSaved(true);

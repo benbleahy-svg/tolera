@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -51,13 +51,19 @@ def _due(days_from_today: int) -> datetime:
 
 
 def _plant_task(
-    seeder: Seeder, org: uuid.UUID, user: uuid.UUID, *, quote_id: uuid.UUID | None = None
+    seeder: Seeder,
+    org: uuid.UUID,
+    user: uuid.UUID,
+    *,
+    quote_id: uuid.UUID | None = None,
+    due_date: date | None = None,
 ) -> uuid.UUID:
     task_id = uuid.uuid4()
     seeder.sql(
-        "INSERT INTO task (id, org_id, quote_id, assignee_id, created_by, message, status) "
-        "VALUES (:id, :org, :quote, :user, :user, 'Prüfen', 'open')",
-        {"id": task_id, "org": org, "quote": quote_id, "user": user},
+        "INSERT INTO task "
+        "(id, org_id, quote_id, assignee_id, created_by, message, status, due_date) "
+        "VALUES (:id, :org, :quote, :user, :user, 'Prüfen', 'open', :due)",
+        {"id": task_id, "org": org, "quote": quote_id, "user": user, "due": due_date},
     )
     return task_id
 
@@ -550,6 +556,27 @@ def test_recents_reject_an_unknown_entity_type(app_client: TestClient, seeder: S
             json={"entity_type": "invoice", "entity_id": str(uuid.uuid4())},
         )
     assert res.status_code == 422
+
+
+def test_a_task_is_scored_on_its_own_due_date_not_the_quotes(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """A task carries its own deadline; the parent quote only lends it the value
+    /flags/unresolved signals. A task due tomorrow on a quote due in 20 days must
+    score on tomorrow."""
+    org, me = _org_user(seeder, "taskdue-org")
+    quote = seeder.quote(org, "1801", estimator_id=me, due_date=_due(20))
+    _plant_task(seeder, org, me, quote_id=quote, due_date=_due(1).date())
+
+    with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
+        rows = _rows(app_client)
+
+    task_row = next(r for r in rows if r["source"] == "task")
+    due = next(f for f in task_row["factors"] if f["key"] == "due")
+    assert due["raw"] == "1"  # the task's date, not the quote's 20 days
+    assert due["contribution"] == "0.4000"
+    # …and it therefore outranks the quote it hangs off.
+    assert [r["source"] for r in rows] == ["task", "quote_action"]
 
 
 def test_offered_expedite_tiers_are_not_an_urgency_flag(

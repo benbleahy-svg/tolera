@@ -53,9 +53,12 @@ _UNRESOLVED_CAP = 10
 #: The three urgency flags (spec ``#newscope``: expedite / VIP / export).
 _FLAG_COUNT = 3
 
-#: Value-band upper bounds in **minor units** (cents) of the org's currency —
-#: EUR 1 000 / 10 000 / 50 000 / 250 000. A quote at or above the last bound is
-#: the top band. Bands (not amounts) are what the score and the API expose.
+#: Value-band upper bounds in **minor units** of the org's own currency —
+#: 1 000 / 10 000 / 50 000 / 250 000. A quote at or above the last bound is the
+#: top band. These are thresholds, not amounts: :func:`value_band` is called at
+#: the DB boundary (``app.work_queue``), where the org's single currency is
+#: known, and only the resulting **band index** enters the score or the API — no
+#: monetary quantity travels through this module or over the wire.
 _VALUE_BAND_BOUNDS: tuple[int, ...] = (100_000, 1_000_000, 5_000_000, 25_000_000)
 #: The top band index — the divisor that normalises a band onto 0-1.
 TOP_VALUE_BAND = len(_VALUE_BAND_BOUNDS)
@@ -90,14 +93,20 @@ DEFAULT_URGENCY_WEIGHTS = UrgencyWeights()
 class UrgencyInputs:
     """The raw signals behind one queue row.
 
-    ``value_minor`` is the parent quote's value proxy in minor units (see
-    :mod:`app.work_queue` for the derivation); ``None`` for a row with no quote
-    or no priced quantity yet. Rows hanging off a quote (task, review item,
-    mention) inherit that quote's value/flags/unresolved signals so all five
-    sources land on one comparable scale."""
+    ``value_band`` is the parent quote's value **band** (0 through
+    :data:`TOP_VALUE_BAND`) — deliberately not an amount: a bare minor-units
+    integer with no currency beside it is exactly the money representation
+    CLAUDE.md §5 forbids, so the conversion happens once at the DB boundary
+    (:func:`value_band`, called where the org's currency is known) and this
+    module never handles money at all. ``0`` covers "no quote" and "not priced
+    yet" alike — both mean the term contributes nothing.
+
+    Rows hanging off a quote (task, review item, mention) inherit that quote's
+    value/flags/unresolved signals so all five sources land on one comparable
+    scale."""
 
     days_to_due: int | None
-    value_minor: int | None
+    value_band: int
     unresolved_count: int
     expedite: bool
     vip: bool
@@ -142,7 +151,10 @@ def due_factor(days_to_due: int | None) -> Decimal:
 
 
 def value_band(value_minor: int | None) -> int:
-    """The quote's value band, 0 (or unpriced) through :data:`TOP_VALUE_BAND`."""
+    """Band a quote's value, 0 (or unpriced) through :data:`TOP_VALUE_BAND`.
+
+    Takes minor units of the caller's own currency and returns an index — the
+    only place in the scoring path that sees an amount, and it keeps none."""
     if value_minor is None:
         return 0
     return sum(1 for bound in _VALUE_BAND_BOUNDS if value_minor >= bound)
@@ -178,7 +190,7 @@ def score_urgency(
     inputs: UrgencyInputs, weights: UrgencyWeights = DEFAULT_URGENCY_WEIGHTS
 ) -> UrgencyScore:
     """Score one row and return every contributing factor with it."""
-    band = value_band(inputs.value_minor)
+    band = min(max(inputs.value_band, 0), TOP_VALUE_BAND)
     factors = (
         _term(
             "due",
