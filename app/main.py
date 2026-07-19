@@ -33,6 +33,7 @@ from .email_threads import router as email_threads_router
 from .errors import register_exception_handlers
 from .facilitate import facilitate_router
 from .file_split import split_router
+from .gdpr import gdpr_router
 from .health import router as health_router
 from .interrogation import interrogation_router
 from .interrogation_config import interrogation_config_router
@@ -141,6 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(quote_send_router)
     app.include_router(quote_settings_router)
     app.include_router(compliance_router)
+    app.include_router(gdpr_router)
     app.include_router(rules_router)
     app.include_router(review_items_router)
     app.include_router(rule_suggest_router)
