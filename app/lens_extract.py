@@ -28,7 +28,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any, cast
 
 from celery.result import AsyncResult
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,10 +39,17 @@ from .celery_app import celery_app
 from .db import make_engine, make_sessionmaker, org_scoped_session
 from .deps import get_session, get_storage
 from .errors import AppError
+from .export_control import record_ai_skip, record_ai_skip_standalone
 from .lens import NotExtractableError, extract_page_texts, run_document_extraction
 from .lens_provider import LensProviderError
 from .lens_provider import resolve as resolve_lens_provider
-from .models import ExtractionFinding, FindingStatus, Part, PartFile
+from .models import (
+    ExportControlSubject,
+    ExtractionFinding,
+    FindingStatus,
+    Part,
+    PartFile,
+)
 from .parts import _get_part_file_or_404
 from .storage import ObjectStorage
 from .task_resources import resolve as resolve_task_resources
@@ -92,6 +99,16 @@ async def run_extraction(
             # the flag may have been set between enqueue and run): flagged
             # files are skipped BEFORE any bytes leave for a provider.
             if part is not None and part.export_controlled:
+                # M6.9: record the refusal against the FILE — this path is about
+                # a specific document's bytes, and "which prints were withheld"
+                # is the question an export-control audit actually asks.
+                await record_ai_skip(
+                    session,
+                    org_id=org_id,
+                    subject_type=ExportControlSubject.part_file,
+                    subject_id=file_id,
+                    route="lens_extract.worker",
+                )
                 return {
                     "skipped": True,
                     "reason": "export_controlled",
@@ -291,6 +308,7 @@ async def _get_part_and_file_or_404(
 async def extract_part_file(
     part_id: uuid.UUID,
     file_id: uuid.UUID,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     storage: Annotated[ObjectStorage, Depends(get_storage)],
     principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
@@ -300,6 +318,17 @@ async def extract_part_file(
     if part.export_controlled:
         # Restricted path (no-external-LLM mode, v1): the print must not leave
         # the DPA region, so extraction is refused outright — manual entry.
+        # M6.9: audited in its OWN committed transaction. ``org_scoped_session``
+        # rolls back on error, so an entry added to ``session`` here would vanish
+        # with the 422 — and the refusal is precisely what must be on record.
+        await record_ai_skip_standalone(
+            request.app.state.sessionmaker,
+            org_id=principal.active_org_id,
+            subject_type=ExportControlSubject.part_file,
+            subject_id=file_id,
+            route="lens_extract.request",
+            actor_user_id=principal.user_id,
+        )
         raise AppError(
             "export_controlled",
             "Dieses Teil ist als exportkontrolliert markiert — KI-Extraktion ist "

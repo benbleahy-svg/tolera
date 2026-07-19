@@ -31,12 +31,14 @@ from sqlalchemy import delete, select
 from .celery_app import celery_app
 from .db import make_engine, make_sessionmaker, org_scoped_session
 from .events import emit_event
+from .export_control import record_ai_skip
 from .lens_extract import _run_on_own_loop
 from .lens_provider import LensProviderError
 from .lens_provider import resolve as resolve_lens_provider
 from .models import (
     Component,
     ComponentQuantity,
+    ExportControlSubject,
     Part,
     PartFile,
     QuoteItem,
@@ -130,6 +132,15 @@ async def _extract(
             logger.info(
                 "vendor_reply_extract_skipped_export_controlled",
                 extra={"response_id": str(response_id)},
+            )
+            # M6.9: the refusal is recorded, so the compliance log shows the
+            # skips rather than asking an auditor to take them on trust.
+            await record_ai_skip(
+                session,
+                org_id=org_id,
+                subject_type=ExportControlSubject.vendor_rfq,
+                subject_id=rfq.id,
+                route="vendor_reply_lens.extract",
             )
             return {"skipped": "export_controlled", "response_id": str(response_id)}
         body_text = response.email_body_text or ""

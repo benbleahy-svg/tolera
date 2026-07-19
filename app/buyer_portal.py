@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .db import org_scoped_session
 from .errors import AppError
+from .impressum import legal_block
 from .models import (
     Component,
     Material,
@@ -359,6 +360,10 @@ async def build_buyer_payload(
             "currency": org.currency,
             "locale": org.locale,
         },
+        # Impressum + Datenschutzerklärung (M6.9). DACH-DELTA §5 requires both on
+        # every customer-facing surface; M5.9 covered the PDF and the email, this
+        # covers the portal. Renders only what the org has actually configured.
+        "legal": legal_block(org),
         # Checkout Settings the buyer sees (spec Checkout Settings): the offered
         # fulfilment options + whether T&Cs must be accepted before checkout. The
         # checkout endpoint re-enforces both server-side.

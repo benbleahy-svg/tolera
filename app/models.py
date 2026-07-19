@@ -108,7 +108,31 @@ class ObtainMethod(enum.StrEnum):
 # Native Postgres enums — created by the migration, referenced (not re-created) here.
 _role_enum = Enum(MembershipRole, name="membership_role", create_type=False)
 _status_enum = Enum(MembershipStatus, name="membership_status", create_type=False)
+
+
+class ExportRegime(enum.StrEnum):
+    """Which export-control regime an org operates under (spec ``#dach-delta``:
+    "Export-control regime = **config, not hardcoded**").
+
+    ``eu_dual_use`` is the DACH default — Regulation (EU) 2021/821 plus national
+    AWG/AWV and the EU control lists, which is what DACH-DELTA-LAYER §5 puts in
+    place of the reference product's ITAR/CUI model. ``itar`` is retained as a
+    value (DECISIONS 2026-06-26 named the enum ``none|eu_dual_use|itar``) for a
+    future non-DACH tenant; no code branches on it today. ``none`` = the org
+    declares no regime, so flagged records are still audited but the audit entry
+    records no regime label.
+
+    The regime is a **label/config selector only**. Auditing is unconditional on
+    the record's ``export_controlled`` flag — never on the regime — so switching
+    regimes can never silently stop the compliance log."""
+
+    none = "none"
+    eu_dual_use = "eu_dual_use"
+    itar = "itar"
+
+
 _country_enum = Enum(OrgCountry, name="org_country", create_type=False)
+_export_regime_enum = Enum(ExportRegime, name="export_regime", create_type=False)
 _account_type_enum = Enum(AccountType, name="account_type", create_type=False)
 # UPPERCASE DB values ('MANUFACTURED'/'PURCHASED') differ from the lowercase member
 # names, so map by ``.value`` (the other enums have name == value and need no callable).
@@ -219,8 +243,23 @@ class Organization(Base):
     # München, HRB 123456"). Display-only — never enters tax math. Nullable → a
     # bare org simply renders no Impressum block (never invented).
     commercial_register: Mapped[str | None] = mapped_column(String)
+    #: URL of the shop's Datenschutzerklärung (M6.9). DACH-DELTA §5 requires it on
+    #: every customer- and vendor-facing surface, but unlike the Impressum it is a
+    #: document the shop publishes — nothing in the schema derives it. Nullable, and
+    #: a null renders no link rather than an invented one (CLAUDE.md §6.4).
+    privacy_policy_url: Mapped[str | None] = mapped_column(String)
     is_kleinunternehmer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    #: Export-control regime (M6.9). Spec ``#dach-delta``: "Export-control regime
+    #: = config, not hardcoded"; DECISIONS 2026-06-26 deferred this column to M6.
+    #: Defaults to ``eu_dual_use`` because ``country`` is a hard DE/AT/CH enum and
+    #: DACH-DELTA §5 puts Reg (EU) 2021/821 + AWG/AWV in place of ITAR/CUI for
+    #: exactly that region. Selects the label recorded in the compliance log and
+    #: the screening list identifier — it never gates whether auditing happens
+    #: (see :class:`ExportControlAccess`).
+    export_regime: Mapped[ExportRegime] = mapped_column(
+        _export_regime_enum, nullable=False, server_default=ExportRegime.eu_dual_use.value
     )
     # Facility Information for the white-label quote/order PDF (M5.4; spec
     # #company-settings-detail "logo on PDFs"). ``logo_object_key`` points at the
@@ -4718,3 +4757,149 @@ class IntegrationAction(Base):
     )
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+# --------------------------------------------------------------------------- #
+# Export control & compliance (M6.9 — pilot hardening)
+# --------------------------------------------------------------------------- #
+class ExportControlSubject(enum.StrEnum):
+    """What kind of record an :class:`ExportControlAccess` row is about."""
+
+    part = "part"
+    part_file = "part_file"
+    quote = "quote"
+    quote_item = "quote_item"
+    request_for_quote = "request_for_quote"
+    vendor_rfq = "vendor_rfq"
+
+
+class ExportControlAction(enum.StrEnum):
+    """What happened to the flagged record.
+
+    ``view``/``download`` are the spec ``#authz`` access log ("flag + audit, **no
+    hard block** in v1 — any internal user may open flagged quotes/parts/files,
+    but access is logged"). ``ai_skip`` records that an AI path refused a flagged
+    record — the evidential counterpart of "CUI/ITAR-flagged files are always
+    skipped regardless of the toggle". ``external_send`` covers a flagged record
+    leaving the tenant (vendor RFQ, marketplace adapter — DECISIONS 2026-07-07).
+    ``screening`` records a restricted-party screening result."""
+
+    view = "view"
+    download = "download"
+    ai_skip = "ai_skip"
+    external_send = "external_send"
+    screening = "screening"
+
+
+_export_regime_enum = Enum(ExportRegime, name="export_regime", create_type=False)
+_export_control_subject_enum = Enum(
+    ExportControlSubject, name="export_control_subject", create_type=False
+)
+_export_control_action_enum = Enum(
+    ExportControlAction, name="export_control_action", create_type=False
+)
+
+
+class ExportControlAccess(Base):
+    """Append-only compliance log for export-controlled (EU dual-use) records.
+
+    This is the "CUI Audit" the spec's Settings tree exposes as a CSV download
+    (``#company-settings-detail``), generalised from :class:`QuoteTokenAccess` —
+    whose own docstring defers "full CUI/GDPR archival hardening" to this block.
+    Where ``QuoteTokenAccess`` logs *external portal loads* of any quote, this
+    logs *any* touch of a record carrying the ``export_controlled`` flag,
+    internal or external.
+
+    Append-only at the database: ``tolera_app`` is granted SELECT + INSERT only,
+    so neither a code slip nor a compromised app role can rewrite the compliance
+    trail (the :class:`QuoteStatusEvent` precedent, M1.4).
+
+    ``actor_user_id`` is NULL for a system/worker action (an ``ai_skip`` raised
+    inside a Celery task) or an unauthenticated external load. It is deliberately
+    **not** an FK: the audit entry must outlive the user row it names, exactly as
+    ``OrderHistoryEvent.actor_user_id`` does.
+
+    ``detail`` carries structured context (route, refusal reason, recipient) and
+    **never** customer print content or PII beyond the identifiers already in the
+    row — see CLAUDE.md §5 logging rules."""
+
+    __tablename__ = "export_control_access"
+    __table_args__ = (
+        Index(
+            "ix_export_control_access_org_occurred",
+            "org_id",
+            "occurred_at",
+        ),
+        Index(
+            "ix_export_control_access_org_subject",
+            "org_id",
+            "subject_type",
+            "subject_id",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    #: NULL = system/worker or unauthenticated external actor. Not an FK on
+    #: purpose (the entry outlives the user).
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    subject_type: Mapped[ExportControlSubject] = mapped_column(
+        _export_control_subject_enum, nullable=False
+    )
+    subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    action: Mapped[ExportControlAction] = mapped_column(_export_control_action_enum, nullable=False)
+    #: The org's regime at the moment of the entry — denormalised so the log
+    #: stays truthful after a later Settings change.
+    regime: Mapped[ExportRegime] = mapped_column(
+        _export_regime_enum, nullable=False, server_default=ExportRegime.none.value
+    )
+    detail: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    ip_address: Mapped[str | None] = mapped_column(String)
+    user_agent: Mapped[str | None] = mapped_column(String)
+    occurred_at: Mapped[datetime] = _ts()
+
+
+class GdprRequestKind(enum.StrEnum):
+    """Which data-subject right was exercised."""
+
+    export = "export"
+    erasure = "erasure"
+
+
+_gdpr_request_kind_enum = Enum(GdprRequestKind, name="gdpr_request_kind", create_type=False)
+
+
+class GdprRequestLog(Base):
+    """Append-only record of every data-subject export/erasure (M6.9).
+
+    Erasure destroys direct identifiers across six tables; without this, the
+    tombstone values were the only trace and they name no actor, so "who erased
+    whom, and when" was unanswerable right after the most destructive action the
+    product offers.
+
+    A sibling of :class:`ExportControlAccess` rather than a row in it: that table
+    is the export-control ("CUI Audit") trail the spec surfaces as its own CSV,
+    and folding an unrelated action into it would make that export wrong.
+
+    ``subject_email`` is retained deliberately — an erasure log that cannot say
+    *whose* data was erased cannot evidence compliance with the request it
+    records. It is the only personal datum here.
+    """
+
+    __tablename__ = "gdpr_request_log"
+    __table_args__ = (Index("ix_gdpr_request_log_org_occurred", "org_id", "occurred_at"),)
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    #: No FK: the entry outlives the admin who ran it.
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    kind: Mapped[GdprRequestKind] = mapped_column(_gdpr_request_kind_enum, nullable=False)
+    subject_email: Mapped[str] = mapped_column(String, nullable=False)
+    #: Per-table row counts, e.g. ``{"contact": 1, "account": 1}``.
+    affected: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    affected_row_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    occurred_at: Mapped[datetime] = _ts()

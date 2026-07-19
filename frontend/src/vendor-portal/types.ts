@@ -1,3 +1,5 @@
+import type { LegalBlock } from '../shared/LegalFooter';
+
 /**
  * Vendor-RFQ portal wire types (M6.2), mirroring `app.vendor_portal`'s payload.
  *
@@ -60,6 +62,8 @@ export interface VendorRfq {
   is_past_due: boolean;
   message: string | null;
   shop: VendorRfqShop;
+  /** Impressum + Datenschutzerklärung (M6.9; DACH-DELTA §5). */
+  legal?: LegalBlock | null;
   vendor: { name: string };
   lines: VendorRfqLine[];
   response: VendorSubmittedResponse | null;

@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
+import { LegalFooter } from '../shared/LegalFooter';
 import { fetchVendorRfq, submitVendorResponse, vendorFileUrl, vendorPdfUrl } from './api';
 import type { VendorRfq, VendorRfqLine, VendorResponseRequest } from './types';
 
@@ -376,6 +377,7 @@ export function VendorRfqPage() {
           </button>
         </section>
       </form>
+      <LegalFooter legal={rfq.legal} />
     </div>
   );
 }

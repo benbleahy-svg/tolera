@@ -20,6 +20,7 @@ from .bulk_create import bulk_create_router
 from .buyer_portal import buyer_router
 from .checkout import checkout_router
 from .collab import collab_router
+from .compliance_api import compliance_router
 from .config import Settings, get_settings
 from .config_completeness import config_completeness_router
 from .crm_integration import register_handlers as register_crm_handlers
@@ -32,6 +33,7 @@ from .email_threads import router as email_threads_router
 from .errors import register_exception_handlers
 from .facilitate import facilitate_router
 from .file_split import split_router
+from .gdpr import gdpr_router
 from .health import router as health_router
 from .interrogation import interrogation_router
 from .interrogation_config import interrogation_config_router
@@ -139,6 +141,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(email_templates_router)
     app.include_router(quote_send_router)
     app.include_router(quote_settings_router)
+    app.include_router(compliance_router)
+    app.include_router(gdpr_router)
     app.include_router(rules_router)
     app.include_router(review_items_router)
     app.include_router(rule_suggest_router)

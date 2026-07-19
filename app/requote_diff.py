@@ -46,9 +46,11 @@ from .config import Settings, get_settings
 from .db import make_engine, make_sessionmaker, org_scoped_session
 from .deps import get_session
 from .errors import AppError
+from .export_control import record_ai_skip
 from .lens_provider import LensProviderError
 from .models import (
     Component,
+    ExportControlSubject,
     ExtractionFinding,
     FindingStatus,
     Part,
@@ -560,6 +562,15 @@ async def build_requote_snapshot(
         ai_reason = "requote_diff_disabled"
     elif export_controlled:
         ai_reason = "export_controlled"
+        # M6.9: record the refusal. Subject is the part under diff — the flag
+        # travels with the part across quotes (DECISIONS 2026-06-26).
+        await record_ai_skip(
+            session,
+            org_id=org_id,
+            subject_type=ExportControlSubject.part,
+            subject_id=part_id,
+            route="requote_diff.generate",
+        )
     else:
         ai_reason = "ok"
 

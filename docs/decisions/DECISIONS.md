@@ -19,6 +19,35 @@
 
 ---
 
+## [2026-07-19] M6.9 pilot hardening — export-control audit, GDPR/GoBD reconciliation, large-BOM perf
+**Status:** RESOLVED (grill-time `ASSUMED:` choices, recorded for the audit trail)
+
+**Context.** M6.9 ships three obligations at once. All the load-bearing questions were answered *from the sources* up the precedence ladder; the choices below are the ones the sources under-specified. Each was classified **cheap to reverse** per CLAUDE.md §6.3 (no money/tax math, no tenancy change, no external contract), so they were applied with inline notes rather than a halt.
+
+**1. Export control is audited, never blocked.** Not a new decision — `#authz` is explicit and marked `decision`: *"flag + audit, **no hard block** in v1 — any internal user may open flagged quotes/parts/files, but access is **logged**."* M6.9 supplies the logging half (`export_control_access`, append-only, SELECT+INSERT only for `tolera_app`) and the Settings CSV the spec names ("CUI Audit: download CSV"). The one hard refusal — AI on flagged records — was already implemented; M6.9 makes each refusal *evidential*.
+
+**2. `organization.export_regime` defaults to `eu_dual_use`.** DECISIONS 2026-06-26 deferred this column to M6 and named the enum `none|eu_dual_use|itar` (followed verbatim, tier-1). The default is `eu_dual_use` because `organization.country` is a hard DE/AT/CH enum and DACH-DELTA §5 puts Reg (EU) 2021/821 + AWG/AWV in place of ITAR/CUI for exactly that region. The regime is a **label/config selector only** — auditing keys off the record's flag, never the regime, so changing it can never silently stop the compliance log.
+
+**3. `rule_suggest` is deliberately left ungated.** The M6.9 survey flagged it as a missing AI gate. On inspection its payload is aggregate counts (operation name, process family, material class, part count, window) with no part identity, geometry or file bytes — no controlled artefact and no single subject to name. Gating it would be unfounded and unimplementable; auditing what a path does not disclose would make the log misleading. `email_parts` **was** a real gap (it ships the customer's email body + filenames) and is now gated + audited.
+
+**4. `compliance_manage` is a new admin-exclusive permission.** `settings_edit` and `users_manage` both reach `manager` (`app/authz._MANAGER`, pinned explicitly so new sensitive permissions do not auto-flow). The compliance audit names every actor, and GDPR export returns a person's complete personal data, so neither is a manager capability.
+
+**5. Erasure-vs-GoBD is a declarative policy, and every RETAIN is cited.** `app/retention.py` classifies each PII column. **No reason is invented here** — each is either *structural* (the table's existing `tolera_app` GRANT is SELECT+INSERT only, decided when the table was built: `email_message` 0024, `quote_status_event` 0008, `order_history_event` 0046) or *regulatory* (DACH-DELTA §63 GoBD ~10-year immutability for order/quote records). The erasure response returns the retained set **in full**: a report that silently omits what survived is worse than no report.
+
+**6. No retention *window* is implemented — on-request erasure only.** CLAUDE.md §6.4 forbids inventing a regulatory rule, and the vendor-contact window is already an unresolved `OPEN:` (M6.3, this date). On-request erasure is a settled data-subject right that needs no window. There is no purge job; when the OPEN resolves, a scheduled job can reuse `ERASURE_POLICY` unchanged.
+
+**7. `app_user` and `recent_view` are out of scope for org-admin erasure.** `app_user` is a platform identity shared across orgs (E4-a) — erasing it from one tenant's admin surface would reach into another. `recent_view` is keyed to an internal user, not a customer/vendor subject. Both are reported as retained *with that reason*, rather than omitted.
+
+**8. `organization.privacy_policy_url` added (nullable).** DACH-DELTA §5 requires the Datenschutzerklärung on all customer- and vendor-facing surfaces, but unlike the Impressum nothing in the schema derives it — it is a document the shop publishes. Null renders no link, matching `app/impressum.py`'s existing "render what's present, never invent" contract.
+
+**9. Screening ships with no list and answers `not_screened`.** DACH-DELTA §5 asks for an **optional** hook. Bundling a sanctions list would look authoritative while going stale by EU regulation. `NullScreeningProvider` never answers "clear" — "checked and clear" and "never checked" must not collapse. Every outcome (including `clear`) is audited, because a log holding only the hits cannot answer "was this counterparty ever checked?". Matched names stay out of the log (third-party PII). Mock-first per the M6 adapter posture, so no credential is needed and the block does not halt.
+
+**10. The perf budget is asserted as query-count growth, not milliseconds.** `ASSUMED` — no document states a latency figure, and it is a test constant (cheap to reverse). A wall-clock ceiling on shared CI is flaky and diagnoses nothing; query count is deterministic and *is* the defect. Measured on a 120-component assembly: **1230 queries → 39, with growth from 10→120 components of exactly 0.** A companion test pins the roll-up total so a query-shape change can never quietly move money (tier-1 invariant).
+
+**Affects:** M6.9 (this PR); **M6.10** (the 14-demo replay runs on the perf-fixed path); **M6.7c** (its hard external-send gate can now call `screen_and_record` and be audited); the vendor-PII `OPEN:` below (its ROPA row and retention window land in `docs/compliance/ROPA.md` when resolved).
+
+---
+
 ## [2026-07-19] M6.5 Vendor RFQ email — the reference number, the verify flag, and what a model is allowed to say about money
 
 **Context.** `/block M6.5` — the outbound vendor RFQ email and the email-reply ingest (spec `#vendor-rfq` → "Outbound RFQ email" + "Email-channel ingest (Lens)"). M6.4 left the transport explicitly unbuilt ("a batch created here is `open` with `sent_at` unset until M6.5 mails it"); M3 owns the Mailgun-EU inbound pipeline this reuses. The self-grill found **no `OPEN:` item** — every expensive-to-reverse question was answered up the ladder. What follows is what was decided and why.

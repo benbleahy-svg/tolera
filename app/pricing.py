@@ -183,6 +183,35 @@ async def _material_names(
     return (material.display_name, family.name if family else None)
 
 
+async def _material_names_bulk(
+    session: AsyncSession, material_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, tuple[str | None, str | None]]:
+    """``material_id -> (display name, family name)`` for many materials at once.
+
+    The batched counterpart of :func:`_material_names`, which costs two
+    ``session.get`` calls per component."""
+    if not material_ids:
+        return {}
+    materials = (await session.scalars(select(Material).where(Material.id.in_(material_ids)))).all()
+    families = {
+        f.id: f
+        for f in (
+            await session.scalars(
+                select(MaterialFamily).where(
+                    MaterialFamily.id.in_({m.family_id for m in materials})
+                )
+            )
+        ).all()
+    }
+    return {
+        material.id: (
+            material.display_name,
+            families[material.family_id].name if material.family_id in families else None,
+        )
+        for material in materials
+    }
+
+
 async def _load_children(
     session: AsyncSession, root: Component, breaks: list[ComponentQuantity]
 ) -> list[ChildInfo]:
@@ -223,21 +252,47 @@ async def _load_children(
     ).all()
     by_part = {component.part_id: component for component in components}
 
+    # --- batched loads (M6.9 perf pass) -----------------------------------
+    # This loop runs once per distinct child part. Every read it needs used to be
+    # issued inside it, so a 120-component assembly cost well over a thousand
+    # sequential round-trips for one page. The five queries below replace all of
+    # them; the loop body is now pure dictionary lookups.
+    priced = [by_part[pid] for pid in counts if pid in by_part]
+    parts_by_id = {
+        p.id: p for p in (await session.scalars(select(Part).where(Part.id.in_(counts)))).all()
+    }
+    names_by_material = await _material_names_bulk(
+        session, {c.material_id for c in priced if c.material_id is not None}
+    )
+    ops_by_component: dict[uuid.UUID, list[Operation]] = {}
+    if priced:
+        for operation in (
+            await session.scalars(
+                select(Operation)
+                .where(Operation.component_id.in_([c.id for c in priced]))
+                .order_by(Operation.position, Operation.created_at, Operation.id)
+            )
+        ).all():
+            ops_by_component.setdefault(operation.component_id, []).append(operation)
+    # Only built when some child actually has a formula — the common all-manual
+    # assembly pays nothing for this.
+    kalk_prefetch = None
+    if any(op.cost_formula for ops in ops_by_component.values() for op in ops):
+        kalk_prefetch = await kalk_costing.build_kalk_prefetch(session, priced)
+
     children: list[ChildInfo] = []
     for part_id, count in counts.items():
         component = by_part.get(part_id)
         if component is None:
             continue  # a node without a quoting layer contributes nothing yet
-        part = await session.get(Part, part_id)
+        part = parts_by_id.get(part_id)
         assert part is not None  # FK-guaranteed
-        material_name, family_name = await _material_names(session, component.material_id)
-        operations = (
-            await session.scalars(
-                select(Operation)
-                .where(Operation.component_id == component.id)
-                .order_by(Operation.position, Operation.created_at, Operation.id)
-            )
-        ).all()
+        material_name, family_name = (
+            names_by_material.get(component.material_id, (None, None))
+            if component.material_id is not None
+            else (None, None)
+        )
+        operations = ops_by_component.get(component.id, [])
         info = ChildInfo(
             component=component,
             part=part,
@@ -264,7 +319,9 @@ async def _load_children(
                 )
                 for brk in breaks
             ]
-            info.kalk_env = await kalk_costing.load_kalk_env(session, component, synthetic)
+            info.kalk_env = await kalk_costing.load_kalk_env(
+                session, component, synthetic, prefetch=kalk_prefetch
+            )
         children.append(info)
     return children
 

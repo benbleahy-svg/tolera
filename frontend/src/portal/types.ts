@@ -1,3 +1,5 @@
+import type { LegalBlock } from '../shared/LegalFooter';
+
 /**
  * Buyer-portal payload contract (M5.1). The public, unauthenticated Digital
  * Quote endpoint (`GET /api/public/quotes/:token`) returns money as 4-dp
@@ -13,6 +15,8 @@ export interface BuyerQuote {
   is_expired: boolean; // soft expiry: still selectable when true
   requotes_enabled: boolean;
   shop: { name: string; slug: string; country: string; currency: string; locale: string };
+  /** Impressum + Datenschutzerklärung (M6.9; DACH-DELTA §5). */
+  legal?: LegalBlock | null;
   price_range: { min_unit: string; max_unit: string } | null;
   line_items: BuyerLineItem[];
 }
