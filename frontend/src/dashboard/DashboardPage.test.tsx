@@ -290,6 +290,47 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('link', { name: /1407/ })).toHaveAttribute('href', '/quotes/q7');
   });
 
+  it('keeps the queue up when the KPI call fails', async () => {
+    // The KPI row is secondary and role-gated: its failure must not blank the
+    // work queue behind a load error.
+    getKpis.mockRejectedValue(new Error('403'));
+    getQueue.mockResolvedValue({
+      rows: [queueRow()],
+      weights: {
+        weight_due: '0.4000',
+        weight_value: '0.2500',
+        weight_unresolved: '0.2500',
+        weight_flags: '0.1000',
+        vendor_rfq_queue_enabled: false,
+      },
+      generated_on: '2026-07-19',
+    });
+    await renderWithProviders(<DashboardPage />, { me: makeMe({ roles: ['manager'] }) });
+
+    expect(await screen.findByTestId('queue-row')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('kpi-open-quotes')).not.toBeInTheDocument();
+  });
+
+  it('links each urgency toggle to its own factor panel', async () => {
+    getQueue.mockResolvedValue({
+      rows: [queueRow()],
+      weights: {
+        weight_due: '0.4000',
+        weight_value: '0.2500',
+        weight_unresolved: '0.2500',
+        weight_flags: '0.1000',
+        vendor_rfq_queue_enabled: false,
+      },
+      generated_on: '2026-07-19',
+    });
+    await renderWithProviders(<DashboardPage />);
+
+    const toggle = await screen.findByRole('button', { name: '0,20' });
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-controls', screen.getByTestId('queue-factors').id);
+  });
+
   it('shows the KPI row for a manager and not for an estimator', async () => {
     const { unmount } = await renderWithProviders(<DashboardPage />);
     await screen.findByText('Nichts offen — Ihre Warteschlange ist leer.');

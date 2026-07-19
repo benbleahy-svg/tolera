@@ -63,7 +63,9 @@ export function WorkQueueSettingsPage(): React.ReactElement {
   };
 
   if (!draft) {
-    return <p role="alert">{error ?? ''}</p>;
+    // An empty `role="alert"` during the initial fetch announces nothing to a
+    // screen reader but still claims a live region — render it only on failure.
+    return error ? <p role="alert">{error}</p> : <></>;
   }
 
   return (

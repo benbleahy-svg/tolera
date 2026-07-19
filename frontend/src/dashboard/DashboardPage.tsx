@@ -62,6 +62,14 @@ export function DashboardPage(): React.ReactElement {
   const locale = session.active_org.locale;
 
   const reload = useCallback(async () => {
+    // The KPI row is role-gated and secondary, so it sits *outside* the page's
+    // error boundary: started in parallel with the rest (no extra round trip)
+    // and swallowing its own failure — a 403 or a flaky KPI query must not blank
+    // the work queue. `undefined` means "failed", which leaves the last good
+    // value on screen; `null` is the honest value for a non-manager.
+    const kpisPromise: Promise<Kpis | null | undefined> = isManager
+      ? api.getKpis().catch(() => undefined)
+      : Promise.resolve(null);
     try {
       const [queue, recent, notes] = await Promise.all([
         api.getQueue(),
@@ -71,13 +79,14 @@ export function DashboardPage(): React.ReactElement {
       setRows(queue.rows);
       setRecents(recent.rows);
       setNotifications(notes);
-      // The KPI row is a separate, role-gated call: a non-manager must not have
-      // a 403 take the whole dashboard down with it.
-      setKpis(isManager ? await api.getKpis() : null);
       // A transient failure must not leave the alert up for the rest of the session.
       setError(null);
     } catch {
       setError(t('collab.load_error'));
+    }
+    const nextKpis = await kpisPromise;
+    if (nextKpis !== undefined) {
+      setKpis(nextKpis);
     }
   }, [api, collab, isManager, t]);
 

@@ -29,10 +29,18 @@ function formatScore(value: string, locale: string): string {
   });
 }
 
-function FactorPanel({ factors }: { factors: UrgencyFactor[] }): React.ReactElement {
+function FactorPanel({
+  factors,
+  id,
+}: {
+  factors: UrgencyFactor[];
+  /** Matches the toggle's `aria-controls` so assistive tech knows which button
+   *  reveals which panel — one row's toggle must not claim another's table. */
+  id: string;
+}): React.ReactElement {
   const { t } = useTranslation();
   return (
-    <table className="queue-factors" data-testid="queue-factors">
+    <table className="queue-factors" data-testid="queue-factors" id={id}>
       <thead>
         <tr>
           <th>{t('work_queue.factor')}</th>
@@ -86,6 +94,7 @@ export function WorkQueue({
     <ul className="work-queue">
       {rows.map((row) => {
         const key = `${row.source}:${row.id}`;
+        const panelId = `queue-factors-${key}`;
         const open = expanded === key;
         return (
           <li key={key} className="queue-row" data-testid="queue-row" data-source={row.source}>
@@ -109,6 +118,7 @@ export function WorkQueue({
               type="button"
               className="queue-urgency"
               aria-expanded={open}
+              aria-controls={panelId}
               // Hover shows the same numbers the panel does (spec: "show the
               // contributing factors on hover"); the click target keeps it
               // reachable by keyboard and on touch.
@@ -120,7 +130,7 @@ export function WorkQueue({
               {formatScore(row.urgency, locale)}
             </button>
             <RowLink row={row} />
-            {open && <FactorPanel factors={row.factors} />}
+            {open && <FactorPanel factors={row.factors} id={panelId} />}
           </li>
         );
       })}
