@@ -179,6 +179,12 @@ class OrgService:
     async def create_org(self, spec: OrgSpec) -> OrgResult:
         """Idempotently create or reconcile the org described by ``spec``."""
         org_id, org_created = await self._upsert_org(spec)
+        # M6.8 — every org gets the managed-integration rows (HubSpot + the ERP
+        # push stub) and their action definitions. Idempotent, so reconciling an
+        # existing org backfills any definition added since it was provisioned.
+        from ..crm_integration import provision_integrations
+
+        await provision_integrations(self._session, org_id)
         members: list[UserResult] = []
         for user in spec.users:
             user_id, user_created = await self._upsert_user(user)

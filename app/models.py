@@ -338,6 +338,15 @@ class Account(Base):
     #: Key account — one of the three urgency flags the Dashboard work queue
     #: scores on (spec ``#newscope`` §2: ``flags(expedite/VIP/export)``; M6.1).
     is_vip: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    #: --- CRM sync (M6.8, spec ``#crm``) ---
+    #: The id this record carries in the connected CRM, and which CRM that is.
+    #: Both NULL for a record that has never been synced.
+    external_crm_id: Mapped[str | None] = mapped_column(String)
+    crm_source: Mapped[str | None] = mapped_column(String)
+    #: Watermark for the **Tolera-always-wins** rule (DECISIONS.md 2026-07-17):
+    #: an inbound CRM change applies only while ``updated_at <= last_synced_at``
+    #: — i.e. nobody has edited this record in Tolera since the last sync.
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
     deleted_at: Mapped[datetime | None] = _deleted_at()
@@ -392,6 +401,10 @@ class Contact(Base):
     phone_ext: Mapped[str | None] = mapped_column(String)
     notes: Mapped[str | None] = mapped_column(Text)
     salesperson_id: Mapped[uuid.UUID | None] = _salesperson_fk()
+    #: --- CRM sync (M6.8) — see the matching trio on :class:`Account`. ---
+    external_crm_id: Mapped[str | None] = mapped_column(String)
+    crm_source: Mapped[str | None] = mapped_column(String)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
     deleted_at: Mapped[datetime | None] = _deleted_at()
@@ -905,6 +918,12 @@ class Quote(Base):
     # the quote is sent (M5.5 writes the snapshot at send; the shop's own
     # download endpoint renders live). Spec :603 "URL on the Quote model".
     pdf_object_key: Mapped[str | None] = mapped_column(Text)
+    # M6.8 — the CRM deal/opportunity this quote is linked to (spec ``#crm``:
+    # "Expose a deal/opportunity ID field on Quote (nullable crm_opportunity_id)
+    # and push quoted amount back to the deal on quote-finalize"). Written by
+    # the CRM adapter when the ``quote.sent`` event is dispatched; the CRM's own
+    # id format, so text rather than uuid.
+    crm_opportunity_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -4518,3 +4537,184 @@ class VendorRfqResponsePrice(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     lead_time_days: Mapped[int | None] = mapped_column(Integer)
+
+
+# --------------------------------------------------------------------------- #
+# Managed Integrations framework (M6.8 — INTEGRATION-API-CONTRACT §2)
+#
+# The in-app Integration Manager UI is post-pilot; the **v1 data model** is here
+# so the export contract and the audit trail exist from day one. Three records:
+# an ``Integration`` (one connected system), its ``IntegrationActionDefinition``s
+# (capabilities), and the ``IntegrationAction`` log rows (attempts).
+# --------------------------------------------------------------------------- #
+
+
+class IntegrationActionDirection(enum.StrEnum):
+    """Which way the data flows for one capability.
+
+    Not cosmetic: §6 makes ``export`` the *only* direction that notifies on
+    failure by default — a DATEV/ERP export failing silently is the dangerous
+    case, whereas an import failure is visible as "the data never arrived"."""
+
+    export = "export"
+    import_ = "import"
+
+
+class IntegrationActionStatus(enum.StrEnum):
+    """Lifecycle of one attempt (§2).
+
+    All **six** states the sub-spec lists. The build-plan prose abbreviates to
+    ``queued → in_progress → completed/failed``, but ``cancelled`` and
+    ``timed_out`` are terminal states §6 explicitly notifies on, so dropping
+    them would silently break the notification rule."""
+
+    queued = "queued"
+    in_progress = "in_progress"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+    timed_out = "timed_out"
+
+
+#: Terminal states that fire an export-failure notification (§6).
+INTEGRATION_FAILURE_STATUSES = frozenset(
+    {
+        IntegrationActionStatus.failed,
+        IntegrationActionStatus.cancelled,
+        IntegrationActionStatus.timed_out,
+    }
+)
+
+#: Every state from which no further transition is legal.
+INTEGRATION_TERMINAL_STATUSES = INTEGRATION_FAILURE_STATUSES | {IntegrationActionStatus.completed}
+
+_integration_action_direction_enum = Enum(
+    IntegrationActionDirection,
+    name="integration_action_direction",
+    create_type=False,
+    # Member name is ``import_`` (``import`` is a keyword) but the DB value is
+    # ``import`` — map by value like ``obtain_method``.
+    values_callable=lambda enum_cls: [member.value for member in enum_cls],
+)
+_integration_action_status_enum = Enum(
+    IntegrationActionStatus, name="integration_action_status", create_type=False
+)
+
+
+class Integration(Base):
+    """One connected external system for an org — HubSpot, the ERP push stub.
+
+    Looked up in code by ``key`` (stable machine name); ``name`` is the display
+    label an admin may rename. ``enabled`` is the spec's Pause/Play: a disabled
+    integration receives no dispatch."""
+
+    __tablename__ = "integration"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        UniqueConstraint("org_id", "key", name="uq_integration_org_key"),
+        UniqueConstraint("org_id", "id", name="uq_integration_org_id_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    author: Mapped[str | None] = mapped_column(String)
+    support_contact: Mapped[str | None] = mapped_column(String)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    #: "Last phoned home" (§2 heartbeat).
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class IntegrationActionDefinition(Base):
+    """A *capability* of an integration ("Export Quote") — not an attempt."""
+
+    __tablename__ = "integration_action_definition"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        UniqueConstraint("org_id", "integration_id", "type", name="uq_iad_org_integration_type"),
+        UniqueConstraint("org_id", "id", name="uq_iad_org_id_id"),
+        ForeignKeyConstraint(
+            ["org_id", "integration_id"],
+            ["integration.org_id", "integration.id"],
+            name="fk_iad_integration_same_org",
+        ),
+        CheckConstraint(
+            "has_tolera_entity = (entity_type IS NOT NULL)",
+            name="ck_iad_entity_type_present",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    integration_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: Machine key of the capability, e.g. ``export_quote``.
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    display_title: Mapped[str] = mapped_column(String, nullable=False)
+    display_description: Mapped[str | None] = mapped_column(Text)
+    direction: Mapped[IntegrationActionDirection] = mapped_column(
+        _integration_action_direction_enum, nullable=False
+    )
+    has_tolera_entity: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    entity_type: Mapped[str | None] = mapped_column(String)
+    can_be_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    notify_on_failure: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class IntegrationAction(Base):
+    """One attempt to perform an action — the audit trail the user sees (§2)."""
+
+    __tablename__ = "integration_action"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "definition_id"],
+            [
+                "integration_action_definition.org_id",
+                "integration_action_definition.id",
+            ],
+            name="fk_ia_definition_same_org",
+        ),
+        Index("ix_integration_action_org_created", "org_id", "definition_id", "created_at"),
+        Index(
+            "ix_integration_action_related",
+            "org_id",
+            "related_object_type",
+            "related_object_id",
+            postgresql_where=text("related_object_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    definition_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    status: Mapped[IntegrationActionStatus] = mapped_column(
+        _integration_action_status_enum,
+        nullable=False,
+        server_default=IntegrationActionStatus.queued.value,
+    )
+    status_message: Mapped[str | None] = mapped_column(Text)
+    related_object_type: Mapped[str | None] = mapped_column(String)
+    related_object_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: NULL for an event-triggered attempt; set for a user-initiated request.
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id")
+    )
+    #: The exact payload handed to the integration — the ERP export contract is
+    #: asserted against this, and it is what a manual resend replays. Never
+    #: contains credentials (see app.integration_actions._SECRET_KEYS).
+    request_payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()

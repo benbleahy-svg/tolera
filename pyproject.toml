@@ -131,6 +131,7 @@ module = [
     "app.rule_suggest",
     "app.requote_diff",
     "app.bulk_refresh",
+    "app.event_dispatch_tasks",
     "app.vendor_reply_lens",
     "app.vendor_rfq_email",
 ]

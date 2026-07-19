@@ -22,6 +22,7 @@ from .checkout import checkout_router
 from .collab import collab_router
 from .config import Settings, get_settings
 from .config_completeness import config_completeness_router
+from .crm_integration import register_handlers as register_crm_handlers
 from .custom_tables import custom_tables_router
 from .db import make_engine, make_sessionmaker
 from .email_connections import router as email_connections_router
@@ -59,6 +60,7 @@ from .review_items import review_items_router
 from .rule_suggest_api import rule_suggest_router
 from .rules import rules_router
 from .saved_views import saved_views_router
+from .services.crm.hubspot import build_hubspot_adapter
 from .sourcing import sourcing_router
 from .storage import make_storage
 from .task_resources import register as register_task_resources
@@ -75,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.validate_storage()  # fail closed on a misconfigured object store
     settings.validate_av()  # …and on unscanned uploads outside development/test (M3.13)
     settings.validate_wuerth()  # …and on a half-configured live sourcing adapter (M6.7)
+    settings.validate_hubspot()  # …and on a half-configured live CRM adapter (M6.8)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -85,6 +88,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.storage = make_storage(settings)  # object store for part files (M1.2)
         # Eagerly-run Celery tasks (tests) share the app's storage + restricted DSN (M2.5).
         register_task_resources(settings.effective_app_database_url, app.state.storage)
+        # M6.8 — subscribe the CRM handlers to the domain-event bus. Registration
+        # is per-process and idempotent: the Celery worker that drains the outbox
+        # registers the same handlers via its own import of this module.
+        register_crm_handlers(build_hubspot_adapter(settings))
         try:
             yield
         finally:

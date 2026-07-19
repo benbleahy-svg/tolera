@@ -474,45 +474,28 @@ async def apply_lead_times_to_all(
 # --------------------------------------------------------------------------- #
 # Quote totals — net + VAT line + gross (integer minor units + currency)
 # --------------------------------------------------------------------------- #
-@addons_router.get("/quotes/{quote_id}/totals")
-async def quote_totals(
+# --------------------------------------------------------------------------- #
+# Net roll-up — the shared core of the totals endpoint
+#
+# Extracted (M6.8) so a non-HTTP caller can obtain a quote's net without
+# duplicating money math: the CRM deal write needs the quoted amount in integer
+# minor units, and a second implementation of this loop would be a second place
+# for the two to drift. The endpoint below is now a thin VAT/serialisation
+# wrapper over this function; its behaviour is unchanged.
+# --------------------------------------------------------------------------- #
+async def quote_net(
+    session: AsyncSession,
     quote_id: uuid.UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    _: Annotated[Principal, Depends(require(Permission.view_all))],
-    item: Annotated[list[str], Query()] = [],  # noqa: B006 — FastAPI query default
-) -> Any:
-    """Net + MwSt/USt/MWST + gross for a DACH quote (spec #dach-tax; the
-    2026-07-08 minor-units boundary). Line = resolved total price at the
-    selected break + its REQUIRED add-ons; optional add-ons and expedites are
-    the buyer's checkout choice (M5). Selection: ``?item=<quote_item_id>:<qty>``
-    per line; unselected items use their lowest break. A line whose price is
-    still unresolved contributes 0 and flips ``has_unpriced_lines`` — the
-    caller must not present that net as a final figure (PP blocks finalize on
-    unpriced work; it never invents a 0)."""
-    quote = await _get_quote_or_404(session, quote_id)
-    org = await session.get(Organization, quote.org_id)
-    if org is None:  # RLS should always expose the active org — fail loud
-        raise AppError(
-            "invalid_org",
-            "Active organization is not available.",
-            status_code=status.HTTP_404_NOT_FOUND,
-        )
-    profile = VAT_PROFILES[org.country]
+    *,
+    selections: dict[uuid.UUID, int] | None = None,
+) -> tuple[Decimal, bool, list[dict[str, Any]]]:
+    """Net total, the unpriced flag, and the per-line detail for one quote.
 
-    selections: dict[uuid.UUID, int] = {}
-    for raw in item:
-        item_id, sep, qty = raw.partition(":")
-        try:
-            if not sep:
-                raise ValueError(raw)
-            selections[uuid.UUID(item_id)] = int(qty)
-        except ValueError as exc:
-            raise AppError(
-                "invalid_selection",
-                "Selections take the form item=<quote_item_id>:<quantity>.",
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            ) from exc
-
+    ``selections`` maps quote_item_id → chosen quantity break; a line that is
+    not named uses its lowest break. Returns the net as a rounded ``Decimal``
+    (the caller converts to minor units at its own boundary).
+    """
+    selections = selections or {}
     items = (
         await session.scalars(
             select(QuoteItem).where(QuoteItem.quote_id == quote_id).order_by(QuoteItem.created_at)
@@ -591,6 +574,62 @@ async def quote_totals(
                 "unpriced": unpriced,
             }
         )
+
+    return net, has_unpriced, lines
+
+
+async def quote_net_minor(session: AsyncSession, quote_id: uuid.UUID) -> tuple[int, bool]:
+    """The quote's net in **integer minor units**, at every line's lowest break.
+
+    This is the figure pushed onto a CRM deal (spec ``#crm``: "PP writes the
+    quoted amount back to the deal so the HubSpot pipeline stays live"). The
+    second element is ``has_unpriced_lines`` — a caller must not present a net
+    that carries unpriced work as a final figure.
+    """
+    net, has_unpriced, _ = await quote_net(session, quote_id)
+    return to_minor_units(net), has_unpriced
+
+
+@addons_router.get("/quotes/{quote_id}/totals")
+async def quote_totals(
+    quote_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[Principal, Depends(require(Permission.view_all))],
+    item: Annotated[list[str], Query()] = [],  # noqa: B006 — FastAPI query default
+) -> Any:
+    """Net + MwSt/USt/MWST + gross for a DACH quote (spec #dach-tax; the
+    2026-07-08 minor-units boundary). Line = resolved total price at the
+    selected break + its REQUIRED add-ons; optional add-ons and expedites are
+    the buyer's checkout choice (M5). Selection: ``?item=<quote_item_id>:<qty>``
+    per line; unselected items use their lowest break. A line whose price is
+    still unresolved contributes 0 and flips ``has_unpriced_lines`` — the
+    caller must not present that net as a final figure (PP blocks finalize on
+    unpriced work; it never invents a 0)."""
+    quote = await _get_quote_or_404(session, quote_id)
+    org = await session.get(Organization, quote.org_id)
+    if org is None:  # RLS should always expose the active org — fail loud
+        raise AppError(
+            "invalid_org",
+            "Active organization is not available.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    profile = VAT_PROFILES[org.country]
+
+    selections: dict[uuid.UUID, int] = {}
+    for raw in item:
+        item_id, sep, qty = raw.partition(":")
+        try:
+            if not sep:
+                raise ValueError(raw)
+            selections[uuid.UUID(item_id)] = int(qty)
+        except ValueError as exc:
+            raise AppError(
+                "invalid_selection",
+                "Selections take the form item=<quote_item_id>:<quantity>.",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ) from exc
+
+    net, has_unpriced, lines = await quote_net(session, quote_id, selections=selections)
 
     vat = vat_amount(net, profile.standard_pct)
     return {
