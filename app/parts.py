@@ -45,6 +45,7 @@ from fastapi import (
     Depends,
     File,
     Query,
+    Request,
     Response,
     UploadFile,
     status,
@@ -73,6 +74,7 @@ from .dimensions import (
     evaluate_volume,
 )
 from .errors import AppError
+from .export_control import record_access
 from .file_types import (
     MAGIC_SNIFF_BYTES,
     FileCategory,
@@ -83,6 +85,8 @@ from .file_types import (
 from .interrogation import clear_extracted_geometry, maybe_enqueue_for_primary
 from .models import (
     Component,
+    ExportControlAction,
+    ExportControlSubject,
     FileAnnotationLayer,
     FileRole,
     Node,
@@ -585,10 +589,28 @@ async def upload_library_parts(
 @parts_router.get("/{part_id}")
 async def get_part(
     part_id: uuid.UUID,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.view_all))],
 ) -> PartOut:
-    """Fetch one part."""
-    return _part_out(await _get_part_or_404(session, part_id))
+    """Fetch one part.
+
+    Reading an export-controlled part is **not** refused — spec ``#authz``:
+    "flag + audit, no hard block in v1 — any internal user may open flagged
+    quotes/parts/files, but access is logged". M6.9 supplies the logging half."""
+    part = await _get_part_or_404(session, part_id)
+    if part.export_controlled:
+        await record_access(
+            session,
+            org_id=principal.active_org_id,
+            subject_type=ExportControlSubject.part,
+            subject_id=part.id,
+            action=ExportControlAction.view,
+            actor_user_id=principal.user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    return _part_out(part)
 
 
 @parts_router.patch("/{part_id}")
@@ -1020,17 +1042,38 @@ async def _discard_blobs(storage: ObjectStorage, keys: list[str]) -> None:
 async def download_part_file(
     part_id: uuid.UUID,
     file_id: uuid.UUID,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     storage: Annotated[ObjectStorage, Depends(get_storage)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    principal: Annotated[Principal, Depends(require(Permission.view_all))],
 ) -> StreamingResponse:
     """Stream a file back byte-identically (M1.2 acceptance: round-trips intact).
 
     Gated on the M3.13 malware verdict: an infected file is 403, an unscanned one
-    409 — the bytes never leave the system on an unknown verdict."""
+    409 — the bytes never leave the system on an unknown verdict.
+
+    An export-controlled part's file is still served (flag + audit, no hard block)
+    but the download is logged. The flag lives on ``Part``, not ``PartFile``, so
+    the parent is fetched to read it."""
     pf = await _get_part_file_or_404(session, part_id, file_id)
     if (blocked := scan_gate_error(pf, settings)) is not None:
         raise blocked
+    part = await _get_part_or_404(session, part_id)
+    if part.export_controlled:
+        # Recorded when the download is AUTHORISED. The body streams after this
+        # handler returns, so the entry attests to the grant, not to delivery.
+        await record_access(
+            session,
+            org_id=principal.active_org_id,
+            subject_type=ExportControlSubject.part_file,
+            subject_id=file_id,
+            action=ExportControlAction.download,
+            actor_user_id=principal.user_id,
+            detail={"part_id": str(part_id)},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
     return StreamingResponse(
         storage.stream(pf.storage_key),
         media_type=pf.content_type or "application/octet-stream",

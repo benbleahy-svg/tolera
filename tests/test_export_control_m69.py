@@ -295,3 +295,141 @@ def test_email_parts_parse_refuses_a_flagged_rfq_and_records_it(
         "SELECT suggested_line_items FROM request_for_quote WHERE id = :id", {"id": rfq_id}
     )
     assert payload is None
+
+
+# --------------------------------------------------------------------------- #
+# Internal access is logged — "flag + audit, no hard block" (spec #authz)
+# --------------------------------------------------------------------------- #
+def _flagged_part(seeder: Seeder, org_id: uuid.UUID) -> uuid.UUID:
+    part_id = seeder.part(org_id)
+    seeder.sql("UPDATE part SET export_controlled = true WHERE id = :id", {"id": part_id})
+    return part_id
+
+
+def _entries(seeder: Seeder, org_id: uuid.UUID, action: str) -> list[Any]:
+    return seeder.fetch(
+        "SELECT subject_type::text, subject_id, actor_user_id FROM export_control_access "
+        "WHERE org_id = :org AND action = :action",
+        {"org": org_id, "action": action},
+    )
+
+
+def test_viewing_a_flagged_part_is_allowed_and_logged(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """The decided posture in one test: the read succeeds (no hard block) AND an
+    entry naming the actor lands in the compliance log."""
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    part_id = _flagged_part(seeder, org_id)
+
+    with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
+        resp = app_client.get(f"/api/parts/{part_id}")
+
+    assert resp.status_code == 200  # never blocked
+    assert _entries(seeder, org_id, "view") == [("part", part_id, admin)]
+
+
+def test_viewing_an_unflagged_part_writes_nothing(app_client: TestClient, seeder: Seeder) -> None:
+    """The log is for flagged records only — otherwise it is a traffic log, and
+    the compliance signal drowns."""
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    part_id = seeder.part(org_id)
+    with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
+        assert app_client.get(f"/api/parts/{part_id}").status_code == 200
+    assert _entries(seeder, org_id, "view") == []
+
+
+def test_downloading_a_flagged_parts_file_is_allowed_and_logged(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """The flag lives on Part, not PartFile, so the download seam has to reach the
+    parent to know it is controlled."""
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    part_id = _flagged_part(seeder, org_id)
+
+    with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
+        # Upload through the API so a real blob backs the stream.
+        upload = app_client.post(
+            f"/api/parts/{part_id}/files",
+            files=[("files", ("BR-100.step", b"ISO-10303-21;", "application/step"))],
+        )
+        assert upload.status_code in (200, 201), upload.text
+        file_id = uuid.UUID(upload.json()[0]["id"])
+        resp = app_client.get(f"/api/parts/{part_id}/files/{file_id}/download")
+
+    assert resp.status_code == 200
+    assert _entries(seeder, org_id, "download") == [("part_file", file_id, admin)]
+
+
+# --------------------------------------------------------------------------- #
+# Restricted-party screening — the OPTIONAL hook (DACH-DELTA §5)
+# --------------------------------------------------------------------------- #
+def test_null_provider_answers_not_screened_never_clear() -> None:
+    """The distinction is the whole point: an org that has not configured
+    screening has not been screened, and must not be recorded as passing."""
+    from app.services.screening import NullScreeningProvider, ScreeningStatus
+
+    result = asyncio.run(NullScreeningProvider().screen("Beispiel GmbH"))
+    assert result.status is ScreeningStatus.not_screened
+    # not_screened is not a review trigger by itself — it means "opted out".
+    assert result.needs_review is False
+
+
+def test_fixture_provider_surfaces_a_hit_for_a_human() -> None:
+    from app.services.screening import FixtureScreeningProvider, ScreeningStatus
+
+    provider = FixtureScreeningProvider({"Sanktioniert AG": "EU-2026-001"})
+    hit = asyncio.run(provider.screen("Sanktioniert AG"))
+    assert hit.status is ScreeningStatus.potential_match
+    assert hit.needs_review is True  # a finding, never an automatic refusal
+    assert hit.matches[0].reference == "EU-2026-001"
+
+    clear = asyncio.run(provider.screen("Fechner Zerspanung GmbH"))
+    assert clear.status is ScreeningStatus.clear
+    assert clear.needs_review is False
+
+
+def test_every_screening_outcome_is_recorded_without_naming_the_match(
+    tenancy_db: str, seeder: Seeder
+) -> None:
+    """A log holding only the hits cannot answer "was this ever checked?". And the
+    matched names are third-party personal data — the count and list go in, the
+    names stay out."""
+    from app.db import make_engine, make_sessionmaker, org_scoped_session
+    from app.export_control import screen_and_record
+    from app.services.screening import FixtureScreeningProvider, register
+
+    org_id, admin = _org_with(seeder, "fechner", ADMIN)
+    vendor_rfq_id = uuid.uuid4()
+    register(FixtureScreeningProvider({"Sanktioniert AG": "EU-2026-001"}))
+
+    async def _run() -> None:
+        engine = make_engine(tenancy_db)
+        try:
+            sm = make_sessionmaker(engine)
+            async with org_scoped_session(sm, org_id) as session:
+                await screen_and_record(
+                    session,
+                    org_id=org_id,
+                    subject_type=ExportControlSubject.vendor_rfq,
+                    subject_id=vendor_rfq_id,
+                    party_name="Sanktioniert AG",
+                    actor_user_id=admin,
+                )
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_run())
+    finally:
+        register(None)  # restore the null default for every later test
+
+    [(detail,)] = seeder.fetch(
+        "SELECT detail FROM export_control_access WHERE org_id = :org AND action = 'screening'",
+        {"org": org_id},
+    )
+    assert detail["status"] == "potential_match"
+    assert detail["match_count"] == 1
+    assert detail["lists"] == ["eu-consolidated"]
+    # The matched party's name is third-party PII — it must not be in the log.
+    assert "Sanktioniert AG" not in str(detail)

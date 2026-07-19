@@ -41,12 +41,16 @@ import io
 import uuid
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .db import org_scoped_session
+
+if TYPE_CHECKING:  # avoid importing the provider seam at module load
+    from .services.screening import ScreeningResult
+
 from .models import (
     ExportControlAccess,
     ExportControlAction,
@@ -269,3 +273,46 @@ async def record_ai_skip_standalone(
             actor_user_id=actor_user_id,
             detail={"reason": "export_controlled", "route": route},
         )
+
+
+async def screen_and_record(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    subject_type: ExportControlSubject,
+    subject_id: uuid.UUID,
+    party_name: str,
+    actor_user_id: uuid.UUID | None = None,
+) -> ScreeningResult:
+    """Run restricted-party screening and file the outcome in the compliance log.
+
+    Every outcome is recorded, including ``not_screened`` and ``clear``. A log
+    that only holds the hits cannot answer "was this counterparty ever checked?",
+    which is the question an export-control audit actually asks.
+
+    The result is returned to the caller and **never acts on its own**: name
+    matching yields false positives, so a hit is evidence for a human, not a
+    refusal (see :mod:`app.services.screening`).
+
+    ``detail`` records the match count and list, never the matched names — those
+    are third-party personal data and belong in the caller's UI, not in a log
+    that :func:`_check_detail` exists to keep free of PII.
+    """
+    from .services.screening import resolve as resolve_screening
+
+    result = await resolve_screening().screen(party_name)
+    await record_access(
+        session,
+        org_id=org_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        action=ExportControlAction.screening,
+        actor_user_id=actor_user_id,
+        detail={
+            "status": str(result.status),
+            "provider": result.provider,
+            "match_count": len(result.matches),
+            "lists": sorted({m.list_name for m in result.matches}),
+        },
+    )
+    return result
