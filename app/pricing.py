@@ -56,6 +56,7 @@ from .models import (
     Component,
     ComponentQuantity,
     CostCategory,
+    CostingMode,
     Discount,
     DiscountCell,
     DiscountDef,
@@ -164,6 +165,10 @@ class PricingEnv:
     has_lead_base: bool = False
     # DACH Costing Mode (M1.12) — exposes the Zuschlagskalkulation Kalk helpers
     dach_costing_mode: bool = False
+    # Make vs Buy for the line item this component roots (M6.4, spec #vendor-rfq).
+    # ``buy`` disables internal costing; the vendor's price is the cost. A child
+    # component has no line item of its own, so it is always ``make``.
+    costing_mode: CostingMode = CostingMode.make
 
 
 async def _material_names(
@@ -343,6 +348,15 @@ async def load_pricing_env(session: AsyncSession, component: Component) -> Prici
             base_lead_days += material.added_lead_time_days
             has_lead_base = True
 
+    # Make vs Buy lives on the *line item* (M6.4). A component that roots no line
+    # item — a BOM child, or a component mid-creation — is costed the normal way.
+    costing_mode = (
+        await session.scalar(
+            select(QuoteItem.costing_mode).where(QuoteItem.root_component_id == component.id)
+        )
+        or CostingMode.make
+    )
+
     contact_obj: KalkObject | None = None
     quote_row = await session.scalar(
         select(Quote)
@@ -392,6 +406,7 @@ async def load_pricing_env(session: AsyncSession, component: Component) -> Prici
             select(Organization.dach_costing_mode).where(Organization.id == component.org_id)
         )
         or False,
+        costing_mode=costing_mode,
     )
 
 
@@ -423,7 +438,12 @@ class BreakResult:
     quantity: int
     material: Decimal = _ZERO
     inside: Decimal = _ZERO
+    #: Resolved outside-service cost = ``COALESCE(manual_outside_cost, calc_outside)``
+    #: (M6.4). Every downstream consumer — unit_cost, the Kalk ``OUTSIDE_COST``
+    #: context, the category bases — reads this one.
     outside: Decimal = _ZERO
+    #: What the router's outside-service operations computed, before the override.
+    calc_outside: Decimal = _ZERO
     purchased: Decimal = _ZERO
     override: Decimal = _ZERO
     total_cost: Decimal = _ZERO
@@ -686,6 +706,23 @@ def compute_break(env: PricingEnv, brk: ComponentQuantity) -> BreakResult:
     component_operations[root_key] = root_ops
     component_material_operations[root_key] = root_material_ops
     component_children[root_key] = child_objects
+
+    # ---- Buy mode + the outside-service override (M6.4) ----------------------
+    # Part-level Buy (spec #vendor-rfq, "Operation-level vs part-level"): the whole
+    # part is outsourced, so internal costing is *disabled* — the router no longer
+    # speaks for this line and the vendor's price becomes its cost. The pricing layer
+    # below (items/markup/margin/discounts) is untouched and stays live.
+    if env.costing_mode is CostingMode.buy:
+        result.material = result.inside = result.purchased = result.override = _ZERO
+        result.outside = _ZERO
+        result.has_unpriced = False
+    result.calc_outside = _q4(result.outside)
+    if brk.manual_outside_cost is not None:
+        # The estimator's override — and where M6.6's Apply writes a vendor price.
+        result.outside = brk.manual_outside_cost
+    elif env.costing_mode is CostingMode.buy:
+        # Buy with no vendor price yet: unpriced, never a silent zero.
+        result.has_unpriced = True
 
     for bucket in ("material", "inside", "outside", "purchased", "override"):
         setattr(result, bucket, _q4(getattr(result, bucket)))
@@ -953,6 +990,10 @@ async def reprice_component(
     for brk, computed in zip(env.breaks, results, strict=True):
         brk.material_cost = computed.material
         brk.inside_cost = computed.inside
+        # M6.4 calc-vs-override: the calc side is rewritten every reprice, the
+        # resolved column follows COALESCE(manual, calc), and manual_outside_cost
+        # is never touched here (CLAUDE.md §5).
+        brk.calc_outside_cost = computed.calc_outside
         brk.outside_cost = computed.outside
         brk.purchased_component_cost = computed.purchased
         brk.child_override_cost = computed.override
@@ -1154,6 +1195,26 @@ class UnitPriceUpdate(BaseModel):
     manual_unit_price: Annotated[Decimal | None, Field(ge=0)] = None
 
 
+class OutsideCostUpdate(BaseModel):
+    """M6.4 — the outside-service override on one quantity break.
+
+    A **break total** (the same shape as ``outside_cost``'s siblings), not a unit
+    price: M6.6's Apply multiplies the vendor's per-break unit price by the break
+    quantity before writing here."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    manual_outside_cost: Annotated[Decimal | None, Field(ge=0)] = None
+
+
+class CostingModeUpdate(BaseModel):
+    """M6.4 — flip a line item between Make and part-level Buy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    costing_mode: CostingMode
+
+
 class PricingItemOrder(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1317,11 +1378,19 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
                 "quantity": brk.quantity,
                 "material": brk.material_cost,
                 "inside": brk.inside_cost,
+                # M6.4 calc-vs-override pair behind the resolved ``outside``.
                 "outside": brk.outside_cost,
+                "calc_outside": brk.calc_outside_cost,
+                "manual_outside": brk.manual_outside_cost,
                 "purchased_component": brk.purchased_component_cost,
                 "child_override": brk.child_override_cost,
                 "total": (_q4(cost_total(brk)) if brk.material_cost is not None else None),
                 "unit_cost": brk.unit_cost,
+                # Buy mode with no vendor price yet: the line has *no* cost source,
+                # which the UI must show as awaiting rather than as a genuine zero.
+                "buy_awaiting_vendor_price": (
+                    env.costing_mode is CostingMode.buy and brk.manual_outside_cost is None
+                ),
                 "custom_rows": custom_rows,
             }
         )
@@ -1532,6 +1601,9 @@ async def _pricing_summary(session: AsyncSession, component: Component) -> dict[
     return {
         "component_id": str(component.id),
         "quantities": quantities,
+        # M6.4: ``buy`` tells the estimating UI to hide/disable the internal-cost
+        # fields — the vendor's price is the whole cost of this line.
+        "costing_mode": env.costing_mode.value,
         "costing": costing,
         "pricing_items": items_out,
         "discounts": discounts_out,
@@ -1894,6 +1966,68 @@ async def set_unit_price_override(
         "manual_unit_price": brk.manual_unit_price,
         "unit_price": brk.unit_price,
     }
+
+
+@pricing_router.patch("/components/{component_id}/outside-cost/{quantity}")
+async def set_outside_cost_override(
+    component_id: uuid.UUID,
+    quantity: int,
+    payload: OutsideCostUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> Any:
+    """Override this break's outside-service cost (M6.4, spec ``#vendor-rfq``).
+
+    The estimator's manual figure while an RFQ is in flight, and the cell M6.6's
+    one-click Apply writes an accepted vendor price into. Sending ``null`` clears the
+    override and the resolved cost falls back to what the router computed — the calc
+    side is never destroyed by either direction (CLAUDE.md §5)."""
+    component = await _get_component_or_404(session, component_id)
+    await _lock_editable(session, component)
+    brk = await session.scalar(
+        select(ComponentQuantity).where(
+            ComponentQuantity.component_id == component_id,
+            ComponentQuantity.quantity == quantity,
+        )
+    )
+    if brk is None:
+        raise AppError(
+            "not_found", "No such quantity break.", status_code=status.HTTP_404_NOT_FOUND
+        )
+    updates = payload.model_dump(exclude_unset=True)
+    if "manual_outside_cost" in updates:
+        brk.manual_outside_cost = updates["manual_outside_cost"]
+    await session.flush()
+    await reprice_component(session, principal.active_org_id, component_id)
+    return {
+        "quantity": quantity,
+        "calc_outside_cost": brk.calc_outside_cost,
+        "manual_outside_cost": brk.manual_outside_cost,
+        "outside_cost": brk.outside_cost,
+    }
+
+
+@pricing_router.patch("/quote-items/{item_id}/costing-mode")
+async def set_costing_mode(
+    item_id: uuid.UUID,
+    payload: CostingModeUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require(Permission.quote_edit))],
+) -> Any:
+    """Flip a line item between Make and part-level Buy (M6.4, spec ``#vendor-rfq``).
+
+    Buy is a non-destructive *view* of the same line: the router's operations are left
+    untouched (they are what the estimator argues make-vs-buy against and what a flip
+    back restores), they simply stop contributing while the part is bought."""
+    item = await session.get(QuoteItem, item_id)
+    if item is None:
+        raise AppError("not_found", "No such line item.", status_code=status.HTTP_404_NOT_FOUND)
+    component = await _get_component_or_404(session, item.root_component_id)
+    await _lock_editable(session, component)
+    item.costing_mode = payload.costing_mode
+    await session.flush()
+    await reprice_component(session, principal.active_org_id, item.root_component_id)
+    return {"id": str(item.id), "costing_mode": item.costing_mode.value}
 
 
 # --------------------------------------------------------------------------- #

@@ -47,6 +47,7 @@ import { RequestedFinishes } from './RequestedFinishes';
 import { OperationDrawer } from './OperationDrawer';
 import { ReviewItemsPanel } from '../review/ReviewItemsPanel';
 import { OperationsSection } from './OperationsSection';
+import { OutsideServicesBand } from '../vendor-rfq/OutsideServicesBand';
 import { PricingSection } from './PricingSection';
 import { QuoteTotalsPanel } from './QuoteTotalsPanel';
 import { RequoteDiffPanel } from './RequoteDiffPanel';
@@ -493,6 +494,12 @@ export function EstimatingPage() {
       .catch(fail);
   };
 
+  // M6.4: after a batch send a line's awaiting-response count changes — refetch the
+  // quote so the chip is current without a manual reload.
+  const reloadQuote = () => {
+    if (quoteId) api.getQuote(quoteId).then(setQuote).catch(fail);
+  };
+
   // M5.0 — sidebar navigation + line-item costing-inputs actions.
   const selectItem = (itemId: string) => navigate(`/quotes/edit/${quoteId}/${itemId}`);
 
@@ -539,6 +546,7 @@ export function EstimatingPage() {
         editable={editable}
         onSelect={selectItem}
         onAddItem={addLineItem}
+        onVendorRfqSent={reloadQuote}
       />
       <main className="est-page">
       <header className="est-header">
@@ -554,7 +562,18 @@ export function EstimatingPage() {
           <button
             type="button"
             className="est-send-quote"
-            onClick={() => setSendingQuote(true)}
+            onClick={() => {
+              // M6.4 #vendor-rfq "Workflow stage soft warning": advancing with vendor
+              // RFQs still in flight warns and lets the estimator override — the spec
+              // is explicit that this is not a hard block.
+              const pending = quote.pending_vendor_rfq_item_count;
+              if (
+                pending > 0 &&
+                !window.confirm(t('vendorRfq.pending_warning', { count: pending }))
+              )
+                return;
+              setSendingQuote(true);
+            }}
           >
             {t('sendComposer.send_quote')}
           </button>
@@ -813,6 +832,19 @@ export function EstimatingPage() {
           </p>
         );
       })()}
+
+      {/* M6.4 #vendor-rfq: the Outside-Services entry point into the batch-send modal,
+          plus the in-flight "Awaiting N vendor response(s)" chip. */}
+      {quoteId && quoteItemId && (
+        <OutsideServicesBand
+          quoteId={quoteId}
+          quoteItemId={quoteItemId}
+          awaitingResponses={quote.items[itemIndex]?.awaiting_vendor_responses ?? 0}
+          costingMode={quote.items[itemIndex]?.costing_mode ?? 'make'}
+          onSent={reloadQuote}
+          disabled={!editable}
+        />
+      )}
 
       {costing && (
         <>

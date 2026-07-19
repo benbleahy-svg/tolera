@@ -1825,5 +1825,40 @@
     "unit_price_for": "Unit price for {{quantity}} off, part {{part}}",
     "untitled_part": "No part number",
     "valid_until": "Quote valid until"
+  },
+  "vendorRfq": {
+    "send_title": "Send vendor RFQ",
+    "unnamed_part": "No part number",
+    "new_label": "New",
+    "redacted_label": "redacted",
+    "show_all_vendors": "Show all vendors (including non-matching capabilities)",
+    "no_matching_vendors": "No vendor matches these process types. Tick “Show all vendors” or add capabilities in the directory.",
+    "export_controlled_warning": "Note: at least one line is flagged export-controlled. Check which files each vendor receives before sending.",
+    "awaiting": "⏳ Awaiting {{count}} vendor response",
+    "awaiting_plural": "⏳ Awaiting {{count}} vendor responses",
+    "pending_warning": "{{count}} line item has a pending vendor quote. Continue anyway?",
+    "pending_warning_plural": "{{count}} line items have pending vendor quotes. Continue anyway?",
+    "get_vendor_quote": "Get vendor quote",
+    "send_vendor_rfq": "Send vendor RFQ",
+    "sent_toast": "{{count}} vendor RFQ created",
+    "sent_toast_plural": "{{count}} vendor RFQs created",
+    "section": {
+      "lines": "Line items",
+      "vendors": "Vendors"
+    },
+    "field": {
+      "need_by": "Need-by date",
+      "message": "Message to the vendor",
+      "costing_mode": "Costing mode"
+    },
+    "costing_mode": {
+      "unchanged": "Leave unchanged",
+      "make": "Make (in-house)",
+      "buy": "Buy (outsourced)"
+    },
+    "actions": {
+      "cancel": "Cancel",
+      "send": "Send to {{count}} vendors"
+    }
   }
 }

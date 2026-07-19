@@ -35,6 +35,7 @@ from .models import (
     AccountType,
     Component,
     Contact,
+    CostingMode,
     MembershipStatus,
     Organization,
     QiWorkflowStatus,
@@ -63,6 +64,7 @@ from .quote_filters import (
     is_system_view,
 )
 from .quote_lifecycle import INITIAL_STATUS, allowed_targets, required_permission, transition
+from .vendor_rfq import awaiting_counts_by_item
 
 # Line-item workflow_status values that count as "done" for the quote's outstanding-
 # work rollup (spec: a no-quoted item counts as complete but is unselectable).
@@ -228,6 +230,12 @@ class QuoteItemOut(BaseModel):
     export_controlled: bool
     #: M5.0 #partview — line-item priority (nullable numeric, higher = more urgent).
     priority: int | None
+    #: M6.4 #vendor-rfq — Make vs part-level Buy. In ``buy`` the estimating UI hides
+    #: the internal-cost fields; the vendor's price is the whole cost of the line.
+    costing_mode: CostingMode
+    #: M6.4 #vendor-rfq — vendors on open RFQs who have not answered for this line.
+    #: Drives the "⏳ Awaiting N vendor response(s)" chip; 0 = no chip.
+    awaiting_vendor_responses: int
     quantities: list[QuantityCellOut]
 
 
@@ -277,6 +285,11 @@ class QuoteDetail(BaseModel):
     # M1.14 #missing-rates-warning: how many line items use an operation whose
     # rate resolves to nothing — non-blocking banner, reappears until rates set
     missing_rates_item_count: int
+    # M6.4 #vendor-rfq: line items with vendor RFQs still in flight. Feeds the
+    # workflow-advance **soft** warning ("N line items have pending vendor
+    # quotes") — informational, never a block; the estimator overrides and
+    # proceeds, which is what the spec requires.
+    pending_vendor_rfq_item_count: int
     # the top-of-quote dynamic-lead-time editor staging (M1.11 #addons)
     expedite_tiers: dict[str, Any] | None
     allowed_transitions: list[QuoteStatus]
@@ -386,6 +399,8 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
     ).all()
     # One query for every line item's quantity-break grid (avoids an N+1 over items).
     grids = await load_grids(session, quote.org_id, [qi.root_component_id for qi, _ in rows])
+    # M6.4: one query for the whole quote's in-flight vendor RFQs (no N+1 per line).
+    awaiting = await awaiting_counts_by_item(session, quote.id)
     items = [
         QuoteItemOut(
             id=qi.id,
@@ -396,6 +411,8 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
             was_won=qi.was_won,
             export_controlled=qi.export_controlled,
             priority=qi.priority,
+            costing_mode=qi.costing_mode,
+            awaiting_vendor_responses=awaiting.get(qi.id, 0),
             quantities=grids.get(qi.root_component_id, []),
         )
         for qi, part_id in rows
@@ -439,6 +456,7 @@ async def _load_detail(session: AsyncSession, quote: Quote) -> QuoteDetail:
         config_frozen_at=quote.config_frozen_at,
         trashed=quote.deleted_at is not None,
         missing_rates_item_count=await quote_items_missing_rates(session, quote.id),
+        pending_vendor_rfq_item_count=sum(1 for count in awaiting.values() if count),
         expedite_tiers=quote.expedite_tiers,
         allowed_transitions=sorted(allowed_targets(quote.status, quote.status_before_hold)),
         workflow=tracker,

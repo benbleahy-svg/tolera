@@ -1825,5 +1825,40 @@
     "unit_price_for": "Stückpreis für {{quantity}} Stück, Teil {{part}}",
     "untitled_part": "Ohne Teilenummer",
     "valid_until": "Angebot gültig bis"
+  },
+  "vendorRfq": {
+    "send_title": "Lieferanten-Anfrage senden",
+    "unnamed_part": "Ohne Teilenummer",
+    "new_label": "Neu",
+    "redacted_label": "geschwärzt",
+    "show_all_vendors": "Alle Lieferanten anzeigen (auch ohne passende Fähigkeit)",
+    "no_matching_vendors": "Kein Lieferant mit passendem Verfahren. „Alle Lieferanten anzeigen“ aktivieren oder Fähigkeiten pflegen.",
+    "export_controlled_warning": "Achtung: mindestens eine Position ist als exportkontrolliert markiert. Prüfen Sie vor dem Versand, welche Dateien der Lieferant erhält.",
+    "awaiting": "⏳ Warten auf {{count}} Lieferantenantwort",
+    "awaiting_plural": "⏳ Warten auf {{count}} Lieferantenantworten",
+    "pending_warning": "{{count}} Position hat eine offene Lieferanten-Anfrage. Trotzdem fortfahren?",
+    "pending_warning_plural": "{{count}} Positionen haben offene Lieferanten-Anfragen. Trotzdem fortfahren?",
+    "get_vendor_quote": "Lieferantenangebot einholen",
+    "send_vendor_rfq": "Lieferanten-Anfrage senden",
+    "sent_toast": "{{count}} Lieferanten-Anfrage erstellt",
+    "sent_toast_plural": "{{count}} Lieferanten-Anfragen erstellt",
+    "section": {
+      "lines": "Positionen",
+      "vendors": "Lieferanten"
+    },
+    "field": {
+      "need_by": "Antwort benötigt bis",
+      "message": "Nachricht an den Lieferanten",
+      "costing_mode": "Kalkulationsart"
+    },
+    "costing_mode": {
+      "unchanged": "Unverändert lassen",
+      "make": "Eigenfertigung (Make)",
+      "buy": "Fremdbezug (Buy)"
+    },
+    "actions": {
+      "cancel": "Abbrechen",
+      "send": "An {{count}} Lieferanten senden"
+    }
   }
 }
