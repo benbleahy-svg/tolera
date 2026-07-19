@@ -34,10 +34,11 @@ from sqlalchemy import select
 
 from .celery_app import celery_app
 from .db import make_engine, make_sessionmaker, org_scoped_session
+from .export_control import record_ai_skip
 from .lens import RawLineItem
 from .lens_extract import _run_on_own_loop
 from .lens_provider import PARTS_PROMPT_VERSION, LensProviderError, resolve
-from .models import PartFile, RequestForQuote
+from .models import ExportControlSubject, PartFile, RequestForQuote
 from .part_index import normalize_filename
 from .tasks import BaseTask
 
@@ -250,6 +251,26 @@ async def run_email_parts_parse(
             rfq = await session.get(RequestForQuote, rfq_id)
             if rfq is None:
                 return {"failed": True, "error_code": "rfq_gone"}
+            # M6.9: the flagged-content gate this path was missing. The parse
+            # ships the customer's email body + attachment filenames to the
+            # provider, so a dual-use-flagged RFQ must never reach it — the spec
+            # states the rule absolutely ("CUI/ITAR-flagged files are always
+            # skipped regardless of the toggle") and DECISIONS 2026-06-26 applies
+            # it to every provider call, not just print extraction. Refusal is
+            # audited so the skip is provable (M6.9 compliance log).
+            if rfq.export_controlled:
+                await record_ai_skip(
+                    session,
+                    org_id=org_id,
+                    subject_type=ExportControlSubject.request_for_quote,
+                    subject_id=rfq_id,
+                    route="email_parts.parse",
+                )
+                return {
+                    "skipped": True,
+                    "reason": "export_controlled",
+                    "quote_id": str(rfq.quote_id) if rfq.quote_id is not None else None,
+                }
             body_text = rfq.description or ""
             # M3.9: the draft quote the Triage Brief chains onto after this parse.
             quote_id = str(rfq.quote_id) if rfq.quote_id is not None else None

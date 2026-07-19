@@ -229,3 +229,69 @@ def test_audit_is_org_isolated_through_the_api(app_client: TestClient, seeder: S
     _seed_entry(seeder, other)
     with authed(app_client, user_id=admin, org_id=org_id, roles=ADMIN):
         assert app_client.get("/api/settings/export-control/audit").json()["entries"] == []
+
+
+# --------------------------------------------------------------------------- #
+# AI refusals are recorded, not merely asserted
+#
+# Spec (AI architecture): "CUI/ITAR-flagged files are always skipped regardless
+# of the toggle." M6.9's job is to make that provable — every refusing path
+# writes an ``ai_skip`` entry naming the route.
+# --------------------------------------------------------------------------- #
+def _skips(seeder: Seeder, org_id: uuid.UUID) -> list[tuple[str, str]]:
+    """(route, subject_type) of every recorded AI refusal for the org."""
+    rows = seeder.fetch(
+        "SELECT detail->>'route', subject_type::text FROM export_control_access "
+        "WHERE org_id = :org AND action = 'ai_skip' ORDER BY occurred_at",
+        {"org": org_id},
+    )
+    return [(row[0], row[1]) for row in rows]
+
+
+def test_triage_records_its_ai_refusal(tenancy_db: str, seeder: Seeder) -> None:
+    """The triage brief already refused a flagged RFQ (M3.9); M6.9 makes the
+    refusal evidential."""
+    from tests.test_triage_m39 import _run_brief, _seed_quote_with_rfq
+
+    org_id, quote_id = _seed_quote_with_rfq(
+        seeder,
+        filenames=["BR-100.step"],
+        line_items=[{"part_number": "BR-100"}],
+        export_controlled=True,
+    )
+    _run_brief(tenancy_db, org_id, quote_id)
+    assert ("triage.brief", "request_for_quote") in _skips(seeder, org_id)
+
+
+def test_email_parts_parse_refuses_a_flagged_rfq_and_records_it(
+    tenancy_db: str, seeder: Seeder
+) -> None:
+    """The gap M6.9 closed: this path ships the customer's email body + filenames
+    to the provider and had no export-control gate at all."""
+    from app.email_parts import run_email_parts_parse
+
+    org_id = seeder.org("fechner")
+    quote_id = seeder.quote(org_id, "Q-EC-1")
+    rfq_id = uuid.uuid4()
+    seeder.sql(
+        "INSERT INTO request_for_quote (id, org_id, quote_id, description, export_controlled) "
+        "VALUES (:id, :org, :q, :body, true)",
+        {
+            "id": rfq_id,
+            "org": org_id,
+            "q": quote_id,
+            "body": "Bitte 10 Stk. Teil BR-100 anfragen.",
+        },
+    )
+
+    result = asyncio.run(run_email_parts_parse(tenancy_db, org_id=org_id, rfq_id=rfq_id))
+
+    assert result["skipped"] is True
+    assert result["reason"] == "export_controlled"
+    assert ("email_parts.parse", "request_for_quote") in _skips(seeder, org_id)
+    # The refusal must not have written a suggestions payload — a flagged RFQ
+    # simply has no AI-derived parts list.
+    [(payload,)] = seeder.fetch(
+        "SELECT suggested_line_items FROM request_for_quote WHERE id = :id", {"id": rfq_id}
+    )
+    assert payload is None

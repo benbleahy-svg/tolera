@@ -41,8 +41,10 @@ from sqlalchemy import func, select
 from .celery_app import celery_app
 from .config import Settings, get_settings
 from .db import make_engine, make_sessionmaker, org_scoped_session
+from .export_control import record_ai_skip
 from .lens_extract import _run_on_own_loop
 from .lens_provider import LensProviderError
+from .models import ExportControlSubject
 from .tasks import BaseTask
 
 logger = logging.getLogger("app.triage")
@@ -556,6 +558,22 @@ async def build_triage_snapshot(
         ai_reason = "triage_disabled"
     elif export_controlled:
         ai_reason = "export_controlled"
+        # M6.9: make the refusal evidential. The spec states the rule absolutely
+        # ("CUI/ITAR-flagged files are always skipped regardless of the toggle"),
+        # so the compliance log has to show the skips, not just claim them.
+        # Subject is the RFQ when there is one — that is what carries the flag or
+        # joins to the flagged parts — else the quote.
+        await record_ai_skip(
+            session,
+            org_id=org_id,
+            subject_type=(
+                ExportControlSubject.request_for_quote
+                if rfq is not None
+                else ExportControlSubject.quote
+            ),
+            subject_id=rfq.id if rfq is not None else quote_id,
+            route="triage.brief",
+        )
     else:
         ai_reason = "ok"
 

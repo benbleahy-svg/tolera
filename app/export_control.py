@@ -14,10 +14,17 @@ FastAPI route, a Celery worker, an outbound adapter — goes through
 So nothing here refuses a read. What it does is make every touch of a flagged
 record evidential. The one place the product *does* refuse is AI: per the spec's
 AI-architecture section, "CUI/ITAR-flagged files are **always skipped**
-regardless of the toggle" — those refusals already live at their call sites
+regardless of the toggle" — those refusals live at their call sites
 (``lens_extract``, ``vendor_reply_lens``, ``triage``, ``requote_diff``,
-``email_parts``, ``rule_suggest``) and record an :attr:`ExportControlAction.ai_skip`
-entry here so the skip is provable, not merely asserted.
+``email_parts``) and record an :attr:`ExportControlAction.ai_skip` entry here so
+the skip is provable, not merely asserted.
+
+``rule_suggest`` is deliberately **not** on that list. Its nightly scan sends
+Claude only aggregate counts — operation name, process family, material class,
+part count, window — with no part identity, no geometry and no file bytes. There
+is no controlled artefact in the payload and no single subject to name, so a gate
+there would be both unfounded and unimplementable. Auditing what a path does not
+disclose would make the log misleading.
 
 DACH-DELTA-LAYER §5 re-bases the regime on Regulation (EU) 2021/821 + national
 AWG/AWV; the org's :class:`ExportRegime` is denormalised onto each entry so the
@@ -37,8 +44,9 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from .db import org_scoped_session
 from .models import (
     ExportControlAccess,
     ExportControlAction,
@@ -197,3 +205,67 @@ def _compact_json(detail: dict[str, Any]) -> str:
     import json
 
     return json.dumps(detail, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
+
+
+async def record_ai_skip(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    subject_type: ExportControlSubject,
+    subject_id: uuid.UUID,
+    route: str,
+    actor_user_id: uuid.UUID | None = None,
+) -> ExportControlAccess:
+    """Record that an AI path refused a flagged record.
+
+    The spec's AI-architecture section states the rule absolutely — "CUI/ITAR-
+    flagged files are **always skipped** regardless of the toggle" — and this is
+    the evidence for it. Every AI entrypoint that refuses (``lens_extract``,
+    ``vendor_reply_lens``, ``triage``, ``requote_diff``, ``email_parts``) writes
+    one entry naming the route, so an auditor can see the refusals rather than
+    take them on trust.
+
+    ``route`` is the module/entrypoint that refused — an identifier, never a
+    payload.
+    """
+    return await record_access(
+        session,
+        org_id=org_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        action=ExportControlAction.ai_skip,
+        actor_user_id=actor_user_id,
+        detail={"reason": "export_controlled", "route": route},
+    )
+
+
+async def record_ai_skip_standalone(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    org_id: uuid.UUID,
+    subject_type: ExportControlSubject,
+    subject_id: uuid.UUID,
+    route: str,
+    actor_user_id: uuid.UUID | None = None,
+) -> None:
+    """Record an AI refusal in its **own** committed transaction.
+
+    :func:`record_ai_skip` shares the caller's transaction, which is right when
+    the caller goes on to commit. It is wrong when the caller refuses by raising:
+    ``org_scoped_session`` rolls back on error, so an entry added just before an
+    ``AppError`` would vanish with it — and the refusal would be the one thing
+    the compliance log failed to record.
+
+    This opens a short session of its own, writes, and commits, so the entry
+    survives the 4xx that follows.
+    """
+    async with org_scoped_session(sessionmaker, org_id) as session:
+        await record_access(
+            session,
+            org_id=org_id,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            action=ExportControlAction.ai_skip,
+            actor_user_id=actor_user_id,
+            detail={"reason": "export_controlled", "route": route},
+        )
