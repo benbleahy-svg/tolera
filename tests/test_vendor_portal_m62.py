@@ -573,7 +573,6 @@ def test_rfq_pdf_template_renders_the_batch_without_any_price() -> None:
     html = render_vendor_rfq_html(
         {
             "rfq_number": "RFQ-1001",
-            "quote_number": "Q-2026-0007",
             "need_by_date": "2026-09-01",
             "is_past_due": False,
             "message": "Bitte um Angebot für Eloxieren.",
@@ -595,6 +594,8 @@ def test_rfq_pdf_template_renders_the_batch_without_any_price() -> None:
         }
     )
     assert "RFQ-1001" in html
+    # The shop's internal quote reference is not the vendor's business either.
+    assert "Q-2026-0007" not in html
     assert "Eloxal Schmidt GmbH" in html
     assert "PN-1000" in html
     assert "zeichnung.pdf" in html
@@ -610,7 +611,6 @@ def test_rfq_pdf_template_escapes_untrusted_text() -> None:
     html = render_vendor_rfq_html(
         {
             "rfq_number": "RFQ-1",
-            "quote_number": None,
             "need_by_date": None,
             "message": "<script>alert(1)</script>",
             "shop": {"name": "Shop", "slug": "s", "country": "DE", "locale": "de-DE"},
@@ -621,3 +621,161 @@ def test_rfq_pdf_template_escapes_untrusted_text() -> None:
     )
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
+
+
+# --------------------------------------------------------------------------- #
+# Submission validation — every rejection below would otherwise be a 500 on an
+# UNAUTHENTICATED endpoint (the column could not store the value).
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("prices", "why"),
+    [
+        ([{"quantity": 10, "unit_price": "5"}, {"quantity": 10, "unit_price": "7"}], "duplicate"),
+        ([{"quantity": 10, "unit_price": "NaN"}], "not-a-number"),
+        ([{"quantity": 10, "unit_price": "Infinity"}], "infinite"),
+        ([{"quantity": 10, "unit_price": "1E30"}], "out of numeric(14,4) range"),
+        ([{"quantity": 10, "unit_price": "1.00005"}], "more than 4 dp — must not be rounded"),
+    ],
+)
+def test_unstorable_prices_are_422_not_500(
+    seeder: Seeder, app_client: TestClient, prices: list[dict[str, Any]], why: str
+) -> None:
+    org, user = _org_admin(seeder, f"vrfq-bad-{abs(hash(why)) % 100000}")
+    with _as_admin(app_client, org, user) as client:
+        qid, item_id, _ = _quote_with_item(client)
+    token, line_ids, _ = _seed_rfq(seeder, app_client, org, qid, [item_id])
+
+    res = app_client.post(
+        f"/api/public/vendor-rfq/{token}/response",
+        json={"lines": [{"rfq_line_id": line_ids[0], "prices": prices}]},
+    )
+    assert res.status_code == 422, f"{why}: {res.status_code} {res.text}"
+    # Nothing was written — validation fully precedes persistence.
+    assert seeder.count("vendor_rfq_response", "org_id = :o", {"o": org}) == 0
+
+
+def test_a_bad_price_on_a_later_line_writes_nothing(seeder: Seeder, app_client: TestClient) -> None:
+    """Validation must precede persistence: a valid first line cannot be left behind
+    by a rejected second one."""
+    org, user = _org_admin(seeder, "vrfq-atomic")
+    with _as_admin(app_client, org, user) as client:
+        qid, item_a, _ = _quote_with_item(client)
+        item_b = client.post(f"/api/quotes/{qid}/items").json()["items"][-1]["id"]
+    token, line_ids, _ = _seed_rfq(seeder, app_client, org, qid, [item_a, str(item_b)])
+
+    res = app_client.post(
+        f"/api/public/vendor-rfq/{token}/response",
+        json={
+            "lines": [
+                {"rfq_line_id": line_ids[0], "prices": [{"quantity": 10, "unit_price": "9.00"}]},
+                {"rfq_line_id": line_ids[1], "prices": [{"quantity": 1, "unit_price": "NaN"}]},
+            ]
+        },
+    )
+    assert res.status_code == 422, res.text
+    assert seeder.count("vendor_rfq_response", "org_id = :o", {"o": org}) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Attachment, PDF and the file-download happy path
+# --------------------------------------------------------------------------- #
+def _submit_minimal(app_client: TestClient, token: str, line_id: str) -> None:
+    res = app_client.post(
+        f"/api/public/vendor-rfq/{token}/response",
+        json={"lines": [{"rfq_line_id": line_id, "prices": [{"quantity": 10}]}]},
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_attachment_upload_replaces_and_sanitises_the_filename(
+    seeder: Seeder, app_client: TestClient
+) -> None:
+    """A crafted name must not escape the object-key prefix or reach a header verbatim."""
+    org, user = _org_admin(seeder, "vrfq-attach")
+    with _as_admin(app_client, org, user) as client:
+        qid, item_id, _ = _quote_with_item(client)
+    token, line_ids, _ = _seed_rfq(seeder, app_client, org, qid, [item_id])
+    _submit_minimal(app_client, token, line_ids[0])
+
+    res = app_client.post(
+        f"/api/public/vendor-rfq/{token}/response/attachment",
+        files={"file": ("../../evil.pdf", b"%PDF-1.4 fake", "application/pdf")},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["filename"] == "evil.pdf"  # traversal stripped
+    body = app_client.get(f"/api/public/vendor-rfq/{token}").json()
+    assert body["response"]["attachment_filename"] == "evil.pdf"
+
+    # Re-uploading replaces rather than accumulating.
+    again = app_client.post(
+        f"/api/public/vendor-rfq/{token}/response/attachment",
+        files={"file": ("angebot.pdf", b"%PDF-1.4 second", "application/pdf")},
+    )
+    assert again.status_code == 200, again.text
+    body = app_client.get(f"/api/public/vendor-rfq/{token}").json()
+    assert body["response"]["attachment_filename"] == "angebot.pdf"
+
+
+def test_attachment_requires_a_submitted_response_and_a_valid_token(
+    seeder: Seeder, app_client: TestClient
+) -> None:
+    org, user = _org_admin(seeder, "vrfq-attach-guard")
+    with _as_admin(app_client, org, user) as client:
+        qid, item_id, _ = _quote_with_item(client)
+    token, _, _ = _seed_rfq(seeder, app_client, org, qid, [item_id])
+
+    # No response yet → 422, not a stray blob.
+    early = app_client.post(
+        f"/api/public/vendor-rfq/{token}/response/attachment",
+        files={"file": ("angebot.pdf", b"x", "application/pdf")},
+    )
+    assert early.status_code == 422, early.text
+
+    # Garbage token → 401, and the credential is checked before the body is buffered.
+    bad = app_client.post(
+        "/api/public/vendor-rfq/not-a-real-token/response/attachment",
+        files={"file": ("angebot.pdf", b"x", "application/pdf")},
+    )
+    assert bad.status_code == 401, bad.text
+
+
+def test_granted_file_on_a_batch_part_downloads_byte_identically(
+    seeder: Seeder, app_client: TestClient
+) -> None:
+    """The allowlist + batch-membership gate must not also block the legitimate case."""
+    org, user = _org_admin(seeder, "vrfq-file-ok")
+    with _as_admin(app_client, org, user) as client:
+        qid, item_id, _ = _quote_with_item(client)
+        part_id = uuid.UUID(client.get(f"/api/quotes/{qid}").json()["items"][0]["part_id"])
+        # Uploaded through the authenticated route so a real blob exists to stream.
+        uploaded = client.post(
+            f"/api/parts/{part_id}/files",
+            files={"files": ("zeichnung.pdf", b"%PDF-1.4 drawing", "application/pdf")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        file_id = uuid.UUID(uploaded.json()[0]["id"])
+    token, _, _ = _seed_rfq(seeder, app_client, org, qid, [item_id], part_file_ids=[file_id])
+
+    body = app_client.get(f"/api/public/vendor-rfq/{token}").json()
+    assert [f["filename"] for f in body["lines"][0]["files"]] == ["zeichnung.pdf"]
+    res = app_client.get(f"/api/public/vendor-rfq/{token}/files/{file_id}")
+    assert res.status_code == 200, res.text
+    assert "zeichnung.pdf" in res.headers["content-disposition"]
+    assert res.content == b"%PDF-1.4 drawing"  # byte-identical round trip
+
+
+def test_rfq_pdf_route_is_token_gated(seeder: Seeder, app_client: TestClient) -> None:
+    """401 before anything is rendered; with a valid token it is a PDF (or a clean 503
+    where WeasyPrint's native libs are absent, as on a bare dev box)."""
+    org, user = _org_admin(seeder, "vrfq-pdf")
+    with _as_admin(app_client, org, user) as client:
+        qid, item_id, _ = _quote_with_item(client)
+    token, _, _ = _seed_rfq(seeder, app_client, org, qid, [item_id])
+
+    assert app_client.get("/api/public/vendor-rfq/nope/pdf").status_code == 401
+    res = app_client.get(f"/api/public/vendor-rfq/{token}/pdf")
+    assert res.status_code in (200, 503), res.text
+    if res.status_code == 200:
+        assert res.content.startswith(b"%PDF")
+    else:
+        assert res.json()["code"] == "pdf_unavailable"

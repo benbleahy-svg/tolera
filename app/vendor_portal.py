@@ -44,6 +44,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .db import org_scoped_session
+from .deps import get_storage
 from .errors import AppError
 from .events import emit_event
 from .metrics import vendor_rfq_portal_events
@@ -54,7 +55,6 @@ from .models import (
     Part,
     PartFile,
     Process,
-    Quote,
     QuoteItem,
     QuoteToken,
     QuoteTokenAccess,
@@ -66,15 +66,22 @@ from .models import (
     VendorRfqResponseLine,
     VendorRfqResponsePrice,
 )
+from .parts import _safe_filename  # house convention: email_ingest/email_sync do the same
 from .pdf import html_to_pdf, render_vendor_rfq_html, weasyprint_available
 from .quote_tokens import InvalidToken, decode_jwt
-from .storage import ObjectStorage, make_storage
+from .storage import ObjectStorage
 
 vendor_portal_router = APIRouter(prefix="/api/public/vendor-rfq", tags=["vendor-portal"])
 
 #: A vendor's own quote PDF is the only upload the portal accepts, and it is capped
 #: well below the authenticated CAD limits — this surface is unauthenticated.
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+#: Bounds mirroring what ``vendor_rfq_response_price`` can actually store, so an
+#: out-of-range answer is a clean 422 rather than a database error on insert.
+_PRICE_DECIMALS = 4  # numeric(14, 4)
+MAX_UNIT_PRICE = Decimal(10) ** 10  # numeric(14, 4) → ten integral digits
+MAX_LEAD_TIME_DAYS = 3650  # ten years; anything beyond is a typo, not a lead time
+MAX_QUANTITY = 10_000_000
 
 
 # --------------------------------------------------------------------------- #
@@ -85,9 +92,11 @@ class VendorPriceIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    quantity: int = Field(gt=0)
+    # Both bounds are upper-bounded as well as lower-bounded: the columns are plain
+    # ``integer``, so an unbounded value would be a 500 on insert, not a 422.
+    quantity: int = Field(gt=0, le=MAX_QUANTITY)
     unit_price: str | None = None
-    lead_time_days: int | None = Field(default=None, ge=0)
+    lead_time_days: int | None = Field(default=None, ge=0, le=MAX_LEAD_TIME_DAYS)
 
 
 class VendorLineIn(BaseModel):
@@ -414,15 +423,31 @@ def _invalid(message: str) -> AppError:
 
 
 def _parse_price(raw: str | None) -> Decimal | None:
-    """Parse a money string exactly, or raise 422 — never a float, never a guess."""
+    """Parse a money string exactly, or raise 422 — never a float, never a guess.
+
+    Every rejection here is a value the ``numeric(14,4)`` column could not store
+    faithfully, so refusing is the only honest answer on a *money* field:
+
+    * ``NaN``/``Infinity`` parse as valid Decimals but are not prices — and comparing
+      a NaN raises, so the range check itself must not run before this guard.
+    * A magnitude past ``numeric(14,4)``'s ten integral digits would be a database
+      error on insert (an unauthenticated 500) rather than a usable answer.
+    * **More than four decimal places is refused, never rounded** — silently storing
+      ``1.00005`` as ``1.0001`` would show the vendor a price it did not quote."""
     if raw is None or raw.strip() == "":
         return None
     try:
         value = Decimal(raw.strip())
     except InvalidOperation as exc:
         raise _invalid(f"'{raw}' is not a valid price.") from exc
+    if not value.is_finite():
+        raise _invalid(f"'{raw}' is not a valid price.")
     if value < 0:
         raise _invalid("A price cannot be negative.")
+    if value >= MAX_UNIT_PRICE:
+        raise _invalid("That price is too large.")
+    if -value.as_tuple().exponent > _PRICE_DECIMALS:  # type: ignore[operator]
+        raise _invalid(f"A price may have at most {_PRICE_DECIMALS} decimal places.")
     return value
 
 
@@ -452,9 +477,19 @@ async def _save_response(
         if line.cannot_quote and line.prices:
             raise _invalid("A line marked 'cannot quote' must carry no prices.")
         offered = set(valid_lines[line.rfq_line_id].quantities)
+        quantities: set[int] = set()
         for price in line.prices:
             if offered and price.quantity not in offered:
                 raise _invalid(f"Quantity {price.quantity} was not requested for this part.")
+            # ``UNIQUE (response_line_id, quantity)`` would otherwise turn a repeated
+            # break into an integrity error (a 500 on a public endpoint), and there is
+            # no honest way to pick which of two prices for the same quantity wins.
+            if price.quantity in quantities:
+                raise _invalid(f"Quantity {price.quantity} was priced twice for this part.")
+            quantities.add(price.quantity)
+            # Parse every price up front: validation must fully precede persistence, so
+            # a bad value on the last line cannot leave the first lines' rows written.
+            _parse_price(price.unit_price)
 
     currency = payload.currency.strip().upper()
     if len(currency) != 3:
@@ -617,12 +652,16 @@ async def upload_vendor_attachment(
 
     One attachment per response — re-uploading replaces it. The blob lands in the org's
     object store under the RFQ's prefix; the old key is best-effort purged so a replaced
-    file does not linger (GDPR erasure posture, M1.2)."""
-    body = await file.read(MAX_ATTACHMENT_BYTES + 1)
-    if len(body) > MAX_ATTACHMENT_BYTES:
-        raise _invalid("The attachment is larger than 10 MB.")
+    file does not linger (GDPR erasure posture, M1.2).
 
-    storage: ObjectStorage = make_storage(request.app.state.settings)
+    The credential is checked **before** the body is buffered: this surface is
+    unauthenticated, so an anonymous caller must not be able to make the process hold
+    10 MB per request on the strength of a garbage token. The filename is sanitised with
+    the same helper the authenticated uploads use — a crafted name would otherwise escape
+    the per-response object-key prefix or inject into a ``Content-Disposition`` header
+    when the estimator downloads it."""
+    filename = _safe_filename(file.filename)
+    storage: ObjectStorage = get_storage(request)
     async with org_scoped_session(_sessionmaker(request), _claim_org(request, token)) as session:
         scope = await _resolve(session, token, _secret(request))
         response = (
@@ -635,14 +674,18 @@ async def upload_vendor_attachment(
         if response is None:
             raise _invalid("Submit your response before attaching a file.")
 
+        body = await file.read(MAX_ATTACHMENT_BYTES + 1)
+        if len(body) > MAX_ATTACHMENT_BYTES:
+            raise _invalid("The attachment is larger than 10 MB.")
+
         previous = response.attachment_object_key
         key = (
             f"orgs/{scope.rfq.org_id}/vendor-rfq/{scope.rfq.id}/"
-            f"{scope.recipient.id}/{uuid.uuid4()}/{file.filename or 'attachment'}"
+            f"{scope.recipient.id}/{uuid.uuid4()}/{filename}"
         )
         size = await storage.put(key, io.BytesIO(body), content_type=file.content_type)
         response.attachment_object_key = key
-        response.attachment_filename = file.filename
+        response.attachment_filename = filename
         response.attachment_size_bytes = size
         response.attachment_content_type = file.content_type
         filename = response.attachment_filename
@@ -661,7 +704,7 @@ async def download_vendor_file(
 
     A file not on the allowlist is a 401, not a 404: the vendor must not be able to
     distinguish "exists but not yours" from "does not exist"."""
-    storage: ObjectStorage = make_storage(request.app.state.settings)
+    storage: ObjectStorage = get_storage(request)
     async with org_scoped_session(_sessionmaker(request), _claim_org(request, token)) as session:
         scope = await _resolve(session, token, _secret(request))
         if file_id not in _allowed_file_ids(scope.token_row):
@@ -693,8 +736,6 @@ async def get_vendor_rfq_pdf(token: str, request: Request) -> Response:
     async with org_scoped_session(_sessionmaker(request), _claim_org(request, token)) as session:
         scope = await _resolve(session, token, _secret(request))
         payload = await build_vendor_payload(session, scope, now)
-        quote = await session.get(Quote, scope.rfq.quote_id)
-        payload["quote_number"] = quote.number if quote is not None else None
 
     if not weasyprint_available():
         raise AppError(
