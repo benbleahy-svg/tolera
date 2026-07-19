@@ -21,6 +21,7 @@ import type {
   PurchaseMatchesOut,
   PurchasedComponentOut,
 } from './types';
+import { ToleraSourcePanel } from '../sourcing/ToleraSourcePanel';
 
 interface Props {
   api: EstimatingApi;
@@ -443,6 +444,8 @@ export default function AssemblyComponentsSection({
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const [convertFor, setConvertFor] = useState<string | null>(null);
   const [copyFor, setCopyFor] = useState<string | null>(null);
+  // The purchased component whose Tolera Source panel is open (M6.7).
+  const [sourceFor, setSourceFor] = useState<AssemblyNodeOut | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -574,6 +577,21 @@ export default function AssemblyComponentsSection({
               >
                 {t('assembly.menu_copy_pricing')}
               </button>
+              {row.group === 'purchased' && row.purchased_component_id && (
+                <>
+                  <span className="asm-menu-caption">{t('sourcing.menu_source')}</span>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setSourceFor(row);
+                      setMenuRow(null);
+                    }}
+                  >
+                    {t('sourcing.title')}
+                  </button>
+                </>
+              )}
               {row.group === 'manufactured' && (
                 <>
                   <span className="asm-menu-caption">
@@ -746,6 +764,14 @@ export default function AssemblyComponentsSection({
           componentIds={[...selection]}
           onDone={reload}
           onClose={() => setBulkOpen(false)}
+        />
+      )}
+      {sourceFor?.purchased_component_id && (
+        <ToleraSourcePanel
+          purchasedComponentId={sourceFor.purchased_component_id}
+          partName={rowName(sourceFor)}
+          quantities={quantities}
+          onClose={() => setSourceFor(null)}
         />
       )}
       {addOpen && (

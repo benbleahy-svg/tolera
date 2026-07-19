@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "supplier": "wuerth",
+  "currency": "EUR",
+  "_comment": "Recorded Würth ('Tolera Source') availability + pricing response. THIS FILE IS THE ADAPTER CONTRACT (DECISIONS.md 2026-06-14 'Würth API access'): the live endpoint conforms to this shape, so swapping fixture→live is config only. Prices are integer MINOR UNITS (cents) + explicit currency — never a float (CLAUDE.md §5).",
+  "items": [
+    {
+      "oem_part_number": "0057 8 30",
+      "description": "Sechskantschraube DIN 933 M8x30, verzinkt",
+      "brand": "Würth",
+      "unit": "piece",
+      "quantity_available": 12500,
+      "lead_time_days": 2,
+      "price_breaks": [
+        { "min_quantity": 1, "unit_price_minor": 24 },
+        { "min_quantity": 100, "unit_price_minor": 19 },
+        { "min_quantity": 500, "unit_price_minor": 16 },
+        { "min_quantity": 2000, "unit_price_minor": 13 }
+      ]
+    },
+    {
+      "oem_part_number": "0384 06",
+      "description": "Scheibe DIN 125 A M6, A2",
+      "brand": "Würth",
+      "unit": "piece",
+      "quantity_available": 400,
+      "lead_time_days": 3,
+      "price_breaks": [
+        { "min_quantity": 1, "unit_price_minor": 9 },
+        { "min_quantity": 250, "unit_price_minor": 7 }
+      ]
+    },
+    {
+      "oem_part_number": "0300 5 12",
+      "description": "Zylinderschraube ISO 4762 M5x12, 8.8",
+      "brand": "Würth",
+      "unit": "piece",
+      "quantity_available": 0,
+      "lead_time_days": 21,
+      "price_breaks": [{ "min_quantity": 1, "unit_price_minor": 31 }]
+    },
+    {
+      "oem_part_number": "PEM-CLS-M4-2",
+      "description": "Einpressmutter CLS M4-2 (Blindnietmutter-Ersatz)",
+      "brand": "PEM",
+      "unit": "piece",
+      "quantity_available": 3000,
+      "lead_time_days": 5,
+      "price_breaks": [
+        { "min_quantity": 1, "unit_price_minor": 42 },
+        { "min_quantity": 1000, "unit_price_minor": 35 }
+      ]
+    }
+  ]
+}

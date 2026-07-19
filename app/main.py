@@ -59,6 +59,7 @@ from .review_items import review_items_router
 from .rule_suggest_api import rule_suggest_router
 from .rules import rules_router
 from .saved_views import saved_views_router
+from .sourcing import sourcing_router
 from .storage import make_storage
 from .task_resources import register as register_task_resources
 from .vendor_portal import vendor_portal_router
@@ -73,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(settings.log_level)
     settings.validate_storage()  # fail closed on a misconfigured object store
     settings.validate_av()  # …and on unscanned uploads outside development/test (M3.13)
+    settings.validate_wuerth()  # …and on a half-configured live sourcing adapter (M6.7)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -143,6 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(vendor_contacts_router)
     app.include_router(vendor_rfq_router)
     app.include_router(work_queue_router)
+    app.include_router(sourcing_router)
     # Unauthenticated vendor surface — the token is the only credential (M6.2).
     app.include_router(vendor_portal_router)
 

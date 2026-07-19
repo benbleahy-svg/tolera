@@ -1867,5 +1867,27 @@
     "pending_warning_other": "{{count}} line items have pending vendor quotes. Continue anyway?",
     "sent_toast_one": "{{count}} vendor RFQ created",
     "sent_toast_other": "{{count}} vendor RFQs created"
+  },
+  "sourcing": {
+    "title": "Tolera Source — availability & pricing",
+    "degraded": "Supplier data unavailable right now — costing is unaffected.",
+    "not_found": "Part {{partNumber}} is not listed by the supplier.",
+    "stock": "In stock: {{qty}} pcs",
+    "lead_time": "Lead time {{days}} days",
+    "quantity": "Quantity",
+    "unit_price": "Unit price",
+    "extended_price": "Extended",
+    "availability": "Availability",
+    "suggestion_note": "Supplier prices are suggestions — they never change costing.",
+    "send_rfq": "Send RFQ",
+    "rfq_sent": "RFQ sent (reference {{reference}}).",
+    "rfq_failed": "The RFQ could not be sent. Please try again later.",
+    "menu_source": "Tolera Source",
+    "status": {
+      "available": "Available",
+      "at_risk": "Stock at risk",
+      "insufficient": "Insufficient",
+      "unknown": "Unknown"
+    }
   }
 }
