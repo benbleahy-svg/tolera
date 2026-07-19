@@ -55,6 +55,13 @@ class Permission(enum.StrEnum):
     settings_edit = "settings_edit"
     users_manage = "users_manage"
     quote_delete = "quote_delete"
+    #: Compliance surfaces (M6.9): the export-control ("CUI") audit log and the
+    #: GDPR data-subject export/erasure endpoints. **Admin-only, deliberately** —
+    #: these read every contact's personal data in the org and, for erasure,
+    #: destroy it. ``settings_edit``/``users_manage`` both reach ``manager``, so
+    #: reusing either would silently widen who can pull a subject's data; the
+    #: ``_MANAGER`` set below is pinned explicitly for exactly this reason.
+    compliance_manage = "compliance_manage"
 
 
 class ReviewStage(enum.StrEnum):
