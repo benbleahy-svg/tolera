@@ -237,3 +237,42 @@ tr.est-missing-rate td {
 .dfm-info { color: var(--muted, #667085); cursor: help; font-size: 0.75rem; }
 .dfm-warnings .dfm-instances { margin: 0 0 0.25rem 1.9rem; padding: 0; list-style: none; font-size: 0.72rem; color: var(--muted, #667085); }
 .dfm-family-label { margin: 0 0 0.25rem; font-size: 0.75rem; color: var(--muted, #667085); }
+
+/* M6.1 — Dashboard work queue (spec #newscope §2). One merged, prioritised list:
+   source badge · entity · reason chips · urgency (click/hover = the factors).
+   Deliberately flat and dense — this is a queue to work through, not a report. */
+.dashboard-kpis dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0 0 1rem; }
+.dashboard-kpis .kpi dt { font-size: 0.75rem; color: var(--muted, #667085); margin: 0; }
+.dashboard-kpis .kpi dd { font-size: 1.4rem; font-weight: 600; margin: 0; }
+.dashboard-queue { margin-bottom: 1.5rem; }
+.work-queue { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.queue-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(8rem, 1fr) auto 4rem auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: 8px;
+}
+.queue-source { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted, #667085); }
+.queue-label { font-weight: 600; }
+.queue-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.queue-chip {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface-2, #f2f4f7);
+  color: var(--t2, #475467);
+}
+.queue-org-badge { font-size: 0.72rem; padding: 0.1rem 0.45rem; border: 1px dashed var(--border, #e4e7ec); border-radius: 999px; }
+.queue-urgency { font-variant-numeric: tabular-nums; font-weight: 600; border: none; background: none; cursor: pointer; padding: 0.15rem 0.35rem; }
+.queue-cross-org-hint { font-size: 0.72rem; color: var(--muted, #667085); font-style: italic; }
+/* The explainability panel spans the row it belongs to. */
+.queue-factors { grid-column: 1 / -1; width: 100%; font-size: 0.75rem; border-collapse: collapse; }
+.queue-factors th, .queue-factors td { text-align: left; padding: 0.15rem 0.5rem; font-variant-numeric: tabular-nums; }
+.queue-factors thead th { color: var(--muted, #667085); font-weight: 500; }
+.dashboard-recents ul { list-style: none; margin: 0 0 1.5rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.dashboard-recents li a { display: flex; gap: 0.5rem; align-items: center; padding: 0.35rem 0.6rem; border: 1px solid var(--border, #e4e7ec); border-radius: 8px; text-decoration: none; }
+.recent-status { font-size: 0.7rem; color: var(--muted, #667085); }
+.dashboard-links { display: flex; gap: 1rem; margin: 0.75rem 0 0; font-size: 0.85rem; }

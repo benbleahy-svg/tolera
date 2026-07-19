@@ -1174,3 +1174,20 @@ Spec `#partview` routes per line item with a left sidebar; the built page is `/q
 - **Notification recipients are shape-checked.** A non-null value in `notification_recipients` must match the repo's contact-email pattern (`app.accounts._EMAIL_RE`); the repo has no `email-validator`/`EmailStr`, so that lightweight regex is the house convention.
 
 **Revisit trigger:** if `default_tax_rate_pct` ever becomes an input to costing/invoicing (it must not — that path is the VAT engine's), or Fechner asks for a jurisdiction picker.
+
+## [2026-07-19] M6.1 urgency-score contract — the parts the formula leaves open
+
+**Context.** Spec `#newscope` §2 fixes the shape of the Dashboard work queue's ordering — `w1·days_to_due⁻¹ + w2·quote_value_band + w3·unresolved_count + w4·flags(expedite/VIP/export)`, weights org-configurable, "deterministic and explainable" — but not the arithmetic's edges. None of these is expensive to reverse (they change a *ranking*; nothing is persisted, no money is computed or displayed), so per CLAUDE.md §6.3 they are recorded here as decided defaults rather than logged as `OPEN:` halts.
+
+**Decided (applied in `app/urgency.py`, unit-pinned in `tests/test_urgency_m61.py`).**
+- **`days_to_due⁻¹` made total.** No due date → the term contributes **0**. Due *today* (the inverse is undefined) → clamped to the **1.0** floor. **Overdue** → `1.0 + 0.1·days`, capped at **2.0** — so overdue always outranks due-tomorrow, but a year-late quote cannot dwarf the other three terms. Otherwise the literal `1/days`.
+- **One 0–1 scale.** Every factor is normalised before weighting (value = band/4, unresolved = min(n,10)/10, flags = raised/3), so a weight reads as "this share of the ranking" and re-weighting behaves predictably. The overdue branch above is the single deliberate exception.
+- **Decimal end-to-end, quantised to 4 dp**, contributions rounded *before* summing so the four numbers in the hover panel add up to the displayed score exactly. `days_to_due` is derived once per request from a UTC **date** (day granularity) and the sort is fully specified (score → due → recency → id): same seed, same order, every render.
+- **Quote value is a proxy and never leaves as money.** Per line item the largest quantity break's `total_price`, summed across items; it reaches the client only as a **band** (0–4, thresholds €1k/10k/50k/250k in the org's own currency — v1 is single-currency per org, no FX). The tier-1 minor-units rule is satisfied by the queue not handing out amounts at all.
+- **`account.is_vip`** added (additive, reversible migration 0049, default `false`) — the spec names VIP as an urgency flag and the model had nowhere to put it.
+- **Weights** live in `org_dashboard_settings` (one row per org, absent row = defaults, `org_quote_settings` pattern). Shipped defaults **0.40 / 0.25 / 0.25 / 0.10**. Negatives are rejected at both the API and the scoring type (a negative weight would invert the term's meaning).
+- **Cross-org rows are @mentions only.** E4-a's "cross-org notifications (labelled, switch-on-select)" is read narrowly: every other source stays inside the RLS-pinned active org. Mentions are read through a new **`SECURITY DEFINER` `app_user_mentions()`** (0004's audited pattern — no user argument, binds to the `app.current_user_id` GUC, restricted to *active* memberships). Because the actual org **switch** is still deferred to M5.12, a cross-org row is labelled with its org and its open control shows the switcher's own "switching soon" hint rather than a dead link.
+- **KPI row is gated on the `admin`/`manager` roles**, not a new permission — the spec scopes it by audience ("for managers") and the M0.3 matrix stays the single source of truth for capabilities.
+- **Vendor-RFQ source** ships behind per-org `vendor_rfq_queue_enabled` (**off**), inert until M6.2 builds the entities — as the block's scope directs.
+
+**Revisit trigger:** M6.2 landing the vendor-RFQ entities (turn the flag on by default); M5.12 landing the real org switch (make cross-org rows selectable); Fechner pilot feedback on the default weights or the band thresholds.

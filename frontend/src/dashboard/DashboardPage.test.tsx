@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { renderWithProviders } from '../test/render';
+import { makeMe, renderWithProviders } from '../test/render';
 import { DashboardPage } from './DashboardPage';
 
 const listTasks = vi.fn();
@@ -65,6 +65,47 @@ vi.mock('../collab/api', async () => {
   };
 });
 
+// M6.1 — the page now leads with the work queue; stub its API (stable object,
+// or the load effect re-fires every render).
+const getQueue = vi.fn();
+const getRecents = vi.fn();
+const getKpis = vi.fn();
+const workQueueApi = {
+  getQueue,
+  getRecents,
+  getKpis,
+  getSettings: vi.fn(),
+  saveSettings: vi.fn(),
+  recordRecent: vi.fn(),
+};
+vi.mock('./workQueueApi', async () => {
+  const actual = await vi.importActual<typeof import('./workQueueApi')>('./workQueueApi');
+  return { ...actual, useWorkQueueApi: () => workQueueApi };
+});
+
+function queueRow(overrides: Record<string, unknown> = {}) {
+  return {
+    source: 'quote_action' as const,
+    id: 'q1',
+    quote_id: 'q1',
+    label: '1001',
+    reason_chips: [{ key: 'work_queue.chip.due_in', params: { days: 2 } }],
+    urgency: '0.2000',
+    factors: [
+      { key: 'due', raw: '2', normalized: '0.5', weight: '0.4000', contribution: '0.2000' },
+      { key: 'value', raw: '0', normalized: '0', weight: '0.2500', contribution: '0.0000' },
+      { key: 'unresolved', raw: '0', normalized: '0', weight: '0.2500', contribution: '0.0000' },
+      { key: 'flags', raw: '0', normalized: '0', weight: '0.1000', contribution: '0.0000' },
+    ],
+    deep_link: '/quotes/q1',
+    org_id: 'org-fechner',
+    org_name: 'Fechner GmbH',
+    org_slug: 'fechner',
+    cross_org: false,
+    ...overrides,
+  };
+}
+
 // The M3.10 suggested-actions strip renders inside the dashboard; stub its API
 // so this suite stays focused on notifications/tasks (the strip has its own).
 // Stable object per the real useMemo hook — a fresh object each render would
@@ -115,37 +156,148 @@ describe('DashboardPage', () => {
     listNotifications.mockResolvedValue([]);
     markNotification.mockResolvedValue({});
     getTriageBrief.mockResolvedValue({ brief: null });
+    getQueue.mockReset();
+    getRecents.mockReset();
+    getKpis.mockReset();
+    getQueue.mockResolvedValue({
+      rows: [],
+      weights: {
+        weight_due: '0.4000',
+        weight_value: '0.2500',
+        weight_unresolved: '0.2500',
+        weight_flags: '0.1000',
+        vendor_rfq_queue_enabled: false,
+      },
+      generated_on: '2026-07-19',
+    });
+    getRecents.mockResolvedValue({ rows: [] });
+    getKpis.mockResolvedValue({ open_quotes: 4, due_this_week: 2, win_rate_30d_pct: '50.0' });
   });
 
-  it('surfaces assigned tasks with assignee + status', async () => {
-    listTasks.mockResolvedValue([
-      task(),
-      task({ id: 't2', message: 'Beschichtung klären', status: 'overdue', due_date: '2000-01-01' }),
-    ]);
+  it('merges every source into one prioritised queue with its reason chips', async () => {
+    getQueue.mockResolvedValue({
+      rows: [
+        queueRow({ urgency: '0.6000', reason_chips: [{ key: 'work_queue.chip.overdue', params: { days: 3 } }] }),
+        queueRow({
+          source: 'task',
+          id: 't1',
+          label: 'Maskierung prüfen',
+          urgency: '0.1000',
+          reason_chips: [{ key: 'work_queue.chip.task_assigned', params: {} }],
+        }),
+        queueRow({
+          source: 'review_item',
+          id: 'r1',
+          label: 'Fehlende Zeichnung',
+          urgency: '0.0500',
+          reason_chips: [{ key: 'work_queue.chip.unresolved', params: { count: 3 } }],
+        }),
+      ],
+      weights: {
+        weight_due: '0.4000',
+        weight_value: '0.2500',
+        weight_unresolved: '0.2500',
+        weight_flags: '0.1000',
+        vendor_rfq_queue_enabled: false,
+      },
+      generated_on: '2026-07-19',
+    });
     await renderWithProviders(<DashboardPage />);
 
-    expect(await screen.findByText('Maskierung prüfen')).toBeInTheDocument();
-    expect(screen.getAllByText('Max Bauer')).toHaveLength(2);
-    expect(screen.getByText('Offen')).toBeInTheDocument();
-    expect(screen.getByText('Überfällig')).toBeInTheDocument();
-    expect(screen.getAllByTestId('task-row')).toHaveLength(2);
+    const rows = await screen.findAllByTestId('queue-row');
+    expect(rows).toHaveLength(3);
+    // Server order is the urgency order — the client never re-sorts.
+    expect(rows.map((r) => r.dataset.source)).toEqual(['quote_action', 'task', 'review_item']);
+    expect(screen.getByText('seit 3 Tagen überfällig')).toBeInTheDocument();
+    expect(screen.getByText('3 offene Prüfpunkte')).toBeInTheDocument();
+    expect(screen.getByText('Maskierung prüfen')).toBeInTheDocument();
   });
 
-  it('shows an empty state when there are no tasks', async () => {
-    listTasks.mockResolvedValue([]);
+  it('explains a row: the factors expand and add up to its score', async () => {
+    getQueue.mockResolvedValue({
+      rows: [queueRow()],
+      weights: {
+        weight_due: '0.4000',
+        weight_value: '0.2500',
+        weight_unresolved: '0.2500',
+        weight_flags: '0.1000',
+        vendor_rfq_queue_enabled: false,
+      },
+      generated_on: '2026-07-19',
+    });
     await renderWithProviders(<DashboardPage />);
-    expect(await screen.findByText('Keine offenen Aufgaben.')).toBeInTheDocument();
+
+    // German locale formatting for the score (0,20 — not 0.20).
+    const score = await screen.findByRole('button', { name: '0,20' });
+    expect(screen.queryByTestId('queue-factors')).not.toBeInTheDocument();
+    await userEvent.click(score);
+    expect(screen.getByTestId('queue-factors')).toBeInTheDocument();
+    expect(screen.getByTestId('factor-due')).toHaveTextContent('0.2000');
+    expect(screen.getByTestId('factor-flags')).toHaveTextContent('0.0000');
   });
 
-  it('resolves a task', async () => {
-    listTasks.mockResolvedValue([task()]);
+  it('labels a cross-org row and does not pretend it can switch org yet', async () => {
+    getQueue.mockResolvedValue({
+      rows: [
+        queueRow({
+          source: 'mention',
+          id: 'n9',
+          quote_id: null,
+          deep_link: '/',
+          org_id: 'org-helvetia',
+          org_name: 'Helvetia AG',
+          org_slug: 'helvetia',
+          cross_org: true,
+          reason_chips: [{ key: 'work_queue.chip.mentioned', params: {} }],
+        }),
+      ],
+      weights: {
+        weight_due: '0.4000',
+        weight_value: '0.2500',
+        weight_unresolved: '0.2500',
+        weight_flags: '0.1000',
+        vendor_rfq_queue_enabled: false,
+      },
+      generated_on: '2026-07-19',
+    });
     await renderWithProviders(<DashboardPage />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Erledigen' }));
-    await waitFor(() => expect(updateTask).toHaveBeenCalledWith('t1', 'resolved'));
+
+    expect(await screen.findByTestId('queue-org-badge')).toHaveTextContent('Helvetia AG');
+    // The org switch is M5.12; the row says so rather than offering a dead link.
+    expect(screen.queryByRole('link', { name: 'Öffnen' })).not.toBeInTheDocument();
+  });
+
+  it('shows the queue empty state', async () => {
+    await renderWithProviders(<DashboardPage />);
+    expect(await screen.findByText('Nichts offen — Ihre Warteschlange ist leer.')).toBeInTheDocument();
+  });
+
+  it('shows the Recently-opened strip when there is something to resume', async () => {
+    getRecents.mockResolvedValue({
+      rows: [
+        { entity_type: 'quote', entity_id: 'q7', label: '1407', status: 'draft', opened_at: '2026-07-19T09:00:00Z' },
+      ],
+    });
+    await renderWithProviders(<DashboardPage />);
+    expect(await screen.findByTestId('recent-row')).toHaveTextContent('1407');
+    expect(screen.getByRole('link', { name: /1407/ })).toHaveAttribute('href', '/quotes/q7');
+  });
+
+  it('shows the KPI row for a manager and not for an estimator', async () => {
+    const { unmount } = await renderWithProviders(<DashboardPage />);
+    await screen.findByText('Nichts offen — Ihre Warteschlange ist leer.');
+    expect(screen.queryByTestId('kpi-open-quotes')).not.toBeInTheDocument();
+    expect(getKpis).not.toHaveBeenCalled();
+    unmount();
+
+    await renderWithProviders(<DashboardPage />, {
+      me: makeMe({ roles: ['manager'] }),
+    });
+    expect(await screen.findByTestId('kpi-open-quotes')).toHaveTextContent('4');
+    expect(screen.getByTestId('kpi-win-rate')).toHaveTextContent('50,0 %');
   });
 
   it('renders the email-ingest notification as a triage card with signals (M3.9)', async () => {
-    listTasks.mockResolvedValue([]);
     getTriageBrief.mockResolvedValue({ brief: triageBrief() });
     listNotifications.mockResolvedValue([
       {
@@ -173,7 +325,6 @@ describe('DashboardPage', () => {
   });
 
   it('shows the AI-disabled state without suppressing compliance (M3.9)', async () => {
-    listTasks.mockResolvedValue([]);
     getTriageBrief.mockResolvedValue({
       brief: triageBrief({ ai: { enabled: false, reason: 'master_disabled' } }),
     });
@@ -194,7 +345,6 @@ describe('DashboardPage', () => {
   });
 
   it('marks a notification as read', async () => {
-    listTasks.mockResolvedValue([]);
     listNotifications.mockResolvedValue([
       {
         id: 'n1',
@@ -212,7 +362,6 @@ describe('DashboardPage', () => {
   });
 
   it('shows the notifications empty state', async () => {
-    listTasks.mockResolvedValue([]);
     await renderWithProviders(<DashboardPage />);
     expect(await screen.findByText('Keine Benachrichtigungen.')).toBeInTheDocument();
   });

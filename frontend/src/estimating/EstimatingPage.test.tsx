@@ -92,6 +92,15 @@ vi.mock('../review/api', async () => {
   const actual = await vi.importActual<typeof import('../review/api')>('../review/api');
   return { ...actual, useRuleSuggestApi: () => ruleSuggestApi };
 });
+// The M6.1 "Recently opened" ping fires on mount; stub it (stable object — a
+// fresh one each render would re-fire the effect in a loop).
+const workQueueApi = { recordRecent: vi.fn().mockResolvedValue(undefined) };
+vi.mock('../dashboard/workQueueApi', async () => {
+  const actual =
+    await vi.importActual<typeof import('../dashboard/workQueueApi')>('../dashboard/workQueueApi');
+  return { ...actual, useWorkQueueApi: () => workQueueApi };
+});
+
 vi.mock('../configure/api', () => ({ useConfigureApi: () => ({ importRules: vi.fn() }) }));
 // M5.7 — the Facilitate Order entry uses the orders API (Clerk-bound); stub it so
 // these Clerk-free unit tests don't touch auth.

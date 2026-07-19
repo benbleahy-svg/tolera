@@ -329,6 +329,9 @@ class Account(Base):
     website: Mapped[str | None] = mapped_column(String)
     notes: Mapped[str | None] = mapped_column(Text)
     salesperson_id: Mapped[uuid.UUID | None] = _salesperson_fk()
+    #: Key account — one of the three urgency flags the Dashboard work queue
+    #: scores on (spec ``#newscope`` §2: ``flags(expedite/VIP/export)``; M6.1).
+    is_vip: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
     deleted_at: Mapped[datetime | None] = _deleted_at()
@@ -2677,6 +2680,77 @@ class OrgQuoteSettings(Base):
 
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
+
+
+class OrgDashboardSettings(Base):
+    """Per-org **Dashboard work-queue settings** — the four urgency weights and
+    the queue-source flags (spec ``#newscope`` §2; M6.1).
+
+    Same shape as :class:`OrgQuoteSettings` / :class:`OrgAiSettings`: ``org_id``
+    is the PRIMARY KEY (exactly one row per org) and an **absent row is treated
+    as all-defaults** by the accessor (:mod:`app.dashboard_settings`), so an org
+    that never opened Settings behaves identically to one that did.
+
+    The weights are ``Numeric`` — never float — because the score they feed
+    (:mod:`app.urgency`) must order the queue identically on every machine and
+    every run. ``vendor_rfq_queue_enabled`` gates the fifth queue source, whose
+    entities arrive in M6.2; it ships **off** so the source is inert until then
+    (``build-plan/M6-differentiators-hardening.md`` M6.1 scope)."""
+
+    __tablename__ = "org_dashboard_settings"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id", ondelete="CASCADE"), primary_key=True
+    )
+    weight_due: Mapped[Decimal] = mapped_column(
+        Numeric(6, 4), nullable=False, server_default=text("0.4000")
+    )
+    weight_value: Mapped[Decimal] = mapped_column(
+        Numeric(6, 4), nullable=False, server_default=text("0.2500")
+    )
+    weight_unresolved: Mapped[Decimal] = mapped_column(
+        Numeric(6, 4), nullable=False, server_default=text("0.2500")
+    )
+    weight_flags: Mapped[Decimal] = mapped_column(
+        Numeric(6, 4), nullable=False, server_default=text("0.1000")
+    )
+    #: The vendor-RFQ queue source (M6.2 entities); off until they exist.
+    vendor_rfq_queue_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _updated_ts()
+
+
+class RecentView(Base):
+    """One entry of a user's **Recently opened** strip (spec ``#newscope`` §2:
+    "a strip of the user's last 8 quotes/parts … for instant resume"; M6.1).
+
+    Keyed on (org, user, entity) and upserted on open, so re-opening a quote
+    refreshes ``opened_at`` rather than appending — this is a *resume* affordance,
+    not an access log (which would be an audit surface with its own retention
+    duty under the GDPR pack). Org-scoped; RLS keys on ``org_id``."""
+
+    __tablename__ = "recent_view"
+    __table_args__ = (
+        # The only read: this user's most-recent N in the active org.
+        Index("ix_recent_view_org_user_opened", "org_id", "user_id", "opened_at"),
+    )
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organization.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id", ondelete="CASCADE"), primary_key=True
+    )
+    #: ``quote`` | ``part`` (CHECK-constrained in the DB).
+    entity_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    opened_at: Mapped[datetime] = _ts()
 
 
 class SuggestedActionKind(enum.StrEnum):

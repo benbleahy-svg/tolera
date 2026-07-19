@@ -262,6 +262,10 @@ SYSTEM_QUOTE_VIEWS: tuple[SystemView, ...] = (
     SystemView(key="outstanding", label_key="quotes.views.outstanding"),
     SystemView(key="overdue", label_key="quotes.views.overdue"),
     SystemView(key="highest-priority", label_key="quotes.views.highest_priority"),
+    # M6.1: the classic three-panel Dashboard table survives here as a view once
+    # /home becomes the work queue (spec #newscope §2: "the classic Workflows
+    # table remains available as a saved view") — same grid, no rebuild.
+    SystemView(key="workflows", label_key="quotes.views.workflows"),
 )
 
 _SYSTEM_VIEW_KEYS = frozenset(v.key for v in SYSTEM_QUOTE_VIEWS)
@@ -299,6 +303,12 @@ def apply_system_view(stmt: Select[Any], key: str, *, user_id: uuid.UUID) -> Sel
             Quote.due_date < func.now(),
             Quote.status.in_(_OPEN_STATUSES),
         ).order_by(Quote.due_date.asc(), Quote.id.desc())
+    if key == "workflows":
+        # The reference Dashboard's active-work table: everything still in play,
+        # soonest-due first (undated last) — what the old landing page showed.
+        return stmt.where(Quote.status.in_(_OPEN_STATUSES)).order_by(
+            Quote.due_date.asc().nulls_last(), Quote.created_at.desc(), Quote.id.desc()
+        )
     if key == "highest-priority":
         # Spec #partview "Highest Priority": the most urgent quotes first. Derived
         # MAX(line-item priority) DESC; unprioritised quotes fall to the bottom.

@@ -1,26 +1,34 @@
 /**
- * Dashboard (M2.11 slice + M3.3 notifications) — the landing surface where
- * **Assign Task** and the intake notifications land.
+ * Dashboard — the landing surface, redesigned around one question: **"What needs
+ * me now."** (M6.1, spec #newscope §2).
  *
- * The full Dashboard redesign is M6; M3.3 adds only the notifications list so
- * "New Quote created from Email Forwarding: Created Quote #N" (spec #wingman)
- * renders and deep-links to the quote. The M3.9 Triage Brief later replaces
- * the plain email-ingest card with a structured triage card. Org-scoped by RLS.
+ * The **work queue** is the page: one merged, prioritised list across quotes
+ * needing my action, tasks, review items, vendor RFQs and @mentions, ordered by
+ * an explainable urgency score. Around it sit the *Recently opened* strip, the
+ * manager KPI glance row, and the regions the reference dashboard is retained
+ * for — the notifications feed (with the M3.9 triage card), the M3.10 suggested
+ * actions, and the "view all" links.
+ *
+ * What the redesign **replaces** is the reference three-panel Workflows table;
+ * it survives untouched as the "Workflows" saved view on /quotes (M1.3), which
+ * the link below points at. Analytics tiles stay out (deferred to M7).
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
-import {
-  type Member,
-  memberLabel,
-  type Notification,
-  type Task,
-  useCollabApi,
-} from '../collab/api';
+import { type Notification, useCollabApi } from '../collab/api';
+import { useSession } from '../session/session';
+import { KpiRow } from './KpiRow';
+import { RecentlyOpened } from './RecentlyOpened';
 import { SuggestedActionsStrip } from './SuggestedActionsStrip';
 import { TriageCard } from './TriageCard';
+import { WorkQueue } from './WorkQueue';
+import { type Kpis, type QueueRow, type RecentRow, useWorkQueueApi } from './workQueueApi';
+
+/** Roles the KPI row is for — the API enforces the same set. */
+const MANAGER_ROLES = ['admin', 'manager'];
 
 /** Human copy per notification kind; unknown kinds fall back to the raw kind. */
 function notificationText(
@@ -41,46 +49,45 @@ function notificationText(
 
 export function DashboardPage(): React.ReactElement {
   const { t } = useTranslation();
-  const api = useCollabApi();
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
+  const session = useSession();
+  const collab = useCollabApi();
+  const api = useWorkQueueApi();
+  const [rows, setRows] = useState<QueueRow[]>([]);
+  const [recents, setRecents] = useState<RecentRow[]>([]);
+  const [kpis, setKpis] = useState<Kpis | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const isManager = session.roles.some((role) => MANAGER_ROLES.includes(role));
+  const locale = session.active_org.locale;
+
   const reload = useCallback(async () => {
     try {
-      const [ts, mem, notes] = await Promise.all([
-        api.listTasks(),
-        api.listMembers(),
-        api.listNotifications(),
+      const [queue, recent, notes] = await Promise.all([
+        api.getQueue(),
+        api.getRecents(),
+        collab.listNotifications(),
       ]);
-      setTasks(ts);
-      setMembers(mem);
+      setRows(queue.rows);
+      setRecents(recent.rows);
       setNotifications(notes);
+      // The KPI row is a separate, role-gated call: a non-manager must not have
+      // a 403 take the whole dashboard down with it.
+      setKpis(isManager ? await api.getKpis() : null);
     } catch {
       setError(t('collab.load_error'));
     }
-  }, [api, t]);
+  }, [api, collab, isManager, t]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  const assigneeName = (id: string | null): string => {
-    const m = members.find((x) => x.id === id);
-    return m ? memberLabel(m) : t('collab.unknown_member');
-  };
-
-  const resolve = async (task: Task) => {
-    await api.updateTask(task.id, task.status === 'resolved' ? 'open' : 'resolved');
-    await reload();
-  };
-
   const markRead = async (n: Notification) => {
     try {
-      await api.markNotification(n.id, true);
-      // Only the notification list changed — don't refetch tasks/members.
-      setNotifications(await api.listNotifications());
+      await collab.markNotification(n.id, true);
+      // A read @mention leaves the queue too — reload both, not just the feed.
+      await reload();
     } catch {
       setError(t('collab.load_error'));
     }
@@ -89,10 +96,20 @@ export function DashboardPage(): React.ReactElement {
   return (
     <div className="dashboard">
       <h1>{t('nav.dashboard')}</h1>
+      {error && <p role="alert">{error}</p>}
+      {kpis && <KpiRow kpis={kpis} locale={locale} />}
+      <section aria-label={t('work_queue.title')} className="dashboard-queue">
+        <h2>{t('work_queue.title')}</h2>
+        <WorkQueue rows={rows} locale={locale} />
+        <p className="dashboard-links">
+          <Link to="/quotes?view=workflows">{t('work_queue.view_workflows')}</Link>
+          <Link to="/quotes">{t('work_queue.view_all_quotes')}</Link>
+        </p>
+      </section>
+      <RecentlyOpened rows={recents} />
       <SuggestedActionsStrip />
       <section aria-label={t('dashboard.notifications')}>
         <h2>{t('dashboard.notifications')}</h2>
-        {error && <p role="alert">{error}</p>}
         {notifications.length === 0 ? (
           <p className="dashboard-empty">{t('dashboard.no_notifications')}</p>
         ) : (
@@ -103,8 +120,7 @@ export function DashboardPage(): React.ReactElement {
                 className={n.read_at ? 'notification-read' : 'notification-unread'}
                 data-testid="notification-row"
               >
-                {n.kind === 'quote_email_ingested' &&
-                typeof n.payload.quote_id === 'string' ? (
+                {n.kind === 'quote_email_ingested' && typeof n.payload.quote_id === 'string' ? (
                   <TriageCard
                     quoteId={n.payload.quote_id}
                     quoteNumber={String(n.payload.quote_number ?? '')}
@@ -123,45 +139,6 @@ export function DashboardPage(): React.ReactElement {
               </li>
             ))}
           </ul>
-        )}
-      </section>
-      <section aria-label={t('dashboard.tasks')}>
-        <h2>{t('dashboard.tasks')}</h2>
-        {tasks.length === 0 ? (
-          <p className="dashboard-empty">{t('dashboard.no_tasks')}</p>
-        ) : (
-          <table className="dashboard-tasks">
-            <thead>
-              <tr>
-                <th>{t('dashboard.task')}</th>
-                <th>{t('dashboard.assignee')}</th>
-                <th>{t('dashboard.due')}</th>
-                <th>{t('dashboard.status')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((task) => (
-                <tr key={task.id} className={`task-${task.status}`} data-testid="task-row">
-                  <td>{task.message ?? t('dashboard.untitled_task')}</td>
-                  <td>{assigneeName(task.assignee_id)}</td>
-                  <td>{task.due_date ?? '—'}</td>
-                  <td>
-                    <span className={`task-status task-status-${task.status}`}>
-                      {t(`dashboard.status_${task.status}`)}
-                    </span>
-                  </td>
-                  <td>
-                    <button type="button" onClick={() => void resolve(task)}>
-                      {task.status === 'resolved'
-                        ? t('dashboard.reopen')
-                        : t('dashboard.resolve')}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         )}
       </section>
     </div>

@@ -17,6 +17,7 @@ import { useBomApi } from '../bom/api';
 import { BomBuilderModal } from '../bom/BomBuilderModal';
 import type { BomStatus } from '../bom/types';
 import { useConfigureApi } from '../configure/api';
+import { useWorkQueueApi } from '../dashboard/workQueueApi';
 import { useOrdersApi } from '../orders/api';
 import {
   FacilitateOrderDrawer,
@@ -72,8 +73,16 @@ export function EstimatingPage() {
   const api = useEstimatingApi();
   const suggestApi = useRuleSuggestApi();
   const configureApi = useConfigureApi();
+  const workQueueApi = useWorkQueueApi();
   const canEdit = useHasPermission('quote_edit');
   const canFinalize = useHasPermission('quote_finalize');
+
+  // Feed the Dashboard's "Recently opened" strip (M6.1). Fire-and-forget: this
+  // is a convenience surface, and a failed write must never break the editor.
+  useEffect(() => {
+    if (!quoteId) return;
+    void workQueueApi.recordRecent('quote', quoteId).catch(() => undefined);
+  }, [workQueueApi, quoteId]);
 
   const [quote, setQuote] = useState<QuoteSummary | null>(null);
   const [costing, setCosting] = useState<ComponentCosting | null>(null);

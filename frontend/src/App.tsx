@@ -28,6 +28,7 @@ import { PlaceholderPage } from './pages/PlaceholderPage';
 import { EmailConnectionPage } from './settings/EmailConnectionPage';
 import { EmailTemplatesPage } from './settings/EmailTemplatesPage';
 import { QuoteSettingsPage } from './settings/QuoteSettingsPage';
+import { WorkQueueSettingsPage } from './settings/WorkQueueSettingsPage';
 import { AppShell } from './shell/AppShell';
 import { NAV_ITEMS } from './shell/nav';
 
@@ -89,6 +90,8 @@ export default function App() {
         <Route path="/settings/email-templates" element={<EmailTemplatesPage />} />
         {/* Settings → Finalized Quote Settings (M5.8). */}
         <Route path="/settings/quote" element={<QuoteSettingsPage />} />
+        {/* Settings → Dashboard queue: the urgency weights (M6.1). */}
+        <Route path="/settings/work-queue" element={<WorkQueueSettingsPage />} />
         {/* Unknown paths redirect home rather than rendering the dashboard at a
             wrong URL (keeps the landing route distinct from the catch-all). */}
         <Route path="*" element={<Navigate to="/" replace />} />

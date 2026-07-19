@@ -184,7 +184,8 @@
       "outstanding": "Outstanding",
       "overdue": "Overdue",
       "filtered": "Filtered",
-      "highest_priority": "Highest Priority"
+      "highest_priority": "Highest Priority",
+      "workflows": "Workflows (classic)"
     },
     "filter": {
       "status_label": "Status",
@@ -1684,5 +1685,56 @@
     "load_error": "Could not load the settings.",
     "save_error": "Could not save the settings.",
     "require_terms_needs_text": "Enter Terms & Conditions text first."
+  },
+  "work_queue": {
+    "title": "What needs me now",
+    "empty": "Nothing outstanding — your queue is empty.",
+    "open": "Open",
+    "untitled": "(untitled)",
+    "recents": "Recently opened",
+    "kpis": "Key figures",
+    "kpi_open_quotes": "Open quotes",
+    "kpi_due_this_week": "Due this week",
+    "kpi_win_rate": "Win rate (30 days)",
+    "view_workflows": "Classic workflows table",
+    "view_all_quotes": "All quotes",
+    "factor": "Factor",
+    "factor_raw": "Value",
+    "factor_weight": "Weight",
+    "factor_contribution": "Contribution",
+    "factor_due": "Due date",
+    "factor_value": "Quote value",
+    "factor_unresolved": "Open review items",
+    "factor_flags": "Flags",
+    "source_quote_action": "Quote",
+    "source_task": "Task",
+    "source_review_item": "Review item",
+    "source_vendor_rfq": "Vendor RFQ",
+    "source_mention": "Mention",
+    "chip": {
+      "due_in": "due in {{days}} days",
+      "due_today": "due today",
+      "overdue": "{{days}} days overdue",
+      "unresolved": "{{count}} open review items",
+      "expedite": "expedited",
+      "vip": "key account",
+      "export_controlled": "export-controlled",
+      "task_assigned": "assigned to you",
+      "review_item_assigned": "review item for you",
+      "mentioned": "you were mentioned"
+    }
+  },
+  "workQueueSettings": {
+    "title": "Dashboard queue",
+    "intro": "Weights for the urgency score. Higher values make a factor count for more; the queue re-sorts immediately.",
+    "weight_due": "Due date",
+    "weight_value": "Quote value",
+    "weight_unresolved": "Open review items",
+    "weight_flags": "Flags (expedite / key account / export control)",
+    "vendor_rfq_queue_enabled": "Show vendor RFQs in the queue",
+    "save": "Save",
+    "saved": "Saved.",
+    "load_error": "Could not load settings.",
+    "save_error": "Could not save."
   }
 }
