@@ -1834,14 +1834,8 @@
     "show_all_vendors": "Alle Lieferanten anzeigen (auch ohne passende Fähigkeit)",
     "no_matching_vendors": "Kein Lieferant mit passendem Verfahren. „Alle Lieferanten anzeigen“ aktivieren oder Fähigkeiten pflegen.",
     "export_controlled_warning": "Achtung: mindestens eine Position ist als exportkontrolliert markiert. Prüfen Sie vor dem Versand, welche Dateien der Lieferant erhält.",
-    "awaiting": "⏳ Warten auf {{count}} Lieferantenantwort",
-    "awaiting_plural": "⏳ Warten auf {{count}} Lieferantenantworten",
-    "pending_warning": "{{count}} Position hat eine offene Lieferanten-Anfrage. Trotzdem fortfahren?",
-    "pending_warning_plural": "{{count}} Positionen haben offene Lieferanten-Anfragen. Trotzdem fortfahren?",
     "get_vendor_quote": "Lieferantenangebot einholen",
     "send_vendor_rfq": "Lieferanten-Anfrage senden",
-    "sent_toast": "{{count}} Lieferanten-Anfrage erstellt",
-    "sent_toast_plural": "{{count}} Lieferanten-Anfragen erstellt",
     "section": {
       "lines": "Positionen",
       "vendors": "Lieferanten"
@@ -1858,7 +1852,14 @@
     },
     "actions": {
       "cancel": "Abbrechen",
-      "send": "An {{count}} Lieferanten senden"
-    }
+      "send_one": "An {{count}} Lieferanten senden",
+      "send_other": "An {{count}} Lieferanten senden"
+    },
+    "awaiting_one": "⏳ Warten auf {{count}} Lieferantenantwort",
+    "awaiting_other": "⏳ Warten auf {{count}} Lieferantenantworten",
+    "pending_warning_one": "{{count}} Position hat eine offene Lieferanten-Anfrage. Trotzdem fortfahren?",
+    "pending_warning_other": "{{count}} Positionen haben offene Lieferanten-Anfragen. Trotzdem fortfahren?",
+    "sent_toast_one": "{{count}} Lieferanten-Anfrage erstellt",
+    "sent_toast_other": "{{count}} Lieferanten-Anfragen erstellt"
   }
 }

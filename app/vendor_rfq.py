@@ -56,6 +56,7 @@ from .models import (
     VendorRfqStatus,
     VendorStatus,
 )
+from .pricing import _lock_editable, reprice_component
 from .quote_tokens import create_vendor_rfq_token
 from .vendor_rfq_ranking import RankedVendor, VendorSignals, rank_vendors, suggested_ids
 
@@ -160,13 +161,18 @@ def _default_file_ids(files: Sequence[PartFile]) -> list[uuid.UUID]:
     Everything, **except** that where a redacted copy exists its original is swapped
     out for it: a redaction was made precisely so the un-redacted drawing would not
     leave the shop, so the default must not re-offer the original. The estimator can
-    still tick it back on — the spec's toggle is per vendor and per file."""
-    redacted_stems = {
-        f.filename.rsplit(".", 1)[0].removesuffix(_REDACTED_SUFFIX) for f in files if f.is_redacted
-    }
-    return [
-        f.id for f in files if f.is_redacted or f.filename.rsplit(".", 1)[0] not in redacted_stems
-    ]
+    still tick it back on — the spec's toggle is per vendor and per file.
+
+    Pairing keeps the **extension**, not just the stem: ``zeichnung-redacted.pdf``
+    supersedes ``zeichnung.pdf`` but must not also drop ``zeichnung.dxf``, which no
+    one has redacted and which the vendor needs to quote."""
+
+    def superseded_name(filename: str) -> str:
+        stem, dot, ext = filename.rpartition(".")
+        return f"{stem.removesuffix(_REDACTED_SUFFIX)}{dot}{ext}" if dot else filename
+
+    superseded = {superseded_name(f.filename) for f in files if f.is_redacted}
+    return [f.id for f in files if f.is_redacted or f.filename not in superseded]
 
 
 async def _rank_candidates(
@@ -451,9 +457,18 @@ async def send_batch(
     allowed_files = await _validate_files(session, payload.recipients, part_ids)
 
     if payload.costing_mode is not None:
+        # Flipping Make/Buy changes what the line costs, so it goes through the same
+        # two gates the dedicated endpoint uses: the config-freeze/edit lock, and a
+        # reprice. Without the reprice the line would persist a self-contradictory
+        # state — flagged Buy but still carrying make-mode internal cost — until some
+        # unrelated edit silently repriced it later.
         mode = _parse_costing_mode(payload.costing_mode)
-        for item, _, _, _ in rows:
+        for item, component, _, _ in rows:
+            await _lock_editable(session, component)
             item.costing_mode = mode
+        await session.flush()
+        for _, component, _, _ in rows:
+            await reprice_component(session, org_id, component.id)
 
     secret = request.app.state.settings.resolve_quote_token_secret()
     now = datetime.now(UTC)
@@ -485,7 +500,7 @@ async def send_batch(
             )
 
         contact = (
-            await session.get(VendorContact, recipient_in.vendor_contact_id)
+            await _resolve_contact(session, vendor, recipient_in.vendor_contact_id)
             if recipient_in.vendor_contact_id is not None
             else contacts.get(vendor.id)
         )
@@ -536,6 +551,26 @@ def _parse_costing_mode(raw: str) -> CostingMode:
             "costing_mode must be 'make' or 'buy'.",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         ) from exc
+
+
+async def _resolve_contact(
+    session: AsyncSession, vendor: Vendor, contact_id: uuid.UUID
+) -> VendorContact:
+    """The quoting contact this vendor's RFQ addresses — **checked against the vendor**.
+
+    The composite FK only pins the contact to the same *org*, not the same *vendor*, so
+    without this a client-supplied id could address vendor A's RFQ — and the portal
+    token carrying A's file allowlist — to a competing supplier's inbox. That would
+    defeat both the blind send and the per-vendor file scoping this block exists for."""
+    contact = await session.get(VendorContact, contact_id)
+    if contact is None or contact.vendor_id != vendor.id or contact.deleted_at is not None:
+        raise AppError(
+            "unknown_vendor_contact",
+            "The selected quoting contact does not belong to this vendor.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            details={"vendor_id": str(vendor.id), "vendor_contact_id": str(contact_id)},
+        )
+    return contact
 
 
 async def _resolve_vendors(

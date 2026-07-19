@@ -350,12 +350,14 @@ async def load_pricing_env(session: AsyncSession, component: Component) -> Prici
 
     # Make vs Buy lives on the *line item* (M6.4). A component that roots no line
     # item — a BOM child, or a component mid-creation — is costed the normal way.
-    costing_mode = (
-        await session.scalar(
-            select(QuoteItem.costing_mode).where(QuoteItem.root_component_id == component.id)
+    costing_mode = CostingMode.make
+    if component.is_root_component:
+        costing_mode = (
+            await session.scalar(
+                select(QuoteItem.costing_mode).where(QuoteItem.root_component_id == component.id)
+            )
+            or CostingMode.make
         )
-        or CostingMode.make
-    )
 
     contact_obj: KalkObject | None = None
     quote_row = await session.scalar(

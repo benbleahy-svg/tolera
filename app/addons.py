@@ -31,6 +31,7 @@ from .models import (
     AddOnDef,
     Component,
     ComponentQuantity,
+    CostingMode,
     ExpediteOption,
     Organization,
     QuoteItem,
@@ -565,7 +566,19 @@ async def quote_totals(
         # a manual cost at this break (the M1.14 missing-rates signal)
         buckets = await rollup_inputs(session, quote_item.root_component_id)
         bucket = next((b for b in buckets if b.quantity == brk.quantity), None)
-        unpriced = brk.total_price is None or (bucket is not None and bucket.has_unpriced_rows)
+        # M6.4: a part-level **Buy** line has exactly one cost source — the vendor's
+        # price in ``manual_outside_cost``. Without it the line has no cost at all,
+        # and its router rows (still present, but not contributing in Buy mode) would
+        # otherwise make it look priced. That would put a silent €0,00 on the quote
+        # for a part the shop has not been quoted for yet, so it counts as unpriced.
+        awaiting_vendor_price = (
+            quote_item.costing_mode is CostingMode.buy and brk.manual_outside_cost is None
+        )
+        unpriced = (
+            brk.total_price is None
+            or awaiting_vendor_price
+            or (bucket is not None and bucket.has_unpriced_rows)
+        )
         has_unpriced = has_unpriced or unpriced
         line_net = round_money((brk.total_price or _ZERO) + required_total)
         net += line_net

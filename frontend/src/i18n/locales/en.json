@@ -1834,14 +1834,8 @@
     "show_all_vendors": "Show all vendors (including non-matching capabilities)",
     "no_matching_vendors": "No vendor matches these process types. Tick “Show all vendors” or add capabilities in the directory.",
     "export_controlled_warning": "Note: at least one line is flagged export-controlled. Check which files each vendor receives before sending.",
-    "awaiting": "⏳ Awaiting {{count}} vendor response",
-    "awaiting_plural": "⏳ Awaiting {{count}} vendor responses",
-    "pending_warning": "{{count}} line item has a pending vendor quote. Continue anyway?",
-    "pending_warning_plural": "{{count}} line items have pending vendor quotes. Continue anyway?",
     "get_vendor_quote": "Get vendor quote",
     "send_vendor_rfq": "Send vendor RFQ",
-    "sent_toast": "{{count}} vendor RFQ created",
-    "sent_toast_plural": "{{count}} vendor RFQs created",
     "section": {
       "lines": "Line items",
       "vendors": "Vendors"
@@ -1858,7 +1852,14 @@
     },
     "actions": {
       "cancel": "Cancel",
-      "send": "Send to {{count}} vendors"
-    }
+      "send_one": "Send to {{count}} vendor",
+      "send_other": "Send to {{count}} vendors"
+    },
+    "awaiting_one": "⏳ Awaiting {{count}} vendor response",
+    "awaiting_other": "⏳ Awaiting {{count}} vendor responses",
+    "pending_warning_one": "{{count}} line item has a pending vendor quote. Continue anyway?",
+    "pending_warning_other": "{{count}} line items have pending vendor quotes. Continue anyway?",
+    "sent_toast_one": "{{count}} vendor RFQ created",
+    "sent_toast_other": "{{count}} vendor RFQs created"
   }
 }

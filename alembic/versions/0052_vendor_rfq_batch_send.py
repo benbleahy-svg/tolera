@@ -66,9 +66,10 @@ def upgrade() -> None:
     op.execute("CREATE INDEX ix_vendor_rfq_org_status ON vendor_rfq (org_id, status)")
 
     # --- per-org RFQ number allocator (mirrors quote_counter, 0008) ---------
-    # ``last_number`` = last assigned number (0 ⇒ the first batch gets 1). Not
-    # org-scoped by RLS: it is a bare counter with no tenant data, keyed by org_id
-    # like ``quote_counter``, and the upsert row-locks so concurrent sends serialise.
+    # ``last_number`` = last assigned number (0 ⇒ the first batch gets 1). The upsert
+    # row-locks, so a concurrent multi-send serialises. Keyed by ``org_id``, so it
+    # gets the same RLS treatment ``quote_counter`` has — the counter carries no
+    # tenant data, but defence in depth is the house rule, not a judgement call.
     op.execute(
         """
         CREATE TABLE vendor_rfq_counter (
@@ -78,6 +79,15 @@ def upgrade() -> None:
         """
     )
     op.execute(f"GRANT SELECT, INSERT, UPDATE ON vendor_rfq_counter TO {APP_ROLE}")
+    op.execute("ALTER TABLE vendor_rfq_counter ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE vendor_rfq_counter FORCE ROW LEVEL SECURITY")
+    op.execute(
+        """
+        CREATE POLICY org_isolation ON vendor_rfq_counter
+            USING (org_id = current_setting('app.current_org_id', true)::uuid)
+            WITH CHECK (org_id = current_setting('app.current_org_id', true)::uuid)
+        """
+    )
 
     # --- recipient → directory link ----------------------------------------
     # ``vendor_contact`` has no composite-FK target yet (M6.3 needed none); add the

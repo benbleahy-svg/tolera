@@ -548,6 +548,101 @@ def test_send_records_buy_mode_lines(app_client: TestClient, seeder: Seeder) -> 
         assert item["costing_mode"] == "buy"
 
 
+def test_send_with_buy_mode_reprices_the_line_immediately(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """Flipping to Buy as part of the send must reprice then and there — otherwise the
+    line persists as Buy while still carrying make-mode internal cost, and the total
+    drops silently the next time something unrelated triggers a reprice."""
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        line = _new_quote_item(app_client)
+        _add_manual_op(app_client, line["component_id"], "CNC Bearbeitung", "100.0000")
+        vendor = _create_vendor(app_client, "Dreherei Ost", processes=["drehen"])
+        _send(app_client, line, [{"vendor_id": vendor}], costing_mode="buy")
+
+        row = _costing_row(app_client, line["component_id"])
+        assert Decimal(row["inside"]) == Decimal("0.0000")
+        assert Decimal(row["total"]) == Decimal("0.0000")
+        assert row["buy_awaiting_vendor_price"] is True
+
+
+def test_buy_line_without_a_vendor_price_counts_as_unpriced_on_the_quote(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """A Buy line's only cost source is the vendor's price. Without it the quote must
+    say **unpriced**, never quietly total 0,00 € for a part nobody has quoted yet."""
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        line = _new_quote_item(app_client)
+        _add_manual_op(app_client, line["component_id"], "CNC Bearbeitung", "100.0000")
+
+        priced = app_client.get(f"/api/quotes/{line['quote_id']}/totals").json()
+        assert priced["has_unpriced_lines"] is False
+        assert priced["net_minor"] == 10000
+
+        app_client.patch(
+            f"/api/quote-items/{line['item_id']}/costing-mode", json={"costing_mode": "buy"}
+        )
+        awaiting = app_client.get(f"/api/quotes/{line['quote_id']}/totals").json()
+        assert awaiting["has_unpriced_lines"] is True
+        assert awaiting["items"][0]["unpriced"] is True
+
+        # ...and the vendor's price makes it priced again.
+        app_client.patch(
+            f"/api/components/{line['component_id']}/outside-cost/1",
+            json={"manual_outside_cost": "210.0000"},
+        )
+        settled = app_client.get(f"/api/quotes/{line['quote_id']}/totals").json()
+        assert settled["has_unpriced_lines"] is False
+        assert settled["net_minor"] == 21000
+
+
+def test_send_rejects_a_quoting_contact_from_another_vendor(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """The composite FK pins the contact to the same *org*, not the same *vendor* — so
+    without an explicit check a client-supplied id could address this vendor's RFQ, and
+    the portal token carrying its file allowlist, to a competing supplier's inbox."""
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        line = _new_quote_item(app_client)
+        mine = _create_vendor(app_client, "Eloxal Nord", processes=["eloxieren"])
+        rival = _create_vendor(app_client, "Eloxal Sued", processes=["eloxieren"])
+        rival_contact = app_client.get(f"/api/vendors/{rival}/contacts").json()[0]["id"]
+
+        res = app_client.post(
+            "/api/vendor-rfqs/batch",
+            json={
+                "quote_id": line["quote_id"],
+                "quote_item_ids": [line["item_id"]],
+                "recipients": [{"vendor_id": mine, "vendor_contact_id": rival_contact}],
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert res.json()["code"] == "unknown_vendor_contact"
+
+
+def test_default_files_keep_an_unredacted_sibling_of_another_type(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """A redacted PDF supersedes *its own* original, not every file sharing the stem —
+    the STEP/DXF nobody redacted is still what the vendor needs to quote."""
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        line = _new_quote_item(app_client)
+        part_id = _part_of(app_client, line)
+        seeder.part_file(org, part_id, "zeichnung.pdf")
+        cad = seeder.part_file(org, part_id, "zeichnung.dxf")
+        redacted = seeder.part_file(org, part_id, "zeichnung-redacted.pdf", is_redacted=True)
+
+        body = app_client.get(
+            "/api/vendor-rfqs/compose",
+            params={"quote_id": line["quote_id"], "quote_item_ids": line["item_id"]},
+        ).json()
+        assert set(body["lines"][0]["default_file_ids"]) == {str(cad), str(redacted)}
+
+
 def test_send_rejects_a_vendor_from_another_org(app_client: TestClient, seeder: Seeder) -> None:
     """Tenancy: a vendor id from org B must not attach to org A's batch."""
     org_a, user_a = _org_admin(seeder, "org-a")

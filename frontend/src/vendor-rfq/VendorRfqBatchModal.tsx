@@ -17,7 +17,13 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '../api/client';
-import { type ComposePayload, type CostingMode, type SendRecipient, useVendorRfqApi } from './api';
+import {
+  type ComposeLine,
+  type ComposePayload,
+  type CostingMode,
+  type SendRecipient,
+  useVendorRfqApi,
+} from './api';
 
 export function VendorRfqBatchModal({
   quoteId,
@@ -36,6 +42,11 @@ export function VendorRfqBatchModal({
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const [compose, setCompose] = useState<ComposePayload | null>(null);
+  // The line checklist is a **stable** snapshot of everything the caller offered.
+  // The vendor list narrows to whatever is currently ticked, but the checklist must
+  // not — a line unticked once has to be re-tickable, and the server only returns
+  // the lines it was asked about.
+  const [allLines, setAllLines] = useState<ComposeLine[]>([]);
   const [includeAllVendors, setIncludeAllVendors] = useState(false);
   const [selectedLines, setSelectedLines] = useState<string[]>(quoteItemIds);
   const [selectedVendors, setSelectedVendors] = useState<string[]>([]);
@@ -78,6 +89,8 @@ export function VendorRfqBatchModal({
   useEffect(() => {
     let cancelled = false;
     if (selectedLines.length === 0) {
+      // Nothing ticked: no vendors to offer, but keep the checklist on screen so the
+      // estimator can tick a line back on instead of being stuck in an empty modal.
       setCompose(null);
       return;
     }
@@ -86,9 +99,23 @@ export function VendorRfqBatchModal({
       .then((payload) => {
         if (cancelled) return;
         setCompose(payload);
+        // Grow the stable checklist; never shrink it (see `allLines`).
+        setAllLines((prev) => {
+          const seen = new Set(prev.map((l) => l.quote_item_id));
+          return [...prev, ...payload.lines.filter((l) => !seen.has(l.quote_item_id))];
+        });
         setSelectedVendors(payload.vendors.filter((v) => v.suggested).map((v) => v.id));
+        // Seed a *newly offered* vendor's file allowlist with the defaults, but never
+        // overwrite one the estimator has already adjusted — that allowlist is the
+        // one setting here with disclosure consequences.
         const defaults = payload.lines.flatMap((line) => line.default_file_ids);
-        setVendorFiles(Object.fromEntries(payload.vendors.map((v) => [v.id, defaults])));
+        setVendorFiles((prev) => {
+          const next = { ...prev };
+          for (const vendor of payload.vendors) {
+            if (!(vendor.id in next)) next[vendor.id] = defaults;
+          }
+          return next;
+        });
       })
       .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
     return () => {
@@ -96,10 +123,19 @@ export function VendorRfqBatchModal({
     };
   }, [api, quoteId, selectedLines, includeAllVendors]);
 
-  const allFiles = useMemo(() => (compose?.lines ?? []).flatMap((line) => line.files), [compose]);
+  // Files + the export-control warning follow what is actually *selected*, not the
+  // whole checklist — an unticked line is not being disclosed to anyone.
+  const selectedLineRows = useMemo(
+    () => allLines.filter((line) => selectedLines.includes(line.quote_item_id)),
+    [allLines, selectedLines],
+  );
+  const allFiles = useMemo(
+    () => selectedLineRows.flatMap((line) => line.files),
+    [selectedLineRows],
+  );
   const exportControlled = useMemo(
-    () => (compose?.lines ?? []).some((line) => line.export_controlled),
-    [compose],
+    () => selectedLineRows.some((line) => line.export_controlled),
+    [selectedLineRows],
   );
 
   const toggle = (list: string[], id: string) =>
@@ -144,7 +180,7 @@ export function VendorRfqBatchModal({
         <form className="crm-form" onSubmit={submit}>
           <fieldset className="crm-fieldset">
             <legend>{t('vendorRfq.section.lines')}</legend>
-            {(compose?.lines ?? []).map((line) => (
+            {allLines.map((line) => (
               <label key={line.quote_item_id} className="crm-check">
                 <input
                   type="checkbox"
