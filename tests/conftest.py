@@ -254,6 +254,22 @@ class Seeder:
 
         self._loop.run_until_complete(_run())
 
+    def count(
+        self, table: str, where: str = "TRUE", params: dict[str, object] | None = None
+    ) -> int:
+        """Row count on the owner connection — for asserting what a write left
+        *behind* (retention/pruning), which no API surfaces. ``table`` is
+        interpolated, so pass a literal name, never caller input."""
+
+        async def _run() -> int:
+            async with self._engine.begin() as conn:
+                result = await conn.execute(
+                    text(f"SELECT count(*) FROM {table} WHERE {where}"), params or {}
+                )
+                return int(result.scalar_one())
+
+        return self._loop.run_until_complete(_run())
+
     def bom_child(
         self,
         org_id: uuid.UUID,

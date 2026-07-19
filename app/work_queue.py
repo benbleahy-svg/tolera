@@ -47,7 +47,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import Select, func, or_, select, text
+from sqlalchemy import Select, delete, func, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,6 +60,9 @@ from .models import (
     Account,
     ComponentQuantity,
     MembershipRole,
+    Order,
+    OrderLine,
+    Part,
     Quote,
     QuoteItem,
     QuoteStatus,
@@ -69,6 +72,8 @@ from .models import (
     Task,
     TaskStatus,
 )
+from .quote_filters import ACTIVE_QUOTE_STATUSES as _OPEN_STATUSES
+from .quote_filters import owned_by
 from .urgency import UrgencyInputs, UrgencyWeights, score_urgency
 
 work_queue_router = APIRouter(prefix="/api/work-queue", tags=["dashboard"])
@@ -76,12 +81,19 @@ work_queue_router = APIRouter(prefix="/api/work-queue", tags=["dashboard"])
 #: Statuses where the ball is in *our* court. A ``sent`` quote is waiting on the
 #: customer, a won/lost/cancelled one on nobody — neither is "my action".
 _MY_ACTION_STATUSES = (QuoteStatus.draft, QuoteStatus.on_hold)
-#: Statuses that still count as live pipeline for the manager KPI row.
-_OPEN_STATUSES = (QuoteStatus.draft, QuoteStatus.sent, QuoteStatus.on_hold)
+#: Statuses that still count as live pipeline for the manager KPI row. Shared
+#: with the "workflows" system view (app.quote_filters) so the glance row and the
+#: table it links to cannot disagree about what "open" means.
 #: The Recently-opened strip's length (spec ``#newscope``: "last 8 quotes/parts").
 _RECENTS_LIMIT = 8
+#: How many entries are retained per user. A small multiple of the strip length:
+#: enough that a deleted quote doesn't shorten the strip, far from a history log.
+_RECENTS_KEEP = 24
 _QUEUE_LIMIT_DEFAULT = 50
 _QUEUE_LIMIT_MAX = 200
+#: Per-source fetch ceiling before scoring/merging (see get_work_queue). Well
+#: above _QUEUE_LIMIT_MAX so the ranking still sees more than it can show.
+_SOURCE_FETCH_MAX = 500
 #: Roles the KPI glance row is for (spec ``#newscope``: "for managers").
 _MANAGER_ROLES = frozenset({MembershipRole.admin, MembershipRole.manager})
 
@@ -139,15 +151,21 @@ class WeightsOut(BaseModel):
     vendor_rfq_queue_enabled: bool
 
 
+#: Upper bound on a weight: the column is ``numeric(6,4)``, so anything at or
+#: above 100 overflows. Rejecting it at the edge (422) beats a mid-flush
+#: NumericValueOutOfRange surfacing as a 500 for input the contract called legal.
+_WEIGHT_MAX = Decimal("99.9999")
+
+
 class WeightsPatch(BaseModel):
     """A partial settings write — omitted fields keep their stored value."""
 
     model_config = ConfigDict(extra="forbid")
 
-    weight_due: Decimal | None = Field(default=None, ge=0, le=1000)
-    weight_value: Decimal | None = Field(default=None, ge=0, le=1000)
-    weight_unresolved: Decimal | None = Field(default=None, ge=0, le=1000)
-    weight_flags: Decimal | None = Field(default=None, ge=0, le=1000)
+    weight_due: Decimal | None = Field(default=None, ge=0, le=_WEIGHT_MAX)
+    weight_value: Decimal | None = Field(default=None, ge=0, le=_WEIGHT_MAX)
+    weight_unresolved: Decimal | None = Field(default=None, ge=0, le=_WEIGHT_MAX)
+    weight_flags: Decimal | None = Field(default=None, ge=0, le=_WEIGHT_MAX)
     vendor_rfq_queue_enabled: bool | None = None
 
 
@@ -161,10 +179,14 @@ class WorkQueueOut(BaseModel):
 
 
 class RecentRow(BaseModel):
+    """One *Recently opened* entry. ``deep_link`` is built server-side because it
+    depends on the entity type — the strip must not assume every row is a quote."""
+
     entity_type: str
     entity_id: uuid.UUID
     label: str
     status: str | None
+    deep_link: str
     opened_at: datetime
 
 
@@ -216,13 +238,17 @@ def _days_to_due(due: datetime | None, today: date) -> int | None:
     return (due.astimezone(UTC).date() - today).days
 
 
-def _has_expedite(expedite_tiers: dict[str, Any] | None) -> bool:
-    """The quote-level expedite editor state (M1.11) carries ``tiers``; a
-    non-empty list means the customer is paying for speed."""
-    if not expedite_tiers:
-        return False
-    tiers = expedite_tiers.get("tiers")
-    return bool(tiers)
+#: Why the expedite flag is sourced from an **accepted** checkout selection
+#: (``order_line.expedite_option_id``, M5.2) and *not* from ``quote.expedite_tiers``:
+#: that column is the top-of-quote editor's staging state — ``app.addons``
+#: writes the whole payload on "apply to all", and new orgs are seeded with two
+#: default tiers — so a non-empty ``tiers`` list means expedite options were
+#: **offered**, which is true of nearly every quote and says nothing about
+#: urgency. Scoring on it would rank ordinary jobs as rush jobs *and* tell the
+#: user so on the chip. A queue row is by definition draft/on-hold (not yet
+#: ordered), so this reads false today; it lights up by itself for a
+#: reopened/requoted job that carries a prior acceptance. See DECISIONS.md
+#: 2026-07-19 (M6.1 urgency-score contract).
 
 
 async def _quote_signals(
@@ -242,7 +268,6 @@ async def _quote_signals(
             Quote.number,
             Quote.status,
             Quote.due_date,
-            Quote.expedite_tiers,
             Quote.created_at,
             func.coalesce(Account.is_vip, False).label("vip"),
         )
@@ -278,10 +303,19 @@ async def _quote_signals(
         .where(QuoteItem.quote_id.in_(quote_ids), QuoteItem.export_controlled.is_(True))
         .group_by(QuoteItem.quote_id)
     )
+    # An *accepted* expedite — a checkout selection, not the offered menu (see
+    # the note above the signal dataclass).
+    expedite_stmt = (
+        select(Order.quote_id)
+        .join(OrderLine, OrderLine.order_id == Order.id)
+        .where(Order.quote_id.in_(quote_ids), OrderLine.expedite_option_id.isnot(None))
+        .group_by(Order.quote_id)
+    )
 
     values = {row[0]: row[1] for row in await session.execute(value_stmt)}
     unresolved = {row[0]: row[1] for row in await session.execute(unresolved_stmt)}
     export_flagged = {row[0] for row in await session.execute(export_stmt)}
+    expedited = {row[0] for row in await session.execute(expedite_stmt)}
 
     out: dict[uuid.UUID, _QuoteSignals] = {}
     for row in await session.execute(base):
@@ -293,7 +327,7 @@ async def _quote_signals(
             # Numeric major units -> integer minor units at the boundary.
             value_minor=None if total is None else int(Decimal(total) * 100),
             unresolved_count=unresolved.get(row.id, 0),
-            expedite=_has_expedite(row.expedite_tiers),
+            expedite=row.id in expedited,
             vip=bool(row.vip),
             export_controlled=row.id in export_flagged,
             created_at=row.created_at,
@@ -342,10 +376,12 @@ def _due_chips(days: int | None) -> list[ReasonChip]:
     if days is None:
         return []
     if days < 0:
-        return [ReasonChip(key="work_queue.chip.overdue", params={"days": -days})]
+        # ``count`` (not ``days``) — it is i18next's plural selector, so German
+        # renders "seit 1 Tag" vs "seit 3 Tagen" rather than always the plural.
+        return [ReasonChip(key="work_queue.chip.overdue", params={"count": -days})]
     if days == 0:
         return [ReasonChip(key="work_queue.chip.due_today")]
-    return [ReasonChip(key="work_queue.chip.due_in", params={"days": days})]
+    return [ReasonChip(key="work_queue.chip.due_in", params={"count": days})]
 
 
 def _signal_chips(signals: _QuoteSignals | None) -> list[ReasonChip]:
@@ -369,13 +405,15 @@ def _signal_chips(signals: _QuoteSignals | None) -> list[ReasonChip]:
 # Sources
 # --------------------------------------------------------------------------- #
 def _my_action_quotes_stmt(user_id: uuid.UUID) -> Select[Any]:
-    """Quotes where the ball is in my court. Deliberately reuses the *my-quotes*
-    ownership predicate of :func:`app.quote_filters.apply_system_view` — one
-    definition of "mine", not a parallel one."""
+    """Quotes where the ball is in my court — mine, open, not trashed.
+
+    Ownership comes from :func:`app.quote_filters.owned_by`, the same predicate
+    the ``my-quotes`` system view uses, so "mine" is defined once and the queue
+    cannot drift from the list."""
     return select(Quote.id).where(
         Quote.status.in_(_MY_ACTION_STATUSES),
         Quote.deleted_at.is_(None),
-        or_(Quote.salesperson_id == user_id, Quote.estimator_id == user_id),
+        owned_by(user_id),
     )
 
 
@@ -417,16 +455,28 @@ async def get_work_queue(
     weights = settings.weights
     org_name, org_slug = await _org_identity(session, org_id)
 
-    my_action_ids = set(await session.scalars(_my_action_quotes_stmt(user_id)))
+    my_action_ids = set(
+        await session.scalars(_my_action_quotes_stmt(user_id).limit(_SOURCE_FETCH_MAX))
+    )
     quote_ids = set(my_action_ids)
+    # Each source is bounded before the merge: an estimator with thousands of open
+    # review items must not make the dashboard fan out over thousands of parent
+    # quotes to then show 50 rows. Newest-first with an id tiebreaker keeps the
+    # truncation itself deterministic.
     tasks = list(
         await session.scalars(
-            select(Task).where(Task.assignee_id == user_id, Task.status != TaskStatus.resolved)
+            select(Task)
+            .where(Task.assignee_id == user_id, Task.status != TaskStatus.resolved)
+            .order_by(Task.created_at.desc(), Task.id.desc())
+            .limit(_SOURCE_FETCH_MAX)
         )
     )
     review_items = list(
         await session.scalars(
-            select(ReviewItem).where(ReviewItem.assignee_id == user_id, ReviewItem.status == "open")
+            select(ReviewItem)
+            .where(ReviewItem.assignee_id == user_id, ReviewItem.status == "open")
+            .order_by(ReviewItem.created_at.desc(), ReviewItem.id.desc())
+            .limit(_SOURCE_FETCH_MAX)
         )
     )
     mentions = await _cross_org_mentions(session)
@@ -628,21 +678,34 @@ async def get_recents(
         )
     )
     quote_ids = [r.entity_id for r in recents if r.entity_type == "quote"]
-    labels: dict[uuid.UUID, tuple[str, str]] = {}
+    part_ids = [r.entity_id for r in recents if r.entity_type == "part"]
+    labels: dict[uuid.UUID, tuple[str, str | None]] = {}
     if quote_ids:
-        for row in await session.execute(
+        for quote_row in await session.execute(
             select(Quote.id, Quote.number, Quote.status).where(Quote.id.in_(quote_ids))
         ):
-            labels[row.id] = (row.number, row.status.value)
+            labels[quote_row.id] = (quote_row.number, quote_row.status.value)
+    if part_ids:
+        for part_row in await session.execute(
+            select(Part.id, Part.part_number, Part.name).where(Part.id.in_(part_ids))
+        ):
+            labels[part_row.id] = (part_row.part_number or part_row.name or "", None)
     out: list[RecentRow] = []
     for recent in recents:
-        label, quote_status = labels.get(recent.entity_id, ("", None))
+        resolved = labels.get(recent.entity_id)
+        if resolved is None:
+            # Deleted (or never existed) — a strip entry linking to a 404 is worse
+            # than a shorter strip.
+            continue
+        label, quote_status = resolved
+        section = "quotes" if recent.entity_type == "quote" else "parts"
         out.append(
             RecentRow(
                 entity_type=recent.entity_type,
                 entity_id=recent.entity_id,
                 label=label,
                 status=quote_status,
+                deep_link=f"/{section}/{recent.entity_id}",
                 opened_at=recent.opened_at,
             )
         )
@@ -655,9 +718,27 @@ async def record_recent(
     session: Annotated[AsyncSession, Depends(get_session)],
     principal: Annotated[Principal, Depends(require(Permission.view_all))],
 ) -> Response:
-    """Record that the caller opened something. Upsert on (org, user, entity):
-    re-opening refreshes the timestamp instead of appending, so this stays a
-    resume affordance and never becomes an unbounded access log."""
+    """Record that the caller opened something.
+
+    Upsert on (org, user, entity) so re-opening refreshes the timestamp rather
+    than appending, then prune to :data:`_RECENTS_KEEP`. Both matter: this is a
+    *resume affordance*, not an access log — an unpruned one would become a
+    per-user browsing history with a retention duty under the GDPR pack, for
+    rows nobody ever reads (only the newest :data:`_RECENTS_LIMIT` are shown).
+
+    The entity is verified through the caller's org-scoped session first, so a
+    client cannot plant arbitrary ids (or another org's) into its own strip."""
+    exists_stmt = (
+        select(Quote.id).where(Quote.id == payload.entity_id, Quote.deleted_at.is_(None))
+        if payload.entity_type == "quote"
+        else select(Part.id).where(Part.id == payload.entity_id)
+    )
+    if (await session.scalars(exists_stmt)).one_or_none() is None:
+        raise AppError(
+            "not_found",
+            "Unknown entity.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
     now = datetime.now(UTC)
     stmt = pg_insert(RecentView).values(
         org_id=principal.active_org_id,
@@ -675,6 +756,21 @@ async def record_recent(
                 RecentView.entity_id,
             ],
             set_={"opened_at": now},
+        )
+    )
+    # Keep the tail bounded (see the docstring). Deletes by primary key from a
+    # window over this user's own rows — RLS still pins the org.
+    keep = (
+        select(RecentView.entity_type, RecentView.entity_id)
+        .where(RecentView.user_id == principal.user_id)
+        .order_by(RecentView.opened_at.desc(), RecentView.entity_id.desc())
+        .limit(_RECENTS_KEEP)
+        .subquery()
+    )
+    await session.execute(
+        delete(RecentView).where(
+            RecentView.user_id == principal.user_id,
+            tuple_(RecentView.entity_type, RecentView.entity_id).notin_(select(keep)),
         )
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -701,13 +797,30 @@ async def get_kpis(
     # "Due this week" includes what is already overdue — it is due, and hiding it
     # here would make the glance row disagree with the queue above it.
     due_stmt = open_stmt.where(Quote.due_date.isnot(None), Quote.due_date < now + timedelta(days=7))
-    won_lost_stmt = (
-        select(QuoteStatusEvent.to_status, func.count(func.distinct(QuoteStatusEvent.quote_id)))
+    # One quote, one outcome: a quote won then reopened and lost inside the window
+    # would otherwise land in *both* buckets and report a 50% win rate off a single
+    # loss. Take each quote's LAST closing event in the window, then tally.
+    ranked = (
+        select(
+            QuoteStatusEvent.quote_id,
+            QuoteStatusEvent.to_status,
+            func.row_number()
+            .over(
+                partition_by=QuoteStatusEvent.quote_id,
+                order_by=(QuoteStatusEvent.created_at.desc(), QuoteStatusEvent.id.desc()),
+            )
+            .label("rn"),
+        )
         .where(
             QuoteStatusEvent.to_status.in_((QuoteStatus.won, QuoteStatus.lost)),
             QuoteStatusEvent.created_at >= now - timedelta(days=30),
         )
-        .group_by(QuoteStatusEvent.to_status)
+        .subquery()
+    )
+    won_lost_stmt = (
+        select(ranked.c.to_status, func.count())
+        .where(ranked.c.rn == 1)
+        .group_by(ranked.c.to_status)
     )
     closed = {row[0]: row[1] for row in await session.execute(won_lost_stmt)}
     won = closed.get(QuoteStatus.won, 0)

@@ -1,8 +1,11 @@
 /**
  * "Recently opened" strip (M6.1, spec #newscope §2) — the user's last 8 quotes
- * for instant resume, most recent first. Thumbnails arrive with the part-preview
- * work; v1 shows number + status, which is what the strip is actually used for
- * (finding the thing you had open five minutes ago).
+ * or parts for instant resume, most recent first. Thumbnails arrive with the
+ * part-preview work; v1 shows number + status, which is what the strip is
+ * actually used for (finding the thing you had open five minutes ago).
+ *
+ * The link comes from the row (`deep_link`), not from a hard-coded `/quotes/`
+ * prefix: a part entry must not route into the quotes section.
  */
 
 import { useTranslation } from 'react-i18next';
@@ -22,7 +25,7 @@ export function RecentlyOpened({ rows }: { rows: RecentRow[] }): React.ReactElem
       <ul>
         {rows.map((row) => (
           <li key={`${row.entity_type}:${row.entity_id}`} data-testid="recent-row">
-            <Link to={`/quotes/${row.entity_id}`}>
+            <Link to={row.deep_link}>
               <span className="recent-label">{row.label || row.entity_id.slice(0, 8)}</span>
               {row.status && (
                 <span className={`recent-status recent-status-${row.status}`}>

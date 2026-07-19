@@ -74,6 +74,8 @@ export function DashboardPage(): React.ReactElement {
       // The KPI row is a separate, role-gated call: a non-manager must not have
       // a 403 take the whole dashboard down with it.
       setKpis(isManager ? await api.getKpis() : null);
+      // A transient failure must not leave the alert up for the rest of the session.
+      setError(null);
     } catch {
       setError(t('collab.load_error'));
     }

@@ -303,7 +303,7 @@ def test_reason_chips_say_why_the_row_surfaced(app_client: TestClient, seeder: S
 
     quote_row = next(r for r in rows if r["source"] == "quote_action")
     chips = {c["key"]: c["params"] for c in quote_row["reason_chips"]}
-    assert chips["work_queue.chip.overdue"] == {"days": 3}
+    assert chips["work_queue.chip.overdue"] == {"count": 3}
     assert chips["work_queue.chip.unresolved"] == {"count": 3}
     # Chips are i18n keys + params — no server-rendered prose crosses the wire.
     assert all(c["key"].startswith("work_queue.chip.") for c in quote_row["reason_chips"])
@@ -479,6 +479,69 @@ def test_recents_are_per_user(app_client: TestClient, seeder: Seeder) -> None:
         assert app_client.get("/api/work-queue/recents").json()["rows"] == []
 
 
+def test_recents_reject_an_entity_that_does_not_exist(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """A client must not be able to plant arbitrary ids (or another org's) into
+    its own strip."""
+    org_a, me = _org_user(seeder, "recentsghost-org")
+    org_b = seeder.org("recentsother-org")
+    stranger = seeder.user("stranger@recentsother-org.example")
+    seeder.membership(stranger, org_b, ADMIN)
+    other_orgs_quote = seeder.quote(org_b, "2201")
+
+    with authed(app_client, user_id=me, org_id=org_a, roles=ADMIN):
+        missing = app_client.post(
+            "/api/work-queue/recents",
+            json={"entity_type": "quote", "entity_id": str(uuid.uuid4())},
+        )
+        foreign = app_client.post(
+            "/api/work-queue/recents",
+            json={"entity_type": "quote", "entity_id": str(other_orgs_quote)},
+        )
+        assert app_client.get("/api/work-queue/recents").json()["rows"] == []
+
+    assert missing.status_code == 404
+    assert foreign.status_code == 404
+
+
+def test_recents_are_pruned_so_the_table_is_not_a_browsing_history(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    org, me = _org_user(seeder, "recentsprune-org")
+    quotes = [seeder.quote(org, f"23{i:02d}") for i in range(30)]
+
+    with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
+        for quote in quotes:
+            app_client.post(
+                "/api/work-queue/recents", json={"entity_type": "quote", "entity_id": str(quote)}
+            )
+        recents = app_client.get("/api/work-queue/recents").json()["rows"]
+
+    assert len(recents) == 8  # the strip
+    stored = seeder.count("recent_view")
+    assert stored <= 24  # the retained tail, not all 30
+
+
+def test_recents_carry_a_type_correct_deep_link(app_client: TestClient, seeder: Seeder) -> None:
+    """A part entry must not route into the quotes section."""
+    org, me = _org_user(seeder, "recentslink-org")
+    quote = seeder.quote(org, "2401")
+    part = seeder.part(org)
+
+    with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
+        for entity_type, entity_id in (("quote", quote), ("part", part)):
+            res = app_client.post(
+                "/api/work-queue/recents",
+                json={"entity_type": entity_type, "entity_id": str(entity_id)},
+            )
+            assert res.status_code == 204, res.text
+        rows = app_client.get("/api/work-queue/recents").json()["rows"]
+
+    links = {r["entity_type"]: r["deep_link"] for r in rows}
+    assert links == {"quote": f"/quotes/{quote}", "part": f"/parts/{part}"}
+
+
 def test_recents_reject_an_unknown_entity_type(app_client: TestClient, seeder: Seeder) -> None:
     org, me = _org_user(seeder, "recentstype-org")
     with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
@@ -487,6 +550,63 @@ def test_recents_reject_an_unknown_entity_type(app_client: TestClient, seeder: S
             json={"entity_type": "invoice", "entity_id": str(uuid.uuid4())},
         )
     assert res.status_code == 422
+
+
+def test_offered_expedite_tiers_are_not_an_urgency_flag(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """``quote.expedite_tiers`` is the *offered* expedite menu (every org ships
+    two defaults, and Apply-to-all writes them onto the quote). Treating it as
+    "the customer is paying for speed" would flag ordinary jobs as rush jobs and
+    say so on the chip — the flag needs an accepted tier, not an offered one."""
+    org, me = _org_user(seeder, "expedite-org")
+    quote = seeder.quote(org, "1901", estimator_id=me, due_date=_due(2))
+    seeder.sql(
+        "UPDATE quote SET expedite_tiers = :tiers WHERE id = :id",
+        {
+            "tiers": json.dumps(
+                {"standard_lead_time_days": 25, "tiers": [{"days_faster": 5, "markup_pct": "25"}]}
+            ),
+            "id": quote,
+        },
+    )
+
+    with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
+        rows = _rows(app_client)
+
+    factors = {f["key"]: f for f in rows[0]["factors"]}
+    assert factors["flags"]["raw"] == "0"
+    assert not [c for c in rows[0]["reason_chips"] if c["key"].endswith("expedite")]
+
+
+def test_weight_above_the_column_bound_is_a_422_not_a_500(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """``numeric(6,4)`` tops out below 100 — reject at the edge rather than let
+    the flush raise NumericValueOutOfRange."""
+    org, me = _org_user(seeder, "weightbound-org")
+    with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
+        assert (
+            app_client.put("/api/work-queue/settings", json={"weight_due": "500"}).status_code
+            == 422
+        )
+        assert (
+            app_client.put("/api/work-queue/settings", json={"weight_due": "99"}).status_code == 200
+        )
+
+
+def test_chips_pass_i18next_count_so_german_can_singularise(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    org, me = _org_user(seeder, "plural-org")
+    seeder.quote(org, "1951", estimator_id=me, due_date=_due(-1))
+
+    with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
+        rows = _rows(app_client)
+
+    chip = next(c for c in rows[0]["reason_chips"] if c["key"].endswith("overdue"))
+    # ``count`` (i18next's plural selector), not a bare ``days``.
+    assert chip["params"] == {"count": 1}
 
 
 # --------------------------------------------------------------------------- #
@@ -511,6 +631,48 @@ def test_kpi_row_counts_open_due_and_win_rate(app_client: TestClient, seeder: Se
     assert kpis["open_quotes"] == 2
     assert kpis["due_this_week"] == 1
     assert kpis["win_rate_30d_pct"] == "50.0"
+
+
+def test_win_rate_counts_each_quote_once_by_its_latest_outcome(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """A quote won, reopened, then lost inside the window is one loss — not a
+    50% win rate off a single quote."""
+    org, me = _org_user(seeder, "winrate-org")
+    quote = seeder.quote(org, "2501", status=QuoteStatus.lost)
+    for offset, to_status in ((5, "won"), (1, "lost")):
+        seeder.sql(
+            "INSERT INTO quote_status_event "
+            "(id, org_id, quote_id, from_status, to_status, created_at) "
+            "VALUES (:id, :org, :quote, 'sent', :status, now() - make_interval(days => :offset))",
+            {
+                "id": uuid.uuid4(),
+                "org": org,
+                "quote": quote,
+                "status": to_status,
+                "offset": offset,
+            },
+        )
+
+    with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
+        kpis = app_client.get("/api/work-queue/kpis").json()
+
+    assert kpis["win_rate_30d_pct"] == "0.0"
+
+
+def test_kpi_counts_agree_with_the_workflows_view(app_client: TestClient, seeder: Seeder) -> None:
+    """The glance row and the table it links to must mean the same thing by
+    "open" — an on-hold quote belongs to both."""
+    org, me = _org_user(seeder, "kpiagree-org")
+    seeder.quote(org, "2601", due_date=_due(2))
+    seeder.quote(org, "2602", status=QuoteStatus.on_hold, status_before_hold=QuoteStatus.draft)
+    seeder.quote(org, "2603", status=QuoteStatus.won)
+
+    with authed(app_client, user_id=me, org_id=org, roles=ADMIN):
+        kpis = app_client.get("/api/work-queue/kpis").json()
+        table = app_client.post("/api/quotes/search", json={"system_view": "workflows"}).json()
+
+    assert kpis["open_quotes"] == table["total"] == 2
 
 
 def test_kpi_row_is_manager_only(app_client: TestClient, seeder: Seeder) -> None:

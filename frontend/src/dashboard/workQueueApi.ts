@@ -66,6 +66,8 @@ export interface RecentRow {
   entity_id: string;
   label: string;
   status: string | null;
+  /** Built server-side — a part entry does not live under /quotes. */
+  deep_link: string;
   opened_at: string;
 }
 

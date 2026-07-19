@@ -37,6 +37,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    desc,
     func,
     text,
 )
@@ -2734,8 +2735,9 @@ class RecentView(Base):
 
     __tablename__ = "recent_view"
     __table_args__ = (
-        # The only read: this user's most-recent N in the active org.
-        Index("ix_recent_view_org_user_opened", "org_id", "user_id", "opened_at"),
+        # The only read: this user's most-recent N in the active org. DESC on
+        # opened_at mirrors the migration (0049) so autogenerate sees no drift.
+        Index("ix_recent_view_org_user_opened", "org_id", "user_id", desc("opened_at")),
     )
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 (SQLAlchemy config dunder)
 

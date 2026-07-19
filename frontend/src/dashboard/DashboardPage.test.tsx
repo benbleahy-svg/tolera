@@ -89,7 +89,7 @@ function queueRow(overrides: Record<string, unknown> = {}) {
     id: 'q1',
     quote_id: 'q1',
     label: '1001',
-    reason_chips: [{ key: 'work_queue.chip.due_in', params: { days: 2 } }],
+    reason_chips: [{ key: 'work_queue.chip.due_in', params: { count: 2 } }],
     urgency: '0.2000',
     factors: [
       { key: 'due', raw: '2', normalized: '0.5', weight: '0.4000', contribution: '0.2000' },
@@ -177,7 +177,7 @@ describe('DashboardPage', () => {
   it('merges every source into one prioritised queue with its reason chips', async () => {
     getQueue.mockResolvedValue({
       rows: [
-        queueRow({ urgency: '0.6000', reason_chips: [{ key: 'work_queue.chip.overdue', params: { days: 3 } }] }),
+        queueRow({ urgency: '0.6000', reason_chips: [{ key: 'work_queue.chip.overdue', params: { count: 3 } }] }),
         queueRow({
           source: 'task',
           id: 't1',
@@ -275,7 +275,14 @@ describe('DashboardPage', () => {
   it('shows the Recently-opened strip when there is something to resume', async () => {
     getRecents.mockResolvedValue({
       rows: [
-        { entity_type: 'quote', entity_id: 'q7', label: '1407', status: 'draft', opened_at: '2026-07-19T09:00:00Z' },
+        {
+          entity_type: 'quote',
+          entity_id: 'q7',
+          label: '1407',
+          status: 'draft',
+          deep_link: '/quotes/q7',
+          opened_at: '2026-07-19T09:00:00Z',
+        },
       ],
     });
     await renderWithProviders(<DashboardPage />);

@@ -271,8 +271,23 @@ SYSTEM_QUOTE_VIEWS: tuple[SystemView, ...] = (
 _SYSTEM_VIEW_KEYS = frozenset(v.key for v in SYSTEM_QUOTE_VIEWS)
 
 # Statuses that count as "still open" for the Overdue view (a won/lost/expired quote
-# is never overdue).
+# is never overdue). An on-hold quote is deliberately absent here: it is paused, so
+# it is not chased as overdue.
 _OPEN_STATUSES = (QuoteStatus.draft, QuoteStatus.sent)
+
+#: Everything still in play — the reference Dashboard's active-work set, and the
+#: one definition the M6.1 KPI row ("open quotes"/"due this week") and the
+#: ``workflows`` view below both read, so the glance row cannot disagree with the
+#: table it links to. Unlike ``_OPEN_STATUSES`` this includes ``on_hold``: a
+#: paused quote is still live work (and M6.1's queue surfaces it as "my action").
+ACTIVE_QUOTE_STATUSES = (QuoteStatus.draft, QuoteStatus.sent, QuoteStatus.on_hold)
+
+
+def owned_by(user_id: uuid.UUID) -> ColumnElement[bool]:
+    """ "Mine" — the single ownership predicate. The ``my-quotes`` view and the
+    M6.1 work queue's "needs my action" source both read it, so what counts as
+    the caller's quote is defined once."""
+    return or_(Quote.salesperson_id == user_id, Quote.estimator_id == user_id)
 
 
 def is_system_view(key: str) -> bool:
@@ -285,9 +300,7 @@ def apply_system_view(stmt: Select[Any], key: str, *, user_id: uuid.UUID) -> Sel
     if key == "all-quotes":
         return stmt.order_by(Quote.created_at.desc(), Quote.id.desc())
     if key == "my-quotes":
-        return stmt.where(
-            or_(Quote.salesperson_id == user_id, Quote.estimator_id == user_id)
-        ).order_by(Quote.created_at.desc(), Quote.id.desc())
+        return stmt.where(owned_by(user_id)).order_by(Quote.created_at.desc(), Quote.id.desc())
     if key == "drafts":
         return stmt.where(Quote.status == QuoteStatus.draft).order_by(
             Quote.created_at.desc(), Quote.id.desc()
@@ -306,7 +319,7 @@ def apply_system_view(stmt: Select[Any], key: str, *, user_id: uuid.UUID) -> Sel
     if key == "workflows":
         # The reference Dashboard's active-work table: everything still in play,
         # soonest-due first (undated last) — what the old landing page showed.
-        return stmt.where(Quote.status.in_(_OPEN_STATUSES)).order_by(
+        return stmt.where(Quote.status.in_(ACTIVE_QUOTE_STATUSES)).order_by(
             Quote.due_date.asc().nulls_last(), Quote.created_at.desc(), Quote.id.desc()
         )
     if key == "highest-priority":
