@@ -68,7 +68,7 @@ describe('VendorDetailPage', () => {
     expect(screen.getByRole('tab', { name: 'Fähigkeiten' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Notizen' })).toBeInTheDocument();
     expect(screen.getByText(/klose@galvanik-sued\.example/)).toBeInTheDocument();
-    expect(screen.getByText('DE123456789')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('DE123456789')).toBeInTheDocument();
   });
 
   it('labels the Notes tab as internal-only', async () => {
@@ -93,6 +93,41 @@ describe('VendorDetailPage', () => {
     await renderWithProviders(<VendorDetailPage />, { route: '/suppliers/ven-1' });
 
     expect(await screen.findByRole('note')).toHaveTextContent('ERP-4711');
+  });
+
+  it('locks an ERP vendor’s identity fields but keeps capabilities editable', async () => {
+    getVendor.mockResolvedValue(vendor({ erp_vendor_id: 'ERP-4711', erp_managed: true }));
+    await renderWithProviders(<VendorDetailPage />, {
+      route: '/suppliers/ven-1',
+      me: makeMe({ effective_permissions: ['view_all', 'config_edit'], roles: ['admin'] }),
+    });
+
+    // Identity is ERP-owned — disabled, and no save action on the Overview tab.
+    expect(await screen.findByDisplayValue('Galvanik Süd')).toBeDisabled();
+    expect(screen.getByDisplayValue('DE123456789')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Speichern' })).not.toBeInTheDocument();
+
+    // BF-only data never writes back to the ERP, so it stays editable.
+    await userEvent.click(screen.getByRole('tab', { name: 'Fähigkeiten' }));
+    expect(screen.getByDisplayValue('plating')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeInTheDocument();
+  });
+
+  it('saves edited identity fields on a manually created vendor', async () => {
+    await renderWithProviders(<VendorDetailPage />, {
+      route: '/suppliers/ven-1',
+      me: makeMe({ effective_permissions: ['view_all', 'config_edit'], roles: ['admin'] }),
+    });
+
+    const vatId = await screen.findByDisplayValue('DE123456789');
+    await userEvent.clear(vatId);
+    await userEvent.type(vatId, 'DE999999999');
+    await userEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+
+    expect(updateVendor).toHaveBeenCalledWith(
+      'ven-1',
+      expect.objectContaining({ vat_id: 'DE999999999', name: 'Galvanik Süd' }),
+    );
   });
 
   it('saves edited capability tags', async () => {

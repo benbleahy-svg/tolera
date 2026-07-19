@@ -429,7 +429,8 @@ def test_csv_import_reports_bad_rows_without_aborting(
         body = resp.json()
         assert body["created"] == 1
         assert len(body["errors"]) == 2
-        assert {e["row"] for e in body["errors"]} == {2, 3}
+        # Line numbers are the operator's file lines (header = line 1).
+        assert {e["row"] for e in body["errors"]} == {3, 4}
         assert [v["name"] for v in app_client.get("/api/vendors").json()] == ["Gute GmbH"]
 
 
@@ -469,3 +470,91 @@ def test_vendor_seed_is_idempotent(app_client: TestClient, seeder: Seeder, tenan
     with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
         anodize = app_client.get("/api/vendors", params={"process": "anodize"}).json()
     assert [v["name"] for v in anodize] == ["Eloxal Werk Ost GmbH"]
+
+
+def test_csv_import_survives_a_ragged_row(app_client: TestClient, seeder: Seeder) -> None:
+    """A stray comma gives DictReader more fields than the header declares; the
+    surplus lands under the ``None`` restkey as a *list*.
+
+    Regression: that raised ``AttributeError`` → 500 and rolled the whole file
+    back. Now the ragged row is *reported* (its shifted ``contact_email`` holds
+    ``Sitz Köln``, which is not an address) while the good row still commits —
+    the endpoint's "reported, never fatal" contract."""
+    org, admin = _org_with_admin(seeder, "org-a")
+    csv_body = (
+        "name,contact_email\n"
+        "Gute GmbH,gut@example.com\n"
+        "Müller GmbH, Sitz Köln,mueller@example.com\n"  # stray comma → ragged
+    )
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        resp = app_client.post(
+            "/api/vendors/import",
+            content=csv_body.encode("utf-8"),
+            headers={"Content-Type": "text/csv"},
+        )
+        assert resp.status_code == 201, resp.text  # not a 500
+        body = resp.json()
+        assert body["created"] == 1
+        assert [e["row"] for e in body["errors"]] == [3]
+        names = [v["name"] for v in app_client.get("/api/vendors").json()]
+    assert names == ["Gute GmbH"]
+
+
+def test_csv_import_reports_a_duplicate_contact_without_losing_good_rows(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """A row colliding with a live unique index is reported and rolled back to its
+    savepoint — every other row in the file still commits."""
+    org, admin = _org_with_admin(seeder, "org-a")
+    csv_body = (
+        "name,contact_email\n"
+        "Erste GmbH,dup@example.com\n"
+        "Zweite GmbH,dup@example.com\n"  # same vendor? no — different vendor, allowed
+        "Dritte GmbH,dritte@example.com\n"
+    )
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        resp = app_client.post(
+            "/api/vendors/import",
+            content=csv_body.encode("utf-8"),
+            headers={"Content-Type": "text/csv"},
+        )
+        assert resp.status_code == 201, resp.text
+        # The unique index is per-VENDOR, so two different vendors may share an
+        # address — all three land. This pins that semantics deliberately.
+        assert resp.json()["created"] == 3
+        assert len(app_client.get("/api/vendors").json()) == 3
+
+
+def test_duplicate_contact_email_is_a_409_not_a_500(app_client: TestClient, seeder: Seeder) -> None:
+    """Re-adding a contact the vendor already has is an everyday mistake — it must
+    surface as a clean conflict, not an internal error."""
+    org, admin = _org_with_admin(seeder, "org-a")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        vendor_id = app_client.post("/api/vendors", json={"name": "Galvanik Süd"}).json()["id"]
+        body = {"name": "Bernd", "email": "klose@galvanik-sued.example"}
+        assert app_client.post(f"/api/vendors/{vendor_id}/contacts", json=body).status_code == 201
+        clash = app_client.post(f"/api/vendors/{vendor_id}/contacts", json=body)
+        assert clash.status_code == 409
+        assert clash.json()["code"] == "email_conflict"
+
+
+def test_erp_vendor_id_cannot_be_set_by_a_client(app_client: TestClient, seeder: Seeder) -> None:
+    """It permanently freezes the identity fields and no route clears it, so only
+    the (M6.8) ERP sync sets it server-side."""
+    org, admin = _org_with_admin(seeder, "org-a")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        resp = app_client.post(
+            "/api/vendors", json={"name": "Frei GmbH", "erp_vendor_id": "ERP-TYPO"}
+        )
+        assert resp.status_code == 422  # extra="forbid"
+
+
+def test_blank_capability_filter_matches_nothing_not_everything(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """A whitespace-only tag normalizes to [], and JSONB containment of an empty
+    array is satisfied by every row — the filter must not degrade to a no-op."""
+    org, admin = _org_with_admin(seeder, "org-a")
+    with authed(app_client, user_id=admin, org_id=org, roles=ADMIN):
+        _seed_directory(app_client)
+        assert app_client.get("/api/vendors", params={"process": "   "}).json() == []

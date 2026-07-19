@@ -128,7 +128,7 @@ export function VendorDetailPage() {
       </div>
 
       {tab === 'overview' && (
-        <OverviewTab vendor={vendor} contacts={contacts} />
+        <OverviewTab vendor={vendor} contacts={contacts} canEdit={canEdit} onSave={save} />
       )}
       {tab === 'rfq_history' && <RfqHistoryTab entries={history} />}
       {tab === 'capabilities' && (
@@ -139,17 +139,69 @@ export function VendorDetailPage() {
   );
 }
 
-function OverviewTab({ vendor, contacts }: { vendor: Vendor; contacts: VendorContact[] }) {
+function OverviewTab({
+  vendor,
+  contacts,
+  canEdit,
+  onSave,
+}: {
+  vendor: Vendor;
+  contacts: VendorContact[];
+  canEdit: boolean;
+  onSave: (body: Partial<Vendor>) => void;
+}) {
   const { t } = useTranslation();
+  const [name, setName] = useState(vendor.name);
+  const [address, setAddress] = useState(vendor.address ?? '');
+  const [vatId, setVatId] = useState(vendor.vat_id ?? '');
+  const [phone, setPhone] = useState(vendor.phone ?? '');
+
+  // Identity is ERP-owned on a synced vendor (one-way ERP → Tolera), so those
+  // fields are disabled rather than merely rejected by the API on save.
+  const identityLocked = !canEdit || vendor.erp_managed;
+
   return (
     <div role="tabpanel">
+      <label className="crm-field">
+        <span>{t('suppliers.field.name')}</span>
+        <input value={name} disabled={identityLocked} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="crm-field">
+        <span>{t('suppliers.field.address')}</span>
+        <textarea
+          value={address}
+          rows={3}
+          disabled={identityLocked}
+          onChange={(e) => setAddress(e.target.value)}
+        />
+      </label>
+      <label className="crm-field">
+        <span>{t('suppliers.field.vat_id')}</span>
+        <input value={vatId} disabled={identityLocked} onChange={(e) => setVatId(e.target.value)} />
+      </label>
+      <label className="crm-field">
+        <span>{t('suppliers.field.phone')}</span>
+        <input value={phone} disabled={identityLocked} onChange={(e) => setPhone(e.target.value)} />
+      </label>
+      {!identityLocked && (
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={!name.trim()}
+          onClick={() =>
+            onSave({
+              name: name.trim(),
+              address: address.trim() || null,
+              vat_id: vatId.trim() || null,
+              phone: phone.trim() || null,
+            })
+          }
+        >
+          {t('suppliers.actions.save')}
+        </button>
+      )}
+
       <dl className="crm-detail">
-        <dt>{t('suppliers.field.address')}</dt>
-        <dd>{vendor.address ?? '—'}</dd>
-        <dt>{t('suppliers.field.vat_id')}</dt>
-        <dd>{vendor.vat_id ?? '—'}</dd>
-        <dt>{t('suppliers.field.phone')}</dt>
-        <dd>{vendor.phone ?? '—'}</dd>
         <dt>{t('suppliers.field.status')}</dt>
         <dd>{t(`suppliers.status.${vendor.status}`)}</dd>
         <dt>{t('suppliers.field.erp_status')}</dt>

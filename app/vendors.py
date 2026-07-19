@@ -39,7 +39,8 @@ from typing import Annotated, Any, Protocol
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import or_, select
+from sqlalchemy import false, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
@@ -161,7 +162,12 @@ class VendorContactOut(BaseModel):
 class VendorCreate(BaseModel):
     """Payload to create a vendor. ``primary_contact`` mirrors the ADD VENDOR
     modal (company + a first quoting contact); when present it is created under
-    the new vendor in the same transaction."""
+    the new vendor in the same transaction.
+
+    ``erp_vendor_id`` is deliberately **absent**: setting it permanently freezes
+    the vendor's identity fields (:func:`_reject_erp_identity_write`) and no route
+    can clear it, so a client typo would strand the row — archive-and-recreate
+    being the only escape. It is server-set by the ERP sync (M6.8) alone."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -170,8 +176,6 @@ class VendorCreate(BaseModel):
     vat_id: str | None = Field(default=None, max_length=64)
     phone: str | None = Field(default=None, max_length=50)
     website: str | None = Field(default=None, max_length=500)
-    #: Set only by the ERP sync path; a manually created vendor leaves it null.
-    erp_vendor_id: str | None = Field(default=None, max_length=100)
     status: VendorStatus = VendorStatus.active
     capabilities: Capabilities = Field(default_factory=Capabilities)
     notes: str | None = None
@@ -239,6 +243,8 @@ class VendorExternalOut(BaseModel):
 class VendorImportError(BaseModel):
     """One rejected CSV row — reported, never fatal to the rest of the import."""
 
+    #: 1-based line number in the uploaded file (header counts as line 1), so the
+    #: operator can jump straight to it in their spreadsheet.
     row: int
     message: str
 
@@ -380,6 +386,33 @@ def _reject_erp_contact_write(vendor: Vendor) -> None:
         )
 
 
+async def _flush_unique(session: AsyncSession) -> None:
+    """Flush pending vendor writes, mapping a partial-unique violation to a 409
+    envelope instead of a 500 (the ``app.accounts._flush_unique_email`` pattern).
+
+    Two live-only indexes can trip: re-adding a quoting contact someone already
+    added (everyday), and restoring an archived ERP vendor whose ``erp_vendor_id``
+    the sync has since re-created (rarer, but the 500 would be baffling). The
+    transaction rolls back on the raised error."""
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        detail = str(exc.orig)
+        if "uq_vendor_contact_vendor_email_live" in detail:
+            raise AppError(
+                "email_conflict",
+                "This vendor already has a contact with this email address.",
+                status_code=status.HTTP_409_CONFLICT,
+            ) from exc
+        if "uq_vendor_org_erp_id_live" in detail:
+            raise AppError(
+                "erp_vendor_id_conflict",
+                "Another vendor in this organization already carries this ERP vendor id.",
+                status_code=status.HTTP_409_CONFLICT,
+            ) from exc
+        raise
+
+
 def _new_contact(
     org_id: uuid.UUID, vendor_id: uuid.UUID, payload: VendorContactCreate
 ) -> VendorContact:
@@ -422,10 +455,16 @@ async def list_vendors(
         pattern = f"%{q}%"
         stmt = stmt.where(or_(Vendor.name.ilike(pattern), Vendor.vat_id.ilike(pattern)))
     # Containment against the normalized (lowercase) tags — the GIN index serves it.
+    # Guard on the NORMALIZED tag, not the raw string: a whitespace-only filter
+    # normalizes to [], and `capabilities @> '{"processes": []}'` is satisfied by
+    # every row — the filter would silently become a no-op instead of matching
+    # nothing. Treat "the caller asked for a tag we can't represent" as no match.
     if process:
-        stmt = stmt.where(Vendor.capabilities.contains({"processes": _normalize_tags([process])}))
+        tags = _normalize_tags([process])
+        stmt = stmt.where(Vendor.capabilities.contains({"processes": tags}) if tags else false())
     if material:
-        stmt = stmt.where(Vendor.capabilities.contains({"materials": _normalize_tags([material])}))
+        tags = _normalize_tags([material])
+        stmt = stmt.where(Vendor.capabilities.contains({"materials": tags}) if tags else false())
     stmt = stmt.order_by(Vendor.name).limit(limit).offset(offset)
 
     vendors = list((await session.execute(stmt)).scalars())
@@ -447,7 +486,6 @@ async def create_vendor(
         vat_id=payload.vat_id,
         phone=payload.phone,
         website=payload.website,
-        erp_vendor_id=payload.erp_vendor_id,
         status=payload.status,
         capabilities=payload.capabilities.model_dump(),
         notes=payload.notes,
@@ -457,7 +495,7 @@ async def create_vendor(
 
     if payload.primary_contact is not None:
         session.add(_new_contact(principal.active_org_id, vendor.id, payload.primary_contact))
-        await session.flush()
+        await _flush_unique(session)
 
     return _vendor_out(vendor)
 
@@ -499,10 +537,13 @@ async def import_vendors(
         if index > _CSV_MAX_ROWS:
             errors.append(VendorImportError(row=index, message="Import row limit exceeded."))
             break
-        cell = {(k or "").strip(): (v or "").strip() for k, v in row.items()}
+        # Report the line number the operator sees in their spreadsheet (header
+        # included), not the data-row ordinal — they have to go and fix that line.
+        line = reader.line_num
+        cell = _flatten_row(row)
         name = cell.get("name", "")
         if not name:
-            errors.append(VendorImportError(row=index, message="Column 'name' is required."))
+            errors.append(VendorImportError(row=line, message="Column 'name' is required."))
             continue
 
         contact_payload: VendorContactCreate | None = None
@@ -517,7 +558,7 @@ async def import_vendors(
                 # Reject the whole row: a vendor whose only contact is unreachable
                 # can't be sent an RFQ, so importing it half-formed helps nobody.
                 errors.append(
-                    VendorImportError(row=index, message="Column 'contact_email' is not valid.")
+                    VendorImportError(row=line, message="Column 'contact_email' is not valid.")
                 )
                 continue
 
@@ -533,11 +574,22 @@ async def import_vendors(
                 materials=_split_tags(cell.get("materials", "")),
             ).model_dump(),
         )
-        session.add(vendor)
-        await session.flush()
-        if contact_payload is not None:
-            session.add(_new_contact(principal.active_org_id, vendor.id, contact_payload))
-            await session.flush()
+        # Each row commits inside its own SAVEPOINT: a unique violation (a repeated
+        # contact email, an ERP id already used) then rolls back just this row and is
+        # reported, leaving every good row in the file intact. Without the savepoint
+        # the failed statement would poison the outer transaction and lose them all.
+        try:
+            async with session.begin_nested():
+                session.add(vendor)
+                await session.flush()
+                if contact_payload is not None:
+                    session.add(_new_contact(principal.active_org_id, vendor.id, contact_payload))
+                    await session.flush()
+        except IntegrityError:
+            errors.append(
+                VendorImportError(row=line, message="Row conflicts with an existing record.")
+            )
+            continue
         created += 1
 
     return VendorImportResult(created=created, errors=errors)
@@ -546,6 +598,28 @@ async def import_vendors(
 def _split_tags(raw: str) -> list[str]:
     """Split a ``;``-separated CSV tag cell (``anodize;polish``)."""
     return [part for part in raw.split(";") if part.strip()]
+
+
+def _flatten_row(row: dict[str | None, Any]) -> dict[str, str]:
+    """Normalize one ``csv.DictReader`` row to ``{column: value}`` strings.
+
+    A **ragged** row is the case that matters: given more fields than the header
+    declares (a stray comma in ``Müller GmbH, Sitz Köln,mail@x.de``), DictReader
+    files the surplus under the ``None`` restkey as a **list**, and given fewer it
+    yields ``None`` values. Both must survive — this endpoint's contract is that a
+    bad row is *reported*, never fatal, and letting an ``AttributeError`` escape
+    would roll back every good row in the file with an opaque 500.
+
+    The surplus is dropped rather than guessed at: the row still imports if its
+    named columns are valid, which is what the operator meant."""
+    cell: dict[str, str] = {}
+    for key, value in row.items():
+        if key is None:  # restkey: surplus fields, no column to put them in
+            continue
+        if isinstance(value, list):  # defensive; only the restkey is ever a list
+            value = ",".join(part for part in value if part)
+        cell[key.strip()] = (value or "").strip()
+    return cell
 
 
 @vendors_router.get("/{vendor_id}")
@@ -607,7 +681,8 @@ async def restore_vendor(
     vendor = await _get_vendor_or_404(session, vendor_id)
     if vendor.deleted_at is not None:
         vendor.deleted_at = None
-        await session.flush()
+        # Restoring can collide with an ERP id the sync re-created meanwhile.
+        await _flush_unique(session)
     return _vendor_out(vendor)
 
 
@@ -659,7 +734,7 @@ async def create_vendor_contact(
     _reject_erp_contact_write(vendor)
     contact = _new_contact(principal.active_org_id, vendor.id, payload)
     session.add(contact)
-    await session.flush()
+    await _flush_unique(session)
     return _contact_out(contact)
 
 
@@ -675,7 +750,7 @@ async def update_vendor_contact(
     _reject_erp_contact_write(await _get_vendor_or_404(session, contact.vendor_id))
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(contact, key, value)
-    await session.flush()
+    await _flush_unique(session)
     return _contact_out(contact)
 
 
