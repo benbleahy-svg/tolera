@@ -44,6 +44,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from .av import ScanStatus
 from .db import Base
 from .geometry.vector import GV_DIM
 
@@ -117,6 +118,10 @@ _obtain_method_enum = Enum(
     create_type=False,
     values_callable=lambda enum_cls: [member.value for member in enum_cls],
 )
+# M3.13 — the malware verdict on ``part_file`` (the StrEnum itself lives in
+# app.av, next to the scanner that produces it; app.av imports no models, so
+# there is no cycle).
+_scan_status_enum = Enum(ScanStatus, name="part_file_scan_status", create_type=False)
 
 
 def _pk() -> Mapped[uuid.UUID]:
@@ -536,6 +541,17 @@ class PartFile(Base):
     filename_normalized: Mapped[str | None] = mapped_column(Text)
     part_number_extracted: Mapped[str | None] = mapped_column(Text)
     pdf_text: Mapped[str | None] = mapped_column(Text)
+    # Malware verdict (M3.13; DECISIONS.md 2026-06-25 RESOLVED 2026-07-17). Set
+    # async by ``app.av_scan`` after store; the download / vendor-forward paths
+    # gate on it via ``app.av.scan_gate_error``. Starts ``pending`` — an unknown
+    # verdict is never treated as clean.
+    scan_status: Mapped[ScanStatus] = mapped_column(
+        _scan_status_enum, nullable=False, server_default=ScanStatus.pending
+    )
+    # clamd's malware name when infected (e.g. ``Eicar-Test-Signature``); shown to
+    # staff so a quarantine is explainable. Never the file's contents.
+    scan_signature: Mapped[str | None] = mapped_column(Text)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
 
 

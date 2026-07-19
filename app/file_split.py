@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
 from .authz import Permission, require
+from .av import ScanStatus
 from .celery_app import celery_app
 from .db import make_engine, make_sessionmaker, org_scoped_session
 from .deps import get_session, get_storage
@@ -110,6 +111,10 @@ async def run_split(
                         size_bytes=size,
                         role=FileRole.supporting,
                         source_file_id=file_id,
+                        # Pages are cut from a file already judged by M3.13, so
+                        # they inherit its verdict instead of queueing a rescan.
+                        scan_status=ScanStatus(pf.scan_status),
+                        scan_signature=pf.scan_signature,
                         # Match-index fields (M2.12): pages are indexed like any
                         # upload — inline here, we already hold the bytes in a
                         # worker context (no second task round-trip).

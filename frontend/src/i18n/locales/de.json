@@ -112,6 +112,12 @@
         "document": "Dokument",
         "email": "E-Mail",
         "archive": "Archiv"
+      },
+      "scan": {
+        "pending": "Virenprüfung läuft",
+        "infected": "Quarantäne",
+        "pending_hint": "Diese Datei wird noch auf Schadsoftware geprüft und kann noch nicht heruntergeladen werden.",
+        "infected_hint": "Als Schadsoftware eingestuft ({{signature}}) — Download und Weitergabe an Lieferanten sind gesperrt."
       }
     }
   },

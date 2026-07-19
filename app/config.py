@@ -128,6 +128,32 @@ class Settings(BaseSettings):
         if self.storage_backend == "s3" and not self.s3_bucket:
             raise ValueError("S3_BUCKET must be set when STORAGE_BACKEND=s3.")
 
+    # --- Antivirus scanning (M3.13 — DECISIONS.md 2026-06-25, RESOLVED 2026-07-17) ---
+    # ``none`` is the default for the same reason ``storage_backend`` defaults to
+    # ``memory``: tests and a bare local boot must round-trip a file with no
+    # sidecar running. docker-compose and every real deployment set ``clamav``
+    # (enforced outside development/test by ``validate_av``).
+    av_scanner: str = "none"  # "none" | "clamav"
+    clamav_host: str = ""  # e.g. "clamav" (the compose sidecar)
+    clamav_port: int = 3310
+    # A 200 MB print (the upload cap) streams through clamd in well under this;
+    # the ceiling is the Celery soft time limit (270 s), so stay below it.
+    clamav_timeout_seconds: float = 240.0
+
+    def validate_av(self) -> None:
+        """Fail closed: uploads must be scanned outside dev/test.
+
+        The untrusted path is already open (M3.3 email ingest), so a production
+        deploy that forgets ``AV_SCANNER`` must not boot silently unscanned."""
+        choice = self.av_scanner.strip().lower()
+        if choice not in {"none", "clamav"}:
+            raise ValueError(f"AV_SCANNER must be 'none' or 'clamav', got {self.av_scanner!r}")
+        is_dev = self.environment.lower() in {"development", "test"}
+        if choice == "none" and not is_dev:
+            raise ValueError("AV_SCANNER=none is not allowed outside development/test.")
+        if choice == "clamav" and not self.clamav_host:
+            raise ValueError("CLAMAV_HOST must be set when AV_SCANNER=clamav.")
+
     # --- Lens / AI (M3.1 — spec #lens-models, #ai-settings) ---
     # Provider is configurable, never hard-coded (build-plan M3.1 Decisions).
     # v1 = "anthropic": the Claude API under a zero-data-retention agreement

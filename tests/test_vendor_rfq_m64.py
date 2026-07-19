@@ -828,3 +828,62 @@ def test_rfq_history_never_leaks_internal_vendor_notes(
     token = body["rfqs"][0]["portal_token"]
     payload = app_client.get(f"/api/public/vendor-rfq/{token}").text
     assert "Zahlt immer spaet" not in payload
+
+
+# --------------------------------------------------------------------------- #
+# M3.13 — the outbound forward gate: quarantined files never reach a vendor
+# --------------------------------------------------------------------------- #
+def _quarantine(seeder: Seeder, file_id: str) -> None:
+    """Plant a clamd verdict the API has no route to write (M3.13 sets it async)."""
+    seeder.sql(
+        "UPDATE part_file SET scan_status = 'infected', "
+        "scan_signature = 'Eicar-Test-Signature', scanned_at = now() WHERE id = :id",
+        {"id": file_id},
+    )
+
+
+def test_send_rejects_a_quarantined_file(app_client: TestClient, seeder: Seeder) -> None:
+    """Granting a vendor a token for an infected file *is* the outbound disclosure,
+    so the send is refused up front — the estimator finds out now, not the vendor
+    at download (M3.13; the same reasoning as the allowlist check)."""
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        line = _new_quote_item(app_client)
+        part_id = _part_of(app_client, line)
+        infected = _stored_file(app_client, seeder, org, part_id, "malware.pdf")
+        _quarantine(seeder, infected)
+        vendor = _create_vendor(app_client, "Eloxal Nord", processes=["eloxieren"])
+
+        res = app_client.post(
+            "/api/vendor-rfqs/batch",
+            json={
+                "quote_id": line["quote_id"],
+                "quote_item_ids": [line["item_id"]],
+                "recipients": [{"vendor_id": vendor, "part_file_ids": [infected]}],
+            },
+        )
+        assert res.status_code == 409, res.text
+        assert res.json()["code"] == "file_scan_not_clean"
+        assert res.json()["details"]["part_file_ids"] == [infected]
+
+
+def test_portal_download_of_a_file_quarantined_after_send_is_blocked(
+    app_client: TestClient, seeder: Seeder
+) -> None:
+    """The portal re-checks independently: a file that turns infected *after* the
+    batch went out is still stopped at the door (M3.13)."""
+    org, user = _org_admin(seeder)
+    with authed(app_client, user_id=user, org_id=org, roles=ADMIN):
+        line = _new_quote_item(app_client)
+        part_id = _part_of(app_client, line)
+        file_id = _stored_file(app_client, seeder, org, part_id, "zeichnung.pdf")
+        vendor = _create_vendor(app_client, "Eloxal Nord", processes=["eloxieren"])
+        body = _send(app_client, line, [{"vendor_id": vendor, "part_file_ids": [file_id]}])
+
+    token = body["rfqs"][0]["portal_token"]
+    assert app_client.get(f"/api/public/vendor-rfq/{token}/files/{file_id}").status_code == 200
+
+    _quarantine(seeder, file_id)
+    blocked = app_client.get(f"/api/public/vendor-rfq/{token}/files/{file_id}")
+    assert blocked.status_code == 403
+    assert blocked.json()["code"] == "file_quarantined"

@@ -27,6 +27,8 @@ function file(name: string, role: 'primary' | 'supporting', extra: Record<string
     size_bytes: 100,
     role,
     is_redacted: false,
+    scan_status: 'clean',
+    scan_signature: null,
     created_at: '2026-06-25T00:00:00Z',
     ...extra,
   };
@@ -88,5 +90,27 @@ describe('FilesPanel', () => {
     expect(await screen.findByText('Herunterladen')).toBeInTheDocument(); // read OK
     expect(screen.queryByText('Dateien hochladen')).not.toBeInTheDocument();
     expect(screen.queryByText('Löschen')).not.toBeInTheDocument();
+  });
+
+  // --- M3.13: the quarantine is visible and the download is withdrawn ---
+  it('marks a quarantined file and offers no download for it', async () => {
+    listFiles.mockResolvedValue([
+      file('malware.pdf', 'supporting', {
+        scan_status: 'infected',
+        scan_signature: 'Eicar-Test-Signature',
+      }),
+    ]);
+    await renderWithProviders(<FilesPanel partId="p1" />);
+
+    expect(await screen.findByText('Quarantäne')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Herunterladen' })).not.toBeInTheDocument();
+  });
+
+  it('flags a file whose scan has not finished but still lists it', async () => {
+    listFiles.mockResolvedValue([file('drawing.pdf', 'supporting', { scan_status: 'pending' })]);
+    await renderWithProviders(<FilesPanel partId="p1" />);
+
+    expect(await screen.findByText('drawing.pdf')).toBeInTheDocument();
+    expect(screen.getByText('Virenprüfung läuft')).toBeInTheDocument();
   });
 });
