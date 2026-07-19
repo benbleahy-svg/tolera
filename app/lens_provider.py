@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from .config import Settings, get_settings
 from .lens import PROMPT_VERSION, LensProvider, RawFinding, RawLineItem
+from .vendor_reply import RawVendorQuoteLine
 
 logger = logging.getLogger("app.lens_provider")
 
@@ -272,6 +273,67 @@ _PARTS_LIST_SCHEMA: dict[str, Any] = {
 }
 
 
+VENDOR_REPLY_PROMPT_VERSION = "vendor-reply-v1"
+
+_VENDOR_REPLY_PROMPT = (
+    "[{version}] Below is a supplier's reply (German or English) to a request for "
+    "quotation, optionally with the supplier's own quote PDF attached, followed by the "
+    "list of parts that were asked about. Extract the supplier's answer per part. For "
+    "each part report: part_number (matching one of the parts listed below, verbatim), "
+    "cannot_quote (true only if the supplier states they cannot or will not quote that "
+    "part), notes (only a verbatim caveat the supplier wrote), and prices — one entry "
+    "per quantity break the supplier answered, each with quantity (integer), "
+    "unit_price_raw (the price text EXACTLY as written, including its decimal comma "
+    "and any currency sign, e.g. '12,50 EUR'), lead_time_days (the lead time in "
+    "calendar or working days as an integer) and lead_time_raw (the verbatim lead-time "
+    "text, e.g. '10 Arbeitstage'). Report a unit price per piece, not a lot total; if "
+    "the supplier quoted only a lot total, leave the price out rather than dividing it. "
+    "German replies write prices as '1.234,56 EUR' and lead times as 'Lieferzeit 10 "
+    "Arbeitstage' or 'KW 32'. "
+    f"{_NEVER_HALLUCINATE}"
+).format(version=VENDOR_REPLY_PROMPT_VERSION)
+
+_VENDOR_REPLY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "lines": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "part_number": {"type": ["string", "null"]},
+                    "cannot_quote": {"type": "boolean"},
+                    "notes": {"type": ["string", "null"]},
+                    "prices": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "quantity": {"type": "integer"},
+                                "unit_price_raw": {"type": ["string", "null"]},
+                                "lead_time_days": {"type": ["integer", "null"]},
+                                "lead_time_raw": {"type": ["string", "null"]},
+                            },
+                            "required": [
+                                "quantity",
+                                "unit_price_raw",
+                                "lead_time_days",
+                                "lead_time_raw",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["part_number", "cannot_quote", "notes", "prices"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["lines"],
+    "additionalProperties": False,
+}
+
+
 class AnthropicLensProvider:
     """Vision-LLM extraction on the Claude API (structured JSON outputs).
 
@@ -400,3 +462,49 @@ class AnthropicLensProvider:
         if invalid:
             logger.warning("lens_provider_invalid_line_items", extra={"invalid": invalid})
         return items
+
+    async def parse_vendor_reply(
+        self, body_text: str, part_numbers: list[str], pdf: bytes | None = None
+    ) -> list[RawVendorQuoteLine]:
+        """M6.5 — read a supplier's emailed quote (AI-LENS §3, same EU routing).
+
+        The attached PDF, when present, is sent alongside the body: DACH suppliers
+        routinely answer with "Angebot im Anhang" and nothing else. The guard in
+        :mod:`app.vendor_reply` enforces never-hallucinate on whatever comes back, and
+        the prices are parsed from the model's verbatim citations rather than from any
+        number it computed."""
+        parts = "\n".join(part_numbers) or "(none)"
+        content: list[dict[str, Any]] = []
+        if pdf is not None:
+            if len(pdf) > MAX_PROVIDER_PDF_BYTES:
+                raise LensProviderError("provider_document_too_large")
+            content.append(
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": base64.b64encode(pdf).decode("ascii"),
+                    },
+                }
+            )
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    f"{_VENDOR_REPLY_PROMPT}\n\nPARTS ASKED ABOUT:\n{parts}"
+                    f"\n\nSUPPLIER REPLY BODY:\n{body_text}"
+                ),
+            }
+        )
+        payload = await self._complete(content, _VENDOR_REPLY_SCHEMA)
+        lines: list[RawVendorQuoteLine] = []
+        invalid = 0
+        for item in payload.get("lines", []):
+            try:
+                lines.append(RawVendorQuoteLine.model_validate(item))
+            except ValidationError:
+                invalid += 1
+        if invalid:
+            logger.warning("lens_provider_invalid_vendor_lines", extra={"invalid": invalid})
+        return lines

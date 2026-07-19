@@ -15,9 +15,12 @@ module is its server side:
   its own ``vendor_rfq``-scoped :class:`QuoteToken` carrying that vendor's own file
   allowlist.
 
-**This block does not send email** — M6.5 owns the transport. A batch created here is
-``open`` with ``sent_at`` unset until M6.5 mails it; the portal link already works,
-which is what makes the M6.5 email a thin layer over an already-tested surface.
+**M6.5 added the transport.** Each recipient created here is now mailed its own copy
+via :mod:`app.vendor_rfq_email` before the response is returned, which is what stamps
+``sent_at``/``sent_message_id`` and emits ``vendor_rfq.sent``. A send that fails is
+reported per recipient (``email_sent``/``email_error``) and leaves that recipient's
+``sent_at`` NULL rather than rolling back a batch whose rows, tokens and file scoping
+are already correct.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime
+from functools import partial
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -34,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Principal
 from .authz import Permission, require
+from .db import run_after_commit
 from .deps import get_session
 from .errors import AppError
 from .models import (
@@ -58,6 +63,7 @@ from .models import (
 )
 from .pricing import _lock_editable, reprice_component
 from .quote_tokens import create_vendor_rfq_token
+from .vendor_rfq_email import enqueue_vendor_rfq_send
 from .vendor_rfq_ranking import RankedVendor, VendorSignals, rank_vendors, suggested_ids
 
 vendor_rfq_router = APIRouter(prefix="/api/vendor-rfqs", tags=["vendor-rfq"])
@@ -304,7 +310,18 @@ async def compose_batch(
         (
             await session.execute(
                 select(PartFile)
-                .where(PartFile.part_id.in_([p.id for _, _, p, _ in rows]))
+                .where(
+                    PartFile.part_id.in_([p.id for _, _, p, _ in rows]),
+                    # A *vendor's own quote PDF* (M6.5's email channel files it against
+                    # the part so it shows up in Quote Files) must never be offerable to
+                    # another vendor: it is a competitor's price sheet. Excluded here
+                    # rather than merely de-selected, so it cannot be ticked back on.
+                    PartFile.storage_key.notin_(
+                        select(VendorRfqResponse.attachment_object_key).where(
+                            VendorRfqResponse.attachment_object_key.is_not(None)
+                        )
+                    ),
+                )
                 .order_by(PartFile.created_at)
             )
         )
@@ -470,7 +487,8 @@ async def send_batch(
         for _, component, _, _ in rows:
             await reprice_component(session, org_id, component.id)
 
-    secret = request.app.state.settings.resolve_quote_token_secret()
+    settings = request.app.state.settings
+    secret = settings.resolve_quote_token_secret()
     now = datetime.now(UTC)
     created: list[dict[str, Any]] = []
 
@@ -522,6 +540,11 @@ async def send_batch(
             recipient,
             part_file_ids=allowed_files[recipient_in.vendor_id],
         )
+        # M6.5 — the transport. Enqueued **post-commit**, one task per vendor: the mail
+        # carries a portal token for rows that must already exist, and a provider round
+        # trip must not run while this request holds the ``vendor_rfq_counter`` lock.
+        run_after_commit(session, partial(enqueue_vendor_rfq_send, org_id, rfq.id))
+
         created.append(
             {
                 "rfq_id": str(rfq.id),
@@ -531,15 +554,26 @@ async def send_batch(
                 "vendor_name": vendor.name,
                 "contact_email": recipient.contact_email,
                 "recipient_id": str(recipient.id),
-                # M6.5 turns this into the "Submit Your Quote" link; returned here so
-                # the send is verifiable end-to-end before the email layer exists.
+                # The "Angebot abgeben" link M6.5 mails; still returned so a send is
+                # verifiable end-to-end without reading the vendor's inbox.
                 "portal_token": token,
+                # The mail is queued, not yet sent — ``vendor_rfq_recipient.sent_at``
+                # is the record of what actually went out.
+                "email_queued": True,
                 "created_at": now.isoformat(),
             }
         )
 
     await session.flush()
     return {"rfqs": created}
+
+
+def _display_name(member: dict[str, Any] | None) -> str | None:
+    """The estimator's name for the email's "Ihr Ansprechpartner" line."""
+    if not member:
+        return None
+    name = " ".join(p for p in (member.get("first_name"), member.get("last_name")) if p).strip()
+    return name or None
 
 
 def _parse_costing_mode(raw: str) -> CostingMode:
@@ -613,14 +647,25 @@ async def _validate_files(
     """Every per-vendor allowlist may only name files of the parts in this batch.
 
     The portal's download route enforces the same rule at fetch time (M6.2); rejecting
-    it here too means the estimator finds out at send, not the vendor at download."""
+    it here too means the estimator finds out at send, not the vendor at download.
+
+    A vendor's own quote PDF (M6.5's email channel) is rejected here as well: the
+    compose endpoint already refuses to list one, so a request naming it is either a
+    stale client or a hand-rolled call, and either way it would hand one supplier a
+    competitor's prices."""
     requested = {fid for r in recipients for fid in r.part_file_ids}
     if requested:
         valid = set(
             (
                 await session.execute(
                     select(PartFile.id).where(
-                        PartFile.id.in_(requested), PartFile.part_id.in_(part_ids)
+                        PartFile.id.in_(requested),
+                        PartFile.part_id.in_(part_ids),
+                        PartFile.storage_key.notin_(
+                            select(VendorRfqResponse.attachment_object_key).where(
+                                VendorRfqResponse.attachment_object_key.is_not(None)
+                            )
+                        ),
                     )
                 )
             )

@@ -25,14 +25,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import Row, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from alembic import command
@@ -253,6 +253,21 @@ class Seeder:
                 await conn.execute(text(statement), params or {})
 
         self._loop.run_until_complete(_run())
+
+    def fetch(self, statement: str, params: dict[str, object] | None = None) -> list[Row[Any]]:
+        """Read rows on the owner connection — the read counterpart of :meth:`sql`,
+        for asserting state no API surfaces yet (e.g. M6.5's ``ai_extracted`` /
+        ``verified`` flags, which the estimator-facing panel only gets in M6.6).
+
+        Same convention as :meth:`sql`: this connection sees every org, so the
+        statement must self-scope (target by primary key or filter on ``org_id``)."""
+
+        async def _run() -> list[Row[Any]]:
+            async with self._engine.begin() as conn:
+                result = await conn.execute(text(statement), params or {})
+                return list(result.all())
+
+        return self._loop.run_until_complete(_run())
 
     def count(
         self, table: str, where: str = "TRUE", params: dict[str, object] | None = None

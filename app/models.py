@@ -4350,6 +4350,10 @@ class VendorRfqRecipient(Base):
     #: When *this vendor's* copy went out. M6.4 creates the batch; M6.5 owns the
     #: transport, so a batch composed today may have recipients not yet mailed.
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: RFC 2822 ``Message-ID`` of this vendor's copy (M6.5), kept so M6.6's follow-up
+    #: can thread onto it. **Not** the reply-matching key — the spec matches an inbound
+    #: reply by RFQ reference number, since vendors reply from shared inboxes.
+    sent_message_id: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = _updated_ts()
 
@@ -4398,6 +4402,22 @@ class VendorRfqResponse(Base):
     attachment_content_type: Mapped[str | None] = mapped_column(String)
     #: True when the submission arrived after the batch's ``need_by_date`` (soft cutoff).
     is_late: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    #: This response's numbers came out of Lens, not out of the vendor's own typing —
+    #: i.e. the email channel (M6.5). Drives the "AI extracted — verify" flag.
+    ai_extracted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    #: A human has confirmed the numbers. Portal submissions are born verified (the
+    #: vendor typed them); an AI-extracted reply is not, and **M6.6 refuses to apply an
+    #: unverified response to costing** — the suggestion-only invariant (CLAUDE.md §5)
+    #: carried in the schema rather than in one code path.
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    #: RFC 2822 ``Message-ID`` of the inbound reply this response was extracted from.
+    #: Unique per org (partial index) so a Mailgun redelivery is an idempotent no-op.
+    email_message_id: Mapped[str | None] = mapped_column(String)
+    #: The reply's plain-text body — the corpus the never-hallucinate guard checks
+    #: extracted prices against, kept so a re-extraction needs no raw MIME.
+    email_body_text: Mapped[str | None] = mapped_column(Text)
     #: When this response won — i.e. M6.6's one-click Apply wrote its price into the
     #: line's outside-service cost. **Written by M6.6**; M6.4 only *reads* it, as the
     #: top two vendor-ranking signals (spec: "most recent accepted response", then

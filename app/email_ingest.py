@@ -71,6 +71,7 @@ from .services.org_service import RFQ_INGEST_DOMAIN
 from .storage import ObjectStorage
 from .task_resources import resolve as resolve_task_resources
 from .tasks import BaseTask
+from .vendor_reply import find_rfq_reference
 
 logger = logging.getLogger("app.email_ingest")
 
@@ -418,6 +419,21 @@ async def _resolve_org_id(sessionmaker: async_sessionmaker[Any], slug: str) -> u
         return cast("uuid.UUID | None", org_id)
 
 
+def _thread_references(headers: Message) -> list[str]:
+    """Every ``Message-ID`` this reply threads onto (``In-Reply-To`` + ``References``).
+
+    Header-only, so it costs nothing on the common path. A value here that matches a
+    ``vendor_rfq_recipient.sent_message_id`` is proof we sent the thread — the one form
+    of corroboration a vendor cannot accidentally fake and a customer will never carry
+    (M6.5)."""
+    ids: list[str] = []
+    for header in ("In-Reply-To", "References"):
+        raw_value = headers.get(header)
+        if raw_value:
+            ids.extend(token for token in str(raw_value).split() if token.startswith("<"))
+    return list(dict.fromkeys(ids))
+
+
 @ingest_router.post("/webhooks/mailgun")
 async def mailgun_inbound(
     request: Request,
@@ -489,6 +505,45 @@ async def mailgun_inbound(
     headers_msg = BytesParser(policy=policy.default).parsebytes(raw, headersonly=True)
     message_id = message_id_of(raw, headers_msg)
     _, sender_email = parseaddr(str(headers_msg.get("From", "")))
+
+    # M6.5 — is this a vendor answering one of *our* RFQ emails? Checked before the
+    # customer path because a vendor reply must never mint a new draft quote, and
+    # decided from **headers only**: an ``RFQ-n`` in the subject, or the reply threading
+    # onto a Message-ID we minted. The body is deliberately not searched — a customer
+    # writing "unsere Anfrage RFQ 12" in prose would otherwise be swallowed and never
+    # become the draft quote they were owed. An unmatched reference falls straight
+    # through to the ordinary pipeline, so the full parse below is paid for only by
+    # messages that plausibly *are* vendor replies.
+    subject_header = str(headers_msg.get("Subject", "")) or None
+    references = _thread_references(headers_msg)
+    if find_rfq_reference(subject_header) is not None or references:
+        # Imported here, not at module scope: ``vendor_reply_ingest`` imports
+        # ``ParsedEmail`` from this module, so a top-level import would cycle.
+        from .vendor_reply_ingest import handle_vendor_reply
+
+        vendor_result = await handle_vendor_reply(
+            sessionmaker,
+            storage,
+            org_id=org_id,
+            message_id=message_id,
+            subject=subject_header,
+            parsed=parse_rfq_email(raw),
+            references=references,
+        )
+        if vendor_result.matched:
+            logger.info(
+                "vendor_reply_ingested",
+                extra={
+                    "org_id": str(org_id),
+                    "rfq_id": str(vendor_result.rfq_id),
+                    "duplicate": vendor_result.duplicate,
+                },
+            )
+            return {
+                "status": "duplicate" if vendor_result.duplicate else "accepted",
+                "channel": "vendor_rfq_reply",
+                "rfq_id": str(vendor_result.rfq_id) if vendor_result.rfq_id else None,
+            }
 
     duplicate = await _existing_rfq(sessionmaker, org_id, message_id)
     if duplicate is None:

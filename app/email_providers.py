@@ -86,6 +86,11 @@ class OutboundEmail:
     #: RFC 2822 threading headers for follow-ups on an existing thread.
     in_reply_to: str | None = None
     references: list[str] = field(default_factory=list)
+    #: Where replies should go instead of ``From``. The vendor RFQ email (M6.5) points
+    #: this at the org's ``{slug}@rfq.tolera.eu`` ingest address, because that is the
+    #: only mailbox the inbound webhook listens on — without it a vendor's reply lands
+    #: in a human's inbox and the email channel the spec promises never fires.
+    reply_to: str | None = None
 
     @property
     def all_recipients(self) -> list[str]:
@@ -180,6 +185,8 @@ def build_mime(
         mime["Cc"] = ", ".join(message.cc)
     if with_bcc_header and message.bcc:
         mime["Bcc"] = ", ".join(message.bcc)
+    if message.reply_to:
+        mime["Reply-To"] = message.reply_to
     mime["Subject"] = message.subject
     message_id = make_msgid(domain=from_address.partition("@")[2] or None)
     mime["Message-ID"] = message_id

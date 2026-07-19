@@ -528,6 +528,14 @@ async def _save_response(
     response.valid_until = payload.valid_until
     response.notes = payload.notes
     response.submitted_at = now
+    # The vendor typed these numbers themselves, so there is nothing for the estimator
+    # to verify — unlike M6.5's Lens-extracted email channel, which lands
+    # ``ai_extracted``/not ``verified`` and must be confirmed before M6.6 may apply it.
+    # A portal submission also *supersedes* an earlier extraction: a human's own figures
+    # outrank a model's reading of their email.
+    response.source = "portal"
+    response.ai_extracted = False
+    response.verified = True
     # Soft cutoff: a late submission is accepted and merely stamped (spec).
     response.is_late = scope.rfq.need_by_date is not None and scope.rfq.need_by_date < now.date()
     await session.flush()
