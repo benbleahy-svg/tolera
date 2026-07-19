@@ -76,6 +76,9 @@ const file: PartFile = {
   is_redacted: false,
   source_file_id: null,
   created_at: '2026-07-14T00:00:00Z',
+  // M3.13 — every PartFile carries its AV verdict.
+  scan_status: 'clean',
+  scan_signature: null,
 };
 
 function model(names: string[]): CadModel {
