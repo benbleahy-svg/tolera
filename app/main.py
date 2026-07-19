@@ -61,6 +61,7 @@ from .rules import rules_router
 from .saved_views import saved_views_router
 from .storage import make_storage
 from .task_resources import register as register_task_resources
+from .work_queue import work_queue_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -134,6 +135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(checkout_router)
     app.include_router(facilitate_router)
     app.include_router(pdf_router)
+    app.include_router(work_queue_router)
 
     return app
 

@@ -184,7 +184,8 @@
       "outstanding": "Versendet",
       "overdue": "Überfällig",
       "filtered": "Gefiltert",
-      "highest_priority": "Höchste Priorität"
+      "highest_priority": "Höchste Priorität",
+      "workflows": "Workflows (klassisch)"
     },
     "filter": {
       "status_label": "Status",
@@ -1684,5 +1685,60 @@
     "load_error": "Einstellungen konnten nicht geladen werden.",
     "save_error": "Einstellungen konnten nicht gespeichert werden.",
     "require_terms_needs_text": "Zuerst AGB-Text eingeben."
+  },
+  "work_queue": {
+    "title": "Was jetzt ansteht",
+    "empty": "Nichts offen — Ihre Warteschlange ist leer.",
+    "open": "Öffnen",
+    "untitled": "(ohne Bezeichnung)",
+    "recents": "Zuletzt geöffnet",
+    "kpis": "Kennzahlen",
+    "kpi_open_quotes": "Offene Angebote",
+    "kpi_due_this_week": "Diese Woche fällig",
+    "kpi_win_rate": "Erfolgsquote (30 Tage)",
+    "view_workflows": "Klassische Workflow-Tabelle",
+    "view_all_quotes": "Alle Angebote",
+    "factor": "Faktor",
+    "factor_raw": "Wert",
+    "factor_weight": "Gewichtung",
+    "factor_contribution": "Beitrag",
+    "factor_due": "Fälligkeit",
+    "factor_value": "Auftragswert",
+    "factor_unresolved": "Offene Prüfpunkte",
+    "factor_flags": "Merkmale",
+    "source_quote_action": "Angebot",
+    "source_task": "Aufgabe",
+    "source_review_item": "Prüfpunkt",
+    "source_vendor_rfq": "Lieferantenanfrage",
+    "source_mention": "Erwähnung",
+    "chip": {
+      "due_in_one": "fällig in {{count}} Tag",
+      "due_in_other": "fällig in {{count}} Tagen",
+      "due_today": "heute fällig",
+      "overdue_one": "seit {{count}} Tag überfällig",
+      "overdue_other": "seit {{count}} Tagen überfällig",
+      "unresolved_one": "{{count}} offener Prüfpunkt",
+      "unresolved_other": "{{count}} offene Prüfpunkte",
+      "expedite": "Expressauftrag",
+      "vip": "Schlüsselkunde",
+      "export_controlled": "exportkontrolliert",
+      "task_assigned": "Ihnen zugewiesen",
+      "review_item_assigned": "Prüfpunkt für Sie",
+      "mentioned": "Sie wurden erwähnt"
+    }
+  },
+  "workQueueSettings": {
+    "title": "Dashboard-Warteschlange",
+    "intro": "Gewichtung der Dringlichkeitsberechnung. Höhere Werte lassen einen Faktor stärker ins Gewicht fallen; die Reihenfolge der Warteschlange ändert sich sofort.",
+    "weight_due": "Fälligkeit",
+    "weight_value": "Auftragswert",
+    "weight_unresolved": "Offene Prüfpunkte",
+    "weight_flags": "Merkmale (Express / Schlüsselkunde / Exportkontrolle)",
+    "vendor_rfq_queue_enabled": "Lieferantenanfragen in der Warteschlange anzeigen",
+    "save": "Speichern",
+    "saved": "Gespeichert.",
+    "load_error": "Einstellungen konnten nicht geladen werden.",
+    "save_error": "Speichern fehlgeschlagen.",
+    "invalid_weight": "Gewichtungen müssen Zahlen ≥ 0 sein."
   }
 }
