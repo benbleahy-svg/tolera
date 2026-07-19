@@ -396,7 +396,9 @@ async def get_buyer_quote(token: str, request: Request) -> dict[str, Any]:
         claims = decode_jwt(secret, token)
     except InvalidToken as exc:
         raise _rejected() from exc
-    if claims.scope is not QuoteTokenScope.buyer_portal:
+    # A ``vendor_rfq`` token (M6.2) is recipient-scoped and carries no ``quote`` claim;
+    # requiring the subject here rejects it before the row is even looked up.
+    if claims.scope is not QuoteTokenScope.buyer_portal or claims.quote_id is None:
         raise _rejected()
 
     sessionmaker: async_sessionmaker[AsyncSession] = request.app.state.sessionmaker
