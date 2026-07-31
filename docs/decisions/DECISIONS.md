@@ -1189,6 +1189,18 @@ Forward is gated in two places — at vendor-RFQ **send** (granting the token is
 **Resolved:** 2026-07-15 (/block M3.2 grill)
 **Affects:** M3.2 (schema + endpoints), M3.11 (eval harness reads corrections), AI & Automation Settings (future global-share opt-in toggle).
 
+## [2026-07-17] Positioning & marketing — indicative public pricing, packaging, public feature brands
+
+**Status:** RESOLVED (decided by Benjamin, interactive positioning session; full rationale + copy in `POSITIONING-AND-MESSAGING.md`)
+**Question:** The marketing material needed positioning decisions none of the docs had locked: pricing transparency posture, packaging (the Onboarding-Research free-tier recommendation was never ratified), and whether internal subsystem names surface as public feature brands.
+**Decision:**
+- **Indicative public pricing, published now:** Starter ~€299/mo · Growth ~€599–799/mo · Enterprise auf Anfrage; annual discount shown. Anchored at the DACH-validated willingness-to-pay (Spanflug ~€300 entry). Numbers are *indicative* until Paddle checkout ships (post-pilot), then revisited against pilot learnings.
+- **Packaging: no free tier.** 14-day full-featured trial, no credit card. **Overrides** the Onboarding-Research free-tier (5 quotes/mo) recommendation — simpler unit economics, no free-rider load; trial → Starter is the conversion path.
+- **Four public feature brands (Attio-style):** **Lens** (AI intake), **Kontur** (public name for GeometryService), **Kalk** (pricing), **Vergabe** (public name for the Vendor-RFQ portal). All other features stay descriptive. „Source" stays reserved for the material-feed features (Würth/thyssenkrupp); GeometryService and AI-Governor never appear publicly — AI-Governor's public expression is „KI im Vier-Augen-Prinzip". **DPMA/EUIPO trademark screening required before print/launch.**
+- **Positioning frame** (rationale tier-4, but decided): pain-first status-quo anchor — PP and competitors never named in customer copy; beachhead = SME metal job shops DE-first; reader = owner/GF; hero „Verlieren Sie keine Aufträge mehr an schnellere Anbieter."; bilingual DE/EN, Sie-Form; named Fechner reference only after pilot success + written sign-off (never an invented interim testimonial).
+**Resolved:** 2026-07-17
+**Affects:** marketing site (build + assets per `POSITIONING-AND-MESSAGING.md` §7), M6 billing surface (tier names/prices shown pre-checkout), seed (demo org must carry marketing-screenshot-grade DACH data), Vergabe naming (vendor-RFQ blocks), Fechner pilot agreement (reference clause).
+
 ---
 
 *Add new entries above this line as ambiguities arise during the build.*
